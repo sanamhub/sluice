@@ -1,0 +1,23 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# .NET
+bin/
+obj/
+*.user
+
+# node / ui
+node_modules/
+dist/
+.svelte-kit/
+
+# local state and benchmark output
+.sluice/
+bench/results/local/
+*.log
+
+# editors
+.vscode/
+.idea/
+.DS_Store
