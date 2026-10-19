@@ -228,6 +228,7 @@ fn output(
         connections: args.connections,
         serve_endpoints: ticket.addrs.len(),
         fetch_endpoints,
+        serve_store: ticket.store,
         congestion: args.shared.congestion,
         window: net::Windows::for_mode(args.shared.window),
         sink: verified.map(|_| args.sink),

@@ -3,6 +3,7 @@
 
 use std::{
     io::{BufRead, BufReader},
+    path::PathBuf,
     process::{Child, ChildStdout, Command, Stdio},
     sync::mpsc::{self, RecvTimeoutError},
     thread,
@@ -41,6 +42,8 @@ struct Case {
     fetch: Vec<String>,
     serve_endpoints: u64,
     fetch_endpoints: u64,
+    /// What the result must report as `serve_store`. `None` means `null`.
+    serve_store: Option<&'static str>,
 }
 
 impl Case {
@@ -53,7 +56,25 @@ impl Case {
             fetch: Vec::new(),
             serve_endpoints: 1,
             fetch_endpoints: 1,
+            serve_store: (mode == "blobs").then_some("mem"),
         }
+    }
+}
+
+/// A directory removed on drop, for the file store.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("sluice-probe-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        Self(dir)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -134,6 +155,10 @@ fn check(result: &Value, case: &Case) {
     assert_eq!(result["connections"], connections);
     assert_eq!(result["serve_endpoints"], case.serve_endpoints);
     assert_eq!(result["fetch_endpoints"], case.fetch_endpoints);
+    match case.serve_store {
+        Some(store) => assert_eq!(result["serve_store"], store),
+        None => assert!(result["serve_store"].is_null()),
+    }
     assert_eq!(result["congestion"], case.congestion);
     assert_eq!(result["window"]["mode"], "default");
     assert_eq!(result["key_exchange_group"], "X25519MLKEM768");
@@ -268,6 +293,31 @@ fn blobs_bbr3_four_connections_on_four_separate_endpoints() {
     case.serve_endpoints = 4;
     case.fetch_endpoints = 4;
     with_deadline(case);
+}
+
+#[test]
+fn blobs_bbr3_one_connection_from_a_file_store() {
+    let dir = TempDir::new("fs-store");
+    let mut case = Case::new("blobs", "bbr3", 1);
+    case.serve = vec![
+        "--store".into(),
+        "fs".into(),
+        "--dir".into(),
+        dir.0.display().to_string(),
+    ];
+    case.serve_store = Some("fs");
+    with_deadline(case);
+    // The import references the data file, so the store holds no second copy of it.
+    let copies = std::fs::read_dir(dir.0.join("store").join("data"))
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| e.path().extension().is_some_and(|x| x == "data"))
+                .count()
+        })
+        .unwrap_or(0);
+    assert_eq!(copies, 0, "the store copied the data file");
+    assert!(dir.0.join(format!("data-0-{SIZE}.bin")).is_file());
 }
 
 #[test]

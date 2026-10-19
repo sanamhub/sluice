@@ -66,6 +66,16 @@ pub enum Sink {
     Store,
 }
 
+/// Whether the provider holds the test data in memory or on disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StoreKind {
+    /// In RAM, so the disk is not part of what the receiver measures. The size has to fit.
+    Mem,
+    /// A generated file, referenced in place by an `iroh-blobs` file store.
+    Fs,
+}
+
 /// Whether the connections of one fetch share a UDP socket.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -122,7 +132,8 @@ pub struct ServeArgs {
     /// Options shared with `fetch`.
     #[command(flatten)]
     pub shared: Shared,
-    /// Test data size in bytes, with an optional KiB, MiB or GiB suffix. Held in memory.
+    /// Test data size in bytes, with an optional KiB, MiB or GiB suffix. With `--store mem` it is
+    /// held in memory.
     #[arg(long, default_value = "1GiB", value_parser = parse_size)]
     pub size: u64,
     /// Seed of the test data.
@@ -131,6 +142,13 @@ pub struct ServeArgs {
     /// Endpoints to bind, each with its own socket and router. The ticket carries every address.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=16))]
     pub endpoints: u16,
+    /// Where blobs mode keeps the data. `fs` needs `--dir`.
+    #[arg(long, value_enum, default_value_t = StoreKind::Mem)]
+    pub store: StoreKind,
+    /// Directory for `--store fs`. Holds the generated data file and the blob store, and both are
+    /// reused by later runs with the same seed and size.
+    #[arg(long)]
+    pub dir: Option<PathBuf>,
 }
 
 /// Options for `probe fetch`.

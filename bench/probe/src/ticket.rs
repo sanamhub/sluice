@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use iroh::EndpointAddr;
 use serde::{Deserialize, Serialize};
 
-use crate::cli::Mode;
+use crate::cli::{Mode, StoreKind};
 
 const PREFIX: &str = "sluiceprobe2";
 
@@ -22,6 +22,8 @@ pub struct Ticket {
     pub seed: u64,
     /// BLAKE3 root as `iroh-blobs` computed it on import. Blobs mode only.
     pub hash: Option<String>,
+    /// Where `serve` keeps the data. Blobs mode only.
+    pub store: Option<StoreKind>,
 }
 
 impl Ticket {
@@ -54,7 +56,7 @@ mod tests {
     use iroh::{EndpointId, SecretKey};
 
     use super::Ticket;
-    use crate::cli::Mode;
+    use crate::cli::{Mode, StoreKind};
 
     #[test]
     fn roundtrip() {
@@ -65,6 +67,7 @@ mod tests {
             size: 8 << 20,
             seed: 3,
             hash: Some("ab".repeat(32)),
+            store: Some(StoreKind::Fs),
         };
         let decoded = Ticket::decode(&ticket.encode().unwrap()).unwrap();
         assert_eq!(decoded.mode, Mode::Blobs);
@@ -72,6 +75,7 @@ mod tests {
         assert_eq!(decoded.addrs[0].id, id);
         assert_eq!((decoded.size, decoded.seed), (8 << 20, 3));
         assert_eq!(decoded.hash, ticket.hash);
+        assert_eq!(decoded.store, Some(StoreKind::Fs));
     }
 
     #[test]

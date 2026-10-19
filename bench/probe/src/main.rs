@@ -5,6 +5,7 @@ mod blobs;
 mod cli;
 mod cpu;
 mod data;
+mod disk;
 mod fetch;
 mod net;
 mod raw;

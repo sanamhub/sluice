@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::{
-    cli::{Congestion, Mode, Sink},
+    cli::{Congestion, Mode, Sink, StoreKind},
     net::Windows,
     stats::ConnReport,
 };
@@ -37,6 +37,8 @@ pub struct Output {
     pub serve_endpoints: usize,
     /// Endpoints `fetch` bound: 1 with `--endpoints shared`, `connections` with `separate`.
     pub fetch_endpoints: usize,
+    /// `mem` or `fs` in blobs mode, `null` in raw mode, which has no store.
+    pub serve_store: Option<StoreKind>,
     /// Congestion controller on this end.
     pub congestion: Congestion,
     /// Windows on this end.

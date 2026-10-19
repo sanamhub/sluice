@@ -18,8 +18,9 @@ everything else on stderr.
 **Notes:**
 
 - It needs Rust 1.91, because `iroh` 1.3.0 and `iroh-blobs` 0.103.1 do. The msrv job leaves it out.
-- `serve` holds the test data in memory in `blobs` mode, so `--size` has to fit in RAM. The disk is
-  not part of what `fetch --sink discard` measures.
+- `serve` holds the test data in memory in `blobs` mode unless `--store fs` is given, so `--size` has
+  to fit in RAM by default. Raw mode keeps only a 64 MiB block in memory. The disk is not part of what
+  `fetch --sink discard` measures with `--store mem`.
 - `raw` mode repeats a 64 MiB block of seeded data to fill each stream. QUIC neither compresses nor
   deduplicates, so it costs the same on the wire as fresh data, and the sender never waits on the
   generator.
@@ -34,7 +35,8 @@ everything else on stderr.
 **Tests:** `tests/loopback.rs` starts `serve` and `fetch` as processes with 8 MiB, for `raw` and
 `blobs`, `bbr3` and `cubic`, and 1 and 4 connections. It checks the JSON, the byte count and the key
 exchange group, and runs under `cargo nextest run` on all three operating systems. One more case
-puts 4 connections on 4 separate endpoints on both sides. A last test asks for 64 GiB with
+puts 4 connections on 4 separate endpoints on both sides, and another serves 8 MiB from a file store
+and checks that the store holds no copy of the data file. A last test asks for 64 GiB with
 `--timeout 2` and checks the timeout line and the exit status.
 
 ## Run
@@ -55,20 +57,31 @@ The ticket carries the mode, size, seed and addresses, so `fetch` needs none of 
 take `--congestion` and `--window`, because the sender's controller and the receiver's windows both
 limit throughput.
 
-| Option          | Values                          | Default         | `serve` | `fetch`                    |
-| --------------- | ------------------------------- | --------------- | ------- | -------------------------- |
-| `--mode`        | `raw`, `blobs`                  | `blobs`         | yes     | yes, must match the ticket |
-| `--congestion`  | `bbr3`, `cubic`, `newreno`      | `bbr3`          | yes     | yes                        |
-| `--window`      | `default`, `tuned`              | `default`       | yes     | yes                        |
-| `--relay`       | `disabled` or a relay URL       | `disabled`      | yes     | yes                        |
-| `--size`        | bytes, with `KiB`, `MiB`, `GiB` | `1GiB`          | yes     | no                         |
-| `--seed`        | `u64`                           | `0`             | yes     | no                         |
-| `--connections` | 1 to 16                         | `1`             | no      | yes                        |
-| `--sink`        | `discard`, `store`              | `discard`       | no      | yes                        |
-| `--dir`         | directory                       | a temporary one | no      | yes                        |
-| `--timeout`     | seconds, 1 or more              | `600`           | no      | yes                        |
-| `--endpoints`   | 1 to 16                         | `1`             | yes     | no                         |
-| `--endpoints`   | `shared`, `separate`            | `shared`        | no      | yes                        |
+| Option          | Values                          | Default                  | `serve`           | `fetch`                    |
+| --------------- | ------------------------------- | ------------------------ | ----------------- | -------------------------- |
+| `--mode`        | `raw`, `blobs`                  | `blobs`                  | yes               | yes, must match the ticket |
+| `--congestion`  | `bbr3`, `cubic`, `newreno`      | `bbr3`                   | yes               | yes                        |
+| `--window`      | `default`, `tuned`              | `default`                | yes               | yes                        |
+| `--relay`       | `disabled` or a relay URL       | `disabled`               | yes               | yes                        |
+| `--size`        | bytes, with `KiB`, `MiB`, `GiB` | `1GiB`                   | yes               | no                         |
+| `--seed`        | `u64`                           | `0`                      | yes               | no                         |
+| `--connections` | 1 to 16                         | `1`                      | no                | yes                        |
+| `--sink`        | `discard`, `store`              | `discard`                | no                | yes                        |
+| `--dir`         | directory                       | `fetch`: a temporary one | `--store fs` only | `--sink store` only        |
+| `--store`       | `mem`, `fs`                     | `mem`                    | yes               | no                         |
+| `--timeout`     | seconds, 1 or more              | `600`                    | no                | yes                        |
+| `--endpoints`   | 1 to 16                         | `1`                      | yes               | no                         |
+| `--endpoints`   | `shared`, `separate`            | `shared`                 | no                | yes                        |
+
+`--store fs` is for transfers that do not fit in memory, such as the 100 GB file of scenario S1 in
+`docs/performance.md`. `serve` writes the generated data to `<dir>/data-<seed>-<size>.bin` once, in
+constant memory, and reuses the file on later runs if its size matches. It then imports the file into
+an `iroh-blobs` file store in `<dir>/store` and serves from that. The import uses `TryReference`, which
+keeps the blob as a reference to the data file and does not copy it. `serve` exits with an error if
+the store copied the file anyway, since the copy would be another 100 GB. The import is tagged
+`probe-<seed>-<size>`, so a later run with the same seed and size finds the blob already imported and
+skips the hashing pass. All of this finishes before `serve` prints the ticket, so none of it is in
+what `fetch` measures. `--store fs` needs `--mode blobs`, because raw mode has no store.
 
 `--endpoints` decides how many UDP sockets carry a transfer. By default every connection of a `fetch`
 shares one endpoint, so one socket and one socket task, and `serve` has one too. ADR 0016 spreads a
@@ -94,7 +107,8 @@ link. On Windows `cpu_user_s` and `cpu_sys_s` are `null` and no GRO batches are 
 
 ```
 {"outcome":"ok","mode":"blobs","size_bytes":1073741824,"received_bytes":1073741824,
- "connections":1,"serve_endpoints":1,"fetch_endpoints":1,"congestion":"bbr3",
+ "connections":1,"serve_endpoints":1,"fetch_endpoints":1,"serve_store":"mem",
+ "congestion":"bbr3",
  "window":{"mode":"default","stream_receive_bytes":1250000,
            "receive_bytes":4611686018427387903,"send_bytes":10000000},
  "sink":"discard","relay":"disabled","elapsed_s":4.1347848,"throughput_gbit_s":2.0774804512196137,
@@ -112,9 +126,10 @@ link. On Windows `cpu_user_s` and `cpu_sys_s` are `null` and no GRO batches are 
 
 `outcome` is `ok` or `timeout`. `serve_endpoints` is the number of addresses in the ticket and
 `fetch_endpoints` the number of endpoints `fetch` bound, 1 for `shared` and the connection count for
-`separate`. `progress` has one entry per whole second of the transfer: the total
-payload bytes received so far. It is read from a one-second timer, and the transfer never waits for
-it. `connection_stats` has one entry per connection:
+`separate`. `serve_store` is `mem` or `fs` in blobs mode and `null` in raw mode. `progress` has one
+entry per whole second of the transfer: the total payload bytes received so far. It is read from a
+one-second timer, and the transfer never waits for it. `connection_stats` has one entry per
+connection:
 
 - `received_bytes` is the payload the probe counted on that connection. With `--sink store` it
   follows the progress items the store reports.
