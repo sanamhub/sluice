@@ -1,5 +1,5 @@
 //! Runs `probe serve` and `probe fetch` as real processes over the local network and checks the
-//! contract the T3 harness relies on.
+//! contract the bench harness relies on.
 
 use std::{
     io::{BufRead, BufReader},

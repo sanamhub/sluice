@@ -2,7 +2,7 @@
 
 **Measures:** how fast `iroh` and `iroh-blobs` move bytes between two machines, with one connection or
 several, under Cubic, BBRv3 or NewReno, with default or tuned windows. It is the M0 measurement from
-ADR 0010 and the tool the T3 harness drives. It is for the people who tune the transport, not for
+ADR 0010 and the tool the bench harness drives. It is for the people who tune the transport, not for
 users, and its output is for machines: one ticket line from `serve`, one JSON line from `fetch`,
 everything else on stderr.
 
@@ -29,7 +29,7 @@ everything else on stderr.
   marked deprecated. What iroh does count is `recv_datagrams` and `recv_gro_batches`, which the result
   carries as they are. They show whether GRO ran, not how many segments it coalesced.
 - `cpu_user_s` and `cpu_sys_s` come from `getrusage` on Linux and macOS and are `null` on Windows.
-- Numbers from one machine are not results. The T3 harness runs the probe on a pair of hosts.
+- Numbers from one machine are not results. The bench harness runs the probe on a pair of hosts.
 
 **Tests:** `tests/loopback.rs` starts `serve` and `fetch` as processes with 8 MiB, for `raw` and
 `blobs`, `bbr3` and `cubic`, and 1 and 4 connections. It checks the JSON, the byte count and the key

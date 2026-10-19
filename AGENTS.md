@@ -21,7 +21,7 @@ Read this before changing anything. It applies to people and to coding agents al
 - No async traits, no generic public APIs, no macro tricks. Concrete types and enum dispatch.
 - One actor per transfer: owned state and message passing, no shared `Mutex<State>`.
 - Functions under 60 lines in the sans-IO crates. Files under 400 lines everywhere.
-- Every public item has a doc comment with an example.
+- Every public item in a library crate has a doc comment with an example. Binaries are exempt.
 - `tracing` spans carry the transfer id. Filenames and tickets are never logged at the default level.
 - Prose follows [`.claude/skills/writing-style/SKILL.md`](.claude/skills/writing-style/SKILL.md).
 
