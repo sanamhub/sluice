@@ -39,7 +39,8 @@ puts 4 connections on 4 separate endpoints on both sides, and another serves 8 M
 and checks that the store holds no copy of the data file. A last test asks for 64 GiB with
 `--timeout 2` and checks the timeout line and the exit status. `tests/sender.rs` runs 2 connections
 under `bbr3` and under `cubic` and checks that `serve` prints a `connection_closed` line for each,
-with the key of the matching `fetch` entry. One more case moves 512 MiB and checks that both ends
+with the key of the matching `fetch` entry, and that the CPU fields are numbers on Unix and `null`
+on Windows. One more case moves 512 MiB and checks that both ends
 return a `controller_series` with increasing `elapsed_s`, and that the `fetch` series is as long as
 `progress`.
 
@@ -171,6 +172,12 @@ After the ticket, `serve` prints one line for every connection that closes, and 
 read on the sending side after the close, when the counters are final. `received_bytes` is `null`
 on it, because `serve` does not count the payload it writes. After ctrl-c `serve` waits up to 5
 seconds for the lines of the connections the shutdown closes.
+
+The line also has `cpu_user_s` and `cpu_sys_s`: the CPU time the `serve` process has used since it
+printed the ticket, read when that connection closed. The reading at the ticket is the zero point,
+so generating the data and hashing the blob are not in it. The process is shared, so with several
+connections the line of the last one to close holds the whole transfer. Both are `null` on Windows,
+as on `fetch`. The two full example lines above leave out the series and the CPU fields.
 
 Join a `serve` line to its `fetch` entry on `key`. Both ends derive it from the TLS session
 (`export_keying_material`, 8 bytes in hex), so nothing extra crosses the wire, no two connections

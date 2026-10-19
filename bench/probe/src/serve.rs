@@ -5,7 +5,6 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, ensure};
 use iroh::protocol::Router;
 use iroh_blobs::{BlobsProtocol, store::mem::MemStore};
-use tokio::sync::mpsc;
 
 use crate::{
     cli::{Mode, ServeArgs, StoreKind},
@@ -32,7 +31,7 @@ pub async fn run(args: ServeArgs) -> Result<()> {
     }
 
     let mut routers: Vec<Router> = Vec::new();
-    let (lines, queue) = mpsc::unbounded_channel();
+    let (lines, queue) = sender::channel();
     let mut hash = None;
     // Kept so the stores outlive the routers.
     let mut mem_store = None;
@@ -89,6 +88,7 @@ pub async fn run(args: ServeArgs) -> Result<()> {
         hash: hash.map(|h| h.to_hex()),
         store: (args.shared.mode == Mode::Blobs).then_some(args.store),
     };
+    lines.mark_ticket();
     println!("{}", ticket.encode()?);
     // Started after the ticket so it is always the first line on stdout.
     let printer = tokio::spawn(sender::print_lines(queue));

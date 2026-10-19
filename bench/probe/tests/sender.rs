@@ -52,6 +52,9 @@ fn serve_lines(congestion: &'static str) {
             assert_eq!(line["event"], "connection_closed");
             assert!(line["close_reason"].as_str().is_some_and(|r| !r.is_empty()));
             assert!(line["received_bytes"].is_null());
+            // Read with getrusage, which Windows has no safe call for.
+            assert_eq!(line["cpu_user_s"].is_f64(), cfg!(unix), "{line}");
+            assert_eq!(line["cpu_sys_s"].is_f64(), cfg!(unix), "{line}");
             assert!(line["sent_datagrams"].as_u64().is_some_and(|n| n > 0));
             // The sender is the other end of the fetch, so the two never name the same peer.
             assert_ne!(line["remote_id"], received[0]["remote_id"]);
