@@ -1,0 +1,302 @@
+//! `probe fetch`: one transfer, one result.
+
+use std::{
+    ops::Deref,
+    path::PathBuf,
+    str::FromStr,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+use anyhow::{Context, Result, anyhow, bail, ensure};
+use iroh::{
+    Endpoint, EndpointAddr,
+    endpoint::{Connection, VarInt},
+};
+use iroh_blobs::{Hash, api::Store, store::fs::FsStore};
+use rustls::NamedGroup;
+use tokio::task::JoinSet;
+
+use crate::{
+    blobs,
+    cli::{FetchArgs, Mode, Relay, Sink},
+    cpu::{self, Cpu},
+    data, net, raw,
+    result::Output,
+    ticket::Ticket,
+};
+
+/// What each connection is asked for.
+enum Plan {
+    Raw(Vec<u64>),
+    Blobs {
+        hash: Hash,
+        parts: Vec<(u64, u64)>,
+        store: Option<Store>,
+    },
+}
+
+/// What was observed between the first request and the last verified byte.
+struct Measured {
+    received: u64,
+    elapsed: Duration,
+    cpu: Option<Cpu>,
+    datagrams: u64,
+    gro_batches: u64,
+    path: &'static str,
+    rtt: Duration,
+    group: NamedGroup,
+}
+
+/// A store directory removed on drop, unless the caller named one to keep.
+struct Scratch(Option<PathBuf>);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        if let Some(dir) = &self.0 {
+            // Best effort: a leftover temp directory is not worth failing a finished measurement.
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+/// Runs the transfer described by the ticket and reports it.
+pub async fn run(args: FetchArgs) -> Result<Output> {
+    let ticket = Ticket::decode(&args.ticket)?;
+    ensure!(
+        ticket.mode == args.shared.mode,
+        "the ticket is for {:?} but --mode is {:?}",
+        ticket.mode,
+        args.shared.mode
+    );
+    let verified = match ticket.mode {
+        Mode::Raw => None,
+        Mode::Blobs => Some(expected_root(&ticket)?),
+    };
+
+    let endpoint = net::bind(&args.shared).await?;
+    let measured = measure(&endpoint, &args, &ticket, verified).await;
+    // Closed on every path, or iroh logs an ungraceful abort over the real error.
+    endpoint.close().await;
+    Ok(output(&args, &ticket, verified, measured?))
+}
+
+async fn measure(
+    endpoint: &Endpoint,
+    args: &FetchArgs,
+    ticket: &Ticket,
+    verified: Option<Hash>,
+) -> Result<Measured> {
+    let alpn = match ticket.mode {
+        Mode::Raw => net::RAW_ALPN,
+        Mode::Blobs => iroh_blobs::ALPN,
+    };
+    let conns = connect_all(endpoint, &ticket.addr, alpn, args.connections).await?;
+    let group = net::require_post_quantum(&conns[0])?;
+    tracing::info!(connections = conns.len(), ?group, "connected");
+
+    let scratch = Scratch(match (ticket.mode, args.sink, &args.dir) {
+        (Mode::Blobs, Sink::Store, None) => Some(temp_dir()),
+        _ => None,
+    });
+    let fs_store = match (ticket.mode, args.sink) {
+        (Mode::Blobs, Sink::Store) => {
+            let dir = args
+                .dir
+                .clone()
+                .or_else(|| scratch.0.clone())
+                .expect("set above");
+            Some(
+                FsStore::load(&dir)
+                    .await
+                    .map_err(|e| anyhow!("open store: {e}"))?,
+            )
+        }
+        _ => None,
+    };
+    let plan = match verified {
+        None => Plan::Raw(raw::split(ticket.size, args.connections)),
+        Some(hash) => Plan::Blobs {
+            hash,
+            parts: blobs::split(ticket.size, args.connections)?,
+            store: fs_store.as_ref().map(|s| s.deref().clone()),
+        },
+    };
+
+    let cpu_before = cpu::now();
+    let (datagrams_before, gro_before) = socket_counters(endpoint);
+    let started = Instant::now();
+    let received = transfer(&conns, plan).await?;
+    let elapsed = started.elapsed();
+    let cpu = cpu::now()
+        .zip(cpu_before)
+        .map(|(after, before)| after.since(before));
+    let (datagrams_after, gro_after) = socket_counters(endpoint);
+
+    ensure!(
+        received == ticket.size,
+        "received {received} payload bytes but the ticket promised {}",
+        ticket.size
+    );
+    if let (Some(fs), Some(hash)) = (&fs_store, verified) {
+        let local = fs
+            .remote()
+            .local(hash)
+            .await
+            .map_err(|e| anyhow!("check store: {e}"))?;
+        ensure!(
+            local.is_complete(),
+            "the store does not hold the whole blob"
+        );
+    }
+
+    let (path, rtt) = path_summary(&conns)?;
+    for conn in &conns {
+        conn.close(VarInt::from_u32(0), b"done");
+    }
+    if let Some(fs) = fs_store {
+        fs.shutdown()
+            .await
+            .map_err(|e| anyhow!("close store: {e}"))?;
+    }
+    drop(scratch);
+
+    Ok(Measured {
+        received,
+        elapsed,
+        cpu,
+        datagrams: datagrams_after - datagrams_before,
+        gro_batches: gro_after - gro_before,
+        path,
+        rtt,
+        group,
+    })
+}
+
+fn output(args: &FetchArgs, ticket: &Ticket, verified: Option<Hash>, m: Measured) -> Output {
+    let seconds = m.elapsed.as_secs_f64();
+    Output {
+        mode: ticket.mode,
+        size_bytes: ticket.size,
+        received_bytes: m.received,
+        connections: args.connections,
+        congestion: args.shared.congestion,
+        window: net::Windows::for_mode(args.shared.window),
+        sink: verified.map(|_| args.sink),
+        relay: match &args.shared.relay {
+            Relay::Disabled => "disabled".to_string(),
+            Relay::Url(url) => url.to_string(),
+        },
+        elapsed_s: seconds,
+        throughput_gbit_s: ticket.size as f64 * 8.0 / 1e9 / seconds,
+        path: m.path,
+        rtt_ms: Some(m.rtt.as_secs_f64() * 1000.0),
+        cpu_user_s: m.cpu.map(|c| c.user_s),
+        cpu_sys_s: m.cpu.map(|c| c.sys_s),
+        key_exchange_group: format!("{:?}", m.group),
+        gso_segments: None,
+        gro_segments: None,
+        recv_datagrams: m.datagrams,
+        recv_gro_batches: m.gro_batches,
+        iroh_version: env!("PROBE_IROH_VERSION"),
+        iroh_blobs_version: env!("PROBE_IROH_BLOBS_VERSION"),
+        verified_hash: verified.map(|h| h.to_hex()),
+    }
+}
+
+/// The root both ends can compute without a data file. A mismatch means the provider imported
+/// something other than what the seed and size describe, and nothing measured would mean anything.
+fn expected_root(ticket: &Ticket) -> Result<Hash> {
+    let expected = Hash::from(data::expected_hash(ticket.seed, ticket.size));
+    let advertised = ticket
+        .hash
+        .as_deref()
+        .context("the blobs ticket carries no hash")?;
+    let advertised = Hash::from_str(advertised).context("the ticket hash is malformed")?;
+    ensure!(
+        expected == advertised,
+        "the provider imported data that does not match seed {} and size {}",
+        ticket.seed,
+        ticket.size
+    );
+    Ok(expected)
+}
+
+/// Opens all connections at once and checks each one's key exchange.
+async fn connect_all(
+    endpoint: &Endpoint,
+    addr: &EndpointAddr,
+    alpn: &'static [u8],
+    count: u16,
+) -> Result<Vec<Connection>> {
+    let mut dials = JoinSet::new();
+    for _ in 0..count {
+        let (endpoint, addr) = (endpoint.clone(), addr.clone());
+        dials.spawn(async move { endpoint.connect(addr, alpn).await.context("connect") });
+    }
+    let mut conns = Vec::with_capacity(usize::from(count));
+    while let Some(joined) = dials.join_next().await {
+        let conn = joined.context("dial task panicked")??;
+        net::require_post_quantum(&conn)?;
+        conns.push(conn);
+    }
+    Ok(conns)
+}
+
+async fn transfer(conns: &[Connection], plan: Plan) -> Result<u64> {
+    let mut tasks: JoinSet<Result<u64>> = JoinSet::new();
+    match plan {
+        Plan::Raw(lens) => {
+            for (conn, len) in conns.iter().cloned().zip(lens) {
+                tasks.spawn(async move { raw::receive(&conn, len).await });
+            }
+        }
+        Plan::Blobs { hash, parts, store } => {
+            for (conn, part) in conns.iter().cloned().zip(parts) {
+                match &store {
+                    None => tasks.spawn(blobs::fetch_discard(conn, hash, part)),
+                    Some(store) => tasks.spawn(blobs::fetch_store(store.clone(), conn, hash, part)),
+                };
+            }
+        }
+    }
+    let mut total = 0;
+    while let Some(joined) = tasks.join_next().await {
+        total += joined.context("transfer task panicked")??;
+    }
+    Ok(total)
+}
+
+/// `relay` if any connection's selected path goes through a relay. The RTT is the first
+/// connection's, as iroh reports it for the selected path. iroh marks a path selected a little
+/// after the first bytes flow, so a short transfer can finish with `selected: None`. A connection
+/// with exactly one open path has nowhere else to send, so that path counts. With several open and
+/// none selected the answer is unknown and the run fails instead of guessing.
+fn path_summary(conns: &[Connection]) -> Result<(&'static str, Duration)> {
+    let mut any_relay = false;
+    let mut first_rtt = None;
+    for conn in conns {
+        let paths = conn.paths();
+        let in_use = match paths.iter().find(|p| p.is_selected()) {
+            Some(selected) => selected,
+            None if paths.len() == 1 => paths.iter().next().context("one open path")?,
+            None => bail!("no selected path among {} open: {paths:?}", paths.len()),
+        };
+        any_relay |= in_use.is_relay();
+        first_rtt.get_or_insert(in_use.rtt());
+    }
+    let rtt = first_rtt.context("no connections")?;
+    Ok((if any_relay { "relay" } else { "direct" }, rtt))
+}
+
+/// Datagrams received and GRO batches among them, as iroh counts them.
+fn socket_counters(endpoint: &Endpoint) -> (u64, u64) {
+    let socket = &endpoint.metrics().socket;
+    (socket.recv_datagrams.get(), socket.recv_gro_datagrams.get())
+}
+
+fn temp_dir() -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    std::env::temp_dir().join(format!("sluice-probe-{}-{nanos}", std::process::id()))
+}
