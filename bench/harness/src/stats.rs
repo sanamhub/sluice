@@ -1,4 +1,5 @@
-//! The arithmetic behind `summary.md`: median, spread, slow runs and percent of a ceiling.
+//! The arithmetic behind `summary.md`: median, spread, slow runs, dips, outliers and percent of a
+//! ceiling.
 
 /// The middle value, or the mean of the two middle values of an even count. `None` if empty.
 pub fn median(values: &[f64]) -> Option<f64> {
@@ -23,24 +24,61 @@ pub fn spread(values: &[f64]) -> Option<(f64, f64)> {
     Some((min, max))
 }
 
-/// True if any whole second moved less than a tenth of what the run's busiest second moved.
-/// `progress` is the cumulative payload at the end of each second, as `fetch` prints it.
-pub fn is_slow(progress: &[u64]) -> bool {
+/// The payload each second moved. `progress` is the cumulative payload at the end of each second,
+/// as `fetch` prints it.
+fn per_second(progress: &[u64]) -> Vec<u64> {
     let mut previous = 0;
-    let seconds: Vec<u64> = progress
+    progress
         .iter()
         .map(|&total| {
             let moved = total.saturating_sub(previous);
             previous = total;
             moved
         })
-        .collect();
+        .collect()
+}
+
+/// True if any whole second moved less than a tenth of what the run's busiest second moved.
+pub fn is_slow(progress: &[u64]) -> bool {
+    let seconds = per_second(progress);
     let Some(&peak) = seconds.iter().max() else {
         return false;
     };
     seconds
         .iter()
         .any(|&moved| (moved as f64) < 0.1 * peak as f64)
+}
+
+/// The lowest second of a run divided by the run's median second, leaving out the first second,
+/// which is still ramping up, and the last, which the end of the transfer cuts short. `None` if
+/// fewer than three seconds remain, or if the median second moved nothing and so there is no
+/// ratio.
+pub fn dip(progress: &[u64]) -> Option<f64> {
+    let seconds = per_second(progress);
+    if seconds.len() < 3 {
+        return None;
+    }
+    let inner: Vec<f64> = seconds[1..seconds.len() - 1]
+        .iter()
+        .map(|&moved| moved as f64)
+        .collect();
+    let typical = median(&inner).filter(|m| *m > 0.0)?;
+    let lowest = inner.iter().copied().min_by(f64::total_cmp)?;
+    Some(lowest / typical)
+}
+
+/// The deepest dip among the runs.
+pub fn worst_dip<'a>(runs: impl IntoIterator<Item = &'a [u64]>) -> Option<f64> {
+    runs.into_iter().filter_map(dip).min_by(f64::total_cmp)
+}
+
+/// How many finished runs took more than 1.5 times as long as the fastest one. All runs of a
+/// configuration move the same bytes, so a run's time is in inverse proportion to its Gbit/s.
+pub fn outliers(gbit_s: &[f64]) -> usize {
+    let Some(fastest) = gbit_s.iter().copied().max_by(f64::total_cmp) else {
+        return 0;
+    };
+    gbit_s.iter().filter(|&&g| g * 1.5 < fastest).count()
 }
 
 /// `value` as a percentage of `ceiling`. `None` if there is no usable ceiling.
@@ -108,5 +146,55 @@ mod tests {
     fn percent_of_a_ceiling() {
         assert_eq!(percent_of(8.0, 10.0), Some(80.0));
         assert_eq!(percent_of(8.0, 0.0), None);
+    }
+
+    #[test]
+    fn the_dip_is_the_lowest_second_over_the_median_second() {
+        // Seconds: 50 (ramp up, left out), 100, 40, 100, 100, 10 (cut short, left out).
+        let progress = [50, 150, 190, 290, 390, 400];
+        assert_eq!(dip(&progress), Some(0.4));
+    }
+
+    #[test]
+    fn the_first_and_last_second_do_not_count_toward_the_dip() {
+        // A slow first second and a slow last second leave a flat run with no dip at all.
+        assert_eq!(dip(&[1, 101, 201, 301, 302]), Some(1.0));
+    }
+
+    #[test]
+    fn a_collapse_in_the_middle_is_a_dip_of_nearly_zero() {
+        let progress = [100, 200, 300, 301, 400, 500, 600];
+        let d = dip(&progress).expect("a dip");
+        assert!((d - 0.01).abs() < 1e-9, "{d}");
+    }
+
+    #[test]
+    fn a_run_too_short_for_a_middle_has_no_dip() {
+        assert_eq!(dip(&[]), None);
+        assert_eq!(dip(&[100, 200]), None);
+        assert_eq!(dip(&[100, 200, 300]), Some(1.0));
+    }
+
+    #[test]
+    fn a_median_second_of_nothing_has_no_ratio() {
+        assert_eq!(dip(&[0, 0, 0, 0, 0]), None);
+    }
+
+    #[test]
+    fn the_worst_dip_is_the_lowest_across_runs() {
+        let steady: &[u64] = &[100, 200, 300, 400];
+        let dipping: &[u64] = &[100, 200, 220, 320, 420];
+        let short: &[u64] = &[100];
+        assert_eq!(worst_dip([steady, dipping, short]), Some(0.2));
+        assert_eq!(worst_dip([short]), None);
+    }
+
+    #[test]
+    fn a_run_is_an_outlier_above_one_and_a_half_times_the_fastest() {
+        // 2.0 Gbit/s takes 3 times as long as 6.0, 4.0 takes exactly 1.5 times, 4.1 less.
+        assert_eq!(outliers(&[6.0, 6.0, 2.0, 4.0, 4.1]), 1);
+        assert_eq!(outliers(&[6.0, 3.9]), 1);
+        assert_eq!(outliers(&[]), 0);
+        assert_eq!(outliers(&[5.0]), 0);
     }
 }

@@ -4,7 +4,7 @@ use std::fmt::Write;
 
 use crate::{
     netem::Shown,
-    stats::{is_slow, median, percent_of, spread},
+    stats::{is_slow, median, outliers, percent_of, spread, worst_dip},
 };
 
 /// How one run ended.
@@ -159,8 +159,15 @@ fn render_row(row: &Row, ceilings: &Ceilings) -> String {
         .zip(ceilings.lower_for(row))
         .and_then(|(m, ceiling)| percent_of(m, ceiling))
         .map_or("n/a".to_string(), |p| format!("{p:.0}%"));
+    let dip = worst_dip(measured.iter().filter_map(|r| r.progress.as_deref()))
+        .map_or("n/a".to_string(), two);
+    let late = if ok.is_empty() {
+        "n/a".to_string()
+    } else {
+        outliers(&ok).to_string()
+    };
     format!(
-        "| {} | {} | {} / {} | {} | {} | {} | {} | {} | {} |",
+        "| {} | {} | {} / {} | {} | {} | {} | {} | {} | {} | {} | {} |",
         row.workload,
         row.name,
         count(Status::Ok),
@@ -168,6 +175,8 @@ fn render_row(row: &Row, ceilings: &Ceilings) -> String {
         count(Status::Timeout),
         count(Status::Failed),
         slow,
+        dip,
+        late,
         median(&ok).map_or("n/a".to_string(), two),
         range(&ok, 1.0),
         percent
@@ -218,15 +227,21 @@ fn render_scenario(out: &mut String, s: &ScenarioReport) {
     let _ = writeln!(out, "\n### Results\n");
     let _ = writeln!(
         out,
-        "| workload | configuration | ok / runs | timeouts | failed | slow | median Gbit/s | min to max | % of lower ceiling |"
+        "| workload | configuration | ok / runs | timeouts | failed | slow | worst dip | outliers | median Gbit/s | min to max | % of lower ceiling |"
     );
     let _ = writeln!(
         out,
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
     );
     for row in &s.rows {
         let _ = writeln!(out, "{}", render_row(row, &s.ceilings));
     }
+    let _ = writeln!(
+        out,
+        "\nWorst dip is the lowest second of a run over the median second of the same run, leaving out \
+         the first and last second, as the lowest across the runs, and an outlier is a finished run \
+         that took more than 1.5 times as long as the fastest finished run."
+    );
     if !s.not_measured.is_empty() {
         let _ = writeln!(out, "\nNot measured:\n");
         for line in &s.not_measured {
@@ -259,112 +274,4 @@ pub fn render(report: &Report) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn run(status: Status, gbit_s: f64, progress: &[u64]) -> RunResult {
-        RunResult {
-            status,
-            gbit_s: (status == Status::Ok).then_some(gbit_s),
-            progress: Some(progress.to_vec()),
-        }
-    }
-
-    fn row(reads_disk: bool, writes_disk: bool) -> Row {
-        Row {
-            workload: "one-file".to_string(),
-            name: "raw bbr3 default x1 shared".to_string(),
-            reads_disk,
-            writes_disk,
-            runs: vec![
-                run(Status::Ok, 4.0, &[100, 200, 300]),
-                run(Status::Ok, 5.0, &[100, 200, 300]),
-                run(Status::Ok, 6.0, &[100, 200, 201]),
-                run(Status::Timeout, 0.0, &[100, 100, 100]),
-            ],
-        }
-    }
-
-    #[test]
-    fn the_lower_ceiling_covers_the_network_and_the_disks_a_row_touches() {
-        let ceilings = Ceilings {
-            iperf_single: vec![9.0e9],
-            iperf_parallel: vec![9.4e9, 9.5e9, 9.3e9],
-            fio_read: vec![1.0e9],
-            fio_write: vec![0.5e9],
-        };
-        // The network ceiling is the better of the two iperf3 medians: 9.4 Gbit/s.
-        assert_eq!(ceilings.lower_for(&row(false, false)), Some(9.4));
-        // 1 GB/s is 8 Gbit/s and 0.5 GB/s is 4 Gbit/s.
-        assert_eq!(ceilings.lower_for(&row(true, false)), Some(8.0));
-        assert_eq!(ceilings.lower_for(&row(true, true)), Some(4.0));
-    }
-
-    #[test]
-    fn a_missing_ceiling_leaves_no_percentage() {
-        let no_disk = Ceilings {
-            iperf_parallel: vec![10.0e9],
-            ..Ceilings::default()
-        };
-        assert_eq!(no_disk.lower_for(&row(false, false)), Some(10.0));
-        assert_eq!(no_disk.lower_for(&row(true, false)), None);
-        assert_eq!(Ceilings::default().lower_for(&row(false, false)), None);
-    }
-
-    #[test]
-    fn a_row_reports_the_median_spread_slow_runs_and_percent() {
-        let ceilings = Ceilings {
-            iperf_parallel: vec![10.0e9],
-            ..Ceilings::default()
-        };
-        let line = render_row(&row(false, false), &ceilings);
-        // Three finished runs of 4, 5 and 6 Gbit/s, one timeout, and two runs with a second
-        // under a tenth of the peak: the one at 201 and the stalled timeout.
-        assert_eq!(
-            line,
-            "| one-file | raw bbr3 default x1 shared | 3 / 4 | 1 | 0 | 2 | 5.00 | 4.00 to 6.00 | 50% |"
-        );
-    }
-
-    #[test]
-    fn a_row_without_a_ceiling_says_so() {
-        let line = render_row(&row(false, false), &Ceilings::default());
-        assert!(line.ends_with("| n/a |"), "{line}");
-    }
-
-    #[test]
-    fn the_summary_has_a_table_per_scenario() {
-        let report = Report {
-            label: "lab".to_string(),
-            date: "2026-10-19".to_string(),
-            hosts: vec!["sender: local (linux)".to_string()],
-            runs: 5,
-            scenarios: vec![
-                ScenarioReport {
-                    id: "S1".to_string(),
-                    link: "LAN".to_string(),
-                    netem: None,
-                    skipped: None,
-                    ceilings: Ceilings::default(),
-                    rows: vec![row(false, false)],
-                    not_measured: vec!["iperf3: missing on the receiver".to_string()],
-                },
-                ScenarioReport {
-                    id: "S3".to_string(),
-                    link: "WAN".to_string(),
-                    netem: None,
-                    skipped: Some("netem needs Linux".to_string()),
-                    ceilings: Ceilings::default(),
-                    rows: Vec::new(),
-                    not_measured: Vec::new(),
-                },
-            ],
-        };
-        let text = render(&report);
-        assert!(text.starts_with("# Bench results: lab"));
-        assert!(text.contains("## S1: LAN"));
-        assert!(text.contains("| ceiling | runs | median | min to max |"));
-        assert!(text.contains("- iperf3: missing on the receiver"));
-        assert!(text.contains("Skipped: netem needs Linux"));
-    }
-}
+mod tests;

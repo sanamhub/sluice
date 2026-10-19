@@ -138,7 +138,10 @@ write into a directory that exists.
   as they can be read without root. A field it could not read is `null`.
 - `summary.md`: per scenario and configuration, the median and spread of the runs, the result as a
   percentage of the lower ceiling, the number of timeouts and the number of slow runs (any second
-  below 10% of the run's peak second), in plain tables.
+  below 10% of the run's peak second), in plain tables. Two more columns catch what that rule
+  misses. The worst dip is the lowest second of a run over the median second of the same run,
+  leaving out the first and last second, as the lowest across the runs. The outliers are finished
+  runs that took more than 1.5 times as long as the fastest finished run.
 
 The files are written even if a scenario fails or the run is interrupted, so what was measured is
 kept.
