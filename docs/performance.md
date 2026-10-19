@@ -71,8 +71,9 @@ virtualization. Every published result carries:
 Test data is generated from a seed, so no large files live in git. The harness and raw results are in
 `bench/`, and anyone can rerun them.
 
-The harness also asserts its own setup: if `noq` reports a GSO or GRO segment count of 1 on the bench
-host, the run fails instead of publishing a number produced by a silent fallback.
+The harness also asserts its own setup. iroh does not expose segment counts, but it counts the GRO
+batches the socket received. If a Linux bench host counts none during a run, GRO did not run, and the
+harness fails the run instead of publishing a number produced by a silent fallback.
 
 ### Scenarios
 
