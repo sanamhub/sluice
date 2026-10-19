@@ -26,3 +26,4 @@ testable. Consequences include what it costs and what would make us revisit it.
 | [0015](0015-bbrv3-by-default.md) | BBRv3 is the default congestion controller | Accepted |
 | [0016](0016-parallel-connections-and-tcp-bulk-path.md) | Shard large transfers across connections, with a TCP bulk path for direct peers | Accepted |
 | [0017](0017-bindings-in-one-repository.md) | Bindings for every language, generated, in this repository | Accepted |
+| [0018](0018-post-quantum-is-checked-at-the-handshake.md) | Post-quantum key exchange is checked at the handshake | Proposed |
