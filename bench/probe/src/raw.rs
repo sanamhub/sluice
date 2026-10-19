@@ -1,7 +1,10 @@
 //! Raw mode: bytes over QUIC streams with no blobs protocol and no hashing, to separate the cost
 //! of QUIC from the cost of verification.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 use anyhow::{Context, Result};
 use iroh::{
@@ -11,10 +14,11 @@ use iroh::{
 
 use crate::data::{RAW_BLOCK_BYTES, generate};
 
-/// Answers each connection's request with that many bytes on one unidirectional stream.
-#[derive(Debug)]
+/// Answers each connection's request with that many bytes on one unidirectional stream. Cloned
+/// once per endpoint, and the clones share the block.
+#[derive(Clone, Debug)]
 pub struct RawHandler {
-    block: Vec<u8>,
+    block: Arc<[u8]>,
 }
 
 impl RawHandler {
@@ -22,7 +26,7 @@ impl RawHandler {
     /// deduplicates, so repeating a pseudorandom block costs the same on the wire as fresh data.
     pub fn new(seed: u64, size: u64) -> Result<Self> {
         Ok(Self {
-            block: generate(seed, size.min(RAW_BLOCK_BYTES))?,
+            block: generate(seed, size.min(RAW_BLOCK_BYTES))?.into(),
         })
     }
 }

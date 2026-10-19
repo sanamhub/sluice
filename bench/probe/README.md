@@ -33,8 +33,9 @@ everything else on stderr.
 
 **Tests:** `tests/loopback.rs` starts `serve` and `fetch` as processes with 8 MiB, for `raw` and
 `blobs`, `bbr3` and `cubic`, and 1 and 4 connections. It checks the JSON, the byte count and the key
-exchange group, and runs under `cargo nextest run` on all three operating systems. One more test
-asks for 64 GiB with `--timeout 2` and checks the timeout line and the exit status.
+exchange group, and runs under `cargo nextest run` on all three operating systems. One more case
+puts 4 connections on 4 separate endpoints on both sides. A last test asks for 64 GiB with
+`--timeout 2` and checks the timeout line and the exit status.
 
 ## Run
 
@@ -66,6 +67,16 @@ limit throughput.
 | `--sink`        | `discard`, `store`              | `discard`       | no      | yes                        |
 | `--dir`         | directory                       | a temporary one | no      | yes                        |
 | `--timeout`     | seconds, 1 or more              | `600`           | no      | yes                        |
+| `--endpoints`   | 1 to 16                         | `1`             | yes     | no                         |
+| `--endpoints`   | `shared`, `separate`            | `shared`        | no      | yes                        |
+
+`--endpoints` decides how many UDP sockets carry a transfer. By default every connection of a `fetch`
+shares one endpoint, so one socket and one socket task, and `serve` has one too. ADR 0016 spreads a
+transfer over several connections to use more cores, and if the shared socket is the bottleneck that
+cannot help. `serve --endpoints n` binds `n` endpoints, each with its own router serving the same
+data, and the ticket carries all `n` addresses. `fetch --endpoints separate` binds one endpoint per
+connection, and connection `i` dials address `i % n`. With `shared`, connection `i` still dials
+address `i % n`, so the server side is the same in both and only the receiving socket changes.
 
 `--timeout` covers the transfer, not the handshakes. When it expires, `fetch` still prints its result
 line, with `"outcome": "timeout"` and everything measured up to that point, then exits non-zero. A
@@ -83,7 +94,7 @@ link. On Windows `cpu_user_s` and `cpu_sys_s` are `null` and no GRO batches are 
 
 ```
 {"outcome":"ok","mode":"blobs","size_bytes":1073741824,"received_bytes":1073741824,
- "connections":1,"congestion":"bbr3",
+ "connections":1,"serve_endpoints":1,"fetch_endpoints":1,"congestion":"bbr3",
  "window":{"mode":"default","stream_receive_bytes":1250000,
            "receive_bytes":4611686018427387903,"send_bytes":10000000},
  "sink":"discard","relay":"disabled","elapsed_s":4.1347848,"throughput_gbit_s":2.0774804512196137,
@@ -99,7 +110,9 @@ link. On Windows `cpu_user_s` and `cpu_sys_s` are `null` and no GRO batches are 
  "verified_hash":"7b343701fd41de622e1208b9490efd7f5a54eee0fe68c052e522500f55aa0fbc"}
 ```
 
-`outcome` is `ok` or `timeout`. `progress` has one entry per whole second of the transfer: the total
+`outcome` is `ok` or `timeout`. `serve_endpoints` is the number of addresses in the ticket and
+`fetch_endpoints` the number of endpoints `fetch` bound, 1 for `shared` and the connection count for
+`separate`. `progress` has one entry per whole second of the transfer: the total
 payload bytes received so far. It is read from a one-second timer, and the transfer never waits for
 it. `connection_stats` has one entry per connection:
 

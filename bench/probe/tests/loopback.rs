@@ -30,7 +30,39 @@ fn probe() -> Command {
     Command::new(env!("CARGO_BIN_EXE_probe"))
 }
 
-fn spawn_server(mode: &str, congestion: &str, size: &str) -> (Server, ChildStdout) {
+/// One loopback run: which options both ends get and what the result line must say about them.
+struct Case {
+    mode: &'static str,
+    congestion: &'static str,
+    connections: u16,
+    /// Extra arguments for `serve`.
+    serve: Vec<String>,
+    /// Extra arguments for `fetch`.
+    fetch: Vec<String>,
+    serve_endpoints: u64,
+    fetch_endpoints: u64,
+}
+
+impl Case {
+    fn new(mode: &'static str, congestion: &'static str, connections: u16) -> Self {
+        Self {
+            mode,
+            congestion,
+            connections,
+            serve: Vec::new(),
+            fetch: Vec::new(),
+            serve_endpoints: 1,
+            fetch_endpoints: 1,
+        }
+    }
+}
+
+fn spawn_server(
+    mode: &str,
+    congestion: &str,
+    size: &str,
+    extra: &[String],
+) -> (Server, ChildStdout) {
     let mut child = probe()
         .args([
             "serve",
@@ -41,6 +73,7 @@ fn spawn_server(mode: &str, congestion: &str, size: &str) -> (Server, ChildStdou
             "--congestion",
             congestion,
         ])
+        .args(extra)
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
@@ -69,11 +102,19 @@ fn one_json_line(stdout: Vec<u8>) -> Value {
     serde_json::from_str(stdout.trim()).expect("stdout is JSON")
 }
 
-fn run_case(server_stdout: ChildStdout, mode: &str, congestion: &str, connections: u16) {
+fn run_case(server_stdout: ChildStdout, case: &Case) {
     let ticket = read_ticket(server_stdout);
     let output = probe()
-        .args(["fetch", &ticket, "--mode", mode, "--congestion", congestion])
-        .args(["--connections", &connections.to_string()])
+        .args([
+            "fetch",
+            &ticket,
+            "--mode",
+            case.mode,
+            "--congestion",
+            case.congestion,
+        ])
+        .args(["--connections", &case.connections.to_string()])
+        .args(&case.fetch)
         .output()
         .expect("run probe fetch");
     assert!(
@@ -81,16 +122,19 @@ fn run_case(server_stdout: ChildStdout, mode: &str, congestion: &str, connection
         "fetch failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    check(&one_json_line(output.stdout), mode, congestion, connections);
+    check(&one_json_line(output.stdout), case);
 }
 
-fn check(result: &Value, mode: &str, congestion: &str, connections: u16) {
+fn check(result: &Value, case: &Case) {
+    let (mode, connections) = (case.mode, case.connections);
     assert_eq!(result["outcome"], "ok");
     assert_eq!(result["mode"], mode);
     assert_eq!(result["size_bytes"], SIZE);
     assert_eq!(result["received_bytes"], SIZE);
     assert_eq!(result["connections"], connections);
-    assert_eq!(result["congestion"], congestion);
+    assert_eq!(result["serve_endpoints"], case.serve_endpoints);
+    assert_eq!(result["fetch_endpoints"], case.fetch_endpoints);
+    assert_eq!(result["congestion"], case.congestion);
     assert_eq!(result["window"]["mode"], "default");
     assert_eq!(result["key_exchange_group"], "X25519MLKEM768");
     assert_eq!(result["path"], "direct");
@@ -154,10 +198,10 @@ fn check_connection_stats(result: &Value, connections: u16) {
     }
 }
 
-fn with_deadline(mode: &'static str, congestion: &'static str, connections: u16) {
+fn with_deadline(case: Case) {
     // The guard stays on this thread so it kills the server on a panic or a timeout alike.
-    let (_server, stdout) = spawn_server(mode, congestion, "8MiB");
-    within_deadline(move || run_case(stdout, mode, congestion, connections));
+    let (_server, stdout) = spawn_server(case.mode, case.congestion, "8MiB", &case.serve);
+    within_deadline(move || run_case(stdout, &case));
 }
 
 fn within_deadline(case: impl FnOnce() + Send + 'static) {
@@ -178,48 +222,58 @@ fn within_deadline(case: impl FnOnce() + Send + 'static) {
 
 #[test]
 fn raw_bbr3_one_connection() {
-    with_deadline("raw", "bbr3", 1);
+    with_deadline(Case::new("raw", "bbr3", 1));
 }
 
 #[test]
 fn raw_bbr3_four_connections() {
-    with_deadline("raw", "bbr3", 4);
+    with_deadline(Case::new("raw", "bbr3", 4));
 }
 
 #[test]
 fn raw_cubic_one_connection() {
-    with_deadline("raw", "cubic", 1);
+    with_deadline(Case::new("raw", "cubic", 1));
 }
 
 #[test]
 fn raw_cubic_four_connections() {
-    with_deadline("raw", "cubic", 4);
+    with_deadline(Case::new("raw", "cubic", 4));
 }
 
 #[test]
 fn blobs_bbr3_one_connection() {
-    with_deadline("blobs", "bbr3", 1);
+    with_deadline(Case::new("blobs", "bbr3", 1));
 }
 
 #[test]
 fn blobs_bbr3_four_connections() {
-    with_deadline("blobs", "bbr3", 4);
+    with_deadline(Case::new("blobs", "bbr3", 4));
 }
 
 #[test]
 fn blobs_cubic_one_connection() {
-    with_deadline("blobs", "cubic", 1);
+    with_deadline(Case::new("blobs", "cubic", 1));
 }
 
 #[test]
 fn blobs_cubic_four_connections() {
-    with_deadline("blobs", "cubic", 4);
+    with_deadline(Case::new("blobs", "cubic", 4));
+}
+
+#[test]
+fn blobs_bbr3_four_connections_on_four_separate_endpoints() {
+    let mut case = Case::new("blobs", "bbr3", 4);
+    case.serve = vec!["--endpoints".into(), "4".into()];
+    case.fetch = vec!["--endpoints".into(), "separate".into()];
+    case.serve_endpoints = 4;
+    case.fetch_endpoints = 4;
+    with_deadline(case);
 }
 
 #[test]
 fn a_timeout_prints_what_was_measured_and_exits_non_zero() {
     // 64 GiB cannot cross loopback in 2 seconds on any machine this runs on.
-    let (_server, stdout) = spawn_server("raw", "bbr3", "64GiB");
+    let (_server, stdout) = spawn_server("raw", "bbr3", "64GiB", &[]);
     within_deadline(move || {
         let ticket = read_ticket(stdout);
         let output = probe()

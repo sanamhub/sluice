@@ -6,15 +6,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::cli::Mode;
 
-const PREFIX: &str = "sluiceprobe1";
+const PREFIX: &str = "sluiceprobe2";
 
 /// Everything `fetch` needs to run and to check the result without being told twice.
 #[derive(Serialize, Deserialize)]
 pub struct Ticket {
     /// What `serve` is serving.
     pub mode: Mode,
-    /// Where to dial. Direct addresses only unless `serve` was given a relay.
-    pub addr: EndpointAddr,
+    /// One address per endpoint `serve` bound. Direct addresses only unless `serve` was given a
+    /// relay.
+    pub addrs: Vec<EndpointAddr>,
     /// Size of the test data in bytes.
     pub size: u64,
     /// Seed of the test data, so `fetch` can compute the expected root itself.
@@ -60,14 +61,15 @@ mod tests {
         let id: EndpointId = SecretKey::generate().public();
         let ticket = Ticket {
             mode: Mode::Blobs,
-            addr: id.into(),
+            addrs: vec![id.into()],
             size: 8 << 20,
             seed: 3,
             hash: Some("ab".repeat(32)),
         };
         let decoded = Ticket::decode(&ticket.encode().unwrap()).unwrap();
         assert_eq!(decoded.mode, Mode::Blobs);
-        assert_eq!(decoded.addr.id, id);
+        assert_eq!(decoded.addrs.len(), 1);
+        assert_eq!(decoded.addrs[0].id, id);
         assert_eq!((decoded.size, decoded.seed), (8 << 20, 3));
         assert_eq!(decoded.hash, ticket.hash);
     }
@@ -75,6 +77,6 @@ mod tests {
     #[test]
     fn garbage_is_rejected() {
         assert!(Ticket::decode("nope").is_err());
-        assert!(Ticket::decode("sluiceprobe1zz").is_err());
+        assert!(Ticket::decode("sluiceprobe2zz").is_err());
     }
 }

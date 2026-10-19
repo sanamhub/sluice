@@ -18,7 +18,7 @@ use tokio::task::JoinSet;
 
 use crate::{
     blobs,
-    cli::{FetchArgs, Mode, Relay, Sink},
+    cli::{EndpointMode, FetchArgs, Mode, Relay, Sink},
     cpu::{self, Cpu},
     data, net, raw,
     result::{Outcome, Output},
@@ -68,15 +68,31 @@ pub async fn run(args: FetchArgs) -> Result<Output> {
         Mode::Blobs => Some(expected_root(&ticket)?),
     };
 
-    let endpoint = net::bind(&args.shared).await?;
-    let measured = measure(&endpoint, &args, &ticket, verified).await;
+    let endpoints = bind_endpoints(&args).await?;
+    let measured = measure(&endpoints, &args, &ticket, verified).await;
     // Closed on every path, or iroh logs an ungraceful abort over the real error.
-    endpoint.close().await;
-    Ok(output(&args, &ticket, verified, measured?))
+    for endpoint in &endpoints {
+        endpoint.close().await;
+    }
+    Ok(output(&args, &ticket, verified, endpoints.len(), measured?))
+}
+
+/// One endpoint, or one per connection. Separate endpoints mean separate sockets and socket
+/// tasks, which is what ADR 0016's sharding needs if the shared one is the bottleneck.
+async fn bind_endpoints(args: &FetchArgs) -> Result<Vec<Endpoint>> {
+    let count = match args.endpoints {
+        EndpointMode::Shared => 1,
+        EndpointMode::Separate => args.connections,
+    };
+    let mut endpoints = Vec::with_capacity(usize::from(count));
+    for _ in 0..count {
+        endpoints.push(net::bind(&args.shared).await?);
+    }
+    Ok(endpoints)
 }
 
 async fn measure(
-    endpoint: &Endpoint,
+    endpoints: &[Endpoint],
     args: &FetchArgs,
     ticket: &Ticket,
     verified: Option<Hash>,
@@ -85,7 +101,7 @@ async fn measure(
         Mode::Raw => net::RAW_ALPN,
         Mode::Blobs => iroh_blobs::ALPN,
     };
-    let conns = connect_all(endpoint, &ticket.addr, alpn, args.connections).await?;
+    let conns = connect_all(endpoints, &ticket.addrs, alpn, args.connections).await?;
     let group = net::require_post_quantum(&conns[0])?;
     tracing::info!(connections = conns.len(), ?group, "connected");
 
@@ -120,7 +136,7 @@ async fn measure(
     let counters = Counters::new(conns.len());
     let mut progress = Vec::new();
     let cpu_before = cpu::now();
-    let (datagrams_before, gro_before) = socket_counters(endpoint);
+    let (datagrams_before, gro_before) = socket_counters(endpoints);
     let started = Instant::now();
     let limit = Duration::from_secs(args.timeout);
     let ran =
@@ -129,7 +145,7 @@ async fn measure(
     let cpu = cpu::now()
         .zip(cpu_before)
         .map(|(after, before)| after.since(before));
-    let (datagrams_after, gro_after) = socket_counters(endpoint);
+    let (datagrams_after, gro_after) = socket_counters(endpoints);
 
     // Read before anything closes. A stalled run is only worth having with these in it.
     let counted = counters.per_connection();
@@ -196,7 +212,13 @@ async fn measure(
     })
 }
 
-fn output(args: &FetchArgs, ticket: &Ticket, verified: Option<Hash>, m: Measured) -> Output {
+fn output(
+    args: &FetchArgs,
+    ticket: &Ticket,
+    verified: Option<Hash>,
+    fetch_endpoints: usize,
+    m: Measured,
+) -> Output {
     let seconds = m.elapsed.as_secs_f64();
     Output {
         outcome: m.outcome,
@@ -204,6 +226,8 @@ fn output(args: &FetchArgs, ticket: &Ticket, verified: Option<Hash>, m: Measured
         size_bytes: ticket.size,
         received_bytes: m.received,
         connections: args.connections,
+        serve_endpoints: ticket.addrs.len(),
+        fetch_endpoints,
         congestion: args.shared.congestion,
         window: net::Windows::for_mode(args.shared.window),
         sink: verified.map(|_| args.sink),
@@ -248,25 +272,33 @@ fn expected_root(ticket: &Ticket) -> Result<Hash> {
     Ok(expected)
 }
 
-/// Opens all connections at once and checks each one's key exchange.
+/// Opens all connections at once and checks each one's key exchange. Connection `i` goes out
+/// of endpoint `i % endpoints` to address `i % addrs`, and the result is in `i` order, so the
+/// per-connection statistics line up with the endpoints.
 async fn connect_all(
-    endpoint: &Endpoint,
-    addr: &EndpointAddr,
+    endpoints: &[Endpoint],
+    addrs: &[EndpointAddr],
     alpn: &'static [u8],
     count: u16,
 ) -> Result<Vec<Connection>> {
+    ensure!(!addrs.is_empty(), "the ticket carries no address");
     let mut dials = JoinSet::new();
-    for _ in 0..count {
-        let (endpoint, addr) = (endpoint.clone(), addr.clone());
-        dials.spawn(async move { endpoint.connect(addr, alpn).await.context("connect") });
+    for i in 0..usize::from(count) {
+        let endpoint = endpoints[i % endpoints.len()].clone();
+        let addr = addrs[i % addrs.len()].clone();
+        dials.spawn(async move {
+            let conn = endpoint.connect(addr, alpn).await.context("connect")?;
+            Ok::<_, anyhow::Error>((i, conn))
+        });
     }
     let mut conns = Vec::with_capacity(usize::from(count));
     while let Some(joined) = dials.join_next().await {
-        let conn = joined.context("dial task panicked")??;
+        let (i, conn) = joined.context("dial task panicked")??;
         net::require_post_quantum(&conn)?;
-        conns.push(conn);
+        conns.push((i, conn));
     }
-    Ok(conns)
+    conns.sort_by_key(|(i, _)| *i);
+    Ok(conns.into_iter().map(|(_, conn)| conn).collect())
 }
 
 /// `relay` if any connection's selected path goes through a relay. The RTT is the first
@@ -291,10 +323,15 @@ fn path_summary(conns: &[Connection]) -> Result<(&'static str, Duration)> {
     Ok((if any_relay { "relay" } else { "direct" }, rtt))
 }
 
-/// Datagrams received and GRO batches among them, as iroh counts them.
-fn socket_counters(endpoint: &Endpoint) -> (u64, u64) {
-    let socket = &endpoint.metrics().socket;
-    (socket.recv_datagrams.get(), socket.recv_gro_datagrams.get())
+/// Datagrams received and GRO batches among them, summed over the endpoints, as iroh counts them.
+fn socket_counters(endpoints: &[Endpoint]) -> (u64, u64) {
+    endpoints.iter().fold((0, 0), |(datagrams, gro), endpoint| {
+        let socket = &endpoint.metrics().socket;
+        (
+            datagrams + socket.recv_datagrams.get(),
+            gro + socket.recv_gro_datagrams.get(),
+        )
+    })
 }
 
 fn temp_dir() -> PathBuf {

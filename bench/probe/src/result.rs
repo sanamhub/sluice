@@ -33,6 +33,10 @@ pub struct Output {
     pub received_bytes: u64,
     /// Parallel connections used.
     pub connections: u16,
+    /// Endpoints `serve` bound, which is the number of addresses in the ticket.
+    pub serve_endpoints: usize,
+    /// Endpoints `fetch` bound: 1 with `--endpoints shared`, `connections` with `separate`.
+    pub fetch_endpoints: usize,
     /// Congestion controller on this end.
     pub congestion: Congestion,
     /// Windows on this end.
@@ -66,7 +70,7 @@ pub struct Output {
     pub gso_segments: Option<u64>,
     /// Always `null`: iroh counts GRO batches, not the segments in them.
     pub gro_segments: Option<u64>,
-    /// QUIC datagrams this endpoint received during the transfer (iroh `recv_datagrams`).
+    /// QUIC datagrams the endpoints received during the transfer (iroh `recv_datagrams`, summed).
     pub recv_datagrams: u64,
     /// Receive batches that used GRO during the transfer (iroh `recv_gro_datagrams`).
     pub recv_gro_batches: u64,

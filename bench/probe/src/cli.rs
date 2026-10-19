@@ -66,6 +66,16 @@ pub enum Sink {
     Store,
 }
 
+/// Whether the connections of one fetch share a UDP socket.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EndpointMode {
+    /// One endpoint, so one socket and one socket task, carries every connection.
+    Shared,
+    /// One endpoint per connection.
+    Separate,
+}
+
 /// Relay setting. A relay is never chosen silently (ADR 0011).
 #[derive(Clone, Debug)]
 pub enum Relay {
@@ -118,6 +128,9 @@ pub struct ServeArgs {
     /// Seed of the test data.
     #[arg(long, default_value_t = 0)]
     pub seed: u64,
+    /// Endpoints to bind, each with its own socket and router. The ticket carries every address.
+    #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=16))]
+    pub endpoints: u16,
 }
 
 /// Options for `probe fetch`.
@@ -131,6 +144,10 @@ pub struct FetchArgs {
     /// Parallel connections, 1 to 16.
     #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u16).range(1..=16))]
     pub connections: u16,
+    /// `shared` puts every connection on one endpoint. `separate` binds one endpoint per connection
+    /// and dials the ticket's address `i % n` for connection `i`.
+    #[arg(long, value_enum, default_value_t = EndpointMode::Shared)]
+    pub endpoints: EndpointMode,
     /// What to do with verified blobs. Ignored in raw mode.
     #[arg(long, value_enum, default_value_t = Sink::Discard)]
     pub sink: Sink,
