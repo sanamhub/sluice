@@ -18,7 +18,7 @@ vulnerability, see [`SECURITY.md`](../SECURITY.md).
 | A relay reads or alters traffic | QUIC with TLS 1.3 end to end. Every 16 KiB chunk group is verified against the BLAKE3 root before any caller sees it |
 | A provider serves bad data in a multi-provider fetch | The same verification. Providers that fail it are scored down and dropped |
 | Dialing reaches the wrong peer | Endpoints are dialed by Ed25519 public key, not by address |
-| Recording traffic now to decrypt later with a quantum computer | Hybrid `X25519MLKEM768` key exchange (RFC 10024) on native builds. The `aws-lc-rs` provider is passed in explicitly and the negotiated group is asserted in a test, because one transitive dependency enabling `ring` would silently remove it. ADR 0012 |
+| Recording traffic now to decrypt later with a quantum computer | Hybrid `X25519MLKEM768` key exchange (RFC 10024) on native builds. The `aws-lc-rs` provider is passed in explicitly, and a connection that negotiated any other group is closed, because a build or feature change can downgrade it with no error. ADR 0018 |
 | A malicious manifest writes outside the output folder | The receiver rejects absolute paths, `..`, empty components, NTFS alternate data streams, Windows reserved names and symlinks that escape the root. Fuzzed |
 | A ticket holder fills the sender's disk | `iroh-blobs` push is disabled, and the `get`, `get_many` and `observe` modes are set together to the ticket's allowlist. Restricting `get` alone would leave the other two open. Tested |
 | A leaked relay URL is used as free bandwidth | Relays run with authorization on. `open` mode needs a flag and has a per-client byte rate limit. ADR 0011 |

@@ -1,6 +1,6 @@
 # 0012. The TLS crypto provider is chosen explicitly
 
-**Status:** Accepted
+**Status:** Superseded by ADR 0018
 **Date:** 2026-10-19
 **Approved by:** @sanamhub
 

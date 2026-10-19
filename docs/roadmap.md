@@ -20,7 +20,7 @@ It also measures:
 
 - the direct-connection rate with only a rendezvous server and no relay (ADR 0013)
 - BLAKE3 WASM throughput in Chrome, Firefox and Safari, desktop and iOS (ADR 0014)
-- the negotiated key exchange group, asserted to be `X25519MLKEM768` (ADR 0012)
+- the negotiated key exchange group, asserted to be `X25519MLKEM768` (ADR 0018)
 
 The repository gets its skeleton in the same phase: the three 1.0 crates, CI with every gate from
 [`design.md`](design.md#tooling), and the bench harness.
