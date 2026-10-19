@@ -57,10 +57,11 @@ pub struct Output {
     pub progress: Vec<u64>,
     /// What `noq` counted on each connection, in the order the connections were opened.
     pub connection_stats: Vec<ConnReport>,
-    /// `relay` if any connection's selected path is a relay, else `direct`. `null` after a timeout
-    /// when iroh had not marked a path as selected.
+    /// `relay` if any connection's selected path is a relay. `direct` if none is, or if no open path
+    /// is a relay. `null` when iroh had not marked a path selected and a relay path was open.
     pub path: Option<&'static str>,
-    /// RTT of the first connection's selected path at the end of the transfer.
+    /// RTT of the first connection's selected path at the end of the transfer. `null` if iroh had
+    /// not marked a path selected and the connection had several open.
     pub rtt_ms: Option<f64>,
     /// User CPU seconds of this process during the transfer. `null` on Windows.
     pub cpu_user_s: Option<f64>,

@@ -153,8 +153,11 @@ These statistics are the receiver's. QUIC declares a packet lost at the end that
 `cwnd_bytes` is the receiver's window (5808 bytes in the example above, far below what 1 GiB in 4 s
 needs). The congestion state that limits a download lives on the sender, and `serve` reports it.
 
-After a timeout `received_bytes` is what arrived, `path` is `null` if iroh had not marked a path
-selected, and `verified_hash` is the root the bytes would have been checked against. Otherwise `fetch`
+After a timeout `received_bytes` is what arrived and `verified_hash` is the root the bytes would
+have been checked against. `path` is `relay` if a selected path is a relay and `direct` if none is,
+or if no open path is a relay. iroh marks a path selected a little after the first bytes flow, so a
+short transfer on a host with two addresses can end with two paths open and none selected. Then
+`rtt_ms` is `null`, and so is `path` if one of the open paths is a relay. Otherwise `fetch`
 exits non-zero, without a result line, if the received byte count differs from `size_bytes`, if a blob
 does not verify against the root, or if any connection negotiated a key exchange group other than
 `X25519MLKEM768`.

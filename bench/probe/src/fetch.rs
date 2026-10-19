@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use anyhow::{Context, Result, anyhow, ensure};
 use iroh::{
     Endpoint, EndpointAddr,
     endpoint::{Connection, VarInt},
@@ -173,18 +173,12 @@ async fn measure(
                     "the store does not hold the whole blob"
                 );
             }
-            let (path, rtt) = path_summary(&conns)?;
-            (Outcome::Ok, received, Some(path), Some(rtt))
+            let (path, rtt) = path_summary(&conns);
+            (Outcome::Ok, received, path, rtt)
         }
-        // The path is a bonus on a timeout: with several open and none selected it stays unknown.
         Err(_) => {
-            let summary = path_summary(&conns).ok();
-            (
-                Outcome::Timeout,
-                counted.iter().sum(),
-                summary.map(|(path, _)| path),
-                summary.map(|(_, rtt)| rtt),
-            )
+            let (path, rtt) = path_summary(&conns);
+            (Outcome::Timeout, counted.iter().sum(), path, rtt)
         }
     };
     for conn in &conns {
@@ -302,26 +296,35 @@ async fn connect_all(
     Ok(conns.into_iter().map(|(_, conn)| conn).collect())
 }
 
-/// `relay` if any connection's selected path goes through a relay. The RTT is the first
-/// connection's, as iroh reports it for the selected path. iroh marks a path selected a little
-/// after the first bytes flow, so a short transfer can finish with `selected: None`. A connection
-/// with exactly one open path has nowhere else to send, so that path counts. With several open and
-/// none selected the answer is unknown and the run fails instead of guessing.
-fn path_summary(conns: &[Connection]) -> Result<(&'static str, Duration)> {
-    let mut any_relay = false;
+/// `relay` if any connection's selected path goes through a relay, and `direct` if none is, or if
+/// no open path is a relay, since then whichever is selected is direct. Otherwise `None`. iroh marks
+/// a path selected a little after the first bytes flow, so a short transfer can finish with several
+/// paths open and none selected, as it does on a host with two addresses. A connection with exactly
+/// one open path has nowhere else to send, so that path counts. The RTT is the first known
+/// connection's, `None` if no path is known.
+fn path_summary(conns: &[Connection]) -> (Option<&'static str>, Option<Duration>) {
+    let (mut relay_in_use, mut relay_open, mut all_known) = (false, false, true);
     let mut first_rtt = None;
     for conn in conns {
         let paths = conn.paths();
-        let in_use = match paths.iter().find(|p| p.is_selected()) {
-            Some(selected) => selected,
-            None if paths.len() == 1 => paths.iter().next().context("one open path")?,
-            None => bail!("no selected path among {} open: {paths:?}", paths.len()),
-        };
-        any_relay |= in_use.is_relay();
-        first_rtt.get_or_insert(in_use.rtt());
+        relay_open |= paths.iter().any(|p| p.is_relay());
+        let selected = paths.iter().find(|p| p.is_selected());
+        match selected.or_else(|| paths.iter().next().filter(|_| paths.len() == 1)) {
+            Some(in_use) => {
+                relay_in_use |= in_use.is_relay();
+                first_rtt.get_or_insert(in_use.rtt());
+            }
+            None => all_known = false,
+        }
     }
-    let rtt = first_rtt.context("no connections")?;
-    Ok((if any_relay { "relay" } else { "direct" }, rtt))
+    let path = if relay_in_use {
+        Some("relay")
+    } else if all_known || !relay_open {
+        Some("direct")
+    } else {
+        None
+    };
+    (path, first_rtt)
 }
 
 /// Datagrams received and GRO batches among them, summed over the endpoints, as iroh counts them.

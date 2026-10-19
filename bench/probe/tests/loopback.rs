@@ -115,7 +115,8 @@ fn check(result: &Value, case: &Case) {
             .as_f64()
             .is_some_and(|g| g > 0.0)
     );
-    assert!(result["rtt_ms"].as_f64().is_some_and(|r| r >= 0.0));
+    // Null when iroh has not selected one of two open paths yet, as on a host with two addresses.
+    assert!(result["rtt_ms"].is_null() || result["rtt_ms"].as_f64().is_some_and(|r| r >= 0.0));
     assert!(result["gso_segments"].is_null() && result["gro_segments"].is_null());
     assert!(
         result["iroh_version"]
