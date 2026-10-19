@@ -143,7 +143,7 @@ async fn run_scenario(
             out.skipped = Some(reason);
             return Ok(());
         }
-        let shown = netem::apply(shaping, &s.receiver, wanted)
+        let shown = netem::apply(shaping, &s.sender, &s.receiver, wanted)
             .await
             .context("apply netem")?;
         s.record(&json!({ "kind": "scenario", "scenario": scenario.id, "status": "shaped", "netem": shown }))?;
@@ -156,17 +156,34 @@ async fn run_scenario(
     undone.context("remove netem")
 }
 
-/// Why this receiver cannot be shaped, if it cannot.
+/// Why this pair cannot be shaped in both directions, if it cannot.
 fn cannot_shape(s: &Session) -> Option<String> {
-    if s.receiver.os != Os::Linux {
+    // One interface has one egress, so one host cannot be both the delayed data path and the
+    // delayed return path.
+    if s.sender.entry.host == s.receiver.entry.host {
         return Some(format!(
-            "netem needs a Linux receiver, and the receiver is {:?}",
-            s.receiver.os
+            "netem needs two hosts. Both ends are {}, and one interface cannot be shaped in both \
+             directions",
+            s.sender.entry.host
         ));
     }
-    found(&s.receiver_tools, "tc")
-        .is_none()
-        .then(|| "tc not found on the receiver".to_string())
+    for host in [&s.sender, &s.receiver] {
+        if host.os != Os::Linux {
+            return Some(format!(
+                "netem needs Linux on both hosts, and the {} is {:?}",
+                host.role, host.os
+            ));
+        }
+    }
+    for (host, tools) in [
+        (&s.sender, &s.sender_tools),
+        (&s.receiver, &s.receiver_tools),
+    ] {
+        if found(tools, "tc").is_none() {
+            return Some(format!("tc not found on the {}", host.role));
+        }
+    }
+    None
 }
 
 async fn measure(s: &mut Session, scenario: &Scenario, out: &mut ScenarioReport) -> Result<()> {

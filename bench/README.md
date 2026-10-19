@@ -1,7 +1,7 @@
 # sluice-bench
 
 **Measures:** the M0 transport numbers from ADR 0010 on a pair of real hosts. For each scenario it
-drives [`probe`](probe/README.md) on both ends, shapes the receiver's link with netem, measures what
+drives [`probe`](probe/README.md) on both ends, shapes both hosts' links with netem, measures what
 the path and the disks can do (`iperf3`, `fio`) and what a parallel-TCP copy reaches (`mscp`), and
 writes the results anyone can rerun. The binary is `bench`, the package `sluice-bench`. It is for the
 people who run M0, not for users.
@@ -22,12 +22,14 @@ people who run M0, not for users.
 - It runs commands through the system `ssh` binary, or directly for `local`. There is no SSH crate.
   ssh runs with `BatchMode`, so keys or an agent have to work already.
 - A remote host needs a POSIX shell. A Windows host works as `local` only.
-- netem is Linux only. A scenario with netem is skipped, with the reason in `summary.md`, if the
-  receiver is not Linux or has no `tc`. S1 has no netem and runs anywhere.
-- netem shapes the receiver's interface, so it shapes what the receiver sends. For a download that is
-  the acknowledgements: `delay_ms` is the round trip time added, and loss and rate act on the return
-  path. Data from the sender is not shaped. Run the same file with the hosts swapped to shape the other
-  direction.
+- netem is Linux only, and needs two hosts. A scenario with netem is skipped, with the reason in
+  `summary.md`, if either host is not Linux or has no `tc`, or if both ends are the same host. S1 has
+  no netem and runs anywhere.
+- netem shapes egress, so each host shapes what it sends. The sender carries half of `delay_ms`, the
+  `loss_percent`, the `rate` and the `limit_packets`, so they act on the data. The receiver carries
+  the other half of `delay_ms` and half of `jitter_ms`, so they act on the acknowledgements. The round
+  trip gets the full delay. Loss on the acknowledgements is not shaped, and a rate applies to the
+  data direction only. `summary.md` shows what `tc qdisc show` read back on each side.
 - The probe moves one blob or one raw stream. The other two workloads in `docs/performance.md` (100k
   small files, a mixed tree) need the engine and are not here.
 - `mscp` copies over ssh, so it needs a receiver that is not `local`. With both ends local it is
@@ -37,7 +39,8 @@ people who run M0, not for users.
   until a noq release fixes it. Do not add a `[patch]` entry to make them look better.
 
 **Tests:** unit tests cover the summary maths (median, spread, slow runs, percentage of the lower
-ceiling), the parsing of `scenarios.toml` and the hosts file, and the checks on `tc qdisc show`.
+ceiling), the parsing of `scenarios.toml` and the hosts file, the checks on `tc qdisc show`, how netem
+is split between the two hosts, and that a side already shaped is undone when the other fails.
 `tests/smoke.rs` runs `bench smoke` as one integration test under `cargo nextest run` on all three
 operating systems. It uses the probe only, because CI runners may lack `iperf3`, `fio` and `mscp`, and
 the results record them as missing.
@@ -55,8 +58,9 @@ Both hosts need:
 - `mscp` on both, if you want the parallel-TCP bar. It copies over ssh, so the sender must reach the
   receiver by ssh without a password.
 
-The receiver also needs `tc` and a user that may run it without a password. A sudoers line such as
-this one, written with `visudo`, is enough, and the path is whatever `command -v tc` prints:
+Both hosts also need `tc` and a user that may run it without a password, because each one shapes its
+own interface. A sudoers line such as this one, written with `visudo`, is enough, and the path is
+whatever `command -v tc` prints:
 
 ```
 bench ALL=(root) NOPASSWD: /usr/sbin/tc
@@ -71,8 +75,9 @@ real machines, and fill it in:
 cp bench/hosts.example.toml ~/m0-hosts.toml
 ```
 
-`host` is `local` or an ssh destination. `interface` on the receiver is the NIC netem shapes. `address`
-is where the other end reaches this host, for `iperf3` and `mscp`, if it differs from the host name.
+`host` is `local` or an ssh destination. `interface` is the NIC netem shapes, and both hosts need one
+for the scenarios with netem. `address` is where the other end reaches this host, for `iperf3` and
+`mscp`, if it differs from the host name.
 
 ## Check
 
@@ -81,9 +86,12 @@ cargo build --release -p sluice-probe -p sluice-bench
 target/release/bench check --hosts ~/m0-hosts.toml
 ```
 
-It lists, for each host, its operating system and which of `probe`, `iperf3`, `fio`, `tc` and `mscp`
-it can run, with the version where the tool prints one. It changes nothing. It exits non-zero if a host is unreachable, the probe
-is missing or the data directory is not writable.
+It lists, for each host, its operating system, which of `probe`, `iperf3`, `fio`, `tc` and `mscp` it
+can run (with the version where the tool prints one), whether the data directory is writable, whether
+the interface exists, and whether `sudo -n tc` works without a password. It changes nothing. It exits
+non-zero if a host is unreachable, the probe is missing or the data directory is not writable. A
+missing interface or `sudo -n tc` is reported and does not fail the check, because S1 does not need
+them.
 
 ## Run M0
 
@@ -100,7 +108,7 @@ target/release/bench run --hosts ~/m0-hosts.toml --label try --scenario S3 --run
 
 Each scenario, in order:
 
-1. Applies netem to the receiver's interface, reads it back with `tc qdisc show`, and fails if it does
+1. Applies netem to both interfaces, reads each back with `tc qdisc show`, and fails if either does
    not match what was asked.
 2. Measures `iperf3` with one stream and with 8, and `fio` sequential read on the sender and write on
    the receiver, for the runs that touch disk.
@@ -108,7 +116,7 @@ Each scenario, in order:
 4. For each probe configuration, five times: starts `serve`, reads the ticket, runs `fetch` with the
    scenario's timeout, joins the `fetch` line and the `serve` lines on `key`, and stops `serve`. A
    process that outlives the timeout by 30 s is killed.
-5. Removes netem.
+5. Removes netem from both.
 
 S1 at 100 GiB takes hours across its 7 configurations. S3 and S6 are 10 GiB and 50 GiB. To shrink a
 scenario, copy `scenarios.toml`, edit the sizes, and pass it with `--scenarios`. The committed file

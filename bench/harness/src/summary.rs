@@ -2,7 +2,10 @@
 
 use std::fmt::Write;
 
-use crate::stats::{is_slow, median, percent_of, spread};
+use crate::{
+    netem::Shown,
+    stats::{is_slow, median, percent_of, spread},
+};
 
 /// How one run ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,8 +87,8 @@ pub struct ScenarioReport {
     pub id: String,
     /// The link in words.
     pub link: String,
-    /// What `tc qdisc show` printed, or `None` for an unshaped link.
-    pub netem: Option<String>,
+    /// What `tc qdisc show` printed on each side, or `None` for an unshaped link.
+    pub netem: Option<Shown>,
     /// Why nothing ran, if nothing did.
     pub skipped: Option<String>,
     /// Ceilings measured on this path.
@@ -181,8 +184,10 @@ fn render_scenario(out: &mut String, s: &ScenarioReport) {
         Some(shown) => {
             let _ = writeln!(
                 out,
-                "netem on the receiver's interface, as `tc qdisc show` read it back: `{}`",
-                shown.trim()
+                "netem on both interfaces, as `tc qdisc show` read them back:\n\n\
+                 - sender: `{}`\n- receiver: `{}`",
+                shown.sender.trim(),
+                shown.receiver.trim()
             );
         }
         None => {

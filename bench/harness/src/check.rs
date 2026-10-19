@@ -38,6 +38,13 @@ pub async fn run(hosts: &Hosts) -> Result<bool> {
             }
         }
     }
+    if hosts.sender.host == hosts.receiver.host {
+        println!(
+            "\nnote: both ends are {}. netem scenarios are skipped, because one interface cannot be \
+             shaped in both directions.",
+            hosts.sender.host
+        );
+    }
     println!(
         "\n{}",
         if ready {
@@ -78,8 +85,13 @@ async fn report(host: &Host) -> Result<bool> {
                 format!("not found: {interface}")
             }
         );
+    } else {
+        println!(
+            "  {:<10} not set, netem scenarios need it on both hosts",
+            "interface"
+        );
     }
-    if host.role == "receiver" && found(&tools, "tc").is_some() && host.os == Os::Linux {
+    if found(&tools, "tc").is_some() && host.os == Os::Linux {
         let out = host.run(&["sudo", "-n", "tc", "-V"], QUICK).await;
         let allowed = out.is_ok_and(|o| o.success());
         println!(
@@ -92,10 +104,10 @@ async fn report(host: &Host) -> Result<bool> {
             }
         );
     }
-    if host.role == "receiver" && host.os != Os::Linux {
+    if host.os != Os::Linux {
         println!(
-            "  note: netem scenarios are skipped on a {:?} receiver",
-            host.os
+            "  note: netem scenarios are skipped, because the {} is {:?}",
+            host.role, host.os
         );
     }
     Ok(ready)

@@ -1,43 +1,87 @@
-//! netem on the receiver's interface: apply it, read it back, remove it.
+//! netem on both hosts' interfaces: apply it, read it back, remove it.
+//!
+//! netem shapes egress. The sender's carries what the data sees (half the delay, the loss, the
+//! rate and the queue) and the receiver's carries the other half of the delay for the
+//! acknowledgements, so the round trip gets the delay the scenario names.
 //!
 //! Only `sudo -n tc` runs with privilege. `tc qdisc show` needs none, so the check that the shaping
 //! took effect runs as the harness's own user.
 
+mod verify;
+
 use std::{
+    future::Future,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use serde::Serialize;
 
+use self::verify::{rate_bits, verify};
 use crate::{host::Host, scenarios::Netem};
 
 const TC_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The receiver whose interface is shaped right now, so an error or ctrl-c can undo it.
+/// What `tc qdisc show` printed on each side after the shaping was applied.
+#[derive(Clone, Debug, Serialize)]
+pub struct Shown {
+    /// The sender's interface.
+    pub sender: String,
+    /// The receiver's interface.
+    pub receiver: String,
+}
+
+/// The hosts whose interfaces are shaped right now, so an error or ctrl-c can undo them.
 #[derive(Clone, Default)]
-pub struct Shaping(Arc<Mutex<Option<Host>>>);
+pub struct Shaping(Arc<Mutex<Vec<Host>>>);
 
 impl Shaping {
-    /// Removes the shaping if there is any. Safe to call when there is none.
+    /// Removes the shaping from every host that has it, the last one shaped first. It tries them
+    /// all, and returns the first error. Safe to call when there is none.
     pub async fn undo(&self) -> Result<()> {
-        let active = self.0.lock().expect("shaping").take();
-        match active {
-            Some(host) => remove(&host).await,
-            None => Ok(()),
+        let active: Vec<Host> = std::mem::take(&mut *self.0.lock().expect("shaping"));
+        let mut first = None;
+        for host in active.iter().rev() {
+            if let Err(e) = remove(host).await {
+                first.get_or_insert(e);
+            }
         }
+        first.map_or(Ok(()), Err)
     }
 
-    fn set(&self, host: Host) {
-        *self.0.lock().expect("shaping") = Some(host);
+    fn add(&self, host: Host) {
+        self.0.lock().expect("shaping").push(host);
     }
 }
 
 fn interface(host: &Host) -> Result<&str> {
-    host.entry
-        .interface
-        .as_deref()
-        .context("netem needs `interface` on the receiver in the hosts file")
+    host.entry.interface.as_deref().with_context(|| {
+        format!(
+            "netem needs `interface` on the {} in the hosts file",
+            host.role
+        )
+    })
+}
+
+/// The scenario's netem split between the two egress directions: the sender's, which the data
+/// crosses, and the receiver's, which the acknowledgements cross.
+pub fn split(netem: &Netem) -> (Netem, Netem) {
+    let data = Netem {
+        delay_ms: netem.delay_ms.map(|d| d / 2.0),
+        jitter_ms: None,
+        loss_percent: netem.loss_percent,
+        rate: netem.rate.clone(),
+        limit_packets: netem.limit_packets,
+    };
+    let acks = Netem {
+        delay_ms: netem.delay_ms.map(|d| d / 2.0),
+        jitter_ms: netem.jitter_ms.map(|j| j / 2.0),
+        loss_percent: None,
+        rate: None,
+        limit_packets: None,
+    };
+    (data, acks)
 }
 
 /// The `tc` arguments after `qdisc replace dev <interface> root netem`.
@@ -61,8 +105,49 @@ pub fn parameters(netem: &Netem) -> Vec<String> {
     args
 }
 
-/// Shapes the receiver's interface and returns what `tc qdisc show` printed after it.
-pub async fn apply(shaping: &Shaping, host: &Host, netem: &Netem) -> Result<String> {
+/// Shapes both interfaces and returns what `tc qdisc show` printed on each. If either side
+/// fails, the shaping that was applied is removed before the error is returned.
+pub async fn apply(
+    shaping: &Shaping,
+    sender: &Host,
+    receiver: &Host,
+    netem: &Netem,
+) -> Result<Shown> {
+    let (data, acks) = split(netem);
+    let (sender, receiver) = both(
+        apply_side(shaping, sender, &data),
+        apply_side(shaping, receiver, &acks),
+        shaping.undo(),
+    )
+    .await?;
+    Ok(Shown { sender, receiver })
+}
+
+/// Runs `first`, then `second`. If either fails, `undo` runs before the error is returned, so a
+/// side that did apply is not left shaped. `undo` is not run when both succeed.
+async fn both<A, B>(
+    first: impl Future<Output = Result<A>>,
+    second: impl Future<Output = Result<B>>,
+    undo: impl Future<Output = Result<()>>,
+) -> Result<(A, B)> {
+    let applied: Result<(A, B)> = async {
+        let a = first.await?;
+        let b = second.await?;
+        Ok((a, b))
+    }
+    .await;
+    match applied {
+        Ok(pair) => Ok(pair),
+        Err(error) => match undo.await {
+            Ok(()) => Err(error),
+            Err(undone) => {
+                Err(error.context(format!("removing the shaping also failed: {undone:#}")))
+            }
+        },
+    }
+}
+
+async fn apply_side(shaping: &Shaping, host: &Host, netem: &Netem) -> Result<String> {
     let interface = interface(host)?;
     if let Some(rate) = &netem.rate {
         rate_bits(rate).with_context(|| format!("rate {rate:?}"))?;
@@ -70,7 +155,8 @@ pub async fn apply(shaping: &Shaping, host: &Host, netem: &Netem) -> Result<Stri
     let before = show(host, interface).await?;
     ensure!(
         !before.contains("netem"),
-        "{interface} already has a netem qdisc: {}. Remove it with `sudo tc qdisc del dev {interface} root`.",
+        "{interface} on the {} already has a netem qdisc: {}. Remove it with `sudo tc qdisc del dev {interface} root`.",
+        host.role,
         before.trim()
     );
     let mut argv = vec![
@@ -79,7 +165,7 @@ pub async fn apply(shaping: &Shaping, host: &Host, netem: &Netem) -> Result<Stri
     let params = parameters(netem);
     argv.extend(params.iter().map(String::as_str));
     // Registered first: if the check below fails, the shaping is already undoable.
-    shaping.set(host.clone());
+    shaping.add(host.clone());
     let out = host.run(&argv, TC_TIMEOUT).await?;
     if !out.success() {
         let hint = if out.stderr.contains("password") {
@@ -87,21 +173,37 @@ pub async fn apply(shaping: &Shaping, host: &Host, netem: &Netem) -> Result<Stri
         } else {
             ""
         };
-        bail!("tc qdisc replace failed: {}.{hint}", out.stderr.trim());
+        bail!(
+            "tc qdisc replace failed on the {}: {}.{hint}",
+            host.role,
+            out.stderr.trim()
+        );
     }
     let shown = show(host, interface).await?;
-    verify(&shown, netem).with_context(|| format!("tc qdisc show printed: {}", shown.trim()))?;
+    verify(&shown, netem).with_context(|| {
+        format!(
+            "tc qdisc show on the {} printed: {}",
+            host.role,
+            shown.trim()
+        )
+    })?;
     Ok(shown)
 }
 
-/// Removes the netem qdisc from the receiver's interface.
+/// Removes the netem qdisc from a host's interface, if it has one.
 pub async fn remove(host: &Host) -> Result<()> {
     let interface = interface(host)?;
+    // A side whose apply failed before tc changed anything has nothing to delete, and `tc qdisc
+    // del` fails on that and would hide the error that mattered.
+    if !show(host, interface).await?.contains("netem") {
+        return Ok(());
+    }
     let argv = ["sudo", "-n", "tc", "qdisc", "del", "dev", interface, "root"];
     let out = host.run(&argv, TC_TIMEOUT).await?;
     ensure!(
         out.success(),
-        "could not remove netem from {interface}: {}. Run `sudo tc qdisc del dev {interface} root`.",
+        "could not remove netem from {interface} on the {}: {}. Run `sudo tc qdisc del dev {interface} root`.",
+        host.role,
         out.stderr.trim()
     );
     Ok(())
@@ -113,82 +215,6 @@ async fn show(host: &Host, interface: &str) -> Result<String> {
         .await?;
     ensure!(out.success(), "tc qdisc show failed: {}", out.stderr.trim());
     Ok(out.stdout)
-}
-
-/// Fails unless `shown` is a root netem qdisc with every parameter `netem` asked for.
-pub fn verify(shown: &str, netem: &Netem) -> Result<()> {
-    let tokens: Vec<&str> = shown.split_whitespace().collect();
-    ensure!(
-        tokens.contains(&"netem") && tokens.contains(&"root"),
-        "no root netem qdisc"
-    );
-    let after = |key: &str, skip: usize| {
-        let at = tokens.iter().position(|t| *t == key)?;
-        tokens.get(at + 1 + skip).copied()
-    };
-    if let Some(want) = netem.delay_ms {
-        let got = after("delay", 0).and_then(micros);
-        ensure!(
-            close(got, want * 1000.0, 1.0),
-            "delay is {got:?} us, wanted {want} ms"
-        );
-    }
-    if let Some(want) = netem.jitter_ms {
-        let got = after("delay", 1).and_then(micros);
-        ensure!(
-            close(got, want * 1000.0, 1.0),
-            "jitter is {got:?} us, wanted {want} ms"
-        );
-    }
-    if let Some(want) = netem.loss_percent {
-        let got = after("loss", 0).and_then(|t| t.strip_suffix('%')?.parse().ok());
-        ensure!(close(got, want, 1e-3), "loss is {got:?} %, wanted {want} %");
-    }
-    if let Some(want) = &netem.rate {
-        let got = after("rate", 0).and_then(rate_bits);
-        ensure!(
-            close(got, rate_bits(want).context("rate")?, 1.0),
-            "rate is {got:?} bit/s, wanted {want}"
-        );
-    }
-    if let Some(want) = netem.limit_packets {
-        let got: Option<u32> = after("limit", 0).and_then(|t| t.parse().ok());
-        ensure!(got == Some(want), "limit is {got:?}, wanted {want}");
-    }
-    Ok(())
-}
-
-fn close(got: Option<f64>, want: f64, tolerance: f64) -> bool {
-    got.is_some_and(|got| (got - want).abs() <= tolerance)
-}
-
-/// A `tc` time such as `80ms`, `500us` or `1.5s`, in microseconds.
-fn micros(token: &str) -> Option<f64> {
-    let split = token.find(|c: char| c.is_ascii_alphabetic())?;
-    let value: f64 = token[..split].parse().ok()?;
-    match &token[split..] {
-        "us" => Some(value),
-        "ms" => Some(value * 1e3),
-        "s" => Some(value * 1e6),
-        _ => None,
-    }
-}
-
-/// A `tc` rate such as `1gbit` or `100Mbit`, in bits per second. `tc` prints `1Gbit` for what
-/// was asked as `1gbit`, so case does not matter.
-fn rate_bits(token: &str) -> Option<f64> {
-    let token = token.to_ascii_lowercase();
-    let split = token.find(|c: char| c.is_ascii_alphabetic())?;
-    let value: f64 = token[..split].parse().ok()?;
-    let unit = match &token[split..] {
-        "bit" => 1.0,
-        "kbit" => 1e3,
-        "mbit" => 1e6,
-        "gbit" => 1e9,
-        "tbit" => 1e12,
-        _ => return None,
-    };
-    Some(value * unit)
 }
 
 #[cfg(test)]
@@ -204,9 +230,6 @@ mod tests {
             limit_packets: Some(20000),
         }
     }
-
-    const SHOWN: &str =
-        "qdisc netem 8001: root refcnt 2 limit 20000 delay 80ms loss 0.1% rate 1Gbit\n";
 
     #[test]
     fn the_arguments_follow_the_scenario() {
@@ -227,41 +250,130 @@ mod tests {
     }
 
     #[test]
-    fn what_tc_prints_matches_what_was_asked() {
-        verify(SHOWN, &s3()).expect("matches");
+    fn the_data_side_takes_half_the_delay_and_all_the_loss_and_rate() {
+        let (data, _) = split(&s3());
+        assert_eq!(
+            parameters(&data).join(" "),
+            "delay 40ms loss 0.1% rate 1gbit limit 20000"
+        );
+    }
+
+    #[test]
+    fn the_ack_side_takes_the_other_half_of_the_delay_and_of_the_jitter() {
         let jittery = Netem {
-            delay_ms: Some(40.0),
             jitter_ms: Some(10.0),
+            ..s3()
+        };
+        let (data, acks) = split(&jittery);
+        assert_eq!(parameters(&acks).join(" "), "delay 40ms 5ms");
+        // The data side has no jitter, so the round trip's variation is not counted twice.
+        assert_eq!(data.jitter_ms, None);
+    }
+
+    #[test]
+    fn the_two_halves_add_up_to_the_round_trip() {
+        let (data, acks) = split(&s3());
+        assert_eq!(data.delay_ms.unwrap() + acks.delay_ms.unwrap(), 80.0);
+    }
+
+    #[test]
+    fn a_link_with_only_a_rate_has_nothing_to_delay_on_the_ack_side() {
+        let rate_only = Netem {
+            delay_ms: None,
+            jitter_ms: None,
             loss_percent: None,
-            rate: Some("10gbit".to_string()),
+            rate: Some("1gbit".to_string()),
             limit_packets: None,
         };
-        let shown = "qdisc netem 8002: root refcnt 2 limit 1000 delay 40ms  10ms rate 10Gbit";
-        verify(shown, &jittery).expect("matches with jitter");
+        let (data, acks) = split(&rate_only);
+        assert_eq!(parameters(&data).join(" "), "rate 1gbit");
+        assert!(parameters(&acks).is_empty());
     }
 
-    #[test]
-    fn a_mismatch_is_reported() {
-        let wrong_delay = SHOWN.replace("80ms", "8ms");
-        assert!(verify(&wrong_delay, &s3()).is_err());
-        let wrong_rate = SHOWN.replace("1Gbit", "100Mbit");
-        assert!(verify(&wrong_rate, &s3()).is_err());
-        let no_loss = SHOWN.replace(" loss 0.1%", "");
-        assert!(verify(&no_loss, &s3()).is_err());
-        let not_root = SHOWN.replace("root", "parent 1:1");
-        assert!(verify(&not_root, &s3()).is_err());
-        assert!(verify("qdisc mq 0: root", &s3()).is_err());
+    fn log(entries: &Mutex<Vec<&'static str>>, entry: &'static str) {
+        entries.lock().unwrap().push(entry);
     }
 
-    #[test]
-    fn units_convert() {
-        assert_eq!(micros("80ms"), Some(80_000.0));
-        assert_eq!(micros("500us"), Some(500.0));
-        assert_eq!(micros("1.5s"), Some(1_500_000.0));
-        assert_eq!(micros("80"), None);
-        assert_eq!(rate_bits("1Gbit"), Some(1e9));
-        assert_eq!(rate_bits("100mbit"), Some(1e8));
-        assert_eq!(rate_bits("1000Mbit"), rate_bits("1gbit"));
-        assert_eq!(rate_bits("fast"), None);
+    #[tokio::test]
+    async fn both_sides_apply_in_order_and_nothing_is_undone_on_success() {
+        let entries = Mutex::new(Vec::new());
+        let got = both(
+            async {
+                log(&entries, "sender");
+                Ok(1)
+            },
+            async {
+                log(&entries, "receiver");
+                Ok(2)
+            },
+            async {
+                log(&entries, "undo");
+                Ok(())
+            },
+        )
+        .await
+        .expect("both apply");
+        assert_eq!(got, (1, 2));
+        assert_eq!(*entries.lock().unwrap(), ["sender", "receiver"]);
+    }
+
+    #[tokio::test]
+    async fn when_the_second_side_fails_the_first_is_undone_before_the_error_returns() {
+        let entries = Mutex::new(Vec::new());
+        let failed = both(
+            async {
+                log(&entries, "sender");
+                Ok(1)
+            },
+            async {
+                log(&entries, "receiver");
+                Err::<i32, _>(anyhow::anyhow!("tc qdisc replace failed"))
+            },
+            async {
+                log(&entries, "undo");
+                Ok(())
+            },
+        )
+        .await
+        .expect_err("the receiver fails");
+        assert_eq!(*entries.lock().unwrap(), ["sender", "receiver", "undo"]);
+        assert!(format!("{failed:#}").contains("tc qdisc replace failed"));
+    }
+
+    #[tokio::test]
+    async fn when_the_first_side_fails_the_second_is_never_tried() {
+        let entries = Mutex::new(Vec::new());
+        let failed = both(
+            async {
+                log(&entries, "sender");
+                Err::<i32, _>(anyhow::anyhow!("no sudo"))
+            },
+            async {
+                log(&entries, "receiver");
+                Ok(2)
+            },
+            async {
+                log(&entries, "undo");
+                Ok(())
+            },
+        )
+        .await
+        .expect_err("the sender fails");
+        assert_eq!(*entries.lock().unwrap(), ["sender", "undo"]);
+        assert!(format!("{failed:#}").contains("no sudo"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_undo_adds_to_the_error_and_does_not_replace_it() {
+        let failed = both(
+            async { Ok(1) },
+            async { Err::<i32, _>(anyhow::anyhow!("replace failed")) },
+            async { Err(anyhow::anyhow!("could not remove")) },
+        )
+        .await
+        .expect_err("fails");
+        let text = format!("{failed:#}");
+        assert!(text.contains("replace failed"), "{text}");
+        assert!(text.contains("could not remove"), "{text}");
     }
 }

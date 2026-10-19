@@ -1,9 +1,11 @@
 # The scenarios M0 runs (docs/performance.md, "Scenarios"). `bench run` reads this file, and
 # `bench run --scenario S3` runs one of them.
 #
-# netem is applied to the receiver's interface, so it shapes what the receiver sends. For a
-# download that is the acknowledgements: delay_ms becomes the added round trip time, and loss and
-# rate act on the return path. bench/README.md says what that leaves out.
+# netem shapes egress, so it is applied on both hosts. The sender's interface carries what the data
+# sees: half of delay_ms, loss_percent, rate and limit_packets. The receiver's carries what the
+# acknowledgements see: the other half of delay_ms and half of jitter_ms. The round trip gets the full
+# delay, and loss and rate act on the data. Both hosts need `interface` in the hosts file and
+# passwordless `sudo -n tc`, and they must be two hosts. bench/README.md says what that leaves out.
 #
 # Every `probe` row runs once per workload, five times by default. The three rows the published
 # numbers have to show are bbr3/default, bbr3/tuned and cubic/default. BBRv3 with default windows

@@ -7,7 +7,8 @@
 
 [sender]
 host = "bench@sender.example.net"
-# Optional here, because netem shapes the receiver. Naming it adds the NIC to env.json.
+# Needed for the scenarios with netem, which shapes the sender's egress as well as the receiver's.
+# Naming it also adds the NIC to env.json. The user needs `sudo -n tc` without a password.
 interface = "enp1s0f0"
 # Optional. Where the receiver reaches the sender, if that is not the host name above.
 address = "10.0.0.1"
@@ -16,7 +17,7 @@ data_dir = "/data/bench"
 
 [receiver]
 host = "bench@receiver.example.net"
-# netem is applied to this interface. The user needs `sudo -n tc` without a password.
+# Needed for the scenarios with netem. The user needs `sudo -n tc` without a password.
 interface = "enp1s0f0"
 address = "10.0.0.2"
 probe = "/home/bench/sluice/target/release/probe"
