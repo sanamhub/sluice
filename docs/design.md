@@ -273,6 +273,23 @@ A partial download is a sparse `.part` file plus a sidecar holding the verified 
 trusted and anything after it is re-verified, so at most 64 MB is checked again. Completion is `fsync`
 then rename. A full disk, a permission error or a quota error leaves a resumable transfer, not a panic.
 
+## Errors
+
+Every failure is one of six variants of `sluice_core::Error`. Callers decide on retries and exit codes
+from the variant alone. The message is for people and can change in any release.
+
+| Variant | Meaning | CLI exit code |
+|---|---|---|
+| `Network` | A peer or relay could not be reached, or a connection failed mid-transfer. Retrying can help | 3 |
+| `Verify` | Received bytes did not match the BLAKE3 root. The bytes are discarded | 4 |
+| `Storage` | The store or filesystem failed: full disk, permission or quota | 5 |
+| `Policy` | Sluice refused by rule: the receiver declined, a path escapes the target directory, a size limit, a disallowed request such as an `iroh-blobs` push | 6 |
+| `Cancelled` | The caller cancelled. Carries no message | 130 |
+| `Bug` | An internal invariant broke. A defect in Sluice, never in the environment | 70 |
+
+Exit code 2 stays with argument errors, as `clap` reports them. Bindings and the control API map the
+same six variants to their own error types, one to one.
+
 ## Clients and bindings
 
 | Client | Shape |
