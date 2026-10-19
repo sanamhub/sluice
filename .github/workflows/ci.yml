@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# A push to main never cancels the run before it, so every commit on main keeps a full result.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   fmt:
     runs-on: ubuntu-latest
@@ -49,7 +54,9 @@ jobs:
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: nextest
+      # nextest does not run doctests.
       - run: cargo nextest run
+      - run: cargo test --doc --workspace
 
   msrv:
     runs-on: ubuntu-latest
