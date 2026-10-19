@@ -15,6 +15,7 @@ mod scenarios;
 mod session;
 mod size_override;
 mod smoke;
+mod stall;
 mod stats;
 mod summary;
 mod tools;

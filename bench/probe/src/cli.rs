@@ -176,6 +176,11 @@ pub struct FetchArgs {
     /// measured, with outcome `timeout`, and exits non-zero.
     #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(u64).range(1..))]
     pub timeout: u64,
+    /// Print one `{"event":"progress","t":<s>,"bytes":<n>}` line on stdout each second, before
+    /// the result line, so a caller can watch a transfer that has not finished. `t` counts seconds
+    /// from the first request and `bytes` is the payload received so far.
+    #[arg(long)]
+    pub progress_lines: bool,
 }
 
 /// Parses `1073741824`, `64KiB`, `8MiB` or `1GiB`.

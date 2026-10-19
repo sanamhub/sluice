@@ -10,9 +10,10 @@ use serde_json::{Value, json};
 
 use crate::{
     host::Spawned,
-    probe_cmd::{KILL_AFTER, classify, fetch_args, join, result_of, serve_args},
+    probe_cmd::{KILL_AFTER, classify, fetch_args, join, progress_bytes, result_of, serve_args},
     scenarios::{ProbeConfig, Scenario, Workload},
     session::Session,
+    stall::StallWatch,
     summary::{Row, RunResult, Status},
 };
 
@@ -21,6 +22,9 @@ use crate::{
 const READY: Duration = Duration::from_secs(1800);
 /// How long to wait for `serve`'s connection lines once `fetch` has exited.
 const LINES_WAIT: Duration = Duration::from_secs(20);
+/// How long to wait for them when `fetch` was killed and `serve` could not be interrupted: the
+/// connection closes when it has been idle for iroh's 30 s timeout.
+const IDLE_WAIT: Duration = Duration::from_secs(45);
 
 static SINKS: AtomicU64 = AtomicU64::new(0);
 
@@ -48,8 +52,9 @@ pub async fn run_config(
         }
         let (status, error, result, record) = match taken {
             Ok(a) => {
-                let (status, error) = classify(a.fetch.as_ref(), a.killed, s.receiver.os);
-                let result = result_of(status, a.fetch.as_ref());
+                let (status, error) =
+                    classify(a.fetch.as_ref(), a.killed, a.stalled, s.receiver.os);
+                let result = result_of(status, a.fetch.as_ref(), &a.live);
                 let record = a.record(status);
                 (status, error, result, record)
             }
@@ -117,6 +122,10 @@ struct Attempt {
     fetch: Option<Value>,
     fetch_exit: Option<i32>,
     killed: bool,
+    /// Seconds waited before the harness stopped `fetch` for stalling, if it did.
+    stalled: Option<u64>,
+    /// Cumulative bytes from the progress lines, the only record of a run that was stopped.
+    live: Vec<u64>,
     serve: Vec<Value>,
     serve_stderr: String,
     fetch_stderr: String,
@@ -131,11 +140,15 @@ impl Attempt {
             .unwrap_or_default();
         let mut record = json!({
             "harness_killed": self.killed,
+            "stalled": self.stalled.is_some(),
             "fetch_exit": self.fetch_exit,
             "fetch": self.fetch,
             "serve": self.serve,
             "joined": joined,
         });
+        if self.fetch.is_none() {
+            record["progress_lines"] = json!(self.live);
+        }
         if status != Status::Ok {
             record["stderr"] = json!({ "serve": self.serve_stderr, "fetch": self.fetch_stderr });
         }
@@ -178,15 +191,23 @@ async fn drive(
     let argv = fetch_args(&s.receiver, config, &ticket, scenario.timeout_s, sink_dir);
     let mut fetch = s.receiver.spawn(&argv)?;
     let limit = Duration::from_secs(scenario.timeout_s + KILL_AFTER);
-    let finished = fetch.finish(limit).await?;
-    let fetch_value = fetch
-        .drain()
-        .first()
-        .and_then(|line| serde_json::from_str::<Value>(line).ok());
+    let watched = watch(&mut fetch, scenario.stall_s, limit).await;
+    if watched.stalled.is_some() || watched.outlived {
+        fetch.kill().await;
+    }
+    let finished = fetch.finish(Duration::from_secs(KILL_AFTER)).await?;
 
-    // serve prints a line as each connection closes, which fetch did on its way out.
+    // serve prints a line as each connection closes, which fetch did on its way out. A fetch that
+    // was killed closed nothing, so serve is asked to stop, which closes them.
+    let stopped = watched.stalled.is_some();
+    let interrupted = stopped && serve.interrupt().await;
+    let wait = if stopped && !interrupted {
+        IDLE_WAIT
+    } else {
+        LINES_WAIT
+    };
     let wanted = usize::from(config.connections);
-    let deadline = Instant::now() + LINES_WAIT;
+    let deadline = Instant::now() + wait;
     let mut lines = Vec::new();
     while lines.len() < wanted {
         let left = deadline.saturating_duration_since(Instant::now());
@@ -196,11 +217,66 @@ async fn drive(
         }
     }
     Ok(Attempt {
-        fetch: fetch_value,
+        fetch: watched.result,
         fetch_exit: finished.code,
-        killed: finished.killed,
+        killed: watched.outlived || finished.killed,
+        stalled: watched.stalled,
+        live: watched.live,
         serve: lines,
         serve_stderr: serve.stderr_tail(),
         fetch_stderr: fetch.stderr_tail(),
     })
 }
+
+/// What `fetch` printed, and whether it was stopped.
+struct Watched {
+    /// The result line, the last line that is not a progress event.
+    result: Option<Value>,
+    /// The cumulative bytes of each progress line.
+    live: Vec<u64>,
+    stalled: Option<u64>,
+    /// `fetch` was still running `limit` after it started, so the harness will kill it.
+    outlived: bool,
+}
+
+/// Reads `fetch`'s stdout until it closes, stopping early if the progress lines show a stall or
+/// `limit` passes. It does not kill anything: the caller does, because it also has `serve` to deal
+/// with.
+async fn watch(fetch: &mut Spawned, stall_s: u64, limit: Duration) -> Watched {
+    let deadline = Instant::now() + limit;
+    let mut stall = StallWatch::new(stall_s);
+    let mut watched = Watched {
+        result: None,
+        live: Vec::new(),
+        stalled: None,
+        outlived: false,
+    };
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match fetch.next_line(left).await {
+            Ok(Some(line)) => match progress_bytes(&line) {
+                Some(bytes) => {
+                    watched.live.push(bytes);
+                    if stall.push(bytes) {
+                        watched.stalled = Some(stall_s);
+                        break;
+                    }
+                }
+                None => {
+                    if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                        watched.result = Some(value);
+                    }
+                }
+            },
+            Ok(None) => break,
+            Err(_) => {
+                watched.outlived = true;
+                break;
+            }
+        }
+    }
+    watched
+}
+
+#[cfg(all(test, unix))]
+mod tests;

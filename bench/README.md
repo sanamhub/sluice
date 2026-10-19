@@ -37,10 +37,19 @@ people who run M0, not for users.
 - The harness measures the stock `noq-proto`. BBRv3 with default windows collapses on 1.3.0
   ([noq#852](https://github.com/n0-computer/noq/issues/852)), and the `bbr3`/`default` rows show it
   until a noq release fixes it. Do not add a `[patch]` entry to make them look better.
+- A collapsed run would use the whole timeout, five times per configuration, so `fetch` is stopped
+  early. `fetch --progress-lines` prints the running total each second, and the harness stops the run
+  when `stall_s` seconds in a row (a scenario key, 30 by default) each moved less than 1% of the
+  busiest second so far. The run is counted as `stalled`, a result like a timeout and not a failure.
+  `serve` is then interrupted, so it still prints a line for the connection. Where it cannot be
+  interrupted (a local Windows process), the harness waits for the connection's idle timeout instead.
+  A run shorter than `stall_s` is never stopped.
 
 **Tests:** unit tests cover the summary maths (median, spread, slow runs, percentage of the lower
 ceiling), the parsing of `scenarios.toml` and the hosts file, the checks on `tc qdisc show`, how netem
-is split between the two hosts, and that a side already shaped is undone when the other fails.
+is split between the two hosts, that a side already shaped is undone when the other fails, and the
+stall detector. On Unix one more test runs a shell script that behaves like a collapsed probe and
+checks that the run is stopped early and still has its `serve` line.
 `tests/smoke.rs` runs `bench smoke` as one integration test under `cargo nextest run` on all three
 operating systems. It uses the probe only, because CI runners may lack `iperf3`, `fio` and `mscp`, and
 the results record them as missing.
@@ -114,8 +123,8 @@ Each scenario, in order:
    the receiver, for the runs that touch disk.
 3. Runs `mscp` if both hosts have it.
 4. For each probe configuration, five times: starts `serve`, reads the ticket, runs `fetch` with the
-   scenario's timeout, joins the `fetch` line and the `serve` lines on `key`, and stops `serve`. A
-   process that outlives the timeout by 30 s is killed.
+   scenario's timeout and `--progress-lines`, joins the `fetch` line and the `serve` lines on `key`,
+   and stops `serve`. A process that outlives the timeout by 30 s is killed.
 5. Removes netem from both.
 
 S1 at 100 GiB takes hours across its 7 configurations. S3 and S6 are 10 GiB and 50 GiB. For a first
@@ -139,7 +148,7 @@ write into a directory that exists.
 - `env.json`: CPU, NIC, kernel, MTU, file system and the exact command lines, for both hosts, as far
   as they can be read without root. A field it could not read is `null`.
 - `summary.md`: per scenario and configuration, the median and spread of the runs, the result as a
-  percentage of the lower ceiling, the number of timeouts and the number of slow runs (any second
+  percentage of the lower ceiling, the number of timeouts, of stalled runs and of slow runs (any second
   below 10% of the run's peak second), in plain tables. Two more columns catch what that rule
   misses. The worst dip is the lowest second of a run over the median second of the same run,
   leaving out the first and last second, as the lowest across the runs. The outliers are finished

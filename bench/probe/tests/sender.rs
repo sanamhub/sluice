@@ -107,14 +107,39 @@ fn both_ends_sample_the_controller_once_a_second() {
     within_deadline(move || {
         let ticket = read_ticket(&mut stdout);
         let fetched = probe()
-            .args(["fetch", &ticket, "--mode", "raw", "--congestion", "bbr3"])
+            .args([
+                "fetch",
+                &ticket,
+                "--mode",
+                "raw",
+                "--congestion",
+                "bbr3",
+                "--progress-lines",
+            ])
             .output()
             .expect("run probe fetch");
         assert!(fetched.status.success(), "fetch failed");
-        let result: Value = serde_json::from_slice(&fetched.stdout).expect("fetch prints JSON");
+        // The same run shows the live stream: progress lines first, then the result line, which
+        // is the only line that is not a progress event.
+        let text = String::from_utf8(fetched.stdout).expect("UTF-8");
+        let (live, result_line) = text.trim_end().rsplit_once('\n').expect("progress lines");
+        let result: Value = serde_json::from_str(result_line).expect("fetch prints JSON");
+        let ticks: Vec<Value> = live
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("progress line"))
+            .collect();
+        let progress = result["progress"].as_array().expect("progress");
+        assert_eq!(ticks.len(), progress.len(), "one line per second");
+        for (i, (tick, total)) in ticks.iter().zip(progress).enumerate() {
+            assert_eq!(tick["event"], "progress");
+            assert_eq!(tick["t"], i as u64 + 1);
+            assert_eq!(
+                tick["bytes"], *total,
+                "same reading as the result's progress"
+            );
+        }
 
         let received = series(&result["connection_stats"][0]);
-        let progress = result["progress"].as_array().expect("progress");
         assert!(!received.is_empty());
         // One tick feeds both, so the two arrays are the same length.
         assert_eq!(received.len(), progress.len());

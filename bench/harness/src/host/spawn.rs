@@ -99,15 +99,29 @@ async fn keep_tail(reader: impl AsyncRead + Unpin, tail: Arc<Mutex<VecDeque<Stri
     }
 }
 
-pub(super) async fn kill_remote(remote: &Remote) {
-    let file = quote(&remote.pid_file);
-    let script = format!("kill -KILL \"$(cat {file})\" 2>/dev/null; rm -f {file}");
+fn ssh_script(remote: &Remote, script: String) -> Command {
     let mut command = Command::new("ssh");
     command.args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "--"]);
     command.arg(&remote.destination).arg(script);
     command.stdin(Stdio::null()).kill_on_drop(true);
+    command
+}
+
+pub(super) async fn kill_remote(remote: &Remote) {
+    let file = quote(&remote.pid_file);
+    let script = format!("kill -KILL \"$(cat {file})\" 2>/dev/null; rm -f {file}");
+    let mut command = ssh_script(remote, script);
     // Best effort: the process may already be gone, and an unreachable host cannot be helped.
     let _ = timeout(Duration::from_secs(30), command.output()).await;
+}
+
+async fn interrupt_remote(remote: &Remote) -> bool {
+    let file = quote(&remote.pid_file);
+    let mut command = ssh_script(remote, format!("kill -INT \"$(cat {file})\""));
+    matches!(
+        timeout(Duration::from_secs(30), command.output()).await,
+        Ok(Ok(out)) if out.status.success()
+    )
 }
 
 /// How a spawned command ended.
@@ -161,11 +175,6 @@ impl Spawned {
         Ok(finished)
     }
 
-    /// Every stdout line still queued. Call after the process has exited.
-    pub fn drain(&mut self) -> Vec<String> {
-        std::iter::from_fn(|| self.queue.try_recv().ok()).collect()
-    }
-
     /// Kills the process, and the remote one it started if there is one.
     pub async fn kill(&mut self) {
         let _ = self.child.kill().await;
@@ -173,6 +182,26 @@ impl Spawned {
             kill_remote(remote).await;
         }
         self.forget_remote();
+    }
+
+    /// Asks the process to stop as ctrl-c would, so `serve` closes its connections and prints a
+    /// line for each on its way out. False if it could not be asked, which is always so for a
+    /// local process on Windows, and the process then runs on.
+    pub async fn interrupt(&mut self) -> bool {
+        if let Some(remote) = &self.remote {
+            return interrupt_remote(remote).await;
+        }
+        let Some(pid) = self.child.id().filter(|_| cfg!(unix)) else {
+            return false;
+        };
+        Command::new("kill")
+            .args(["-INT", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .is_ok_and(|status| status.success())
     }
 
     /// The last lines the process wrote to stderr.

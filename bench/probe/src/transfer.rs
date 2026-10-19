@@ -59,11 +59,12 @@ impl Counters {
 /// Runs the transfers to the end and returns the payload bytes they report. Pushes the running
 /// total onto `progress` once per second, and a controller reading of each connection onto its
 /// entry in `series` at the same tick. The interval is a clock: the counters are only read when
-/// it fires, and the tasks never wait for it.
+/// it fires, and the tasks never wait for it. With `live`, each tick also prints a progress line.
 pub async fn run(
     conns: &[Connection],
     plan: Plan,
     counters: &Counters,
+    live: bool,
     progress: &mut Vec<u64>,
     series: &mut [Vec<Sample>],
 ) -> Result<u64> {
@@ -101,12 +102,37 @@ pub async fn run(
                 None => return Ok(total),
             },
             _ = clock.tick() => {
-                progress.push(counters.total());
+                let bytes = counters.total();
+                progress.push(bytes);
+                if live {
+                    // println! flushes at the newline, so a reader on a pipe sees it this second.
+                    println!("{}", progress_line(progress.len() as u64, bytes));
+                }
                 let at = origin.elapsed();
                 for (conn, samples) in conns.iter().zip(series.iter_mut()) {
                     samples.push(stats::sample(conn, at));
                 }
             }
         }
+    }
+}
+
+/// The line `--progress-lines` prints for second `t`.
+fn progress_line(t: u64, bytes: u64) -> String {
+    format!(r#"{{"event":"progress","t":{t},"bytes":{bytes}}}"#)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_progress_line_is_json_with_the_second_and_the_bytes() {
+        let line = progress_line(3, 1_048_576);
+        assert_eq!(line, r#"{"event":"progress","t":3,"bytes":1048576}"#);
+        let parsed: serde_json::Value = serde_json::from_str(&line).expect("JSON");
+        assert_eq!(parsed["event"], "progress");
+        assert_eq!(parsed["t"], 3);
+        assert_eq!(parsed["bytes"], 1_048_576);
     }
 }

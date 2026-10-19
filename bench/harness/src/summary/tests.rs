@@ -63,7 +63,7 @@ fn a_row_reports_the_median_spread_slow_runs_and_percent() {
     // 6 Gbit/s is exactly 1.5 times 4, which is not an outlier.
     assert_eq!(
         line,
-        "| one-file | raw bbr3 default x1 shared | 3 / 4 | 1 | 0 | 2 | 1.00 | 0 | 5.00 | 4.00 to 6.00 | 50% |"
+        "| one-file | raw bbr3 default x1 shared | 3 / 4 | 1 | 0 | 0 | 2 | 1.00 | 0 | 5.00 | 4.00 to 6.00 | 50% |"
     );
 }
 
@@ -84,7 +84,7 @@ fn a_dip_and_a_late_run_that_the_ten_percent_rule_misses_show_in_their_own_colum
     let line = render_row(&row, &Ceilings::default());
     assert_eq!(
         line,
-        "| one-file | raw bbr3 default x1 shared | 2 / 2 | 0 | 0 | 0 | 0.10 | 1 | 4.00 | 2.00 to 6.00 | n/a |"
+        "| one-file | raw bbr3 default x1 shared | 2 / 2 | 0 | 0 | 0 | 0 | 0.10 | 1 | 4.00 | 2.00 to 6.00 | n/a |"
     );
 }
 
@@ -96,9 +96,24 @@ fn a_row_with_no_finished_run_has_no_outlier_count() {
     };
     let line = render_row(&row, &Ceilings::default());
     assert!(
-        line.contains("| 0 / 1 | 1 | 0 | 1 | n/a | n/a | n/a | n/a | n/a |"),
+        line.contains("| 0 / 1 | 1 | 0 | 0 | 1 | n/a | n/a | n/a | n/a | n/a |"),
         "{line}"
     );
+}
+
+#[test]
+fn a_stalled_run_is_counted_on_its_own_and_not_as_a_timeout() {
+    let row = Row {
+        runs: vec![
+            run(Status::Ok, 4.0, &[100, 200, 300, 400]),
+            run(Status::Stalled, 0.0, &[100, 200, 201, 202]),
+            run(Status::Timeout, 0.0, &[100, 100, 100, 100]),
+        ],
+        ..row(false, false)
+    };
+    let line = render_row(&row, &Ceilings::default());
+    // The stalled run's live progress counts toward slow runs like any other: two of the three.
+    assert!(line.contains("| 1 / 3 | 1 | 1 | 0 | 2 |"), "{line}");
 }
 
 #[test]

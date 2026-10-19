@@ -47,6 +47,8 @@ pub fn fetch_args(
     argv.extend(["--connections".to_string(), config.connections.to_string()]);
     argv.extend(["--endpoints".to_string(), word(&config.endpoints)]);
     argv.extend(["--timeout".to_string(), timeout_s.to_string()]);
+    // The live stream is what lets the harness stop a transfer that has collapsed.
+    argv.push("--progress-lines".to_string());
     if let Some(sink) = config.sink() {
         argv.extend(["--sink".to_string(), word(&sink)]);
         if let (Sink::Store, Some(dir)) = (sink, sink_dir) {
@@ -87,8 +89,28 @@ pub fn join(fetch: &Value, serve: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-/// Decides how the run ended, and refuses a Linux run that did not use GRO.
-pub fn classify(fetch: Option<&Value>, killed: bool, receiver: Os) -> (Status, Option<String>) {
+/// The cumulative bytes in a `--progress-lines` line, or `None` for any other line.
+pub fn progress_bytes(line: &str) -> Option<u64> {
+    let value: Value = serde_json::from_str(line).ok()?;
+    (value["event"] == "progress")
+        .then(|| value["bytes"].as_u64())
+        .flatten()
+}
+
+/// Decides how the run ended, and refuses a Linux run that did not use GRO. `stalled` is the
+/// number of seconds the harness waited before it stopped `fetch`, if it did.
+pub fn classify(
+    fetch: Option<&Value>,
+    killed: bool,
+    stalled: Option<u64>,
+    receiver: Os,
+) -> (Status, Option<String>) {
+    if let Some(seconds) = stalled {
+        let reason = format!(
+            "stopped after {seconds} s with each second under 1% of the busiest one, before the timeout"
+        );
+        return (Status::Stalled, Some(reason));
+    }
     if killed {
         let reason = format!("fetch outlived its timeout by {KILL_AFTER} s and was killed");
         return (Status::Failed, Some(reason));
@@ -117,11 +139,13 @@ pub fn classify(fetch: Option<&Value>, killed: bool, receiver: Os) -> (Status, O
     }
 }
 
-/// The result of a run as the summary reads it.
-pub fn result_of(status: Status, fetch: Option<&Value>) -> RunResult {
+/// The result of a run as the summary reads it. A run that was stopped has no result line, so its
+/// progress is what the live lines showed.
+pub fn result_of(status: Status, fetch: Option<&Value>, live: &[u64]) -> RunResult {
     let progress = fetch
         .and_then(|f| f["progress"].as_array())
-        .map(|p| p.iter().filter_map(Value::as_u64).collect());
+        .map(|p| p.iter().filter_map(Value::as_u64).collect())
+        .or_else(|| (!live.is_empty()).then(|| live.to_vec()));
     RunResult {
         status,
         gbit_s: fetch
@@ -179,14 +203,15 @@ mod tests {
         assert_eq!(
             line,
             "/opt/probe fetch TICKET --mode blobs --congestion bbr3 --window tuned \
-             --connections 4 --endpoints separate --timeout 900 --sink store --dir /data/sink"
+             --connections 4 --endpoints separate --timeout 900 --progress-lines --sink store \
+             --dir /data/sink"
         );
         let discard = ProbeConfig {
             sink: Some(Sink::Discard),
             ..blobs()
         };
         let line = fetch_args(&host(), &discard, "T", 60, None).join(" ");
-        assert!(line.ends_with("--sink discard"), "{line}");
+        assert!(line.ends_with("--progress-lines --sink discard"), "{line}");
     }
 
     #[test]
@@ -219,13 +244,13 @@ mod tests {
     #[test]
     fn a_linux_run_without_gro_fails() {
         let ok = json!({ "outcome": "ok", "recv_gro_batches": 0, "recv_datagrams": 700000 });
-        let (status, error) = classify(Some(&ok), false, Os::Linux);
+        let (status, error) = classify(Some(&ok), false, None, Os::Linux);
         assert_eq!(status, Status::Failed);
         assert!(error.unwrap().contains("GRO did not run"));
         // Other systems do not count GRO batches the same way, so they are not held to it.
-        assert_eq!(classify(Some(&ok), false, Os::Macos).0, Status::Ok);
+        assert_eq!(classify(Some(&ok), false, None, Os::Macos).0, Status::Ok);
         let with = json!({ "outcome": "ok", "recv_gro_batches": 76000, "recv_datagrams": 756000 });
-        assert_eq!(classify(Some(&with), false, Os::Linux).0, Status::Ok);
+        assert_eq!(classify(Some(&with), false, None, Os::Linux).0, Status::Ok);
     }
 
     #[test]
@@ -233,10 +258,45 @@ mod tests {
         let timeout =
             json!({ "outcome": "timeout", "recv_gro_batches": 10, "recv_datagrams": 100 });
         assert_eq!(
-            classify(Some(&timeout), false, Os::Linux).0,
+            classify(Some(&timeout), false, None, Os::Linux).0,
             Status::Timeout
         );
-        assert_eq!(classify(None, false, Os::Linux).0, Status::Failed);
-        assert_eq!(classify(Some(&timeout), true, Os::Linux).0, Status::Failed);
+        assert_eq!(classify(None, false, None, Os::Linux).0, Status::Failed);
+        assert_eq!(
+            classify(Some(&timeout), true, None, Os::Linux).0,
+            Status::Failed
+        );
+    }
+
+    #[test]
+    fn a_run_the_harness_stopped_is_stalled_and_not_failed() {
+        let (status, reason) = classify(None, false, Some(30), Os::Linux);
+        assert_eq!(status, Status::Stalled);
+        assert!(reason.unwrap().contains("30 s"));
+        // Stopping it is not an overrun, so the kill flag does not turn it into a failure.
+        assert_eq!(classify(None, true, Some(30), Os::Linux).0, Status::Stalled);
+    }
+
+    #[test]
+    fn only_progress_events_are_progress_lines() {
+        let line = r#"{"event":"progress","t":4,"bytes":1234}"#;
+        assert_eq!(progress_bytes(line), Some(1234));
+        assert_eq!(progress_bytes(r#"{"outcome":"ok","progress":[1,2]}"#), None);
+        assert_eq!(progress_bytes("not json"), None);
+        assert_eq!(progress_bytes(r#"{"event":"progress"}"#), None);
+    }
+
+    #[test]
+    fn a_stopped_run_takes_its_progress_from_the_live_lines() {
+        let live = [100, 200, 201];
+        let stopped = result_of(Status::Stalled, None, &live);
+        assert_eq!(stopped.progress.as_deref(), Some(&live[..]));
+        assert_eq!(stopped.gbit_s, None);
+        // A result line, when there is one, is the better record.
+        let fetch = json!({ "outcome": "ok", "throughput_gbit_s": 4.0, "progress": [1, 2] });
+        let done = result_of(Status::Ok, Some(&fetch), &live);
+        assert_eq!(done.progress.as_deref(), Some(&[1, 2][..]));
+        assert_eq!(done.gbit_s, Some(4.0));
+        assert_eq!(result_of(Status::Failed, None, &[]).progress, None);
     }
 }

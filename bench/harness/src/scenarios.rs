@@ -25,6 +25,10 @@ pub struct Scenario {
     /// Seconds `fetch` may take before it reports a timeout.
     #[serde(default = "default_timeout")]
     pub timeout_s: u64,
+    /// Seconds in a row below 1% of the run's busiest second before `fetch` is stopped early and
+    /// the run is counted as stalled.
+    #[serde(default = "default_stall")]
+    pub stall_s: u64,
     /// Parallel connections for the `mscp` baseline.
     #[serde(default = "default_mscp_connections")]
     pub mscp_connections: u16,
@@ -34,6 +38,10 @@ pub struct Scenario {
 
 fn default_timeout() -> u64 {
     600
+}
+
+fn default_stall() -> u64 {
+    30
 }
 
 fn default_mscp_connections() -> u16 {
@@ -220,6 +228,7 @@ pub fn parse(text: &str) -> Result<Vec<Scenario>> {
         let id = &scenario.id;
         ensure!(!scenario.workloads.is_empty(), "{id}: no workloads");
         ensure!(!scenario.probe.is_empty(), "{id}: no probe configurations");
+        ensure!(scenario.stall_s >= 1, "{id}: stall_s must be at least 1");
         for workload in &scenario.workloads {
             workload
                 .bytes()
@@ -301,6 +310,7 @@ mod tests {
         "#;
         let scenario = &parse(text).expect("parse")[0];
         assert_eq!(scenario.timeout_s, 600);
+        assert_eq!(scenario.stall_s, 30);
         assert_eq!(scenario.mscp_connections, 4);
         let raw = &scenario.probe[0];
         assert_eq!((raw.sink(), raw.store()), (None, None));
@@ -327,6 +337,25 @@ mod tests {
         "#;
         let error = parse(text).expect_err("raw has no store");
         assert!(format!("{error:#}").contains("raw mode has no sink and no store"));
+    }
+
+    #[test]
+    fn stall_s_can_be_set_and_cannot_be_zero() {
+        let with = |stall: &str| {
+            format!(
+                r#"
+                [[scenario]]
+                id = "T"
+                link = "test"
+                {stall}
+                workloads = [{{ name = "w", size = "1MiB" }}]
+                probe = [{{ mode = "raw", congestion = "bbr3", window = "default", connections = 1, endpoints = "shared" }}]
+            "#
+            )
+        };
+        assert_eq!(parse(&with("stall_s = 12")).expect("parse")[0].stall_s, 12);
+        let error = parse(&with("stall_s = 0")).expect_err("zero would stop every run");
+        assert!(format!("{error:#}").contains("stall_s"), "{error:#}");
     }
 
     #[test]

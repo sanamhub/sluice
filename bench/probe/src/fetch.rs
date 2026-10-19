@@ -142,7 +142,14 @@ async fn measure(
     let limit = Duration::from_secs(args.timeout);
     let ran = tokio::time::timeout(
         limit,
-        transfer::run(&conns, plan, &counters, &mut progress, &mut series),
+        transfer::run(
+            &conns,
+            plan,
+            &counters,
+            args.progress_lines,
+            &mut progress,
+            &mut series,
+        ),
     )
     .await;
     let elapsed = started.elapsed();

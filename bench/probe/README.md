@@ -41,8 +41,9 @@ and checks that the store holds no copy of the data file. A last test asks for 6
 under `bbr3` and under `cubic` and checks that `serve` prints a `connection_closed` line for each,
 with the key of the matching `fetch` entry, and that the CPU fields are numbers on Unix and `null`
 on Windows. One more case moves 512 MiB and checks that both ends
-return a `controller_series` with increasing `elapsed_s`, and that the `fetch` series is as long as
-`progress`.
+return a `controller_series` with increasing `elapsed_s`, that the `fetch` series is as long as
+`progress`, and, with `--progress-lines`, that there is one progress line per second with the same
+reading as `progress` and that the result is the last line.
 
 ## Run
 
@@ -75,6 +76,7 @@ limit throughput.
 | `--dir`         | directory                       | `fetch`: a temporary one | `--store fs` only | `--sink store` only        |
 | `--store`       | `mem`, `fs`                     | `mem`                    | yes               | no                         |
 | `--timeout`     | seconds, 1 or more              | `600`                    | no                | yes                        |
+| `--progress-lines` | flag                         | off                      | no                | yes                        |
 | `--endpoints`   | 1 to 16                         | `1`                      | yes               | no                         |
 | `--endpoints`   | `shared`, `separate`            | `shared`                 | no                | yes                        |
 
@@ -100,6 +102,12 @@ address `i % n`, so the server side is the same in both and only the receiving s
 line, with `"outcome": "timeout"` and everything measured up to that point, then exits non-zero. A
 stall is a result: `progress` shows when the bytes stopped growing, and `connection_stats` shows what
 `noq` had counted by then.
+
+`--progress-lines` makes `fetch` print one `{"event":"progress","t":<s>,"bytes":<n>}` line on
+stdout each second, before the result line, which is unchanged and is the last line. `t` counts
+seconds from the first request and `bytes` is the payload received so far, so line `t` carries the
+same number as `progress[t - 1]`. Without the flag, `progress` still appears only in the result, at
+the end. The bench harness uses the lines to stop a transfer that has collapsed.
 
 `tuned` sets the stream and connection receive windows and the send window to 75 000 000 bytes, the
 bandwidth-delay product of 10 Gbit/s at 60 ms. The values in force are in every result.

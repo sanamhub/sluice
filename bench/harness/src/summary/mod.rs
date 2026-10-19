@@ -15,6 +15,9 @@ pub enum Status {
     Ok,
     /// `fetch` hit its timeout. A result, but not a throughput.
     Timeout,
+    /// The harness stopped `fetch` because the transfer had collapsed. A result, like a timeout,
+    /// that did not wait for the timeout.
+    Stalled,
     /// The harness could not get a result, or refused it.
     Failed,
 }
@@ -170,12 +173,13 @@ fn render_row(row: &Row, ceilings: &Ceilings) -> String {
         outliers(&ok).to_string()
     };
     format!(
-        "| {} | {} | {} / {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+        "| {} | {} | {} / {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
         row.workload,
         row.name,
         count(Status::Ok),
         row.runs.len(),
         count(Status::Timeout),
+        count(Status::Stalled),
         count(Status::Failed),
         slow,
         dip,
@@ -230,11 +234,11 @@ fn render_scenario(out: &mut String, s: &ScenarioReport) {
     let _ = writeln!(out, "\n### Results\n");
     let _ = writeln!(
         out,
-        "| workload | configuration | ok / runs | timeouts | failed | slow | worst dip | outliers | median Gbit/s | min to max | % of lower ceiling |"
+        "| workload | configuration | ok / runs | timeouts | stalled | failed | slow | worst dip | outliers | median Gbit/s | min to max | % of lower ceiling |"
     );
     let _ = writeln!(
         out,
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
     );
     for row in &s.rows {
         let _ = writeln!(out, "{}", render_row(row, &s.ceilings));
@@ -275,7 +279,7 @@ pub fn render(report: &Report) -> String {
     let _ = writeln!(
         out,
         "\nA run is slow if any whole second moved less than a tenth of the run's busiest second. \
-         The median covers finished runs only, and a timeout is counted, not averaged in."
+         The median covers finished runs only. A timeout is counted, not averaged in, and so is a stalled run, which the harness stopped early because its seconds were under 1% of the busiest one for the scenario's `stall_s` seconds in a row."
     );
     for scenario in &report.scenarios {
         render_scenario(&mut out, scenario);

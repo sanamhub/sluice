@@ -7,9 +7,11 @@
 # delay, and loss and rate act on the data. Both hosts need `interface` in the hosts file and
 # passwordless `sudo -n tc`, and they must be two hosts. bench/README.md says what that leaves out.
 #
-# Every `probe` row runs once per workload, five times by default. The three rows the published
-# numbers have to show are bbr3/default, bbr3/tuned and cubic/default. BBRv3 with default windows
-# collapses on stock noq-proto 1.3.0 (noq#852), and the numbers keep showing it until a noq
+# Every `probe` row runs once per workload, five times by default. `timeout_s` bounds a run, and
+# `stall_s` (30 by default) stops it sooner: after that many seconds in a row each under 1% of the
+# run's busiest second, `fetch` is stopped and the run is counted as stalled. The three rows the
+# published numbers have to show are bbr3/default, bbr3/tuned and cubic/default. BBRv3 with default
+# windows collapses on stock noq-proto 1.3.0 (noq#852), and the numbers keep showing it until a noq
 # release fixes it.
 #
 # Sizes assume free space in each host's data directory: the sender holds one data file of the
