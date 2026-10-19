@@ -1,0 +1,61 @@
+# The scenarios M0 runs (docs/performance.md, "Scenarios"). `bench run` reads this file, and
+# `bench run --scenario S3` runs one of them.
+#
+# netem is applied to the receiver's interface, so it shapes what the receiver sends. For a
+# download that is the acknowledgements: delay_ms becomes the added round trip time, and loss and
+# rate act on the return path. bench/README.md says what that leaves out.
+#
+# Every `probe` row runs once per workload, five times by default. The three rows the published
+# numbers have to show are bbr3/default, bbr3/tuned and cubic/default. BBRv3 with default windows
+# collapses on stock noq-proto 1.3.0 (noq#852), and the numbers keep showing it until a noq
+# release fixes it.
+#
+# Sizes assume free space in each host's data directory: the sender holds one data file of the
+# workload size, and a receiver that writes to a store holds one copy.
+
+[[scenario]]
+id = "S1"
+link = "10 Gbit/s LAN, NVMe to NVMe, 0.2 ms RTT, no loss"
+timeout_s = 900
+workloads = [{ name = "one-file", size = "100GiB" }]
+probe = [
+  { mode = "raw", congestion = "bbr3", window = "default", connections = 1, endpoints = "shared" },
+  { mode = "raw", congestion = "bbr3", window = "tuned", connections = 1, endpoints = "shared" },
+  { mode = "raw", congestion = "cubic", window = "default", connections = 1, endpoints = "shared" },
+  { mode = "raw", congestion = "cubic", window = "tuned", connections = 1, endpoints = "shared" },
+  { mode = "raw", congestion = "bbr3", window = "tuned", connections = 4, endpoints = "separate" },
+  { mode = "blobs", congestion = "bbr3", window = "tuned", connections = 1, endpoints = "shared", sink = "store", store = "fs" },
+  { mode = "blobs", congestion = "bbr3", window = "tuned", connections = 4, endpoints = "separate", sink = "store", store = "fs" },
+]
+
+[[scenario]]
+id = "S3"
+link = "1 Gbit/s, 80 ms RTT, 0.1% loss"
+timeout_s = 900
+workloads = [{ name = "one-file", size = "10GiB" }]
+netem = { delay_ms = 80, loss_percent = 0.1, rate = "1gbit", limit_packets = 20000 }
+probe = [
+  { mode = "raw", congestion = "bbr3", window = "default", connections = 1, endpoints = "shared" },
+  { mode = "raw", congestion = "bbr3", window = "tuned", connections = 1, endpoints = "shared" },
+  { mode = "raw", congestion = "cubic", window = "default", connections = 1, endpoints = "shared" },
+  { mode = "raw", congestion = "cubic", window = "tuned", connections = 1, endpoints = "shared" },
+  { mode = "raw", congestion = "bbr3", window = "tuned", connections = 4, endpoints = "separate" },
+  { mode = "blobs", congestion = "bbr3", window = "tuned", connections = 1, endpoints = "shared", sink = "discard", store = "fs" },
+  { mode = "blobs", congestion = "bbr3", window = "tuned", connections = 4, endpoints = "separate", sink = "discard", store = "fs" },
+]
+
+[[scenario]]
+id = "S6"
+link = "10 Gbit/s, 60 ms RTT, 0.1% loss"
+timeout_s = 900
+workloads = [{ name = "one-file", size = "50GiB" }]
+netem = { delay_ms = 60, loss_percent = 0.1, rate = "10gbit", limit_packets = 100000 }
+probe = [
+  { mode = "raw", congestion = "bbr3", window = "default", connections = 1, endpoints = "shared" },
+  { mode = "raw", congestion = "bbr3", window = "tuned", connections = 1, endpoints = "shared" },
+  { mode = "raw", congestion = "cubic", window = "default", connections = 1, endpoints = "shared" },
+  { mode = "raw", congestion = "cubic", window = "tuned", connections = 1, endpoints = "shared" },
+  { mode = "raw", congestion = "bbr3", window = "tuned", connections = 4, endpoints = "separate" },
+  { mode = "blobs", congestion = "bbr3", window = "tuned", connections = 1, endpoints = "shared", sink = "discard", store = "fs" },
+  { mode = "blobs", congestion = "bbr3", window = "tuned", connections = 4, endpoints = "separate", sink = "discard", store = "fs" },
+]

@@ -1,0 +1,23 @@
+# Copy to a file outside the repository, fill in your hosts, and pass it with --hosts. The real
+# file names real machines and is not committed.
+#
+# `host` is `local`, or an ssh destination for the system `ssh` binary: user@host, or an alias
+# from ~/.ssh/config. ssh runs with BatchMode, so keys or an agent must already work. A remote
+# host needs a POSIX shell. Windows works as `local` only.
+
+[sender]
+host = "bench@sender.example.net"
+# Optional here, because netem shapes the receiver. Naming it adds the NIC to env.json.
+interface = "enp1s0f0"
+# Optional. Where the receiver reaches the sender, if that is not the host name above.
+address = "10.0.0.1"
+probe = "/home/bench/sluice/target/release/probe"
+data_dir = "/data/bench"
+
+[receiver]
+host = "bench@receiver.example.net"
+# netem is applied to this interface. The user needs `sudo -n tc` without a password.
+interface = "enp1s0f0"
+address = "10.0.0.2"
+probe = "/home/bench/sluice/target/release/probe"
+data_dir = "/data/bench"
