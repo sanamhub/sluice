@@ -14,7 +14,8 @@ where netcat reached 700). Before any product code, M0 measures on Linux 10 GbE 
 - `iroh` plus `iroh-blobs` with one connection and with N connections
 - each with default and with tuned windows, and with Cubic and BBRv3
 - against `iperf3`, single and parallel, and a parallel-TCP tool (rclone or mscp) as the bar to beat
-- on S1, S3 and S6 from [`performance.md`](performance.md#scenarios)
+- on S1, S3 and S6 from [`performance.md`](performance.md#scenarios), with the one-file workload. The
+  small-file and mixed-tree workloads need the engine, so they start in 1.0
 
 It also measures:
 
