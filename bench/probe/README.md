@@ -3,8 +3,8 @@
 **Measures:** how fast `iroh` and `iroh-blobs` move bytes between two machines, with one connection or
 several, under Cubic, BBRv3 or NewReno, with default or tuned windows. It is the M0 measurement from
 ADR 0010 and the tool the bench harness drives. It is for the people who tune the transport, not for
-users, and its output is for machines: one ticket line from `serve`, one JSON line from `fetch`,
-everything else on stderr.
+users, and its output is for machines: one ticket line from `serve`, one JSON line from `fetch`, one
+JSON line from `serve` for every connection that closes, and everything else on stderr.
 
 **Must never:**
 
@@ -37,7 +37,9 @@ everything else on stderr.
 exchange group, and runs under `cargo nextest run` on all three operating systems. One more case
 puts 4 connections on 4 separate endpoints on both sides, and another serves 8 MiB from a file store
 and checks that the store holds no copy of the data file. A last test asks for 64 GiB with
-`--timeout 2` and checks the timeout line and the exit status.
+`--timeout 2` and checks the timeout line and the exit status. `tests/sender.rs` runs 2 connections
+under `bbr3` and under `cubic` and checks that `serve` prints a `connection_closed` line for each,
+with the key of the matching `fetch` entry.
 
 ## Run
 
@@ -111,16 +113,22 @@ link. On Windows `cpu_user_s` and `cpu_sys_s` are `null` and no GRO batches are 
  "congestion":"bbr3",
  "window":{"mode":"default","stream_receive_bytes":1250000,
            "receive_bytes":4611686018427387903,"send_bytes":10000000},
- "sink":"discard","relay":"disabled","elapsed_s":4.1347848,"throughput_gbit_s":2.0774804512196137,
- "progress":[206503936,480493568,756236288,1037254656],
- "connection_stats":[{"received_bytes":1073741824,"sent_datagrams":17813,
-   "received_datagrams":761323,"lost_packets":86,"lost_bytes":1353,
-   "paths":[{"selected":true,"relay":false,"rtt_ms":0.069566,"cwnd_bytes":5808,
-             "congestion_events":26,"spurious_congestion_events":0,"lost_packets":86,
-             "lost_bytes":1353,"sent_datagrams":17798,"received_datagrams":761317,"mtu":1452}]}],
- "path":"direct","rtt_ms":0.069566,"cpu_user_s":null,"cpu_sys_s":null,
+ "sink":"discard","relay":"disabled","elapsed_s":4.264907,"throughput_gbit_s":2.014096577486918,
+ "progress":[211091456,456114176,730218496,1002274816],
+ "connection_stats":[{"key":"f7812bb23acdbf1e",
+   "remote_id":"76efe258516f89ff079a57de3d202685850b7b4549818b349efca93481930bf4",
+   "received_bytes":1073741824,"sent_datagrams":16560,
+   "received_datagrams":761308,"lost_packets":80,"lost_bytes":1340,
+   "paths":[{"selected":true,"relay":false,"rtt_ms":0.07114300000000001,"cwnd_bytes":5808,
+             "congestion_events":24,"spurious_congestion_events":0,"lost_packets":80,
+             "lost_bytes":1340,"sent_datagrams":16545,"received_datagrams":761303,"mtu":1452,
+             "controller":{"pacing_rate_bytes_s":102601,"send_quantum_bytes":2904,
+                           "ssthresh_bytes":null,"bytes_in_flight":0,
+                           "bbr_state":"ProbeBw(Cruise)","bbr_max_bw_bytes_s":110786.0,
+                           "bbr_app_limited":false}}]}],
+ "path":"direct","rtt_ms":0.07114300000000001,"cpu_user_s":null,"cpu_sys_s":null,
  "key_exchange_group":"X25519MLKEM768","gso_segments":null,"gro_segments":null,
- "recv_datagrams":761319,"recv_gro_batches":0,"iroh_version":"1.3.0","iroh_blobs_version":"0.103.1",
+ "recv_datagrams":761309,"recv_gro_batches":0,"iroh_version":"1.3.0","iroh_blobs_version":"0.103.1",
  "verified_hash":"7b343701fd41de622e1208b9490efd7f5a54eee0fe68c052e522500f55aa0fbc"}
 ```
 
@@ -131,21 +139,73 @@ entry per whole second of the transfer: the total payload bytes received so far.
 one-second timer, and the transfer never waits for it. `connection_stats` has one entry per
 connection:
 
+- `key` and `remote_id` identify the connection. See [Sender statistics](#sender-statistics).
 - `received_bytes` is the payload the probe counted on that connection. With `--sink store` it
   follows the progress items the store reports.
 - `sent_datagrams`, `received_datagrams`, `lost_packets` and `lost_bytes` are `noq`'s totals over every
   path the connection has used. `noq` does not count QUIC packets, so datagrams are the nearest it
   exposes.
 - `paths` lists the paths open at the end, each with its RTT, congestion window, congestion events,
-  losses and MTU.
+  losses, MTU and `controller`.
 
-The statistics are the receiver's. QUIC declares a packet lost at the end that sent it, so
+These statistics are the receiver's. QUIC declares a packet lost at the end that sent it, so
 `lost_packets` here counts the receiver's own packets, which are mostly acknowledgements, and
 `cwnd_bytes` is the receiver's window (5808 bytes in the example above, far below what 1 GiB in 4 s
-needs). The congestion state that limits a download lives on the sender, and `serve` does not report it.
+needs). The congestion state that limits a download lives on the sender, and `serve` reports it.
 
 After a timeout `received_bytes` is what arrived, `path` is `null` if iroh had not marked a path
 selected, and `verified_hash` is the root the bytes would have been checked against. Otherwise `fetch`
 exits non-zero, without a result line, if the received byte count differs from `size_bytes`, if a blob
 does not verify against the root, or if any connection negotiated a key exchange group other than
 `X25519MLKEM768`.
+
+## Sender statistics
+
+After the ticket, `serve` prints one line for every connection that closes, and flushes it. It has
+`"event": "connection_closed"`, a `close_reason`, and the fields of a `connection_stats` entry,
+read on the sending side after the close, when the counters are final. `received_bytes` is `null`
+on it, because `serve` does not count the payload it writes. After ctrl-c `serve` waits up to 5
+seconds for the lines of the connections the shutdown closes.
+
+Join a `serve` line to its `fetch` entry on `key`. Both ends derive it from the TLS session
+(`export_keying_material`, 8 bytes in hex), so nothing extra crosses the wire, no two connections
+share one, and the two ends compute the same value. `remote_id` is not enough on its own, because
+with `--endpoints shared` every connection of a `fetch` has the same one. The index of an entry in
+`connection_stats` is the connection's index in the `fetch`, and the `serve` line carries no index
+because `serve` accepts connections in whatever order they arrive.
+
+The line that matches the `fetch` example above, wrapped for reading:
+
+```
+{"event":"connection_closed","close_reason":"closed by peer: done (code 0)",
+ "key":"f7812bb23acdbf1e",
+ "remote_id":"429b01e5102a4519a4339e0d285cd471acf4b11fdb52423182f64660860af89b",
+ "received_bytes":null,"sent_datagrams":761314,"received_datagrams":16480,
+ "lost_packets":0,"lost_bytes":0,
+ "paths":[{"selected":true,"relay":false,"rtt_ms":0.098584,"cwnd_bytes":587870938,
+           "congestion_events":0,"spurious_congestion_events":0,"lost_packets":0,
+           "lost_bytes":0,"sent_datagrams":761309,"received_datagrams":16465,"mtu":1452,
+           "controller":{"pacing_rate_bytes_s":270723044,"send_quantum_bytes":65536,
+                         "ssthresh_bytes":null,"bytes_in_flight":0,
+                         "bbr_state":"ProbeBw(Cruise)","bbr_max_bw_bytes_s":273457620.0,
+                         "bbr_app_limited":true}}]}
+```
+
+Every path has a `controller` object, read from the controller of that path on that end. Where each
+field comes from:
+
+| Field                                                                   | Source                                                                     | Controllers    |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------- | -------------- |
+| `cwnd_bytes`                                                            | `PathStats::cwnd`, from `Path::stats()`                                    | all            |
+| `pacing_rate_bytes_s`, `send_quantum_bytes`                             | `Controller::metrics()` on `Connection::congestion_state(path_id)`         | BBR            |
+| `ssthresh_bytes`                                                        | the same call                                                              | Cubic, NewReno |
+| `bytes_in_flight`, `bbr_state`, `bbr_max_bw_bytes_s`, `bbr_app_limited` | the derived `Debug` output of the `Bbr3` controller, top-level fields only | BBR            |
+
+`Controller` has no in-flight count, and `Bbr3` keeps its state and bandwidth estimate in private
+fields with no accessors, so for BBR the last row parses the `Debug` text. A unit test builds a
+`Bbr3` and fails if a `noq` upgrade renames a field. A field that is missing or does not parse is
+`null`, and `ssthresh_bytes` is `null` while `noq` reports `u64::MAX` for "not set".
+
+The controller fields are read once, when the connection closes. They describe the end of the
+transfer, where the connection has been idle for a moment, and not the middle of it. The counters
+(`congestion_events`, `lost_packets`, `sent_datagrams`) are totals over the whole connection.

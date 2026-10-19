@@ -152,7 +152,7 @@ async fn measure(
     let connections: Vec<ConnReport> = conns
         .iter()
         .zip(&counted)
-        .map(|(conn, bytes)| stats::report(conn, *bytes))
+        .map(|(conn, bytes)| stats::report(conn, Some(*bytes)))
         .collect();
     let (outcome, received, path, rtt) = match ran {
         Ok(received) => {

@@ -3,6 +3,7 @@
 
 mod blobs;
 mod cli;
+mod controller;
 mod cpu;
 mod data;
 mod disk;
@@ -10,6 +11,7 @@ mod fetch;
 mod net;
 mod raw;
 mod result;
+mod sender;
 mod serve;
 mod stats;
 mod ticket;

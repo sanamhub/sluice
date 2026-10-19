@@ -1,0 +1,76 @@
+//! `serve` reports each connection when it closes, and the line can be joined to the `fetch` result.
+
+use std::collections::BTreeSet;
+
+use serde_json::Value;
+
+mod common;
+use common::{probe, read_line, read_ticket, spawn_server, within_deadline};
+
+const CONNECTIONS: usize = 2;
+
+fn keys(values: impl Iterator<Item = Value>) -> BTreeSet<String> {
+    values
+        .map(|v| v["key"].as_str().expect("key is a string").to_string())
+        .collect()
+}
+
+fn serve_lines(congestion: &'static str) {
+    let (_server, mut stdout) = spawn_server("raw", congestion, "8MiB", &[]);
+    within_deadline(move || {
+        let ticket = read_ticket(&mut stdout);
+        let fetched = probe()
+            .args([
+                "fetch",
+                &ticket,
+                "--mode",
+                "raw",
+                "--congestion",
+                congestion,
+            ])
+            .args(["--connections", &CONNECTIONS.to_string()])
+            .output()
+            .expect("run probe fetch");
+        assert!(fetched.status.success(), "fetch failed");
+        let result: Value = serde_json::from_slice(&fetched.stdout).expect("fetch prints JSON");
+        let received = result["connection_stats"]
+            .as_array()
+            .expect("array")
+            .clone();
+
+        // `serve` prints each line after the client closes, which `fetch` does as it exits.
+        let lines: Vec<Value> = (0..CONNECTIONS)
+            .map(|_| {
+                let line = read_line(&mut stdout);
+                serde_json::from_str(&line).unwrap_or_else(|e| panic!("{e}: {line:?}"))
+            })
+            .collect();
+
+        assert_eq!(keys(lines.iter().cloned()), keys(received.iter().cloned()));
+        assert_eq!(keys(lines.iter().cloned()).len(), CONNECTIONS);
+        for line in &lines {
+            assert_eq!(line["event"], "connection_closed");
+            assert!(line["close_reason"].as_str().is_some_and(|r| !r.is_empty()));
+            assert!(line["received_bytes"].is_null());
+            assert!(line["sent_datagrams"].as_u64().is_some_and(|n| n > 0));
+            // The sender is the other end of the fetch, so the two never name the same peer.
+            assert_ne!(line["remote_id"], received[0]["remote_id"]);
+            let path = &line["paths"][0];
+            assert!(path["cwnd_bytes"].as_u64().is_some_and(|n| n > 0), "{line}");
+            let controller = &path["controller"];
+            assert!(controller["pacing_rate_bytes_s"].is_u64() == (congestion == "bbr3"));
+            assert_eq!(controller["bbr_state"].is_string(), congestion == "bbr3");
+            assert_eq!(controller["bytes_in_flight"].is_u64(), congestion == "bbr3");
+        }
+    });
+}
+
+#[test]
+fn serve_prints_one_line_per_closed_connection_with_bbr_state() {
+    serve_lines("bbr3");
+}
+
+#[test]
+fn serve_leaves_bbr_fields_null_under_cubic() {
+    serve_lines("cubic");
+}

@@ -1,35 +1,14 @@
 //! Runs `probe serve` and `probe fetch` as real processes over the local network and checks the
 //! contract the bench harness relies on.
 
-use std::{
-    io::{BufRead, BufReader},
-    path::PathBuf,
-    process::{Child, ChildStdout, Command, Stdio},
-    sync::mpsc::{self, RecvTimeoutError},
-    thread,
-    time::Duration,
-};
+use std::{io::BufReader, path::PathBuf, process::ChildStdout};
 
 use serde_json::Value;
 
+mod common;
+use common::{probe, read_ticket, spawn_server, within_deadline};
+
 const SIZE: u64 = 8 << 20;
-/// Well under the 60 seconds the suite is allowed, so a hang fails here with a message instead of
-/// being killed by the runner.
-const DEADLINE: Duration = Duration::from_secs(45);
-
-struct Server(Child);
-
-impl Drop for Server {
-    fn drop(&mut self) {
-        // `serve` runs until killed, and a failing or hung test must not leave it behind.
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-fn probe() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_probe"))
-}
 
 /// One loopback run: which options both ends get and what the result line must say about them.
 struct Case {
@@ -78,41 +57,6 @@ impl Drop for TempDir {
     }
 }
 
-fn spawn_server(
-    mode: &str,
-    congestion: &str,
-    size: &str,
-    extra: &[String],
-) -> (Server, ChildStdout) {
-    let mut child = probe()
-        .args([
-            "serve",
-            "--size",
-            size,
-            "--mode",
-            mode,
-            "--congestion",
-            congestion,
-        ])
-        .args(extra)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("start probe serve");
-    let stdout = child.stdout.take().expect("piped stdout");
-    (Server(child), stdout)
-}
-
-fn read_ticket(server_stdout: ChildStdout) -> String {
-    let mut ticket = String::new();
-    BufReader::new(server_stdout)
-        .read_line(&mut ticket)
-        .expect("read the ticket line");
-    let ticket = ticket.trim().to_string();
-    assert!(!ticket.is_empty(), "serve exited before printing a ticket");
-    ticket
-}
-
 fn one_json_line(stdout: Vec<u8>) -> Value {
     let stdout = String::from_utf8(stdout).expect("utf-8 stdout");
     assert_eq!(
@@ -123,8 +67,8 @@ fn one_json_line(stdout: Vec<u8>) -> Value {
     serde_json::from_str(stdout.trim()).expect("stdout is JSON")
 }
 
-fn run_case(server_stdout: ChildStdout, case: &Case) {
-    let ticket = read_ticket(server_stdout);
+fn run_case(mut server_stdout: BufReader<ChildStdout>, case: &Case) {
+    let ticket = read_ticket(&mut server_stdout);
     let output = probe()
         .args([
             "fetch",
@@ -229,22 +173,6 @@ fn with_deadline(case: Case) {
     within_deadline(move || run_case(stdout, &case));
 }
 
-fn within_deadline(case: impl FnOnce() + Send + 'static) {
-    let (done, finished) = mpsc::channel();
-    let worker = thread::spawn(move || {
-        case();
-        let _ = done.send(());
-    });
-    match finished.recv_timeout(DEADLINE) {
-        Ok(()) => worker.join().expect("worker panicked"),
-        // The worker panicked before sending, which drops the sender.
-        Err(RecvTimeoutError::Disconnected) => {
-            std::panic::resume_unwind(worker.join().expect_err("worker ended without a result"))
-        }
-        Err(RecvTimeoutError::Timeout) => panic!("no result within {DEADLINE:?}"),
-    }
-}
-
 #[test]
 fn raw_bbr3_one_connection() {
     with_deadline(Case::new("raw", "bbr3", 1));
@@ -323,9 +251,9 @@ fn blobs_bbr3_one_connection_from_a_file_store() {
 #[test]
 fn a_timeout_prints_what_was_measured_and_exits_non_zero() {
     // 64 GiB cannot cross loopback in 2 seconds on any machine this runs on.
-    let (_server, stdout) = spawn_server("raw", "bbr3", "64GiB", &[]);
+    let (_server, mut stdout) = spawn_server("raw", "bbr3", "64GiB", &[]);
     within_deadline(move || {
-        let ticket = read_ticket(stdout);
+        let ticket = read_ticket(&mut stdout);
         let output = probe()
             .args(["fetch", &ticket, "--mode", "raw", "--timeout", "2"])
             .output()
