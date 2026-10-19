@@ -1,16 +1,19 @@
 # sluice-core
 
-**Owns:** the session layer. Jobs, the transfer queue and priorities, events, policy hooks, tickets,
-directory manifests, small-file packing, the store lock, and identity. Wraps `iroh` and `iroh-blobs`,
-and is the only crate that knows about both.
+**Owns:** the session layer. Jobs, the transfer queue, events, tickets, directory manifests, small-file
+packing, the store lock, identity, and the parallel data path. It wraps `iroh` and `iroh-blobs`, and is
+the only crate that talks to both.
 
-**Must never:** expose an unverified byte to a caller, open a store that another live process holds the
-lock on, or copy user data into the store when reference-in-place will do. Never leave an `iroh-blobs`
-access mode at its default: push stays off, and `get`, `get_many` and `observe` are set together, since
-restricting `get` alone leaves the other two open (`plan.md` section 13).
+**Must never:**
 
-**Note:** this is the one crate with hard async, and the one place `unsafe` is permitted besides
-`sluice-ffi`. Keep the actor-per-transfer shape: owned state, message passing, no shared `Mutex`.
+- return a byte to a caller before it is verified against the content root
+- open a store whose lock another live process holds
+- copy user data into the store when reading in place will do
+- leave an `iroh-blobs` access mode at its default. Push stays off, and `get`, `get_many` and `observe`
+  are set together, because restricting `get` alone leaves the other two open.
 
-**Tests:** `turmoil` for crash and torn-write injection at fsync barriers, `netem` suites in `bench/`,
-whole-system tests with a 100 GB blob and a 100k-file tree.
+**Notes:** this is the only crate with real async, and one of the few where `unsafe` is allowed. Keep
+one actor per transfer, with owned state and messages, and no shared `Mutex`.
+
+**Tests:** `turmoil` for crashes and torn writes at each fsync barrier, the `netem` suite in `bench/`,
+and whole-system runs with a 100 GB file and a 100k-file tree.

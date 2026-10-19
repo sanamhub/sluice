@@ -1,26 +1,36 @@
-# 0002. Rust data plane, C# control plane, TypeScript UI, no Go
+# 0002. Rust for the engine, TypeScript for the UI, nothing else in the product
 
-**Status:** Accepted
+**Status:** Proposed
+**Date:** 2026-10-19
+**Approved by:** pending
 
 ## Context
 
-The maintainer is a C# expert learning Rust, so the temptation is to write everything in C#. .NET has
-QUIC via msquic, but no NAT traversal, no relay mesh, and no verified-streaming store, so a C# core means
-reimplementing iroh and iroh-blobs. See ADR 0001.
+The engine depends on iroh, which is Rust (ADR 0001). The UI has to run in a browser tab and in a
+desktop shell. Every additional language in the product adds a toolchain that contributors must
+install and that CI must build on three operating systems.
 
-Go was considered. quic-go trails quinn and msquic, and Go's GC and missing SIMD intrinsics hurt the hash
-and copy path. Every Go competitor sits in the "correct but not fast" tier.
+An optional multi-user service with policy and audit was considered for the first releases. It would
+have been a third language and a second deployable unit before anyone has used the CLI.
 
 ## Decision
 
-Rust for the data plane. C# .NET 10 Native AOT for the optional control plane, where the official MCP SDK
-and gRPC-on-AOT are strongest and where none of the code is hot path. TypeScript for the one UI, because
-it is the only language that runs in both a browser and a Tauri webview. No Go, no Dart.
+The product is two languages:
+
+- Rust for the engine, the CLI, the bindings layer and the WASM build.
+- TypeScript for the one UI.
+
+Bindings for other languages are generated (ADR 0017), so Python, Go, Swift and the rest do not add
+code a maintainer writes by hand.
+
+The multi-user service is not scheduled. It can return as its own proposal once there is demand.
+
+Rejected: Go for the engine. quic-go has no equivalent of iroh's traversal and verified store, and every
+Go transfer tool we compared sits below the speed tier we are aiming for.
 
 ## Consequences
 
-- About half the project is Rust, and roughly a sixth of that is hard async. The rest is sans-IO logic,
-  declarative wiring, and adapters.
-- Two toolchains cost something at CI setup and release, and buy a control plane in the maintainer's
-  fastest language.
-- A Go SDK still ships, generated from the `.proto`, without a Go runtime in the product.
+- `cargo nextest run` works on a clean clone with only a Rust toolchain.
+- The UI needs Node for development and nothing else.
+- Remote control and multi-user policy wait for the control API (1.1) and for the separate proposal.
+- Revisit if the control API is not enough for team deployments that ask for it.

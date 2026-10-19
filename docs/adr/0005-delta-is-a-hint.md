@@ -1,25 +1,30 @@
-# 0005. Delta is a hint layer that cannot affect correctness
+# 0005. Delta is a hint layer and never decides correctness
 
-**Status:** Accepted
+**Status:** Proposed
+**Date:** 2026-10-19
+**Approved by:** pending
 
 ## Context
 
-Verified streaming needs deterministic chunk boundaries, so the BLAKE3 tree uses fixed 16 KiB groups.
-Delta transfer needs boundaries that shift with insertions, which is what content-defined chunking
-provides. One chunker cannot satisfy both requirements.
+Resending a large file that changed slightly should not move the whole file. Finding the unchanged
+parts needs content-defined chunk boundaries, which move with insertions. Verified streaming needs
+fixed boundaries, which is why the BLAKE3 tree uses 16 KiB groups. One chunker cannot do both.
 
-An earlier draft also had the receiver sending signatures of its own local files to the sender, which
-leaks what the receiver already has on disk.
+The usual rsync-style flow has the receiver send signatures of its own files to the sender. That tells
+the sender what the receiver has on disk.
 
 ## Decision
 
-Keep the BLAKE3 tree as the only integrity and addressing structure. Add a FastCDC index purely as a
-hint. The provider publishes signatures for content the requester is already authorized to read; the
-requester matches locally and asks only for what it cannot reconstruct. Every assembled result is
-verified against the real root, and a failed verification falls back to a plain fetch.
+- The BLAKE3 tree stays the only structure for integrity and addressing.
+- A FastCDC index is added purely as a hint.
+- The provider sends chunk signatures for content the requester is already allowed to read. The
+  requester matches them against its own files and fetches only what it cannot rebuild.
+- The assembled result is verified against the real root. If that fails, the requester discards it and
+  fetches normally.
 
 ## Consequences
 
-- Integrity never depends on the CDC layer, which is what makes having it safe.
-- Signature flow is provider to requester only, so the requester discloses nothing.
-- The worst case for a bad hint is wasted work, never a corrupt file.
+- A wrong hint costs wasted work, never a corrupt file.
+- The requester reveals nothing about its local files.
+- Chunk signatures add traffic before the transfer starts, so delta is opt-in per transfer, through the
+  `DELTA` capability.

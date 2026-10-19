@@ -1,104 +1,90 @@
 # Sluice
 
-Peer-to-peer file transfer that saturates the link. No cloud, no accounts, no third-party service.
-Direct device to device over QUIC. Any rendezvous or relay is one you run.
+Peer-to-peer file transfer built to fill the link. Files go directly from one machine to another over
+QUIC, verified chunk by chunk, with no account and no service in the middle that you don't run
+yourself.
 
-**Status: pre-implementation.** [`plan.md`](plan.md) is the design, [`SPEC.md`](SPEC.md) is the protocol.
-Neither is stable yet. There is no code.
-
-License: Apache-2.0 OR MIT. Free forever. No telemetry, ever.
-
----
-
-## What it will do
+**Status:** design. There is no code yet. The first release is described in
+[`docs/roadmap.md`](docs/roadmap.md).
 
 ```
 sluice send ./bigfile.mkv               # prints a ticket
-sluice send --live ./recording.mkv      # send a file that is still being written
-cat dump.sql | sluice send -            # send a pipe
 sluice recv <ticket> -o ./out
-sluice recv <ticket> --range 4G:4.1G    # verified partial fetch
-sluice mount <ticket> /mnt/remote       # remote content as a read-only path
-sluice doctor                           # NAT class, MTU, path in use, why
+
+sluice send --live ./recording.mkv      # send a file while it is still being written
+cat dump.sql | sluice send -            # send a pipe
+sluice recv <ticket> --range 4G:4.1G    # fetch and verify one byte range
+sluice doctor                           # NAT type, path in use, relay, and why
 ```
 
-## Why another one
+## What it does
 
-| Tool | Gap it leaves |
+- **Fills fast links.** The 10 GbE target is within 10% of `iperf3`. Large transfers spread across
+  several connections, and BBRv3 handles lossy long-distance paths. Every number is published with the
+  hardware, the network conditions and a script to rerun it. See
+  [`docs/performance.md`](docs/performance.md).
+- **Verifies everything.** Content is addressed by BLAKE3, and every 16 KiB is checked before it is
+  written or returned.
+- **Resumes anywhere.** Kill it, unplug the cable, fill the disk. The next run picks up after the last
+  verified range.
+- **Sends files that are still growing.** A recording or a dump can be read on the other side while it
+  is being written, verified segment by segment.
+- **Reads any range.** Fetch and verify bytes 4G to 4.1G of a 200 GB file without the rest.
+- **Leaves your files where they are.** Sending a 100 GB file doesn't copy it anywhere first.
+- **Embeds.** Apache-2.0 or MIT. Bindings for Python, Node, Swift, Kotlin, Go, C# and C are planned
+  in this repository, with a local API and an MCP server for everything else.
+
+## Connectivity
+
+Two machines behind NATs need help to find each other.
+
+| Where | What you need |
 |---|---|
-| Blip | Closed source, paid, their relays |
-| DashBeam | AGPL, so nothing can embed it. No live streaming, no ranges, no API |
-| croc, magic-wormhole | Relay-bound, no hole punching, slow |
-| LocalSend | One LAN only |
-| Syncthing | Folder sync, not one-shot send |
-| Aspera | Six figures, closed |
+| Same network | Nothing |
+| Internet, and either router supports PCP, NAT-PMP or UPnP | Nothing |
+| Internet, otherwise | A rendezvous server you run. It fits on the smallest VPS and carries no file data |
+| Internet, when hole punching fails | A relay you run, which does carry the data |
 
-What none of them have, together:
+Sluice never falls back to someone else's relay. When no relay is configured, the cases that need one
+fail and say why. `sluice doctor` tells you which case you are in, and every transfer shows whether it
+went direct or through a relay.
 
-- **Live streaming.** Read a plain file that is still being written, verified as it arrives.
-- **Verified random access.** Fetch and verify byte range 4G to 4.1G of a 200 GB file.
-- **A real API.** A `--json` CLI, plus gRPC, Connect, SDKs, and an MCP adapter over the same calls.
-  Bytes never pass through any of them.
-- **Published benchmarks.** Method, hardware, netem profiles, raw data, rerun script. They cover WAN,
-  NAT, and relayed paths, not only LAN.
-- **Apache-2.0.** Other products can embed the engine.
+**The browser version is always relayed.** iroh in a browser tab has no UDP socket, so it reaches peers
+only through a relay. The relay can't read the traffic, but it does carry every byte, so the web UI
+needs a relay you run.
 
-None of these is new on its own, and we say where each comes from:
+## Built on
 
-- [Hypercore](https://github.com/holepunchto/hypercore) and Hyperdrive have signed, live, verifiable
-  append-only logs and byte ranges. Our live mode has the same shape, for plain
-  files, closing into an ordinary BLAKE3 root.
-- `iroh-blobs` already does verified ranges.
-- [`ffl-mcp`](https://github.com/nuwainfo/ffl-mcp) already lets agents send files over MCP.
+[iroh](https://github.com/n0-computer/iroh) for connectivity and QUIC, and
+[iroh-blobs](https://github.com/n0-computer/iroh-blobs) for content-addressed, verified streaming.
+Sluice adds:
 
-What is new is having all of them in one embeddable transfer engine.
+- live transfer of growing files
+- delta transfers
+- directory manifests and small-file packing
+- the parallel data path
+- the CLI, the bindings and the UI
 
-## What it is built on
+How it fits together is in [`docs/design.md`](docs/design.md). Live transfer works on the same
+principle as [Hypercore](https://github.com/holepunchto/hypercore)'s signed logs, applied to plain
+files; ADR 0004 explains the differences.
 
-`iroh` and `noq` for QUIC, NAT traversal, and relay fallback. `iroh-blobs` and `bao-tree` for
-content-addressed verified streaming.
+## Documentation
 
-We build live streaming, delta hints, manifests and packing, the session layer, and the clients.
-Everything else is a dependency, not a sprint. See `plan.md` section 3.
+| | |
+|---|---|
+| [`docs/design.md`](docs/design.md) | Architecture, data model, storage, connectivity |
+| [`SPEC.md`](SPEC.md) | Wire protocol, with test vectors, for anyone writing a compatible implementation |
+| [`docs/performance.md`](docs/performance.md) | Targets and how they are measured |
+| [`docs/threat-model.md`](docs/threat-model.md) | What is and isn't protected |
+| [`docs/roadmap.md`](docs/roadmap.md) | Phases, open questions, what won't be built |
+| [`docs/adr/`](docs/adr/README.md) | Decision records |
 
-## Honest connectivity
+## Contributing and security
 
-You cannot punch between two NATs with zero infrastructure. On a LAN, Sluice needs no server. On the
-internet it needs either a router that speaks PCP, NAT-PMP, or UPnP-IGD, or a rendezvous you run, which
-fits on the smallest VPS available. About 10% of paths also need a relay, per iroh's published
-hole-punching rate.
+Start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Report vulnerabilities privately as described in
+[`SECURITY.md`](SECURITY.md), never in a public issue.
 
-`plan.md` section 6 has the full matrix, and `sluice doctor` tells you which case you are in. Every
-transfer also shows, while it runs, whether it is direct or relayed and through which relay.
+## License
 
-The browser is the exception. Sluice's browser build runs iroh, and iroh in a tab has no UDP socket,
-so it reaches peers only through a WebSocket relay. **Every Sluice browser transfer is relayed for its
-whole life**, end to end encrypted but passing through a relay you run.
-
-This is a limit of our stack, not of browsers. WebRTC tools such as FilePizza can hole-punch from a
-tab, and `plan.md` section 10.1 explains why we do not add a second connectivity stack to get that. If
-you want the web UI, plan for a relay. If you only want the CLI, you may never need one.
-
-## Repository
-
-```
-crates/     the Rust engine and CLI
-src/        the optional C# hub and SDK
-proto/      the one API contract, governed by buf
-ui/         one Svelte 5 app, built as a PWA and as a Tauri shell
-bench/      benchmark harness and published results
-docs/adr/   architecture decision records
-docs/research/  evidence notes, with the source of every claim
-SPEC.md     wire protocol, written before the code
-plan.md     the full design, including what we deliberately do not build
-```
-
-## Contributing
-
-Read [`CONTRIBUTING.md`](CONTRIBUTING.md). The short version: `cargo nextest run` works from a clean
-clone with no network, no daemon, and no .NET installed. Every crate README says what that crate owns
-and what it must never do. Every non-obvious decision has an ADR.
-
-## Security
-
-Read [`SECURITY.md`](SECURITY.md). Report vulnerabilities privately, never in a public issue.
+Apache-2.0 or MIT, at your option. Sluice collects no telemetry.

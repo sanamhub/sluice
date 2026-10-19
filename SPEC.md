@@ -1,7 +1,7 @@
 # Sluice Protocol Specification
 
 **Version:** 0.1 draft. Nothing here is stable until 1.0.
-**Status:** written before the implementation, on purpose. Code follows this file, not the reverse.
+**Status:** written before the implementation. Code follows this file, not the reverse.
 
 This document is written so a third party can build a compatible implementation without reading our
 source. If something here is ambiguous, that is a bug in this file.
@@ -248,7 +248,8 @@ does not prove delivery, and implementations MUST NOT describe it as proof of de
 ## 11. Control API
 
 The local control interface is defined by `proto/sluice/v1`, governed by `buf`, and served over a Unix
-socket or Windows named pipe. The same service is served over TCP with TLS and token auth by the hub.
+socket or Windows named pipe. An implementation MAY also serve it over TCP, and then MUST require TLS and
+token authentication.
 
 It is a control plane. **No file bytes ever traverse this API.** A client asks the engine to move bytes
 and observes progress; it never carries them.
@@ -293,3 +294,12 @@ implementation that passes these vectors is compatible with ours.
 3. Measure the pack size curve. 64 MiB and 1 MiB are guesses.
 4. Decide whether `zstd` applies per chunk group or per pack. Per pack is simpler and probably enough.
 5. Decide whether the tail-serving rule needs an explicit provisional-length field on the wire.
+6. Settle section 5 rule 2. `iroh-blobs` fixes its block size at 16 KiB, so a 64 KiB chunk group cannot
+   be negotiated while static content goes through it. Either the rule goes, or the block size becomes
+   configurable upstream.
+7. Add a rule for two validly signed live frames with the same `seq`, with vectors in `live/`.
+8. Add a rule that providers reject `iroh-blobs` push and apply one access policy to `get`, `get_many`
+   and `observe`.
+9. State the order in which `sluice/1` and the `iroh-blobs` ALPN are registered, since that order
+   decides negotiation.
+10. Give the symlink target a field in `Entry` instead of describing it in prose.

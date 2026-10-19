@@ -1,25 +1,27 @@
 # 0007. No io_uring in 1.0
 
-**Status:** Accepted
+**Status:** Proposed
+**Date:** 2026-10-19
+**Approved by:** pending
 
 ## Context
 
-Earlier plans specified io_uring for the disk path. The current Rust ecosystem does not support that
-cheaply: `tokio-uring` has had no changelog entry since 2022, `monoio` is effectively unmaintained, and
-`compio`, the one actively maintained option, is a complete thread-per-core runtime rather than a drop-in
-for tokio.
+At 10 Gbit/s the disk has to sustain 1.25 GB/s. A PCIe 4 NVMe drive sustains 3 to 7 GB/s, and
+published QUIC measurements put the bottleneck in userspace packet processing well before that
+(`docs/performance.md`).
 
-The arithmetic also argues against it. The 8 Gbit/s target is 1 GB/s, while an NVMe sustains 3 to
-7 GB/s. Disk is not the bottleneck. QUIC packet processing is.
+In Rust, `tokio-uring` is dormant and `glommio` and `monoio` are not actively maintained. `compio` is
+maintained and has a production user in Apache Iggy, but it is a complete thread-per-core runtime, not
+an addition to tokio.
 
 ## Decision
 
-Use positioned reads and writes on a blocking pool, with sparse files and `fallocate`. Revisit `compio`
-only when a profile shows disk in the critical path.
+Use positioned reads and writes on a blocking thread pool, with sparse files and `fallocate`. Revisit
+`compio` when a profile shows disk in the critical path, most likely above 40 Gbit/s or on a slow
+filesystem.
 
 ## Consequences
 
-- One less hard dependency and one less hard piece of Rust for a solo maintainer.
-- If a future profile does show disk pressure, the store sits behind a port, so the change is contained.
-- `sendfile` remains unavailable regardless, because QUIC encrypts in userspace. Zero-copy claims stop at
-  avoiding extra copies of our own.
+- One less runtime to depend on and to learn.
+- The store sits behind its own interface, so a later move to `compio` is contained.
+- `sendfile` is not available either way, because QUIC encrypts in userspace.

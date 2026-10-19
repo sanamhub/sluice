@@ -1,25 +1,26 @@
-# 0009. Svelte 5 for a single UI shared by browser and desktop
+# 0009. One Svelte 5 UI for the browser and the desktop
 
-**Status:** Accepted
+**Status:** Proposed
+**Date:** 2026-10-19
+**Approved by:** pending
 
 ## Context
 
-The product needs a browser client and a desktop app, and writing two UIs doubles the work. Avalonia and
-.NET MAUI are good desktop toolkits but cannot share code with a browser, and MAUI has no Linux target.
-Flutter forces a third language and still cannot share with the browser. Electron costs bundle size and
-idle memory for what is a drop zone and a progress bar.
+Sluice needs a browser client and a desktop app. Two UI codebases would double the work for what is
+mostly a drop zone, a ticket field and a progress list.
 
-The at-rest budget allows 60 KB of JavaScript on first load. React's runtime alone is roughly 45 KB
-minified and compressed, against 2 to 3 KB for Svelte 5.
+The first-load budget is 60 KB of JavaScript (`docs/performance.md`). React's runtime is roughly 45 KB
+compressed; Svelte 5's is 2 to 3 KB. Flutter adds a language and cannot share code with the browser
+build. Electron adds a browser engine per install and idle memory the budget does not allow.
 
 ## Decision
 
-One TypeScript application built with Svelte 5, shipped twice: as a PWA with the WASM core, and inside a
-Tauri 2 shell with the native Rust core compiled in. Vite for build, Biome for lint and format, Vitest
-and Playwright for tests.
+One TypeScript application in Svelte 5, built twice: as a PWA with the WASM engine, and inside a Tauri
+2 shell with the native engine compiled in. Vite builds it, Biome lints and formats it, Vitest and
+Playwright test it.
 
 ## Consequences
 
-- One UI codebase covers browser, Windows, macOS, Linux, and later iOS and Android.
-- The first-load budget becomes achievable rather than aspirational.
-- Tauri's backend language is Rust, which is already ours, so the desktop app needs no sidecar process.
+- One UI covers the browser, Windows, macOS and Linux, and later iOS and Android through Tauri.
+- Tauri's backend is Rust, so the desktop app runs the engine in process with no sidecar.
+- Svelte's ecosystem is smaller than React's, which matters little for an app this size.

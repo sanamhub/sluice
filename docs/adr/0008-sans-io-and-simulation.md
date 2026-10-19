@@ -1,26 +1,28 @@
-# 0008. Sans-IO protocol crates plus deterministic simulation testing
+# 0008. Protocol crates do no IO, and concurrency is tested by simulation
 
-**Status:** Accepted
+**Status:** Proposed
+**Date:** 2026-10-19
+**Approved by:** pending
 
 ## Context
 
-Every transfer bug worth finding is a race under loss or a crash at the wrong moment. Tests that depend
-on real sockets and real sleeps find those bugs by luck, and then cannot reproduce them.
+The bugs that matter in a transfer tool are races under packet loss and crashes at the wrong moment.
+Tests built on real sockets and real sleeps find those by luck, and a failure seen once often never
+reproduces.
 
 ## Decision
 
-The two protocol crates we own, `sluice-live` and `sluice-delta`, perform no IO. They take bytes and
-timer ticks and return actions, following the `quinn-proto` pattern. Resume, durability, and scheduling
-are tested with `turmoil` 0.7, which simulates the network plus filesystem durability and torn writes,
-and prints a reproducing seed on every failure.
-
-Scope is limited to what we own. quinn, noq, and iroh test their own transport, so re-simulating QUIC
-would be theatre.
+- The protocol crates we own (`sluice-live`, later `sluice-delta`) perform no IO. They take bytes and
+  timer ticks and return actions, the way `quinn-proto` does.
+- Resume, durability and scheduling are tested with `turmoil`, which simulates the network and the
+  filesystem, injects torn writes, and prints the seed of every failing run.
+- The QUIC stack is not simulated. Its own project tests it.
 
 ## Consequences
 
-- A protocol test is a pure function call, and fuzzing takes a byte slice.
-- The WASM build reuses these crates unchanged, so verification logic exists once rather than twice.
-- Generated code becomes reviewable, because a failing seed reproduces exactly on any machine.
-- This is also the easiest Rust in the repository to write and review, which matters for a solo
-  maintainer.
+- A protocol test is a function call, and a fuzz target takes a byte slice.
+- The WASM build uses the same protocol crates, so verification logic exists once.
+- A failing concurrency test reproduces on any machine from its seed.
+- `turmoil`'s filesystem simulation is behind an `unstable-fs` feature. Durability tests go through one
+  small `Fs` trait in `sluice-core`, so if that feature changes, a hand-written fault-injecting
+  implementation replaces it in about a day.

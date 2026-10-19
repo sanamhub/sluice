@@ -1,11 +1,11 @@
 # sluice-live
 
-**Owns:** the segmented append-only log for content that is still being written. Segment sealing, the
-`prev_entry_hash` chain, signature verification, tail handling, and the transition to a static root at
-close. Spec: `SPEC.md` section 6.
+**Owns:** the segment log for files that are still being written. Sealing segments, the
+`prev_entry_hash` chain, signature checks, the provisional tail, and the switch to a static root on
+close. Specified in `SPEC.md` section 6.
 
-**Must never:** touch the network, the filesystem, or the clock. This crate is sans-IO. It takes bytes
-and timer ticks in, and returns actions out. No `tokio` dependency, ever.
+**Must never:** touch the network, the filesystem or the clock. Bytes and timer ticks go in, actions
+come out, and there is no `tokio` dependency. The browser build uses this crate unchanged.
 
-**Tests:** `tests/` for the state machine, `proptest` for chain algebra, `fuzz/` for frame parsing, and
-the `live/` vectors under `tests/vectors/`.
+**Tests:** state machine tests in `tests/`, `proptest` for the chain, a fuzz target for frame parsing,
+and the `live/` vectors in `tests/vectors/`.

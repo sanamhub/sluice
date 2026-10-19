@@ -1,33 +1,41 @@
-# 0010. `noq` performance is gated by measurement before the plan proceeds
+# 0010. Measure the transport before building on it
 
-**Status:** Accepted
+**Status:** Proposed
+**Date:** 2026-10-19
+**Approved by:** pending
+**Relates to:** ADR 0015, ADR 0016
 
 ## Context
 
-Since v0.96, iroh's QUIC is `noq`, a hard fork of quinn maintained by n0, carrying QUIC Multipath, QUIC
-NAT Traversal, and QUIC Address Discovery. Every quinn benchmark previously cited in this plan describes
-a different codebase. `noq` has no published throughput numbers, and it sits directly beneath a project
-whose headline claim is speed.
+`noq` is n0's fork of quinn and carries iroh's QUIC. It has no published throughput numbers. Two open
+iroh issues report it well below link speed:
+
+- [#4286](https://github.com/n0-computer/iroh/issues/4286): single-stream `iroh-blobs` between two
+  Macs reached 42.65 MB/s with BBR against a 110 MB/s `iperf3` baseline, and 1.3 to 1.7 MB/s with Cubic.
+- [#1943](https://github.com/n0-computer/iroh/issues/1943): about 300 Mbit/s where netcat reached 700,
+  with tuned windows.
+
+Published research puts userspace QUIC 16% to 297% behind TCP at 10 Gbit/s. Sluice's headline claim is
+speed, and every later phase sits on this layer.
 
 ## Decision
 
-M0 answers five questions with numbers before product code exists:
+M0 measures before any product code exists, on Linux 10 GbE and on macOS:
 
-1. LAN throughput, NVMe to NVMe, against an `iperf3` ceiling.
-2. Throughput on a 100 ms, 0.1% loss path.
-3. Which congestion controller is in use, and whether BBR or equivalent is available.
-4. Whether GSO on send and GRO on receive are enabled.
-5. Whether `noq` accepts an injected rustls provider, so `aws-lc-rs` can be pinned and the negotiated
-   group asserted in a test. See ADR 0012: this is no longer a question about rustls, it is a question
-   about whether `noq` exposes the seam.
+1. `iroh` plus `iroh-blobs` with one connection and with several.
+2. Each with default and tuned windows, under Cubic and BBRv3.
+3. Against `iperf3` (one stream and parallel) and a parallel-TCP tool as the bar.
+4. On the LAN, 80 ms with 0.1% loss, and 60 ms at 10 Gbit/s.
 
-Within 20% of ceiling on LAN and the plan proceeds unchanged. Close and we contribute patches upstream.
-Far and we add a second transport through **iroh's own custom transport extension point**, shipped in
-0.97, for paths that need no NAT traversal. That is an implementation, not a fork.
+The outcomes:
+
+- **Within 10% of the ceiling on LAN:** proceed with QUIC only.
+- **Close:** send patches upstream, starting with ACK frequency if `noq` lacks it.
+- **Far:** ship the TCP bulk path from ADR 0016 in 1.0.
 
 ## Consequences
 
-- The riskiest assumption is tested in week one, at a cost of about two days.
-- Publishing the results is a contribution in itself, since nobody has benchmarked this stack publicly.
-- If the stack cannot reach the targets, they are revised in public with the measurement attached. A
-  target quietly dropped is worse than a target missed.
+- The riskiest assumption is tested first, at a cost of about two weeks including the harness.
+- The numbers are published whatever they say. No public benchmark of this stack exists, so they are
+  useful to others too.
+- If no option reaches a target, `docs/performance.md` is revised with the measurement attached.

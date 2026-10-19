@@ -1,31 +1,41 @@
-# 0001. Reuse iroh, noq, and iroh-blobs instead of building transport and store
+# 0001. Reuse iroh, noq and iroh-blobs for transport and storage
 
-**Status:** Accepted
+**Status:** Proposed
+**Date:** 2026-10-19
+**Approved by:** pending
 
 ## Context
 
-Earlier drafts planned to build a verified BLAKE3 tree, a range-set library, a content-addressed store
-with resume, and a multi-provider downloader. All four already exist as `bao-tree`, `range-collections`,
-and `iroh-blobs`, written by the team that also wrote the transport, permissively licensed, and running
-in production behind hundreds of millions of endpoint connections a month.
+A transfer tool needs NAT traversal, a relay fallback, QUIC, a verified streaming tree, range sets, a
+content-addressed store with resume, and a downloader that can use several providers. The iroh project
+ships all of them under Apache-2.0 or MIT: `iroh` and `noq` for connectivity and QUIC, `bao-tree` and
+`range-collections` for the tree and ranges, `iroh-blobs` for the store and downloader, `iroh-relay`
+for the servers.
 
-Building them ourselves would take roughly six weeks and would place the two functions where a transfer
-tool corrupts data, verified streaming and store durability, into brand-new code.
+Writing the tree, the store and the downloader ourselves would take an estimated six weeks. It would
+also put verified streaming and store durability, the two places a transfer tool corrupts data, into
+new code.
 
 ## Decision
 
-Reuse `iroh` (connectivity), `noq` (QUIC), `iroh-blobs` (store, verified streaming, downloader),
-`bao-tree` and `range-collections` (tree and ranges), and `iroh-relay` (as a container). Build only what
-nobody else has: live streaming, delta hints, manifests and packing, the session layer, and the clients.
+Reuse those crates. Use the `iroh-blobs` protocol unchanged for static content. Everything Sluice adds
+lives on its own ALPN, `sluice/1`.
 
-Adopt the `iroh-blobs` protocol unchanged for static content. Our extensions live on ALPN `sluice/1`.
+Build only what does not exist: live transfer, delta hints, manifests and packing, the parallel data
+path, the session layer, and the clients.
+
+Rejected: rust-libp2p. Its hole punching measured 70% success across 4.4M attempts
+([IMC '26](https://arxiv.org/abs/2510.27500)), no better than iroh, and it has no verified-streaming
+store.
 
 ## Consequences
 
-- The code we own is the code nobody else wrote.
-- `sendme` and DashBeam can fetch our static tickets, a compatibility win we did not pay for.
-- Six dependencies now come from one founder-backed company. Mitigations in `plan.md` section 2.2:
-  permissive licenses, wire stability at iroh 1.0, small crates vendorable in days, and a fork plan for
-  the one expensive crate.
-- `iroh-blobs` is pre-1.0 and may break its ALPN once more. Our ticket envelope contains the blast
-  radius, and the interop matrix catches drift.
+- `sendme` and DashBeam can fetch Sluice's static tickets.
+- Six dependencies come from one company, n0. Everything is permissively licensed, iroh's wire is
+  stable since 1.0, and the small crates can be vendored in days. Forking `iroh-blobs` would take about
+  a month.
+- `iroh-blobs` is pre-1.0 and may change its protocol again. Our ticket envelope turns that into a
+  version bump instead of broken tickets, and the interop matrix catches it.
+- `noq` has no published throughput numbers. ADR 0010 measures it before anything depends on it.
+- Revisit if n0 stops maintaining `iroh-blobs`, or if M0 shows the stack cannot reach the targets even
+  with ADR 0016.

@@ -1,13 +1,16 @@
 # sluice-cli
 
-**Owns:** the `sluice` binary. Subcommands, human output, `--json` output, shell completions, man pages,
-progress rendering, and `sluice mcp` (stdio MCP server via `rmcp`).
+**Owns:** the `sluice` binary: subcommands, human output, `--json` output, shell completions, man
+pages, progress display, `sluice doctor`, and `sluice mcp` (an MCP server over stdio, using `rmcp`).
 
-**Must never:** open the store when a daemon holds the lock. Detect the lock and delegate over the
-control socket instead. Never print a ticket to a log, and never colorize when `NO_COLOR` is set.
+**Must never:**
 
-**Note:** cold start budget is 30 ms. Do no work before it is needed: no config parse, no store open, no
-network probe on a command that does not require one.
+- open the store while a daemon holds its lock. It detects the lock and sends the request over the
+  control socket instead.
+- print a ticket to a log
+- use colour when `NO_COLOR` is set
 
-**Tests:** `insta` snapshots for output, `hyperfine` for the cold-start budget, exit-code tests for
-scripting.
+**Notes:** the cold start budget is 30 ms. A command does no config parsing, store opening or network
+probing unless it needs them. Every transfer line shows whether it is direct or relayed.
+
+**Tests:** `insta` snapshots of output, `hyperfine` for cold start, and exit-code tests for scripts.
