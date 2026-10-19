@@ -74,3 +74,50 @@ fn serve_prints_one_line_per_closed_connection_with_bbr_state() {
 fn serve_leaves_bbr_fields_null_under_cubic() {
     serve_lines("cubic");
 }
+
+/// Entries in a `controller_series` array, checked for the shape both ends promise.
+fn series(entry: &Value) -> Vec<Value> {
+    let samples = entry["controller_series"].as_array().expect("an array");
+    let mut last = 0.0;
+    for sample in samples {
+        let at = sample["elapsed_s"].as_f64().expect("elapsed_s");
+        assert!(at > last, "elapsed_s does not increase: {samples:?}");
+        last = at;
+        // BBR's state is read from the same controller as the window, so they are null together.
+        assert_eq!(
+            sample["cwnd_bytes"].is_u64(),
+            sample["bbr_state"].is_string(),
+            "{sample}"
+        );
+    }
+    assert!(
+        samples.iter().any(|s| s["cwnd_bytes"].is_u64()),
+        "no sample found a path: {samples:?}"
+    );
+    samples.clone()
+}
+
+#[test]
+fn both_ends_sample_the_controller_once_a_second() {
+    // 512 MiB, because the first sample comes a second in and loopback moves 8 MiB in far less.
+    let (_server, mut stdout) = spawn_server("raw", "bbr3", "512MiB", &[]);
+    within_deadline(move || {
+        let ticket = read_ticket(&mut stdout);
+        let fetched = probe()
+            .args(["fetch", &ticket, "--mode", "raw", "--congestion", "bbr3"])
+            .output()
+            .expect("run probe fetch");
+        assert!(fetched.status.success(), "fetch failed");
+        let result: Value = serde_json::from_slice(&fetched.stdout).expect("fetch prints JSON");
+
+        let received = series(&result["connection_stats"][0]);
+        let progress = result["progress"].as_array().expect("progress");
+        assert!(!received.is_empty());
+        // One tick feeds both, so the two arrays are the same length.
+        assert_eq!(received.len(), progress.len());
+
+        let line = read_line(&mut stdout);
+        let sent = series(&serde_json::from_str(&line).expect("serve prints JSON"));
+        assert!(!sent.is_empty());
+    });
+}

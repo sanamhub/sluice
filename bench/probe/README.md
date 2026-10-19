@@ -39,7 +39,9 @@ puts 4 connections on 4 separate endpoints on both sides, and another serves 8 M
 and checks that the store holds no copy of the data file. A last test asks for 64 GiB with
 `--timeout 2` and checks the timeout line and the exit status. `tests/sender.rs` runs 2 connections
 under `bbr3` and under `cubic` and checks that `serve` prints a `connection_closed` line for each,
-with the key of the matching `fetch` entry.
+with the key of the matching `fetch` entry. One more case moves 512 MiB and checks that both ends
+return a `controller_series` with increasing `elapsed_s`, and that the `fetch` series is as long as
+`progress`.
 
 ## Run
 
@@ -209,6 +211,32 @@ fields with no accessors, so for BBR the last row parses the `Debug` text. A uni
 `Bbr3` and fails if a `noq` upgrade renames a field. A field that is missing or does not parse is
 `null`, and `ssthresh_bytes` is `null` while `noq` reports `u64::MAX` for "not set".
 
-The controller fields are read once, when the connection closes. They describe the end of the
+The controller fields above are read once, when the connection closes. They describe the end of the
 transfer, where the connection has been idle for a moment, and not the middle of it. The counters
 (`congestion_events`, `lost_packets`, `sent_datagrams`) are totals over the whole connection.
+
+### Controller series
+
+To see the middle of a transfer, both ends also sample each connection's controller once a second
+and add a `controller_series` array to the connection entry (`fetch`) or the `connection_closed`
+line (`serve`). Each sample has `elapsed_s`, `cwnd_bytes`, `pacing_rate_bytes_s`, `bbr_state`,
+`bbr_max_bw_bytes_s` and `bbr_app_limited`, with the same meaning and the same `null` rules as in
+the table above. A transfer shorter than a second has an empty series.
+
+```
+"controller_series":[
+ {"elapsed_s":1.0,"cwnd_bytes":66988,"pacing_rate_bytes_s":333780186,"bbr_state":"Startup",
+  "bbr_max_bw_bytes_s":216543040.0,"bbr_app_limited":false},
+ {"elapsed_s":2.0,"cwnd_bytes":66988,"pacing_rate_bytes_s":333780186,"bbr_state":"ProbeBw(Cruise)",
+  "bbr_max_bw_bytes_s":337151703.0,"bbr_app_limited":true}]
+```
+
+- On `fetch` the samples are taken on the tick that appends to `progress`, so entry `i` of the
+  series pairs with `progress[i]` on every connection.
+- On `serve` the clock starts when the connection is accepted. It runs ahead of the receiver's
+  `progress` clock by the handshake and the setup before the first request, so compare the two by
+  position and expect the offset to be small, not zero.
+- The sample reads the selected path, or the only open path. With several open and none selected
+  the sample is all `null`, because choosing one would be a guess.
+- Reading a BBR controller clones it and formats its state, which is the reason for one sample a
+  second and not more.

@@ -13,7 +13,10 @@ use iroh::endpoint::Connection;
 use iroh_blobs::{Hash, api::Store};
 use tokio::{task::JoinSet, time::MissedTickBehavior};
 
-use crate::{blobs, raw};
+use crate::{
+    blobs, raw,
+    stats::{self, Sample},
+};
 
 /// What each connection is asked for.
 pub enum Plan {
@@ -54,13 +57,15 @@ impl Counters {
 }
 
 /// Runs the transfers to the end and returns the payload bytes they report. Pushes the running
-/// total onto `progress` once per second. The interval is a clock: the counters are only read
-/// when it fires, and the tasks never wait for it.
+/// total onto `progress` once per second, and a controller reading of each connection onto its
+/// entry in `series` at the same tick. The interval is a clock: the counters are only read when
+/// it fires, and the tasks never wait for it.
 pub async fn run(
     conns: &[Connection],
     plan: Plan,
     counters: &Counters,
     progress: &mut Vec<u64>,
+    series: &mut [Vec<Sample>],
 ) -> Result<u64> {
     let mut tasks: JoinSet<Result<u64>> = JoinSet::new();
     match plan {
@@ -84,7 +89,8 @@ pub async fn run(
     }
 
     let second = Duration::from_secs(1);
-    let mut clock = tokio::time::interval_at(tokio::time::Instant::now() + second, second);
+    let origin = tokio::time::Instant::now();
+    let mut clock = tokio::time::interval_at(origin + second, second);
     // A late tick must not be followed by a burst, or the samples stop being one second apart.
     clock.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut total = 0;
@@ -94,7 +100,13 @@ pub async fn run(
                 Some(joined) => total += joined.context("transfer task panicked")??,
                 None => return Ok(total),
             },
-            _ = clock.tick() => progress.push(counters.total()),
+            _ = clock.tick() => {
+                progress.push(counters.total());
+                let at = origin.elapsed();
+                for (conn, samples) in conns.iter().zip(series.iter_mut()) {
+                    samples.push(stats::sample(conn, at));
+                }
+            }
         }
     }
 }

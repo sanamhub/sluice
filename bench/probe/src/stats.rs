@@ -1,6 +1,8 @@
 //! What `noq` counted on each connection, so a stalled run can be compared with a good one. Both
 //! ends build the same report, each from its own side of the connection.
 
+use std::time::Duration;
+
 use iroh::endpoint::Connection;
 use serde::Serialize;
 
@@ -40,6 +42,26 @@ pub struct PathReport {
     pub controller: Option<ControllerReport>,
 }
 
+/// One reading of a connection's controller, taken once a second while the transfer runs. The
+/// closing snapshot cannot show when a collapse started, and a series of these can.
+#[derive(Serialize)]
+pub struct Sample {
+    /// Seconds on the sampling clock, to the millisecond. In a `fetch` entry the clock is the one
+    /// `progress` uses, so entry `i` pairs with `progress[i]`. In a `serve` line it starts when the
+    /// connection is accepted, a little before the transfer.
+    pub elapsed_s: f64,
+    /// Congestion window of the selected path, in bytes. `null` while no path can be chosen.
+    pub cwnd_bytes: Option<u64>,
+    /// Pacing rate in bytes per second. `null` for controllers that do not pace.
+    pub pacing_rate_bytes_s: Option<u64>,
+    /// BBR's state. `null` for other controllers.
+    pub bbr_state: Option<String>,
+    /// BBR's bottleneck bandwidth estimate in bytes per second. `null` for other controllers.
+    pub bbr_max_bw_bytes_s: Option<f64>,
+    /// Whether BBR counts the sender as application-limited. `null` for other controllers.
+    pub bbr_app_limited: Option<bool>,
+}
+
 /// One connection: payload bytes counted by the probe, and what `noq` counted around them.
 #[derive(Serialize)]
 pub struct ConnReport {
@@ -63,10 +85,44 @@ pub struct ConnReport {
     pub lost_bytes: u64,
     /// The paths open now.
     pub paths: Vec<PathReport>,
+    /// This end's controller once a second during the transfer. Empty for a transfer shorter than
+    /// a second.
+    pub controller_series: Vec<Sample>,
 }
 
-/// Reads the counters of `conn`.
-pub fn report(conn: &Connection, received_bytes: Option<u64>) -> ConnReport {
+/// Reads `conn`'s controller on its selected path, or on its only open path. With several open and
+/// none selected there is no honest choice, so the reading is `null`.
+pub fn sample(conn: &Connection, elapsed: Duration) -> Sample {
+    let paths = conn.paths();
+    let in_use = paths
+        .iter()
+        .find(|p| p.is_selected())
+        .or_else(|| paths.iter().next().filter(|_| paths.len() == 1));
+    let controller = in_use
+        .as_ref()
+        .and_then(|p| conn.congestion_state(p.id()))
+        .map(|c| controller::read(c.as_ref()));
+    let (pacing, state, max_bw, app_limited) = match controller {
+        Some(c) => (
+            c.pacing_rate_bytes_s,
+            c.bbr_state,
+            c.bbr_max_bw_bytes_s,
+            c.bbr_app_limited,
+        ),
+        None => (None, None, None, None),
+    };
+    Sample {
+        elapsed_s: (elapsed.as_secs_f64() * 1000.0).round() / 1000.0,
+        cwnd_bytes: in_use.map(|p| p.stats().cwnd),
+        pacing_rate_bytes_s: pacing,
+        bbr_state: state,
+        bbr_max_bw_bytes_s: max_bw,
+        bbr_app_limited: app_limited,
+    }
+}
+
+/// Reads the counters of `conn`. `series` is what the caller sampled while the transfer ran.
+pub fn report(conn: &Connection, received_bytes: Option<u64>, series: Vec<Sample>) -> ConnReport {
     let total = conn.stats();
     let paths = conn
         .paths()
@@ -100,6 +156,7 @@ pub fn report(conn: &Connection, received_bytes: Option<u64>) -> ConnReport {
         lost_packets: total.lost_packets,
         lost_bytes: total.lost_bytes,
         paths,
+        controller_series: series,
     }
 }
 

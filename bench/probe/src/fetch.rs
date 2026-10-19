@@ -22,7 +22,7 @@ use crate::{
     cpu::{self, Cpu},
     data, net, raw,
     result::{Outcome, Output},
-    stats::{self, ConnReport},
+    stats::{self, ConnReport, Sample},
     ticket::Ticket,
     transfer::{self, Counters, Plan},
 };
@@ -135,12 +135,16 @@ async fn measure(
 
     let counters = Counters::new(conns.len());
     let mut progress = Vec::new();
+    let mut series: Vec<Vec<Sample>> = conns.iter().map(|_| Vec::new()).collect();
     let cpu_before = cpu::now();
     let (datagrams_before, gro_before) = socket_counters(endpoints);
     let started = Instant::now();
     let limit = Duration::from_secs(args.timeout);
-    let ran =
-        tokio::time::timeout(limit, transfer::run(&conns, plan, &counters, &mut progress)).await;
+    let ran = tokio::time::timeout(
+        limit,
+        transfer::run(&conns, plan, &counters, &mut progress, &mut series),
+    )
+    .await;
     let elapsed = started.elapsed();
     let cpu = cpu::now()
         .zip(cpu_before)
@@ -152,7 +156,8 @@ async fn measure(
     let connections: Vec<ConnReport> = conns
         .iter()
         .zip(&counted)
-        .map(|(conn, bytes)| stats::report(conn, Some(*bytes)))
+        .zip(series)
+        .map(|((conn, bytes), samples)| stats::report(conn, Some(*bytes), samples))
         .collect();
     let (outcome, received, path, rtt) = match ran {
         Ok(received) => {
