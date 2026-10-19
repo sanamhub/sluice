@@ -137,6 +137,10 @@ pub struct FetchArgs {
     /// Store directory for `--sink store`. Defaults to a temporary directory that is removed.
     #[arg(long)]
     pub dir: Option<PathBuf>,
+    /// Seconds the transfer may take, handshakes excluded. On expiry `fetch` prints what it
+    /// measured, with outcome `timeout`, and exits non-zero.
+    #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(u64).range(1..))]
+    pub timeout: u64,
 }
 
 /// Parses `1073741824`, `64KiB`, `8MiB` or `1GiB`.

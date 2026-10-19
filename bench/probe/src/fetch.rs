@@ -12,7 +12,7 @@ use iroh::{
     Endpoint, EndpointAddr,
     endpoint::{Connection, VarInt},
 };
-use iroh_blobs::{Hash, api::Store, store::fs::FsStore};
+use iroh_blobs::{Hash, store::fs::FsStore};
 use rustls::NamedGroup;
 use tokio::task::JoinSet;
 
@@ -21,29 +21,24 @@ use crate::{
     cli::{FetchArgs, Mode, Relay, Sink},
     cpu::{self, Cpu},
     data, net, raw,
-    result::Output,
+    result::{Outcome, Output},
+    stats::{self, ConnReport},
     ticket::Ticket,
+    transfer::{self, Counters, Plan},
 };
 
-/// What each connection is asked for.
-enum Plan {
-    Raw(Vec<u64>),
-    Blobs {
-        hash: Hash,
-        parts: Vec<(u64, u64)>,
-        store: Option<Store>,
-    },
-}
-
-/// What was observed between the first request and the last verified byte.
+/// What was observed between the first request and the last verified byte, or the timeout.
 struct Measured {
+    outcome: Outcome,
     received: u64,
     elapsed: Duration,
+    progress: Vec<u64>,
+    connections: Vec<ConnReport>,
     cpu: Option<Cpu>,
     datagrams: u64,
     gro_batches: u64,
-    path: &'static str,
-    rtt: Duration,
+    path: Option<&'static str>,
+    rtt: Option<Duration>,
     group: NamedGroup,
 }
 
@@ -122,34 +117,60 @@ async fn measure(
         },
     };
 
+    let counters = Counters::new(conns.len());
+    let mut progress = Vec::new();
     let cpu_before = cpu::now();
     let (datagrams_before, gro_before) = socket_counters(endpoint);
     let started = Instant::now();
-    let received = transfer(&conns, plan).await?;
+    let limit = Duration::from_secs(args.timeout);
+    let ran =
+        tokio::time::timeout(limit, transfer::run(&conns, plan, &counters, &mut progress)).await;
     let elapsed = started.elapsed();
     let cpu = cpu::now()
         .zip(cpu_before)
         .map(|(after, before)| after.since(before));
     let (datagrams_after, gro_after) = socket_counters(endpoint);
 
-    ensure!(
-        received == ticket.size,
-        "received {received} payload bytes but the ticket promised {}",
-        ticket.size
-    );
-    if let (Some(fs), Some(hash)) = (&fs_store, verified) {
-        let local = fs
-            .remote()
-            .local(hash)
-            .await
-            .map_err(|e| anyhow!("check store: {e}"))?;
-        ensure!(
-            local.is_complete(),
-            "the store does not hold the whole blob"
-        );
-    }
-
-    let (path, rtt) = path_summary(&conns)?;
+    // Read before anything closes. A stalled run is only worth having with these in it.
+    let counted = counters.per_connection();
+    let connections: Vec<ConnReport> = conns
+        .iter()
+        .zip(&counted)
+        .map(|(conn, bytes)| stats::report(conn, *bytes))
+        .collect();
+    let (outcome, received, path, rtt) = match ran {
+        Ok(received) => {
+            let received = received?;
+            ensure!(
+                received == ticket.size,
+                "received {received} payload bytes but the ticket promised {}",
+                ticket.size
+            );
+            if let (Some(fs), Some(hash)) = (&fs_store, verified) {
+                let local = fs
+                    .remote()
+                    .local(hash)
+                    .await
+                    .map_err(|e| anyhow!("check store: {e}"))?;
+                ensure!(
+                    local.is_complete(),
+                    "the store does not hold the whole blob"
+                );
+            }
+            let (path, rtt) = path_summary(&conns)?;
+            (Outcome::Ok, received, Some(path), Some(rtt))
+        }
+        // The path is a bonus on a timeout: with several open and none selected it stays unknown.
+        Err(_) => {
+            let summary = path_summary(&conns).ok();
+            (
+                Outcome::Timeout,
+                counted.iter().sum(),
+                summary.map(|(path, _)| path),
+                summary.map(|(_, rtt)| rtt),
+            )
+        }
+    };
     for conn in &conns {
         conn.close(VarInt::from_u32(0), b"done");
     }
@@ -161,8 +182,11 @@ async fn measure(
     drop(scratch);
 
     Ok(Measured {
+        outcome,
         received,
         elapsed,
+        progress,
+        connections,
         cpu,
         datagrams: datagrams_after - datagrams_before,
         gro_batches: gro_after - gro_before,
@@ -175,6 +199,7 @@ async fn measure(
 fn output(args: &FetchArgs, ticket: &Ticket, verified: Option<Hash>, m: Measured) -> Output {
     let seconds = m.elapsed.as_secs_f64();
     Output {
+        outcome: m.outcome,
         mode: ticket.mode,
         size_bytes: ticket.size,
         received_bytes: m.received,
@@ -187,9 +212,11 @@ fn output(args: &FetchArgs, ticket: &Ticket, verified: Option<Hash>, m: Measured
             Relay::Url(url) => url.to_string(),
         },
         elapsed_s: seconds,
-        throughput_gbit_s: ticket.size as f64 * 8.0 / 1e9 / seconds,
+        throughput_gbit_s: m.received as f64 * 8.0 / 1e9 / seconds,
+        progress: m.progress,
+        connection_stats: m.connections,
         path: m.path,
-        rtt_ms: Some(m.rtt.as_secs_f64() * 1000.0),
+        rtt_ms: m.rtt.map(|rtt| rtt.as_secs_f64() * 1000.0),
         cpu_user_s: m.cpu.map(|c| c.user_s),
         cpu_sys_s: m.cpu.map(|c| c.sys_s),
         key_exchange_group: format!("{:?}", m.group),
@@ -240,30 +267,6 @@ async fn connect_all(
         conns.push(conn);
     }
     Ok(conns)
-}
-
-async fn transfer(conns: &[Connection], plan: Plan) -> Result<u64> {
-    let mut tasks: JoinSet<Result<u64>> = JoinSet::new();
-    match plan {
-        Plan::Raw(lens) => {
-            for (conn, len) in conns.iter().cloned().zip(lens) {
-                tasks.spawn(async move { raw::receive(&conn, len).await });
-            }
-        }
-        Plan::Blobs { hash, parts, store } => {
-            for (conn, part) in conns.iter().cloned().zip(parts) {
-                match &store {
-                    None => tasks.spawn(blobs::fetch_discard(conn, hash, part)),
-                    Some(store) => tasks.spawn(blobs::fetch_store(store.clone(), conn, hash, part)),
-                };
-            }
-        }
-    }
-    let mut total = 0;
-    while let Some(joined) = tasks.join_next().await {
-        total += joined.context("transfer task panicked")??;
-    }
-    Ok(total)
 }
 
 /// `relay` if any connection's selected path goes through a relay. The RTT is the first

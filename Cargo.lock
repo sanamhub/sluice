@@ -3334,6 +3334,7 @@ dependencies = [
  "clap",
  "iroh",
  "iroh-blobs",
+ "n0-future",
  "nix",
  "noq",
  "rustls",

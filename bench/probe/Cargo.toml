@@ -17,6 +17,7 @@ blake3.workspace = true
 clap.workspace = true
 iroh.workspace = true
 iroh-blobs.workspace = true
+n0-future.workspace = true
 noq.workspace = true
 rustls.workspace = true
 serde.workspace = true

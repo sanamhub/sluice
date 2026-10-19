@@ -1,6 +1,8 @@
 //! Raw mode: bytes over QUIC streams with no blobs protocol and no hashing, to separate the cost
 //! of QUIC from the cost of verification.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use anyhow::{Context, Result};
 use iroh::{
     endpoint::Connection,
@@ -53,8 +55,8 @@ impl ProtocolHandler for RawHandler {
     }
 }
 
-/// Asks for `len` bytes on this connection and counts what arrives.
-pub async fn receive(conn: &Connection, len: u64) -> Result<u64> {
+/// Asks for `len` bytes on this connection and counts what arrives, into `counter` as it goes.
+pub async fn receive(conn: &Connection, len: u64, counter: &AtomicU64) -> Result<u64> {
     let mut request = conn.open_uni().await.context("open request stream")?;
     request
         .write_all(&len.to_le_bytes())
@@ -66,6 +68,7 @@ pub async fn receive(conn: &Connection, len: u64) -> Result<u64> {
     let mut total = 0u64;
     while let Some(chunk) = data.read_chunk(usize::MAX).await.context("read data")? {
         total += chunk.len() as u64;
+        counter.store(total, Ordering::Relaxed);
     }
     Ok(total)
 }

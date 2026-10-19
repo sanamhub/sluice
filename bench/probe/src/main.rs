@@ -10,13 +10,18 @@ mod net;
 mod raw;
 mod result;
 mod serve;
+mod stats;
 mod ticket;
+mod transfer;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-use crate::cli::{Cli, Command};
+use crate::{
+    cli::{Cli, Command},
+    result::Outcome,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -30,7 +35,15 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Serve(args) => serve::run(args).await,
         Command::Fetch(args) => {
-            println!("{}", fetch::run(args).await?.line()?);
+            let output = fetch::run(args).await?;
+            println!("{}", output.line()?);
+            if output.outcome == Outcome::Timeout {
+                bail!(
+                    "timed out with {} of {} bytes received",
+                    output.received_bytes,
+                    output.size_bytes
+                );
+            }
             Ok(())
         }
     }
