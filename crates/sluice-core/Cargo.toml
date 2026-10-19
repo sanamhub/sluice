@@ -1,0 +1,18 @@
+[package]
+name = "sluice-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+# A crate cannot inherit the workspace table and override one entry, so this repeats it with
+# unsafe_code at deny. This crate may need unsafe later, and forbid cannot be relaxed by `allow`.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

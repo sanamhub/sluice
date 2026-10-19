@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = ["crates/sluice-core", "crates/sluice-live", "crates/sluice-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "Apache-2.0 OR MIT"
+
+[workspace.dependencies]
+assert_cmd = "2"
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
