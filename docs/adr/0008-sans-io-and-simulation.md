@@ -1,8 +1,8 @@
 # 0008. Protocol crates do no IO, and concurrency is tested by simulation
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 
 ## Context
 

@@ -1,8 +1,8 @@
 # 0007. No io_uring in 1.0
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 
 ## Context
 

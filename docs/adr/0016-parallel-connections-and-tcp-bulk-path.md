@@ -1,8 +1,8 @@
 # 0016. Shard large transfers across connections, with a TCP bulk path for direct peers
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 **Relates to:** ADR 0010, ADR 0015
 
 ## Context

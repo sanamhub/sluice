@@ -1,8 +1,8 @@
 # 0010. Measure the transport before building on it
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 **Relates to:** ADR 0015, ADR 0016
 
 ## Context

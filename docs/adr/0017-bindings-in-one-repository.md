@@ -1,8 +1,8 @@
 # 0017. Bindings for every language, generated, in this repository
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 **Relates to:** ADR 0003
 
 ## Context

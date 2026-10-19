@@ -1,8 +1,8 @@
 # 0012. The TLS crypto provider is chosen explicitly
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 
 ## Context
 

@@ -1,8 +1,8 @@
 # 0005. Delta is a hint layer and never decides correctness
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 
 ## Context
 

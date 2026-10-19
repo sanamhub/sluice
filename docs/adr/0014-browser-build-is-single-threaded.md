@@ -1,8 +1,8 @@
 # 0014. The browser build hashes on one thread and needs no special headers
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 **Relates to:** ADR 0011
 
 ## Context

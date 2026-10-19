@@ -1,8 +1,8 @@
 # 0003. One binary, one control contract, and file bytes stay in Rust
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 
 ## Context
 

@@ -1,8 +1,8 @@
 # 0009. One Svelte 5 UI for the browser and the desktop
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 
 ## Context
 

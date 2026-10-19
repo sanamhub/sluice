@@ -1,8 +1,8 @@
 # 0004. Live content is a signed log of fixed-size segments
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 
 ## Context
 

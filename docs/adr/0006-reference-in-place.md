@@ -1,8 +1,8 @@
 # 0006. Reference files in place; the store holds trees, not data
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 
 ## Context
 

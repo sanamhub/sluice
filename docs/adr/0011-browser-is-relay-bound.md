@@ -1,8 +1,8 @@
 # 0011. The browser is always relayed, and relay mode is never chosen silently
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 
 ## Context
 

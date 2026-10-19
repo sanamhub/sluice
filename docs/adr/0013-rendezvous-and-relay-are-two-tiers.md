@@ -1,8 +1,8 @@
 # 0013. Rendezvous and relay ship as two separate images
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-19
-**Approved by:** pending
+**Approved by:** @sanamhub
 **Relates to:** ADR 0011
 
 ## Context
