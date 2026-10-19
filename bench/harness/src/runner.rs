@@ -65,11 +65,17 @@ pub async fn run(
         plan,
         failed: 0,
     };
+    if let Some(over) = &session.plan.size_override {
+        let mut line = serde_json::to_value(over)?;
+        line["kind"] = json!("size_override");
+        session.record(&line)?;
+    }
     let mut report = Report {
         label: label.to_string(),
         date: today(),
         hosts: vec![describe(&session.sender), describe(&session.receiver)],
         runs,
+        size_override: session.plan.size_override.clone(),
         scenarios: Vec::new(),
     };
     let shaping = Shaping::default();

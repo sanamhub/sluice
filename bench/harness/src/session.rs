@@ -5,21 +5,23 @@ use std::time::Duration;
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use crate::{host::Host, results::Results, tools::Tool};
+use crate::{host::Host, results::Results, size_override::SizeOverride, tools::Tool};
 
 /// What a run does besides the probe.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Plan {
     /// False for `bench smoke`, which uses the probe only and records the other tools as missing
     /// or skipped.
     pub ceilings_and_baseline: bool,
+    /// Set when `--size` replaced the committed sizes, so the results can say so.
+    pub size_override: Option<SizeOverride>,
 }
 
 /// Both hosts, what they have, and where the results go.
 pub struct Session {
     /// Runs `probe serve`.
     pub sender: Host,
-    /// Runs `probe fetch`, and is the one netem shapes.
+    /// Runs `probe fetch`.
     pub receiver: Host,
     /// What the sender has.
     pub sender_tools: Vec<Tool>,

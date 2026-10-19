@@ -13,6 +13,7 @@ mod results;
 mod runner;
 mod scenarios;
 mod session;
+mod size_override;
 mod smoke;
 mod stats;
 mod summary;
@@ -55,6 +56,9 @@ enum Command {
         /// Runs per configuration.
         #[arg(long, default_value_t = 5)]
         runs: u32,
+        /// Replaces every workload's size for this run, for example 20GiB. The summary says so.
+        #[arg(long)]
+        size: Option<String>,
         /// The scenarios file.
         #[arg(long, default_value = "bench/scenarios.toml")]
         scenarios: PathBuf,
@@ -94,6 +98,7 @@ async fn execute(cli: Cli) -> Result<bool> {
             label,
             scenario,
             runs,
+            size,
             scenarios,
             out_dir,
         } => {
@@ -110,9 +115,15 @@ async fn execute(cli: Cli) -> Result<bool> {
                     bail!("{} has no scenario {id}", scenarios.display());
                 }
             }
+            // Before the results directory exists, so a bad size leaves nothing behind.
+            let size_override = size
+                .as_deref()
+                .map(|size| size_override::apply(&mut all, size))
+                .transpose()?;
             let results = Results::create(&out_dir, &label)?;
             let plan = Plan {
                 ceilings_and_baseline: true,
+                size_override,
             };
             let finished = runner::run(&hosts, &all, results, &label, runs, plan).await?;
             println!("results: {}", finished.dir.display());

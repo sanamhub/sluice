@@ -65,6 +65,7 @@ pub async fn run(probe: Option<PathBuf>, out: Option<PathBuf>) -> Result<bool> {
     let scenarios = scenarios::parse(SCENARIO)?;
     let plan = Plan {
         ceilings_and_baseline: false,
+        size_override: None,
     };
     let finished = runner::run(&hosts, &scenarios, results, "smoke", RUNS, plan).await;
     let _ = std::fs::remove_dir_all(&data_dir);

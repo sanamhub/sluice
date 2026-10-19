@@ -4,6 +4,7 @@ use std::fmt::Write;
 
 use crate::{
     netem::Shown,
+    size_override::SizeOverride,
     stats::{is_slow, median, outliers, percent_of, spread, worst_dip},
 };
 
@@ -110,6 +111,8 @@ pub struct Report {
     pub hosts: Vec<String>,
     /// Runs per configuration.
     pub runs: u32,
+    /// Set when `--size` replaced the committed sizes.
+    pub size_override: Option<SizeOverride>,
     /// The scenarios, in file order.
     pub scenarios: Vec<ScenarioReport>,
 }
@@ -262,6 +265,13 @@ pub fn render(report: &Report) -> String {
         let _ = writeln!(out, "- {host}");
     }
     let _ = writeln!(out, "- Runs per configuration: {}", report.runs);
+    if let Some(over) = &report.size_override {
+        let _ = writeln!(
+            out,
+            "- Size overridden with `--size`: {}. These are not the committed sizes.",
+            over.describe()
+        );
+    }
     let _ = writeln!(
         out,
         "\nA run is slow if any whole second moved less than a tenth of the run's busiest second. \

@@ -1,4 +1,5 @@
 use super::*;
+use crate::size_override::Replaced;
 
 fn run(status: Status, gbit_s: f64, progress: &[u64]) -> RunResult {
     RunResult {
@@ -124,6 +125,7 @@ fn report(scenarios: Vec<ScenarioReport>) -> Report {
         date: "2026-10-19".to_string(),
         hosts: vec!["sender: local (linux)".to_string()],
         runs: 5,
+        size_override: None,
         scenarios,
     }
 }
@@ -141,6 +143,32 @@ fn the_summary_has_a_table_per_scenario() {
     assert!(text.contains("Worst dip is the lowest second of a run"));
     assert!(text.contains("- iperf3: missing on the receiver"));
     assert!(text.contains("Skipped: netem needs Linux"));
+}
+
+#[test]
+fn an_overridden_size_is_stated_with_what_it_replaced() {
+    let mut r = report(Vec::new());
+    assert!(!render(&r).contains("Size overridden"));
+    r.size_override = Some(SizeOverride {
+        size: "20GiB".to_string(),
+        replaced: vec![
+            Replaced {
+                scenario: "S1".to_string(),
+                workload: "one-file".to_string(),
+                was: "100GiB".to_string(),
+            },
+            Replaced {
+                scenario: "S3".to_string(),
+                workload: "one-file".to_string(),
+                was: "10GiB".to_string(),
+            },
+        ],
+    });
+    let text = render(&r);
+    assert!(text.contains(
+        "- Size overridden with `--size`: 20GiB instead of S1 one-file 100GiB, S3 one-file 10GiB. \
+         These are not the committed sizes."
+    ));
 }
 
 #[test]
