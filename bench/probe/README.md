@@ -208,7 +208,8 @@ connection:
   path the connection has used. `noq` does not count QUIC packets, so datagrams are the nearest it
   exposes.
 - `paths` lists the paths open at the end, each with its RTT, congestion window, congestion events,
-  losses, MTU and `controller`.
+  losses, MTU and `controller`. `paths_at_s` is the time it was read, which is earlier than the end
+  when the peer closed first. See [Paths read late](#paths-read-late).
 
 These statistics are the receiver's. QUIC declares a packet lost at the end that sent it, so
 `lost_packets` here counts the receiver's own packets, which are mostly acknowledgements, and
@@ -217,7 +218,8 @@ needs). The congestion state that limits a download lives on the sender, and `se
 
 After a timeout `received_bytes` is what arrived and `verified_hash` is the root the bytes would
 have been checked against. `path` is `relay` if a selected path is a relay and `direct` if none is,
-or if no open path is a relay. iroh marks a path selected a little after the first bytes flow, so a
+or if no open path is a relay, read from the same list as `paths`. iroh marks a path selected a
+little after the first bytes flow, so a
 short transfer on a host with two addresses can end with two paths open and none selected. Then
 `rtt_ms` is `null`, and so is `path` if one of the open paths is a relay. Otherwise `fetch`
 exits non-zero, without a result line, if the received byte count differs from `size_bytes`, if a blob
@@ -236,7 +238,8 @@ The line also has `cpu_user_s` and `cpu_sys_s`: the CPU time the `serve` process
 printed the ticket, read when that connection closed. The reading at the ticket is the zero point,
 so generating the data and hashing the blob are not in it. The process is shared, so with several
 connections the line of the last one to close holds the whole transfer. Both are `null` on Windows,
-as on `fetch`. The two full example lines above leave out the series and the CPU fields.
+as on `fetch`. The two full example lines above leave out `paths_at_s`, the series and the CPU
+fields.
 
 Join a `serve` line to its `fetch` entry on `key`. Both ends derive it from the TLS session
 (`export_keying_material`, 8 bytes in hex), so nothing extra crosses the wire, no two connections
@@ -306,3 +309,22 @@ the table above. A transfer shorter than a second has an empty series.
   the sample is all `null`, because choosing one would be a guess.
 - Reading a BBR controller clones it and formats its state, which is the reason for one sample a
   second and not more.
+
+### Paths read late
+
+`Connection::paths()` leaves out closed paths (iroh 1.3.0, `connection.rs:1171-1177`). When the peer
+closes first, the list is `[]` by the time this end reads it. Before this was handled, that gave
+`"paths":[]` in 3 of 40 full-suite loopback runs: 2 of 20 on Windows and 1 of 20 in WSL. So each end
+keeps the path list from its latest reading that had a path in it. It reads one as the transfer
+starts, and another with every controller sample.
+
+- If the list at report time has a path, `paths` is that list and `paths_at_s` is the report time:
+  `elapsed_s` of the result on `fetch`, and seconds since accept on `serve`.
+- If it is empty, `paths` is the kept list and `paths_at_s` is when that was read. Its RTT, window,
+  losses and datagram counts are up to a second old. For a transfer shorter than a second they are
+  from the start, so they sit near zero and no path may be marked `selected` yet.
+- If no reading ever had a path, `paths` is `[]` and `paths_at_s` is `null`. The probe does not make
+  one up.
+
+The connection-level counters (`sent_datagrams`, `received_datagrams`, `lost_packets`, `lost_bytes`)
+are read at close and are final, so this does not touch them.

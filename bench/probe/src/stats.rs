@@ -85,16 +85,53 @@ pub struct ConnReport {
     pub lost_packets: u64,
     /// Bytes this end sent that were declared lost, over all paths.
     pub lost_bytes: u64,
-    /// The paths open now.
+    /// The paths open when the report was built, or the last list this end read while any was open,
+    /// if the peer had closed them by then. See `paths_at_s`.
     pub paths: Vec<PathReport>,
+    /// Seconds, on the clock of `controller_series`, at which `paths` was read. It is the report
+    /// time for a live list and earlier for a kept one, whose counters are that much older. `null`
+    /// when `paths` is empty because no list with a path was ever read.
+    pub paths_at_s: Option<f64>,
     /// This end's controller once a second during the transfer. Empty for a transfer shorter than
     /// a second.
     pub controller_series: Vec<Sample>,
 }
 
+/// What the sampler of one connection collects: the controller series, and the latest path list
+/// that had a path in it.
+#[derive(Default)]
+pub struct Series {
+    samples: Vec<Sample>,
+    kept: Option<Kept>,
+}
+
+/// A path list and the time it was read, as a duration on the sampling clock.
+struct Kept {
+    at: Duration,
+    paths: Vec<PathReport>,
+}
+
+impl Series {
+    /// Adds a controller sample and keeps the path list. Called once a second.
+    pub fn tick(&mut self, conn: &Connection, at: Duration) {
+        self.samples.push(sample(conn, at));
+        self.keep_paths(conn, at);
+    }
+
+    /// Keeps the path list without adding a sample. Called as the transfer starts, because a
+    /// transfer under a second is closed by the peer before any tick, and its report would have
+    /// nothing to fall back on.
+    pub fn keep_paths(&mut self, conn: &Connection, at: Duration) {
+        let paths = read_paths(conn);
+        if !paths.is_empty() {
+            self.kept = Some(Kept { at, paths });
+        }
+    }
+}
+
 /// Reads `conn`'s controller on its selected path, or on its only open path. With several open and
 /// none selected there is no honest choice, so the reading is `null`.
-pub fn sample(conn: &Connection, elapsed: Duration) -> Sample {
+fn sample(conn: &Connection, elapsed: Duration) -> Sample {
     let paths = conn.paths();
     let in_use = paths
         .iter()
@@ -123,11 +160,33 @@ pub fn sample(conn: &Connection, elapsed: Duration) -> Sample {
     }
 }
 
-/// Reads the counters of `conn`. `series` is what the caller sampled while the transfer ran.
-pub fn report(conn: &Connection, received_bytes: Option<u64>, series: Vec<Sample>) -> ConnReport {
+/// Reads the counters of `conn`. `series` is what the caller sampled while the transfer ran, and
+/// `now` is the time of this call on the same clock.
+pub fn report(
+    conn: &Connection,
+    received_bytes: Option<u64>,
+    series: Series,
+    now: Duration,
+) -> ConnReport {
     let total = conn.stats();
-    let paths = conn
-        .paths()
+    let (paths, paths_at_s) = choose(read_paths(conn), now, series.kept);
+    ConnReport {
+        key: key(conn),
+        remote_id: conn.remote_id().to_string(),
+        received_bytes,
+        sent_datagrams: total.udp_tx.datagrams,
+        received_datagrams: total.udp_rx.datagrams,
+        lost_packets: total.lost_packets,
+        lost_bytes: total.lost_bytes,
+        paths,
+        paths_at_s,
+        controller_series: series.samples,
+    }
+}
+
+/// The open paths of `conn`, each read once.
+fn read_paths(conn: &Connection) -> Vec<PathReport> {
+    conn.paths()
         .iter()
         .map(|path| {
             let s = path.stats();
@@ -149,17 +208,23 @@ pub fn report(conn: &Connection, received_bytes: Option<u64>, series: Vec<Sample
                     .map(|c| controller::read(c.as_ref())),
             }
         })
-        .collect();
-    ConnReport {
-        key: key(conn),
-        remote_id: conn.remote_id().to_string(),
-        received_bytes,
-        sent_datagrams: total.udp_tx.datagrams,
-        received_datagrams: total.udp_rx.datagrams,
-        lost_packets: total.lost_packets,
-        lost_bytes: total.lost_bytes,
-        paths,
-        controller_series: series,
+        .collect()
+}
+
+/// The live list if it has a path, else the kept one, else none. `Connection::paths` leaves out
+/// closed paths (iroh 1.3.0 `connection.rs:1171-1177`), so once the peer has closed the connection
+/// the live list can be empty. `at` is when the live list was read.
+fn choose(
+    live: Vec<PathReport>,
+    at: Duration,
+    kept: Option<Kept>,
+) -> (Vec<PathReport>, Option<f64>) {
+    if !live.is_empty() {
+        return (live, Some(at.as_secs_f64()));
+    }
+    match kept {
+        Some(kept) => (kept.paths, Some(kept.at.as_secs_f64())),
+        None => (Vec::new(), None),
     }
 }
 
@@ -170,4 +235,57 @@ fn key(conn: &Connection) -> Option<String> {
     conn.export_keying_material(&mut bytes, KEY_LABEL, b"")
         .ok()?;
     Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn path(remote_addr: &str) -> PathReport {
+        PathReport {
+            selected: false,
+            relay: false,
+            remote_addr: remote_addr.to_string(),
+            rtt_ms: 0.0,
+            cwnd_bytes: 0,
+            congestion_events: 0,
+            spurious_congestion_events: 0,
+            lost_packets: 0,
+            lost_bytes: 0,
+            sent_datagrams: 0,
+            received_datagrams: 0,
+            mtu: 0,
+            controller: None,
+        }
+    }
+
+    fn kept(at_s: u64, remote_addr: &str) -> Option<Kept> {
+        Some(Kept {
+            at: Duration::from_secs(at_s),
+            paths: vec![path(remote_addr)],
+        })
+    }
+
+    #[test]
+    fn a_live_list_wins_and_is_stamped_with_the_report_time() {
+        let now = Duration::from_millis(4_250);
+        let (paths, at) = choose(vec![path("live")], now, kept(3, "kept"));
+        assert_eq!(paths[0].remote_addr, "live");
+        assert_eq!(at, Some(4.25));
+    }
+
+    #[test]
+    fn the_kept_list_stands_in_for_an_empty_live_one_with_its_own_time() {
+        let (paths, at) = choose(Vec::new(), Duration::from_secs(4), kept(3, "kept"));
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].remote_addr, "kept");
+        assert_eq!(at, Some(3.0));
+    }
+
+    #[test]
+    fn with_neither_there_are_no_paths_and_no_time() {
+        let (paths, at) = choose(Vec::new(), Duration::from_secs(4), None);
+        assert!(paths.is_empty());
+        assert_eq!(at, None);
+    }
 }

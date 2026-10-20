@@ -137,13 +137,14 @@ async fn report_on_close(conn: Connection, lines: Lines) {
     let mut clock = tokio::time::interval_at(origin + second, second);
     // Same rule as the receiver: a late tick must not be followed by a burst.
     clock.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut series = Vec::new();
+    let mut series = stats::Series::default();
+    series.keep_paths(&conn, Duration::ZERO);
     let closed = conn.closed();
     tokio::pin!(closed);
     let reason = loop {
         tokio::select! {
             reason = &mut closed => break reason,
-            _ = clock.tick() => series.push(stats::sample(&conn, origin.elapsed())),
+            _ = clock.tick() => series.tick(&conn, origin.elapsed()),
         }
     };
     let cpu = lines.cpu_since_ticket();
@@ -152,7 +153,7 @@ async fn report_on_close(conn: Connection, lines: Lines) {
         close_reason: reason.to_string(),
         cpu_user_s: cpu.map(|c| c.user_s),
         cpu_sys_s: cpu.map(|c| c.sys_s),
-        connection: stats::report(&conn, None, series),
+        connection: stats::report(&conn, None, series, origin.elapsed()),
     };
     match serde_json::to_string(&closed) {
         // A closed channel means `serve` is shutting down without waiting for the line.

@@ -13,10 +13,7 @@ use iroh::endpoint::Connection;
 use iroh_blobs::{Hash, api::Store};
 use tokio::{task::JoinSet, time::MissedTickBehavior};
 
-use crate::{
-    blobs, raw,
-    stats::{self, Sample},
-};
+use crate::{blobs, raw, stats::Series};
 
 /// What each connection is asked for.
 pub enum Plan {
@@ -66,7 +63,7 @@ pub async fn run(
     counters: &Counters,
     live: bool,
     progress: &mut Vec<u64>,
-    series: &mut [Vec<Sample>],
+    series: &mut [Series],
 ) -> Result<u64> {
     let mut tasks: JoinSet<Result<u64>> = JoinSet::new();
     match plan {
@@ -94,6 +91,9 @@ pub async fn run(
     let mut clock = tokio::time::interval_at(origin + second, second);
     // A late tick must not be followed by a burst, or the samples stop being one second apart.
     clock.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    for (conn, series) in conns.iter().zip(series.iter_mut()) {
+        series.keep_paths(conn, Duration::ZERO);
+    }
     let mut total = 0;
     loop {
         tokio::select! {
@@ -109,8 +109,8 @@ pub async fn run(
                     println!("{}", progress_line(progress.len() as u64, bytes));
                 }
                 let at = origin.elapsed();
-                for (conn, samples) in conns.iter().zip(series.iter_mut()) {
-                    samples.push(stats::sample(conn, at));
+                for (conn, series) in conns.iter().zip(series.iter_mut()) {
+                    series.tick(conn, at);
                 }
             }
         }

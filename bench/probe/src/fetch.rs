@@ -8,10 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, ensure};
-use iroh::{
-    Endpoint,
-    endpoint::{Connection, VarInt},
-};
+use iroh::{Endpoint, endpoint::VarInt};
 use iroh_blobs::{Hash, store::fs::FsStore};
 use rustls::NamedGroup;
 
@@ -24,7 +21,7 @@ use crate::{
     net, raw,
     rendezvous::{self, Discovery},
     result::{Outcome, Output},
-    stats::{self, ConnReport, Sample},
+    stats::{self, ConnReport, Series},
     ticket::Ticket,
     transfer::{self, Counters, Plan},
 };
@@ -42,7 +39,7 @@ struct Measured {
     datagrams: u64,
     gro_batches: u64,
     path: Option<&'static str>,
-    rtt: Option<Duration>,
+    rtt_ms: Option<f64>,
     group: NamedGroup,
 }
 
@@ -166,7 +163,7 @@ async fn measure(
 
     let counters = Counters::new(conns.len());
     let mut progress = Vec::new();
-    let mut series: Vec<Vec<Sample>> = conns.iter().map(|_| Vec::new()).collect();
+    let mut series: Vec<Series> = conns.iter().map(|_| Series::default()).collect();
     let cpu_before = cpu::now();
     let (datagrams_before, gro_before) = socket_counters(endpoints);
     let started = Instant::now();
@@ -195,9 +192,11 @@ async fn measure(
         .iter()
         .zip(&counted)
         .zip(series)
-        .map(|((conn, bytes), samples)| stats::report(conn, Some(*bytes), samples))
+        .map(|((conn, bytes), samples)| stats::report(conn, Some(*bytes), samples, elapsed))
         .collect();
-    let (outcome, received, path, rtt) = match ran {
+    // From the reported paths, so `path` and `paths` cannot disagree when the peer closed first.
+    let (path, rtt_ms) = path_summary(&connections);
+    let (outcome, received) = match ran {
         Ok(received) => {
             let received = received?;
             ensure!(
@@ -216,13 +215,9 @@ async fn measure(
                     "the store does not hold the whole blob"
                 );
             }
-            let (path, rtt) = path_summary(&conns);
-            (Outcome::Ok, received, path, rtt)
+            (Outcome::Ok, received)
         }
-        Err(_) => {
-            let (path, rtt) = path_summary(&conns);
-            (Outcome::Timeout, counted.iter().sum(), path, rtt)
-        }
+        Err(_) => (Outcome::Timeout, counted.iter().sum()),
     };
     for conn in &conns {
         conn.close(VarInt::from_u32(0), b"done");
@@ -245,7 +240,7 @@ async fn measure(
         datagrams: datagrams_after - datagrams_before,
         gro_batches: gro_after - gro_before,
         path,
-        rtt,
+        rtt_ms,
         group,
     })
 }
@@ -284,7 +279,7 @@ fn output(
         progress: m.progress,
         connection_stats: m.connections,
         path: m.path,
-        rtt_ms: m.rtt.map(|rtt| rtt.as_secs_f64() * 1000.0),
+        rtt_ms: m.rtt_ms,
         cpu_user_s: m.cpu.map(|c| c.user_s),
         cpu_sys_s: m.cpu.map(|c| c.sys_s),
         key_exchange_group: Some(format!("{:?}", m.group)),
@@ -322,17 +317,17 @@ fn expected_root(ticket: &Ticket) -> Result<Hash> {
 /// paths open and none selected, as it does on a host with two addresses. A connection with exactly
 /// one open path has nowhere else to send, so that path counts. The RTT is the first known
 /// connection's, `None` if no path is known.
-fn path_summary(conns: &[Connection]) -> (Option<&'static str>, Option<Duration>) {
+fn path_summary(conns: &[ConnReport]) -> (Option<&'static str>, Option<f64>) {
     let (mut relay_in_use, mut relay_open, mut all_known) = (false, false, true);
     let mut first_rtt = None;
     for conn in conns {
-        let paths = conn.paths();
-        relay_open |= paths.iter().any(|p| p.is_relay());
-        let selected = paths.iter().find(|p| p.is_selected());
-        match selected.or_else(|| paths.iter().next().filter(|_| paths.len() == 1)) {
+        let paths = &conn.paths;
+        relay_open |= paths.iter().any(|p| p.relay);
+        let selected = paths.iter().find(|p| p.selected);
+        match selected.or_else(|| paths.first().filter(|_| paths.len() == 1)) {
             Some(in_use) => {
-                relay_in_use |= in_use.is_relay();
-                first_rtt.get_or_insert(in_use.rtt());
+                relay_in_use |= in_use.relay;
+                first_rtt.get_or_insert(in_use.rtt_ms);
             }
             None => all_known = false,
         }

@@ -109,6 +109,14 @@ fn check(result: &Value, case: &Case) {
     assert_eq!(result["path"], "direct");
     assert!(result["progress"].is_array());
     check_connection_stats(result, connections);
+    let elapsed = result["elapsed_s"].as_f64().expect("elapsed_s");
+    for conn in result["connection_stats"].as_array().expect("array") {
+        let read_at = conn["paths_at_s"].as_f64();
+        assert!(
+            read_at.is_some_and(|t| (0.0..=elapsed).contains(&t)),
+            "{conn}"
+        );
+    }
     assert!(result["elapsed_s"].as_f64().is_some_and(|s| s > 0.0));
     assert!(
         result["throughput_gbit_s"]
