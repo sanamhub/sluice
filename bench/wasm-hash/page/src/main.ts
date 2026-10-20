@@ -1,6 +1,7 @@
 import "./style.css";
 import { measure } from "./measure";
 import { readParams } from "./params";
+import { MIB } from "./protocol";
 import { copyJson, downloadJson, renderEnvironment, renderRuns, renderTable } from "./render";
 
 function element<T extends HTMLElement>(id: string): T {
@@ -21,21 +22,27 @@ function main(): void {
   const failure = element("error");
   const output = element("output");
   const json = element<HTMLTextAreaElement>("json");
+  const picker = element<HTMLInputElement>("disk-file");
   const params = readParams(location.search);
 
   element("plan").textContent =
     `Runs: 1 warm-up that is not counted, then ${params.runs} that are. ` +
     `The two builds alternate run by run, and swap who goes first every round. ` +
     `In memory and copied in hash ${params.memBytes / 1048576} MiB, ` +
-    `from a file hashes ${params.fileBytes / 1048576} MiB.`;
+    `the memory-backed Blob hashes ${params.blobBytes / 1048576} MiB.`;
 
   async function start(): Promise<void> {
-    runButton.disabled = true;
+    const file = picker.files?.[0] ?? null;
     failure.textContent = "";
+    if (file !== null && file.size < MIB) {
+      failure.textContent = "Pick a file of at least 1 MiB. A smaller one hashes too fast to time.";
+      return;
+    }
+    runButton.disabled = true;
     output.hidden = true;
     setState("running");
     try {
-      const result = await measure(params, (text) => {
+      const result = await measure(params, file, (text) => {
         status.textContent = text;
       });
       const text = `${JSON.stringify(result, null, 2)}\n`;

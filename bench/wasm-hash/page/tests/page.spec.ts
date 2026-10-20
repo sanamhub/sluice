@@ -4,9 +4,9 @@ import type { CaseId, PageResult } from "../src/protocol";
 
 // The CI numbers are not results. Playwright's Chromium, Firefox and WebKit are test builds on a
 // shared runner, and Playwright's WebKit is not Safari. These tests check that the page works.
-const SMALL = "autorun=1&mem_mib=64&file_mib=64&runs=2";
+const SMALL = "autorun=1&mem_mib=64&blob_mib=64&runs=2";
 const MIB = 1024 * 1024;
-const CASES: CaseId[] = ["in_memory", "copied_in", "from_file"];
+const CASES: CaseId[] = ["in_memory", "copied_in", "memory_blob"];
 
 async function finished(page: Page): Promise<string> {
   await page.waitForFunction(() => ["done", "error"].includes(document.body.dataset.state ?? ""), {
@@ -112,6 +112,68 @@ test.describe("page (Playwright engines, WebKit here is not Safari)", () => {
     await page.goto(`/?${SMALL}`);
     expect(await finished(page)).toBe("done");
     expect(foreign).toEqual([]);
+  });
+
+  test("a picked file adds a disk case for both builds, with the first read marked", async ({
+    page,
+  }) => {
+    // 4 MiB of the pattern, so its root is the root of the in-memory case at 4 MiB.
+    const buffer = Buffer.alloc(4 * MIB);
+    for (let i = 0; i < buffer.length; i++) {
+      buffer[i] = i % 251;
+    }
+    await page.goto("/?mem_mib=4&blob_mib=4&runs=2");
+    await page.setInputFiles("#disk-file", {
+      name: "private-name.bin",
+      mimeType: "application/x-private-type",
+      buffer,
+    });
+    await page.click("#run");
+    expect(await finished(page), (await page.textContent("#error")) ?? "").toBe("done");
+
+    const text = await page.inputValue("#json");
+    // Only the size and the times are recorded.
+    expect(text).not.toContain("private-name");
+    expect(text).not.toContain("x-private-type");
+    expect(await page.textContent("body")).not.toContain("private-name");
+
+    const result: PageResult = JSON.parse(text);
+    for (const variant of result.variants) {
+      expect(variant.cases.map((c) => c.case)).toEqual([...CASES, "disk_file"]);
+    }
+    const disk = result.variants.flatMap((v) =>
+      (v.cases.find((c) => c.case === "disk_file")?.runs ?? []).map((r) => ({
+        ...r,
+        build: v.variant,
+      })),
+    );
+    disk.sort((a, b) => a.order - b.order);
+    expect(disk.map((r) => r.order)).toEqual(disk.map((_, i) => i + 1));
+    expect(disk.filter((r) => r.first_read)).toHaveLength(1);
+    expect(disk[0]?.first_read).toBe(true);
+    expect(disk[0]?.warmup).toBe(true);
+
+    const memory = result.variants[0]?.cases.find((c) => c.case === "in_memory");
+    for (const variant of result.variants) {
+      const c = variant.cases.find((x) => x.case === "disk_file");
+      expect(c?.bytes).toBe(4 * MIB);
+      expect(c?.error).toBeNull();
+      expect(c?.stats).not.toBeNull();
+    }
+    expect(new Set(disk.map((r) => r.root))).toEqual(new Set([memory?.runs[0]?.root]));
+    await expect(page.locator("#runs td", { hasText: "first read, from disk" })).toHaveCount(1);
+  });
+
+  test("a file under 1 MiB is refused before anything runs", async ({ page }) => {
+    await page.goto("/");
+    await page.setInputFiles("#disk-file", {
+      name: "a.bin",
+      mimeType: "x/y",
+      buffer: Buffer.alloc(10),
+    });
+    await page.click("#run");
+    await expect(page.locator("#error")).toContainText("1 MiB");
+    expect(await page.evaluate(() => document.body.dataset.state)).toBe("idle");
   });
 
   test("a bad query stops the page with the reason", async ({ page }) => {

@@ -118,19 +118,15 @@ function copiedIn(wasm: Wasm, requested: number): Subject | { error: string; fai
   };
 }
 
-function fromFile(wasm: Wasm, requested: number): Subject | { error: string; failed: number[] } {
-  const made = withHalving(requested, patternBlob);
-  if ("error" in made) {
-    return made;
-  }
-  const { value: blob, bytes } = made;
+/** Reads `source` through `stream()` in whatever chunks the browser delivers. */
+function streaming(wasm: Wasm, source: Blob, failed: number[]): Subject {
   return {
-    bytes,
-    failed: made.failed,
+    bytes: source.size,
+    failed,
     chunkBytes: null,
     async measure() {
       const hasher = new wasm.Hasher();
-      const reader = blob.stream().getReader();
+      const reader = source.stream().getReader();
       const start = performance.now();
       let chunks = 0;
       let next = await reader.read();
@@ -148,19 +144,35 @@ function fromFile(wasm: Wasm, requested: number): Subject | { error: string; fai
   };
 }
 
+function memoryBlob(wasm: Wasm, requested: number): Subject | { error: string; failed: number[] } {
+  const made = withHalving(requested, patternBlob);
+  return "error" in made ? made : streaming(wasm, made.value, made.failed);
+}
+
 /** What a case worker holds between requests. */
 interface Open {
   id: CaseId;
   wasm: Wasm;
   subject: Subject;
-  /** The root every run must give, computed apart from the timing. */
-  expected: string;
+  /** The root every run must give. Null for a picked file, whose root nothing knows in advance. */
+  expected: string | null;
 }
 
 let open: Open | null = null;
 
-function prepare(wasm: Wasm, id: CaseId, requested: number) {
-  return { in_memory: inMemory, copied_in: copiedIn, from_file: fromFile }[id](wasm, requested);
+function prepare(wasm: Wasm, id: CaseId, requested: number, file: File | null) {
+  switch (id) {
+    case "in_memory":
+      return inMemory(wasm, requested);
+    case "copied_in":
+      return copiedIn(wasm, requested);
+    case "memory_blob":
+      return memoryBlob(wasm, requested);
+    case "disk_file":
+      return file === null
+        ? { error: "no file was passed to the worker", failed: [] }
+        : streaming(wasm, file, []);
+  }
 }
 
 function prepared(subject: Subject | { error: string; failed: number[] }): JobReply {
@@ -183,12 +195,13 @@ function prepared(subject: Subject | { error: string; failed: number[] }): JobRe
 }
 
 /** Allocates the case's data and works out the root its runs must give. */
-function openCase(wasm: Wasm, id: CaseId, requested: number): JobReply {
+function openCase(wasm: Wasm, id: CaseId, requested: number, file: File | null): JobReply {
   open?.subject.dispose();
   open = null;
-  const subject = prepare(wasm, id, requested);
+  const subject = prepare(wasm, id, requested, file);
   if (!("error" in subject)) {
-    open = { id, wasm, subject, expected: referenceRoot(wasm, subject.bytes) };
+    const expected = id === "disk_file" ? null : referenceRoot(wasm, subject.bytes);
+    open = { id, wasm, subject, expected };
   }
   return prepared(subject);
 }
@@ -198,7 +211,7 @@ async function runOnce(): Promise<JobReply> {
     throw new Error("run asked of a worker that holds no data");
   }
   const timing = await open.subject.measure();
-  if (timing.root !== open.expected) {
+  if (open.expected !== null && timing.root !== open.expected) {
     throw new Error(`${open.id} hashed to ${timing.root}, expected ${open.expected}`);
   }
   return { type: "ran", ...timing };
@@ -238,12 +251,12 @@ async function handle(job: JobRequest): Promise<JobReply> {
     case "self_check":
       return { type: "checked", roots: selfCheck(await load(job.variant), job.variant) };
     case "open":
-      return openCase(await load(job.variant), job.case, job.requested);
+      return openCase(await load(job.variant), job.case, job.requested, job.file);
     case "resize": {
       if (open === null) {
         throw new Error("resize asked of a worker that holds no data");
       }
-      return openCase(open.wasm, open.id, job.bytes);
+      return openCase(open.wasm, open.id, job.bytes, null);
     }
     case "run":
       return runOnce();

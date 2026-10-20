@@ -24,7 +24,7 @@ export function readParams(search: string): Params {
   const query = new URLSearchParams(search);
   return {
     memBytes: mib(query, "mem_mib", 1024, MAX_MEM_MIB) * MIB,
-    fileBytes: mib(query, "file_mib", 256, MAX_MEM_MIB) * MIB,
+    blobBytes: mib(query, "blob_mib", 256, MAX_MEM_MIB) * MIB,
     runs: mib(query, "runs", 5, 100),
     autorun: query.get("autorun") === "1",
   };

@@ -18,11 +18,22 @@
       <p>
         Three cases per build. <strong>In memory</strong> hashes bytes already in WASM memory, which is
         the hash rate alone. <strong>Copied in</strong> feeds the same bytes from JavaScript in 1 MiB
-        chunks, so it also pays the copy into WASM memory. <strong>From a file</strong> reads a Blob
-        through <code>stream()</code>, as a dropped file would be. The <em>simd</em> build is the one
-        ADR 0014 names, and <em>scalar</em> shows what SIMD is worth.
+        chunks, so it also pays the copy into WASM memory. <strong>From a memory-backed Blob</strong>
+        reads a Blob that is held in memory through <code>stream()</code>, so it leaves out the disk read
+        that a dropped file pays. The <em>simd</em> build is the one ADR 0014 names, and <em>scalar</em>
+        shows what SIMD is worth.
       </p>
       <p id="plan"></p>
+      <p>
+        <label for="disk-file">Pick a file to hash from disk</label>
+        <input id="disk-file" type="file" />
+      </p>
+      <p>
+        Optional. It adds a fourth case, <strong>From a file on disk</strong>, for both builds. Only
+        its size and the times are recorded, never its name or type, and the file is not uploaded. The
+        first read comes from disk and later reads may come from the operating system's cache, so
+        the table says which run was the first read. The page does not try to clear the cache.
+      </p>
       <p>
         Keep this tab in the foreground. Nothing is sent anywhere: the page makes no request except
         for its own files.

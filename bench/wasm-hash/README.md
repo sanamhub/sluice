@@ -27,7 +27,16 @@ byte `i` being `i % 251`, so every root can be checked.
 |---|---|---|
 | In memory | 1 GiB, 1 MiB chunks | The hash rate alone, on bytes already in WASM memory |
 | Copied in | 1 GiB, 1 MiB chunks | The same, fed from a JavaScript `ArrayBuffer`, so it pays the copy into WASM memory that the engine pays |
-| From a file | 256 MiB | A `Blob` read through `stream()`, as a dropped file would be, in whatever chunks the stream gives |
+| Memory-backed Blob | 256 MiB | A `Blob` held in memory, read through `stream()` in whatever chunks the stream gives. It leaves out the disk read that a dropped file pays |
+| File from disk (optional) | the file's size | A file picked with the page's file input, read through `File.stream()`. See below |
+
+The fourth case is the one closest to a dropped file. Pick a file of at least 1 MiB, and it runs for both
+builds, interleaved like the others. The page records its size and the times, never its name or type,
+and nothing is uploaded. The first read of a file comes from disk and later reads may come from the
+operating system's cache. The first run of the case, which is simd's warm-up, is marked in the
+JSON as `first_read` and in the table of runs as "first read, from disk". The warm-up is not counted,
+so the cold read is not in the median. The page does not try to drop the cache: a page cannot, and
+how a system caches differs anyway. Compare the first read with the later ones in the table of runs.
 
 Each case runs one warm-up that is not counted, then five runs that are. The result gives the median
 and the range in MB/s and Gbit/s (MB is 10^6 bytes), and the median as a multiple of 500 Mbit/s and of
@@ -57,7 +66,7 @@ must be `false`. If it is `true`, the page warns that the numbers are not what A
 
 If a buffer cannot be allocated, the case retries at half the size, down to 64 MiB, and the result
 records the size used and the sizes that failed. A browser can also kill a tab for memory without
-throwing, and nothing can catch that. On a phone, start lower with `?mem_mib=256&file_mib=128`.
+throwing, and nothing can catch that. On a phone, start lower with `?mem_mib=256&blob_mib=128`.
 
 The page sends nothing anywhere. It loads nothing from a CDN.
 
@@ -95,7 +104,7 @@ Run, and keep the tab in the foreground.
 - **Plain HTTP.** The page is served over HTTP and needs nothing else: WebAssembly and Workers work in
   an insecure context. `navigator.clipboard` does not, so Copy JSON falls back to selecting the text
   and copying it, which can fail on some browsers. Download JSON does not need the clipboard.
-- **Query options.** `?mem_mib=` and `?file_mib=` set the sizes (defaults 1024 and 256, at most 4095),
+- **Query options.** `?mem_mib=` and `?blob_mib=` set the sizes (defaults 1024 and 256, at most 4095),
   `?runs=` sets the counted runs (default 5), and `?autorun=1` starts without the button.
 
 `npm run dev` serves unbuilt modules, so measure with the preview.
@@ -117,7 +126,9 @@ npx playwright test
 ```
 
 Each test runs the page headless at 64 MiB and checks that both builds finish with matching roots, that
-the result has the right shape, and that the page asks for nothing but its own files. Playwright's
+the result has the right shape, and that the page asks for nothing but its own files. One test picks a
+generated 4 MiB file with `setInputFiles` and checks the disk case: both builds, the interleaved order,
+one run marked as the first read, and no file name or type anywhere in the JSON. Playwright's
 WebKit is not Safari, and the project is named `webkit-not-safari` for that reason. The numbers from
 these runs, in CI or here, are not results. The only results are runs on the devices ADR 0014 names.
 

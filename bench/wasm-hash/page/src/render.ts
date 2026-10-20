@@ -3,7 +3,8 @@ import type { CaseId, PageResult, Stats } from "./protocol";
 const CASE_LABELS: Record<CaseId, string> = {
   in_memory: "In memory",
   copied_in: "Copied in",
-  from_file: "From a file",
+  memory_blob: "From a memory-backed Blob",
+  disk_file: "From a file on disk",
 };
 
 const MIB_LABEL = (bytes: number) => `${Number((bytes / 1048576).toFixed(1))} MiB`;
@@ -63,11 +64,19 @@ export function renderTable(result: PageResult): HTMLTableElement {
   return table;
 }
 
+/** Only the disk case has a first read to name. Its other reads may be served by the OS cache. */
+function runNote(id: CaseId, firstRead: boolean): string {
+  if (id !== "disk_file") {
+    return "";
+  }
+  return firstRead ? "first read, from disk" : "may come from the OS cache";
+}
+
 /** Every run of every case, in the order it happened, so thermal drift can be read off. */
 export function renderRuns(result: PageResult): HTMLTableElement {
   const table = document.createElement("table");
   const head = table.createTHead().insertRow();
-  for (const title of ["Case", "Order", "Round", "Build", "MB/s", "Gbit/s"]) {
+  for (const title of ["Case", "Order", "Round", "Build", "MB/s", "Gbit/s", "Note"]) {
     cell(head, title, true);
   }
   const body = table.createTBody();
@@ -84,6 +93,7 @@ export function renderRuns(result: PageResult): HTMLTableElement {
       cell(row, r.build);
       cell(row, r.mb_per_s.toFixed(0));
       cell(row, r.gbit_per_s.toFixed(2));
+      cell(row, runNote(id, r.first_read === true));
     }
   }
   return table;

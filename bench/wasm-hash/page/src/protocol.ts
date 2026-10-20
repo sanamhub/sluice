@@ -1,7 +1,7 @@
 /** The messages between the page and the worker, and the shape of the result object. */
 
 export type Variant = "simd" | "scalar";
-export type CaseId = "in_memory" | "copied_in" | "from_file";
+export type CaseId = "in_memory" | "copied_in" | "memory_blob" | "disk_file";
 
 export const MIB = 1024 * 1024;
 export const CHUNK_BYTES = MIB;
@@ -11,8 +11,8 @@ export const TARGETS_MBIT_PER_S = [500, 1000] as const;
 export interface Params {
   /** Bytes hashed by the in-memory and copied-in cases. */
   memBytes: number;
-  /** Bytes in the Blob of the from-file case. */
-  fileBytes: number;
+  /** Bytes in the Blob of the memory-backed case. The disk case takes its size from the file. */
+  blobBytes: number;
   /** Runs that count, after the warm-up. */
   runs: number;
   autorun: boolean;
@@ -45,9 +45,14 @@ export interface Run {
   seconds: number;
   mb_per_s: number;
   gbit_per_s: number;
-  /** Calls into the hasher: the 1 MiB chunks, or the chunks the Blob stream delivered. */
+  /** Calls into the hasher: the 1 MiB chunks, or the chunks the stream delivered. */
   chunks: number;
   root: string;
+  /**
+   * Set on the first run of the disk case, the first time the file is read. Later reads may come
+   * from the OS cache. Absent on every other run.
+   */
+  first_read?: true;
 }
 
 export interface CaseResult {
@@ -57,7 +62,7 @@ export interface CaseResult {
   bytes: number | null;
   /** Sizes whose allocation failed, largest first. */
   failed_sizes: number[];
-  /** Null for the from-file case, where the stream decides. */
+  /** Null for the two stream cases, where the browser decides. */
   chunk_bytes: number | null;
   runs: Run[];
   stats: Stats | null;
@@ -98,7 +103,7 @@ export interface PageResult {
  */
 export type JobRequest =
   | { kind: "self_check"; variant: Variant }
-  | { kind: "open"; variant: Variant; case: CaseId; requested: number }
+  | { kind: "open"; variant: Variant; case: CaseId; requested: number; file: File | null }
   | { kind: "resize"; bytes: number }
   | { kind: "run" };
 

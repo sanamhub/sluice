@@ -16,7 +16,7 @@ import {
 } from "./protocol";
 import { run, summarize } from "./stats";
 
-export const CASES: CaseId[] = ["in_memory", "copied_in", "from_file"];
+export const CASES: CaseId[] = ["in_memory", "copied_in", "memory_blob"];
 
 // A module with one v128 instruction, which `WebAssembly.validate` accepts only where SIMD exists.
 const SIMD_PROBE = new Uint8Array([
@@ -60,6 +60,7 @@ async function selfCheck(variant: Variant, status: Status): Promise<KnownRoot[]>
 async function openSessions(
   id: CaseId,
   requested: number,
+  file: File | null,
   variants: Variant[],
 ): Promise<Session[]> {
   const sessions: Session[] = variants.map((variant) => ({
@@ -71,7 +72,7 @@ async function openSessions(
   await Promise.all(
     sessions.map(async (s) => {
       s.prepared = await s.channel.ask(
-        { kind: "open", variant: s.variant, case: id, requested },
+        { kind: "open", variant: s.variant, case: id, requested, file },
         "prepared",
       );
     }),
@@ -124,7 +125,12 @@ async function runRounds(
       order++;
       status(`${id}: ${round === 0 ? "warm-up" : `round ${round} of ${rounds}`}, ${s.variant}`);
       const timing = await s.channel.ask({ kind: "run" }, "ran");
-      s.runs.push(run(timing, s.prepared.bytes ?? 0, round, order));
+      const finished = run(timing, s.prepared.bytes ?? 0, round, order);
+      // Whoever runs first reads the file cold. Everything after may come from the OS cache.
+      if (id === "disk_file" && order === 1) {
+        finished.first_read = true;
+      }
+      s.runs.push(finished);
     }
   }
 }
@@ -133,13 +139,19 @@ async function runCase(
   id: CaseId,
   variants: Variant[],
   params: Params,
+  file: File | null,
   status: Status,
 ): Promise<Map<Variant, CaseResult>> {
-  const requested = id === "from_file" ? params.fileBytes : params.memBytes;
+  const requested = {
+    in_memory: params.memBytes,
+    copied_in: params.memBytes,
+    memory_blob: params.blobBytes,
+    disk_file: file?.size ?? 0,
+  }[id];
   const results = new Map<Variant, CaseResult>();
   let sessions: Session[] = [];
   try {
-    sessions = await openSessions(id, requested, variants);
+    sessions = await openSessions(id, requested, file, variants);
     const failed = sessions.find((s) => s.prepared.bytes === null);
     if (failed !== undefined) {
       for (const s of sessions) {
@@ -172,7 +184,12 @@ async function runCase(
   }
 }
 
-export async function measure(params: Params, status: Status): Promise<PageResult> {
+/** `file` adds the disk case as a fourth. Its name and type are never read. */
+export async function measure(
+  params: Params,
+  file: File | null,
+  status: Status,
+): Promise<PageResult> {
   const startedAt = new Date().toISOString();
   const simd = simdSupported();
   const variants: Variant[] = simd ? ["simd", "scalar"] : ["scalar"];
@@ -180,8 +197,8 @@ export async function measure(params: Params, status: Status): Promise<PageResul
   for (const variant of variants) {
     results.push({ variant, self_check: await selfCheck(variant, status), cases: [] });
   }
-  for (const id of CASES) {
-    const byVariant = await runCase(id, variants, params, status);
+  for (const id of file === null ? CASES : [...CASES, "disk_file" as const]) {
+    const byVariant = await runCase(id, variants, params, file, status);
     for (const result of results) {
       const found = byVariant.get(result.variant);
       if (found !== undefined) {
