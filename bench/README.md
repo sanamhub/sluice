@@ -130,8 +130,8 @@ Each scenario, in order:
 S1 at 100 GiB takes hours across its 7 configurations. S3 and S6 are 10 GiB and 50 GiB. For a first
 pass, `--size 20GiB` replaces every workload's size for that run. The summary and `raw.jsonl` record
 the override and the sizes it replaced, so a result is never mistaken for the published scenario. The
-committed sizes stay as they are, and a size another unit would give (`20GB`) is refused before
-anything runs.
+committed sizes stay as they are. `--size` takes `KiB`, `MiB`, `GiB` or `TiB`, and refuses anything
+else, such as `20GB`, before anything runs.
 
 Every probe configuration is one row of the matrix: mode, congestion, window, connections, endpoints
 and, for `blobs`, the sink and store. The three rows the published numbers must show are

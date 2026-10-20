@@ -63,22 +63,22 @@ The ticket carries the mode, size, seed and addresses, so `fetch` needs none of 
 take `--congestion` and `--window`, because the sender's controller and the receiver's windows both
 limit throughput.
 
-| Option          | Values                          | Default                  | `serve`           | `fetch`                    |
-| --------------- | ------------------------------- | ------------------------ | ----------------- | -------------------------- |
-| `--mode`        | `raw`, `blobs`                  | `blobs`                  | yes               | yes, must match the ticket |
-| `--congestion`  | `bbr3`, `cubic`, `newreno`      | `bbr3`                   | yes               | yes                        |
-| `--window`      | `default`, `tuned`              | `default`                | yes               | yes                        |
-| `--relay`       | `disabled` or a relay URL       | `disabled`               | yes               | yes                        |
-| `--size`        | bytes, with `KiB`, `MiB`, `GiB` | `1GiB`                   | yes               | no                         |
-| `--seed`        | `u64`                           | `0`                      | yes               | no                         |
-| `--connections` | 1 to 16                         | `1`                      | no                | yes                        |
-| `--sink`        | `discard`, `store`              | `discard`                | no                | yes                        |
-| `--dir`         | directory                       | `fetch`: a temporary one | `--store fs` only | `--sink store` only        |
-| `--store`       | `mem`, `fs`                     | `mem`                    | yes               | no                         |
-| `--timeout`     | seconds, 1 or more              | `600`                    | no                | yes                        |
-| `--progress-lines` | flag                         | off                      | no                | yes                        |
-| `--endpoints`   | 1 to 16                         | `1`                      | yes               | no                         |
-| `--endpoints`   | `shared`, `separate`            | `shared`                 | no                | yes                        |
+| Option             | Values                          | Default                  | `serve`           | `fetch`                    |
+| ------------------ | ------------------------------- | ------------------------ | ----------------- | -------------------------- |
+| `--mode`           | `raw`, `blobs`                  | `blobs`                  | yes               | yes, must match the ticket |
+| `--congestion`     | `bbr3`, `cubic`, `newreno`      | `bbr3`                   | yes               | yes                        |
+| `--window`         | `default`, `tuned`              | `default`                | yes               | yes                        |
+| `--relay`          | `disabled` or a relay URL       | `disabled`               | yes               | yes                        |
+| `--size`           | bytes, with `KiB`, `MiB`, `GiB` | `1GiB`                   | yes               | no                         |
+| `--seed`           | `u64`                           | `0`                      | yes               | no                         |
+| `--connections`    | 1 to 16                         | `1`                      | no                | yes                        |
+| `--sink`           | `discard`, `store`              | `discard`                | no                | yes                        |
+| `--dir`            | directory                       | `fetch`: a temporary one | `--store fs` only | `--sink store` only        |
+| `--store`          | `mem`, `fs`                     | `mem`                    | yes               | no                         |
+| `--timeout`        | seconds, 1 or more              | `600`                    | no                | yes                        |
+| `--progress-lines` | flag                            | off                      | no                | yes                        |
+| `--endpoints`      | 1 to 16                         | `1`                      | yes               | no                         |
+| `--endpoints`      | `shared`, `separate`            | `shared`                 | no                | yes                        |
 
 `--store fs` is for transfers that do not fit in memory, such as the 100 GB file of scenario S1 in
 `docs/performance.md`. `serve` writes the generated data to `<dir>/data-<seed>-<size>.bin` once, in
