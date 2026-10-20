@@ -314,10 +314,11 @@ fn expected_root(ticket: &Ticket) -> Result<Hash> {
 
 /// `relay` if any connection's chosen path goes through a relay, and `direct` if none does. The
 /// chosen path is the one a sample reads (`sampling::in_use`): the selected one, the only one, or
-/// with several open and none selected, the busiest. iroh marks a path selected a little after the
-/// first bytes flow, and on a host with two addresses it can leave two open and none selected for a
-/// whole transfer. `None` only if a connection has no path in its list while another has a relay
-/// open. The RTT is the first connection's chosen path, `None` if no path is known.
+/// with several and none selected, the busiest, among those with a controller. iroh marks a path
+/// selected a little after the first bytes flow, and on a host with two addresses it can leave two
+/// open and none selected for a whole transfer. `None` only if a connection has no such path while
+/// another has a relay open. The RTT is the first connection's chosen path, `None` if no path is
+/// known.
 fn path_summary(conns: &[ConnReport]) -> (Option<&'static str>, Option<f64>) {
     let (mut relay_in_use, mut relay_open, mut all_known) = (false, false, true);
     let mut first_rtt = None;

@@ -100,8 +100,12 @@ pub fn log_paths(side: &str, entry: &Value) {
     if !samples.is_empty() {
         let count = |path: &str| samples.iter().filter(|s| s["path"] == path).count();
         let none = samples.iter().filter(|s| s["path"].is_null()).count();
+        let stale = samples
+            .iter()
+            .filter(|s| s["stale_paths"].as_u64().is_some_and(|n| n > 0))
+            .count();
         println!(
-            "SAMPLES side={side} selected={} only={} busiest={} none={none}",
+            "SAMPLES side={side} selected={} only={} busiest={} none={none} stale={stale}",
             count("selected"),
             count("only"),
             count("busiest"),

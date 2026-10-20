@@ -53,7 +53,9 @@ connection is direct. Two more cases check that a dial to a dead address is a `n
 a server that does not answer is waited for and recorded as empty. The `iroh-relay` server feature is a
 dev-dependency, so no probe binary carries it. With `PROBE_TEST_LOG_PATHS` set, the tests also print a
 `PATHS` line per connection with its `paths_source` and `paths_at_s`, and a `SAMPLES` line with how
-many of its samples chose each `path`. That is how a loop of the suite counts the fallbacks. Run it
+many of its samples chose each `path` and how many had a stale path. The stderr of each `fetch` run is
+printed as `STDERR side=fetch` lines, because the tests capture it, and a series in which every
+sample is stale prints a `STALE` line. That is how a loop of the suite counts the fallbacks. Run it
 with `--success-output immediate`, or nextest hides the lines of passing tests.
 
 ## Run
@@ -223,11 +225,11 @@ After a timeout `received_bytes` is what arrived and `verified_hash` is the root
 have been checked against. `path` is `relay` if any connection's chosen path is a relay and
 `direct` otherwise, and `rtt_ms` is the RTT of the first connection's chosen path. The chosen path
 is the one a sample reads, from the same list as `paths`: the one iroh marked selected, the only
-open path, or, with several open and none selected, the one with the most datagrams sent plus
-received, a tie going to the lower path id. iroh marks a path a little after the first bytes flow,
-and on a host with two addresses it can leave two open for the whole transfer, so both fields have
-a value whenever a path is open. They are `null` only if a connection's list has no path while
-another connection has a relay open. `fetch`
+path with a controller, or, with several and none selected, the one with the most datagrams sent
+plus received, a tie going to the lower path id. iroh marks a path a little after the first bytes
+flow, and on a host with two addresses it can leave two open for the whole transfer, so both fields
+have a value whenever a path with a controller is listed. They are `null` only if a connection's
+list has no such path while another connection has a relay open. `fetch`
 exits non-zero, without a result line, if the received byte count differs from `size_bytes`, if a blob
 does not verify against the root, or if any connection negotiated a key exchange group other than
 `X25519MLKEM768`.
@@ -294,37 +296,47 @@ transfer, where the connection has been idle for a moment, and not the middle of
 
 To see the middle of a transfer, both ends also sample each connection's controller once a second
 and add a `controller_series` array to the connection entry (`fetch`) or the `connection_closed`
-line (`serve`). Each sample has `elapsed_s`, `open_paths`, `path`, `cwnd_bytes`,
+line (`serve`). Each sample has `elapsed_s`, `open_paths`, `stale_paths`, `path`, `cwnd_bytes`,
 `pacing_rate_bytes_s`, `bbr_state`, `bbr_max_bw_bytes_s` and `bbr_app_limited`. The last five have the
 same meaning and the same `null` rules as in the table above. A transfer shorter than a second has
 an empty series.
 
 ```
 "controller_series":[
- {"elapsed_s":1.0,"open_paths":1,"path":"selected","cwnd_bytes":66988,
+ {"elapsed_s":1.0,"open_paths":1,"stale_paths":0,"path":"selected","cwnd_bytes":66988,
   "pacing_rate_bytes_s":333780186,"bbr_state":"Startup",
   "bbr_max_bw_bytes_s":216543040.0,"bbr_app_limited":false},
- {"elapsed_s":2.0,"open_paths":1,"path":"selected","cwnd_bytes":66988,
+ {"elapsed_s":2.0,"open_paths":1,"stale_paths":0,"path":"selected","cwnd_bytes":66988,
   "pacing_rate_bytes_s":333780186,"bbr_state":"ProbeBw(Cruise)",
   "bbr_max_bw_bytes_s":337151703.0,"bbr_app_limited":true}]
 ```
 
-- `open_paths` is how many paths were open when the sample was read, and `path` says which one the
-  sample read: `selected` for the path iroh marked, `only` for a single open path, `busiest` when
-  several are open and none is selected, or `null` when none is open. Together they explain a series
-  of `null` readings without a rerun.
+- `open_paths` is how many paths iroh listed when the sample was read. `stale_paths` is how many of
+  those had no controller in `noq`. `path` says which path the sample read: `selected` for the path
+  iroh marked, `only` for a single path with a controller, `busiest` when several have one and none is
+  selected, or `null` when none has. Together they explain a series of `null` readings without a
+  rerun.
 - On `fetch` the samples are taken on the tick that appends to `progress`, so entry `i` of the
   series pairs with `progress[i]` on every connection.
 - On `serve` the clock starts when the connection is accepted. It runs ahead of the receiver's
   `progress` clock by the handshake and the setup before the first request, so compare the two by
   position and expect the offset to be small, not zero.
-- A sample reads one path: the selected one, the only open one, or with several open and none
-  selected, the one that has moved the most UDP datagrams so far (sent plus received), a tie going
-  to the lower path id. iroh can hold two paths for a whole transfer without marking one, and a
-  sample that said nothing then would say nothing for the length of the run. The busiest path is
-  where the traffic is, but it is a stand-in, so `path` says `busiest` and not `selected`. A sample
-  is all `null` when no path is open, and also when the chosen path closed before `noq` could return
-  its controller, so the window never appears without the state it belongs to.
+- A sample reads one path, chosen among the listed paths that have a controller: the selected one,
+  the only one, or with several and none selected, the one that has moved the most UDP datagrams so
+  far (sent plus received), a tie going to the lower path id. iroh can hold two paths for a whole
+  transfer without marking one, and a sample that said nothing then would say nothing for the length
+  of the run. The busiest path is where the traffic is, but it is a stand-in, so `path` says
+  `busiest` and not `selected`. Each controller is read once and the sample takes the chosen one, so
+  the window never appears without the state it belongs to.
+- A path is stale when iroh lists it and `noq` holds no controller for it. A selected path that is
+  stale is skipped, and the sample reads another path that has a controller. When every listed path
+  is stale the sample is all `null` with `path` `null`, and `stale_paths` equals `open_paths`. That
+  is the probe telling the truth, not a probe fault: no path had a controller to read.
+- Stale paths come from iroh's list lagging `noq`'s. iroh removes a path only when it handles
+  `noq`'s abandoned event, and when it falls behind `noq`'s path event channel it skips events and
+  does not resync (iroh 1.3.0, `remote_state.rs:573` and `:600`). A skipped abandon leaves a dead
+  path listed. That reading is from the source, and no run has yet been tied to it. A path that
+  closed between the two reads looks the same for a moment, so a single stale sample is not a lag.
 - Reading a BBR controller clones it and formats its state, which is the reason for one sample a
   second and not more.
 

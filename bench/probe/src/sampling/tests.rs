@@ -5,6 +5,7 @@ use std::{sync::Arc, time::Instant};
 use noq::congestion::{Bbr3Config, ControllerFactory, CubicConfig};
 
 use super::*;
+use crate::controller::ControllerReport;
 
 fn path(remote_addr: &str) -> PathReport {
     PathReport {
@@ -78,16 +79,12 @@ fn the_newer_reading_is_kept_and_an_empty_one_is_ignored() {
 }
 
 #[test]
-fn a_sample_with_no_controller_is_null_apart_from_its_time_and_the_path_facts() {
-    let sample = reading(
-        Duration::from_millis(3_013),
-        2,
-        Some(Chosen::Selected),
-        None,
-    );
+fn a_sample_with_no_chosen_path_is_null_apart_from_its_time_and_the_path_counts() {
+    let sample = reading(Duration::from_millis(3_013), 2, 2, None);
     assert_eq!(sample.elapsed_s, 3.013);
     assert_eq!(sample.open_paths, 2);
-    assert_eq!(sample.path, Some(Chosen::Selected));
+    assert_eq!(sample.stale_paths, 2);
+    assert!(sample.path.is_none());
     assert!(sample.cwnd_bytes.is_none());
     assert!(sample.pacing_rate_bytes_s.is_none());
     assert!(sample.bbr_state.is_none());
@@ -101,9 +98,10 @@ fn a_sample_takes_the_window_and_the_state_from_one_controller() {
     let sample = reading(
         Duration::from_secs(1),
         1,
-        Some(Chosen::Only),
-        Some(bbr.as_ref()),
+        0,
+        Some((Chosen::Only, bbr.as_ref())),
     );
+    assert_eq!(sample.path, Some(Chosen::Only));
     assert_eq!(sample.cwnd_bytes, Some(bbr.window()));
     assert_eq!(sample.bbr_state.as_deref(), Some("Startup"));
 
@@ -111,8 +109,8 @@ fn a_sample_takes_the_window_and_the_state_from_one_controller() {
     let sample = reading(
         Duration::from_secs(1),
         1,
-        Some(Chosen::Only),
-        Some(cubic.as_ref()),
+        0,
+        Some((Chosen::Only, cubic.as_ref())),
     );
     assert_eq!(sample.cwnd_bytes, Some(cubic.window()));
     assert!(sample.bbr_state.is_none());
@@ -125,8 +123,18 @@ fn open(paths: &[(u32, bool, u64)]) -> Vec<Candidate> {
             id: PathId::from(id),
             selected,
             datagrams,
+            live: true,
         })
         .collect()
+}
+
+/// `paths` with the one that has `id` stripped of its controller.
+fn stale_at(mut paths: Vec<Candidate>, id: u32) -> Vec<Candidate> {
+    paths
+        .iter_mut()
+        .filter(|c| c.id == PathId::from(id))
+        .for_each(|c| c.live = false);
+    paths
 }
 
 #[test]
@@ -159,11 +167,60 @@ fn no_open_path_is_no_choice() {
 }
 
 #[test]
+fn a_stale_selected_path_falls_through_to_the_live_one() {
+    let paths = stale_at(open(&[(0, true, 900), (1, false, 10)]), 0);
+    assert_eq!(pick(&paths), Some((1, Chosen::Only)));
+}
+
+#[test]
+fn a_stale_path_is_not_the_busiest() {
+    let paths = stale_at(open(&[(0, false, 900), (1, false, 10), (2, false, 20)]), 0);
+    assert_eq!(pick(&paths), Some((2, Chosen::Busiest)));
+}
+
+#[test]
+fn a_live_selected_path_still_wins_beside_a_stale_one() {
+    let paths = stale_at(open(&[(0, false, 900), (1, true, 10)]), 0);
+    assert_eq!(pick(&paths), Some((1, Chosen::Selected)));
+}
+
+#[test]
+fn with_every_path_stale_there_is_no_choice() {
+    let paths = stale_at(stale_at(open(&[(0, true, 5), (1, false, 9)]), 0), 1);
+    assert_eq!(pick(&paths), None);
+}
+
+#[test]
+fn stale_paths_are_counted_and_live_ones_are_not() {
+    assert_eq!(stale(&open(&[(0, true, 1), (1, false, 1)])), 0);
+    let paths = stale_at(open(&[(0, true, 1), (1, false, 1), (2, false, 1)]), 1);
+    assert_eq!(stale(&paths), 1);
+    assert_eq!(stale(&open(&[])), 0);
+}
+
+#[test]
 fn the_report_summary_uses_the_same_choice() {
     let mut paths = vec![path("a"), path("b")];
     paths[0].sent_datagrams = 10;
     paths[1].received_datagrams = 20;
     paths[1].id = PathId::from(1u32);
+    for p in &mut paths {
+        p.controller = Some(controller_report());
+    }
     assert_eq!(in_use(&paths).map(|p| p.remote_addr.as_str()), Some("b"));
     assert!(in_use(&[]).is_none());
+}
+
+#[test]
+fn the_report_summary_skips_a_path_with_no_controller() {
+    let mut paths = vec![path("stale"), path("live")];
+    paths[0].selected = true;
+    paths[1].id = PathId::from(1u32);
+    paths[1].controller = Some(controller_report());
+    assert_eq!(in_use(&paths).map(|p| p.remote_addr.as_str()), Some("live"));
+}
+
+fn controller_report() -> ControllerReport {
+    let cubic = Arc::new(CubicConfig::default()).build(Instant::now(), 1452);
+    controller::read(cubic.as_ref())
 }

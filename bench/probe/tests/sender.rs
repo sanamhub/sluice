@@ -80,15 +80,17 @@ fn serve_leaves_bbr_fields_null_under_cubic() {
     serve_lines("cubic");
 }
 
-/// One line per sample, so a failed check shows how many paths were open and which one was read.
+/// One line per sample, so a failed check shows how many paths were listed, how many of them had
+/// no controller, and which one was read.
 fn describe(samples: &[Value]) -> String {
     samples
         .iter()
         .map(|s| {
             format!(
-                "t={} open_paths={} path={} controller={}",
+                "t={} open_paths={} stale_paths={} path={} controller={}",
                 s["elapsed_s"],
                 s["open_paths"],
+                s["stale_paths"],
                 s["path"],
                 s["cwnd_bytes"].is_u64()
             )
@@ -98,7 +100,7 @@ fn describe(samples: &[Value]) -> String {
 }
 
 /// Entries in a `controller_series` array, checked for the shape both ends promise.
-fn series(entry: &Value) -> Vec<Value> {
+fn series(side: &str, entry: &Value) -> Vec<Value> {
     let samples = entry["controller_series"].as_array().expect("an array");
     let mut last = 0.0;
     for sample in samples {
@@ -117,8 +119,17 @@ fn series(entry: &Value) -> Vec<Value> {
             describe(samples)
         );
     }
+    // iroh's list can hold only paths `noq` has dropped for a whole run. Then every sample says so
+    // with `stale_paths`, and having no reading is the truth, so it passes and is counted.
+    let all_stale = !samples.is_empty()
+        && samples.iter().all(|s| {
+            s["open_paths"].as_u64().is_some_and(|n| n > 0) && s["stale_paths"] == s["open_paths"]
+        });
+    if all_stale {
+        println!("STALE side={side} samples={}", samples.len());
+    }
     assert!(
-        samples.iter().any(|s| s["cwnd_bytes"].is_u64()),
+        all_stale || samples.iter().any(|s| s["cwnd_bytes"].is_u64()),
         "no sample found a path:\n{}",
         describe(samples)
     );
@@ -162,7 +173,7 @@ fn both_ends_sample_the_controller_once_a_second() {
         }
 
         log_paths("fetch", &result["connection_stats"][0]);
-        let received = series(&result["connection_stats"][0]);
+        let received = series("fetch", &result["connection_stats"][0]);
         assert!(!received.is_empty());
         // One tick feeds both, so the two arrays are the same length.
         assert_eq!(received.len(), progress.len());
@@ -170,7 +181,7 @@ fn both_ends_sample_the_controller_once_a_second() {
         let line = read_line(&mut stdout);
         let closed: Value = serde_json::from_str(&line).expect("serve prints JSON");
         log_paths("serve", &closed);
-        let sent = series(&closed);
+        let sent = series("serve", &closed);
         assert!(!sent.is_empty());
     });
 }

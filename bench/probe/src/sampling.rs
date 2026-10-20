@@ -20,15 +20,16 @@ pub struct Sample {
     /// `progress` uses, so entry `i` pairs with `progress[i]`. In a `serve` line it starts when the
     /// connection is accepted, a little before the transfer.
     pub elapsed_s: f64,
-    /// How many paths were open when the sample was read.
+    /// How many paths iroh listed when the sample was read.
     pub open_paths: usize,
-    /// Which path the sample read: `selected` for the one iroh marked, `only` for a single open
-    /// path, `busiest` when several are open and none is selected, or `null` when none is open.
-    /// The choice is recorded even if the path closed before its controller was read, which shows
-    /// as `null` fields below.
+    /// How many of those had no controller in `noq`. iroh's list can lag `noq`'s, and a path that
+    /// closed between the two reads looks the same.
+    pub stale_paths: usize,
+    /// Which path the sample read: `selected` for the one iroh marked, `only` for a single path
+    /// with a controller, `busiest` when several have one and none is selected, or `null` when
+    /// none has.
     pub path: Option<Chosen>,
-    /// Congestion window of that path, in bytes. `null` while no path can be chosen, and
-    /// when the path closed before its controller could be read.
+    /// Congestion window of that path, in bytes. `null` while `path` is.
     pub cwnd_bytes: Option<u64>,
     /// Pacing rate in bytes per second. `null` for controllers that do not pace.
     pub pacing_rate_bytes_s: Option<u64>,
@@ -97,9 +98,10 @@ impl Series {
 pub enum Chosen {
     /// iroh marked it selected.
     Selected,
-    /// It is the only open path.
+    /// It is the only path with a controller.
     Only,
-    /// Several paths are open and none is selected, so it is the one with the most datagrams.
+    /// Several paths have a controller and none is selected, so it is the one with the most
+    /// datagrams.
     Busiest,
 }
 
@@ -109,23 +111,33 @@ struct Candidate {
     selected: bool,
     /// Sent plus received over the path's life.
     datagrams: u64,
+    /// Whether `noq` holds a controller for the path. Without one there is nothing to read.
+    live: bool,
 }
 
-/// The path to read, as an index into `open`, and why it was chosen. iroh can hold two paths for a
-/// whole transfer without marking one, and a reading that is `null` then says nothing while data
-/// moves, so the path that has carried the most datagrams stands in. A tie goes to the lower path
-/// id, so the choice does not depend on the order of the list.
+/// How many of `open` have no controller.
+fn stale(open: &[Candidate]) -> usize {
+    open.iter().filter(|c| !c.live).count()
+}
+
+/// The path to read, as an index into `open`, and why it was chosen. Only paths with a controller
+/// count: iroh can keep listing a path `noq` has dropped, even as the selected one, and reading it
+/// gives nothing while the transfer runs on another. iroh can also hold two paths for a whole
+/// transfer without marking one, so the path that has carried the most datagrams stands in. A tie
+/// goes to the lower path id, so the choice does not depend on the order of the list.
 fn pick(open: &[Candidate]) -> Option<(usize, Chosen)> {
-    if let Some(i) = open.iter().position(|c| c.selected) {
+    let live: Vec<(usize, &Candidate)> = open.iter().enumerate().filter(|(_, c)| c.live).collect();
+    if let Some(&(i, _)) = live.iter().find(|(_, c)| c.selected) {
         return Some((i, Chosen::Selected));
     }
-    if open.len() == 1 {
-        return Some((0, Chosen::Only));
+    match live.as_slice() {
+        [] => None,
+        [(i, _)] => Some((*i, Chosen::Only)),
+        _ => live
+            .iter()
+            .max_by_key(|(_, c)| (c.datagrams, Reverse(c.id)))
+            .map(|&(i, _)| (i, Chosen::Busiest)),
     }
-    open.iter()
-        .enumerate()
-        .max_by_key(|(_, c)| (c.datagrams, Reverse(c.id)))
-        .map(|(i, _)| (i, Chosen::Busiest))
 }
 
 /// The path `pick` chooses among `paths`. `fetch` summarises with the same path a sample reads.
@@ -136,50 +148,54 @@ pub fn in_use(paths: &[PathReport]) -> Option<&PathReport> {
             id: p.id,
             selected: p.selected,
             datagrams: p.sent_datagrams + p.received_datagrams,
+            live: p.controller.is_some(),
         })
         .collect();
     pick(&open).map(|(i, _)| &paths[i])
 }
 
-/// Reads `conn`'s controller on the path `pick` chooses.
+/// Reads the controller of the path `pick` chooses. Each listed path's controller is read once, so
+/// the choice and the reading cannot disagree about whether a path closed in between.
 fn sample(conn: &Connection, elapsed: Duration) -> Sample {
-    let list = conn.paths();
-    let open: Vec<Candidate> = list
+    let (open, mut controllers): (Vec<Candidate>, Vec<Option<Box<dyn Controller>>>) = conn
+        .paths()
         .iter()
         .map(|p| {
             let stats = p.stats();
-            Candidate {
+            let controller = conn.congestion_state(p.id());
+            let candidate = Candidate {
                 id: p.id(),
                 selected: p.is_selected(),
                 datagrams: stats.udp_tx.datagrams + stats.udp_rx.datagrams,
-            }
+                live: controller.is_some(),
+            };
+            (candidate, controller)
         })
-        .collect();
-    let picked = pick(&open);
-    let controller = picked
-        .and_then(|(i, _)| list.iter().nth(i))
-        .and_then(|p| conn.congestion_state(p.id()));
+        .unzip();
+    let chosen = pick(&open).and_then(|(i, how)| controllers[i].take().map(|ctl| (how, ctl)));
     reading(
         elapsed,
         open.len(),
-        picked.map(|(_, chosen)| chosen),
-        controller.as_deref(),
+        stale(&open),
+        chosen.as_ref().map(|(how, ctl)| (*how, ctl.as_ref())),
     )
 }
 
-/// A sample taken from one controller. A path can close between choosing it and asking `noq` for
-/// its controller, so the window comes from the controller too: a window with no state would
-/// pass for a reading when it is half of one.
+/// A sample taken from one controller. The window comes from the controller too, because a window
+/// with no state would pass for a reading when it is half of one.
 fn reading(
     elapsed: Duration,
     open_paths: usize,
-    path: Option<Chosen>,
-    ctl: Option<&dyn Controller>,
+    stale_paths: usize,
+    chosen: Option<(Chosen, &dyn Controller)>,
 ) -> Sample {
+    let path = chosen.map(|(how, _)| how);
+    let ctl = chosen.map(|(_, ctl)| ctl);
     let read = ctl.map(controller::read);
     Sample {
         elapsed_s: (elapsed.as_secs_f64() * 1000.0).round() / 1000.0,
         open_paths,
+        stale_paths,
         path,
         cwnd_bytes: ctl.map(Controller::window),
         pacing_rate_bytes_s: read.as_ref().and_then(|c| c.pacing_rate_bytes_s),
