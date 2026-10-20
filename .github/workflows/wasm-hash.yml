@@ -1,7 +1,7 @@
 name: wasm-hash
 
-# Only the crate, the page, the task runner and this file can break the page build, so only a change
-# to them runs it. A separate workflow because `paths` filters a whole workflow and not a job, and
+# Only the crate, the page, the task runner, the workspace manifest, the lockfile, the toolchain and
+# this file can break the page build, so only a change to them runs it. A separate workflow because `paths` filters a whole workflow and not a job, and
 # ci.yml has to run on every change.
 on:
   push:
@@ -9,11 +9,17 @@ on:
     paths:
       - bench/wasm-hash/**
       - xtask/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
       - .github/workflows/wasm-hash.yml
   pull_request:
     paths:
       - bench/wasm-hash/**
       - xtask/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
       - .github/workflows/wasm-hash.yml
 
 permissions:
