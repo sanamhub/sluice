@@ -21,7 +21,8 @@ use crate::{
     net, raw,
     rendezvous::{self, Discovery},
     result::{Outcome, Output},
-    stats::{self, ConnReport, Series},
+    sampling::Series,
+    stats::{self, ConnReport},
     ticket::Ticket,
     transfer::{self, Counters, Plan},
 };

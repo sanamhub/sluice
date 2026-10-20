@@ -13,6 +13,7 @@ mod net;
 mod raw;
 mod rendezvous;
 mod result;
+mod sampling;
 mod sender;
 mod serve;
 mod stats;

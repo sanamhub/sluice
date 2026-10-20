@@ -14,10 +14,7 @@ use iroh_blobs::{Hash, api::Store};
 use n0_future::{MergeUnbounded, StreamExt};
 use tokio::{task::JoinSet, time::MissedTickBehavior};
 
-use crate::{
-    blobs, raw,
-    stats::{self, Series},
-};
+use crate::{blobs, raw, sampling::Series, stats};
 
 /// What each connection is asked for.
 pub enum Plan {

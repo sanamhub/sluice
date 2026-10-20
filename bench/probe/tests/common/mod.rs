@@ -66,15 +66,29 @@ pub fn read_ticket(server_stdout: &mut BufReader<ChildStdout>) -> String {
     ticket
 }
 
-/// With `PROBE_TEST_LOG_PATHS` set, prints where a connection's `paths` came from, so a loop of
-/// the suite can count how often each source was used. Off by default.
+/// With `PROBE_TEST_LOG_PATHS` set, prints where a connection's `paths` came from and how its
+/// samples chose a path, so a loop of the suite can count how often each was used. Off by default.
 pub fn log_paths(side: &str, entry: &Value) {
-    if std::env::var_os("PROBE_TEST_LOG_PATHS").is_some() {
+    if std::env::var_os("PROBE_TEST_LOG_PATHS").is_none() {
+        return;
+    }
+    println!(
+        "PATHS side={side} source={} paths_at_s={} paths={}",
+        entry["paths_source"],
+        entry["paths_at_s"],
+        entry["paths"].as_array().map_or(0, Vec::len),
+    );
+    let samples = entry["controller_series"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice);
+    if !samples.is_empty() {
+        let count = |path: &str| samples.iter().filter(|s| s["path"] == path).count();
+        let none = samples.iter().filter(|s| s["path"].is_null()).count();
         println!(
-            "PATHS side={side} source={} paths_at_s={} paths={}",
-            entry["paths_source"],
-            entry["paths_at_s"],
-            entry["paths"].as_array().map_or(0, Vec::len),
+            "SAMPLES side={side} selected={} only={} busiest={} none={none}",
+            count("selected"),
+            count("only"),
+            count("busiest"),
         );
     }
 }

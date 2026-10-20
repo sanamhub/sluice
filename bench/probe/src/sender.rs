@@ -19,7 +19,7 @@ use tokio::{
 use crate::{
     cpu::{self, Cpu},
     raw::RawHandler,
-    stats,
+    sampling, stats,
 };
 
 /// What `serve` answers requests with.
@@ -138,7 +138,7 @@ async fn report_on_close(conn: Connection, lines: Lines) {
     let mut clock = tokio::time::interval_at(origin + second, second);
     // Same rule as the receiver: a late tick must not be followed by a burst.
     clock.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut series = stats::Series::default();
+    let mut series = sampling::Series::default();
     // Borrows `conn`, wakes only when a path changes, and ends when the connection closes.
     let mut paths = conn.paths_stream();
     let closed = conn.closed();

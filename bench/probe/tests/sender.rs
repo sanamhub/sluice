@@ -80,24 +80,47 @@ fn serve_leaves_bbr_fields_null_under_cubic() {
     serve_lines("cubic");
 }
 
+/// One line per sample, so a failed check shows how many paths were open and which one was read.
+fn describe(samples: &[Value]) -> String {
+    samples
+        .iter()
+        .map(|s| {
+            format!(
+                "t={} open_paths={} path={} controller={}",
+                s["elapsed_s"],
+                s["open_paths"],
+                s["path"],
+                s["cwnd_bytes"].is_u64()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Entries in a `controller_series` array, checked for the shape both ends promise.
 fn series(entry: &Value) -> Vec<Value> {
     let samples = entry["controller_series"].as_array().expect("an array");
     let mut last = 0.0;
     for sample in samples {
         let at = sample["elapsed_s"].as_f64().expect("elapsed_s");
-        assert!(at > last, "elapsed_s does not increase: {samples:?}");
+        assert!(
+            at > last,
+            "elapsed_s does not increase:\n{}",
+            describe(samples)
+        );
         last = at;
         // BBR's state is read from the same controller as the window, so they are null together.
         assert_eq!(
             sample["cwnd_bytes"].is_u64(),
             sample["bbr_state"].is_string(),
-            "{sample}"
+            "{sample}\n{}",
+            describe(samples)
         );
     }
     assert!(
         samples.iter().any(|s| s["cwnd_bytes"].is_u64()),
-        "no sample found a path: {samples:?}"
+        "no sample found a path:\n{}",
+        describe(samples)
     );
     samples.clone()
 }
@@ -141,6 +164,7 @@ fn both_ends_sample_the_controller_once_a_second() {
             );
         }
 
+        log_paths("fetch", &result["connection_stats"][0]);
         let received = series(&result["connection_stats"][0]);
         assert!(!received.is_empty());
         // One tick feeds both, so the two arrays are the same length.
@@ -148,7 +172,6 @@ fn both_ends_sample_the_controller_once_a_second() {
 
         let line = read_line(&mut stdout);
         let closed: Value = serde_json::from_str(&line).expect("serve prints JSON");
-        log_paths("fetch", &result["connection_stats"][0]);
         log_paths("serve", &closed);
         let sent = series(&closed);
         assert!(!sent.is_empty());

@@ -52,8 +52,9 @@ carries the address, that the server counted a discovery connection from each en
 connection is direct. Two more cases check that a dial to a dead address is a `no_path` result, and that
 a server that does not answer is waited for and recorded as empty. The `iroh-relay` server feature is a
 dev-dependency, so no probe binary carries it. With `PROBE_TEST_LOG_PATHS` set, the tests also print a
-`PATHS` line per connection with its `paths_source` and `paths_at_s`, which is how a loop of the suite
-counts the fallbacks. Run it with `--success-output immediate`, or nextest hides the lines of passing tests.
+`PATHS` line per connection with its `paths_source` and `paths_at_s`, and a `SAMPLES` line with how
+many of its samples chose each `path`. That is how a loop of the suite counts the fallbacks. Run it
+with `--success-output immediate`, or nextest hides the lines of passing tests.
 
 ## Run
 
@@ -290,17 +291,24 @@ transfer, where the connection has been idle for a moment, and not the middle of
 
 To see the middle of a transfer, both ends also sample each connection's controller once a second
 and add a `controller_series` array to the connection entry (`fetch`) or the `connection_closed`
-line (`serve`). Each sample has `elapsed_s`, `cwnd_bytes`, `pacing_rate_bytes_s`, `bbr_state`,
-`bbr_max_bw_bytes_s` and `bbr_app_limited`, with the same meaning and the same `null` rules as in
-the table above. A transfer shorter than a second has an empty series.
+line (`serve`). Each sample has `elapsed_s`, `open_paths`, `path`, `cwnd_bytes`,
+`pacing_rate_bytes_s`, `bbr_state`, `bbr_max_bw_bytes_s` and `bbr_app_limited`. The last five have the
+same meaning and the same `null` rules as in the table above. A transfer shorter than a second has
+an empty series.
 
 ```
 "controller_series":[
- {"elapsed_s":1.0,"cwnd_bytes":66988,"pacing_rate_bytes_s":333780186,"bbr_state":"Startup",
+ {"elapsed_s":1.0,"open_paths":1,"path":"selected","cwnd_bytes":66988,
+  "pacing_rate_bytes_s":333780186,"bbr_state":"Startup",
   "bbr_max_bw_bytes_s":216543040.0,"bbr_app_limited":false},
- {"elapsed_s":2.0,"cwnd_bytes":66988,"pacing_rate_bytes_s":333780186,"bbr_state":"ProbeBw(Cruise)",
+ {"elapsed_s":2.0,"open_paths":1,"path":"selected","cwnd_bytes":66988,
+  "pacing_rate_bytes_s":333780186,"bbr_state":"ProbeBw(Cruise)",
   "bbr_max_bw_bytes_s":337151703.0,"bbr_app_limited":true}]
 ```
+
+- `open_paths` is how many paths were open when the sample was read, and `path` says which one the
+  sample read: `selected` for the path iroh marked, `only` for a single open path, or `null` when
+  none could be chosen. Together they explain a series of `null` readings without a rerun.
 
 - On `fetch` the samples are taken on the tick that appends to `progress`, so entry `i` of the
   series pairs with `progress[i]` on every connection.
