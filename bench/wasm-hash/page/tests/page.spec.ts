@@ -179,6 +179,30 @@ test.describe("page (Playwright engines, WebKit here is not Safari)", () => {
     expect(await page.evaluate(() => document.body.dataset.state)).toBe("idle");
   });
 
+  test("the default is six counted rounds, and each build goes first in three", async ({
+    page,
+  }) => {
+    await page.goto("/?autorun=1&mem_mib=4&blob_mib=4");
+    expect(await finished(page), (await page.textContent("#error")) ?? "").toBe("done");
+    const result: PageResult = JSON.parse(await page.inputValue("#json"));
+    expect(result.counted_runs).toBe(6);
+    test.skip(!result.simd_supported, "one build only, so there is no first slot to share");
+    const first = result.variants
+      .flatMap((v) =>
+        (v.cases.find((c) => c.case === "in_memory")?.runs ?? []).map((r) => ({
+          round: r.round,
+          order: r.order,
+          build: v.variant,
+        })),
+      )
+      .filter((r) => r.round > 0)
+      .sort((a, b) => a.order - b.order)
+      .filter((_, i) => i % 2 === 0)
+      .map((r) => r.build);
+    expect(first.filter((b) => b === "simd")).toHaveLength(3);
+    expect(first.filter((b) => b === "scalar")).toHaveLength(3);
+  });
+
   test("a bad query stops the page with the reason", async ({ page }) => {
     await page.goto("/?mem_mib=0");
     expect(await finished(page)).toBe("error");

@@ -38,7 +38,7 @@ JSON as `first_read` and in the table of runs as "first read, from disk". The wa
 so the cold read is not in the median. The page does not try to drop the cache: a page cannot, and
 how a system caches differs anyway. Compare the first read with the later ones in the table of runs.
 
-Each case runs one warm-up that is not counted, then five runs that are. The result gives the median
+Each case runs one warm-up that is not counted, then six runs that are. The result gives the median
 and the range in MB/s and Gbit/s (MB is 10^6 bytes), and the median as a multiple of 500 Mbit/s and of
 1 Gbit/s. Every run, warm-up included, is in the JSON.
 
@@ -47,8 +47,9 @@ warm-up, and each build gets its own. On the laptop that built this page the bui
 out fastest, which points at thermal drift (a lead, not a measurement), and running one build to the
 end and then the other would charge all of it to the second.
 Each run in the JSON has its `round` and its `order` within the case, and the page lists every run in
-order under the table. With an odd number of counted rounds the first slot cannot split evenly: simd
-goes first in rounds 0, 2 and 4, and scalar in rounds 1, 3 and 5.
+order under the table. The default of six counted rounds splits the first slot evenly: scalar goes first
+in rounds 1, 3 and 5, and simd in rounds 2, 4 and 6. An odd count cannot split evenly. Round 0, the
+warm-up, starts with simd.
 
 Each build keeps its own Worker for the whole case, and the page terminates both when the case is
 done, which is how memory goes back between cases. Both builds hold the case's data at once, so a
@@ -112,7 +113,7 @@ Run, and keep the tab in the foreground.
   an insecure context. `navigator.clipboard` does not, so Copy JSON falls back to selecting the text
   and copying it, which can fail on some browsers. Download JSON does not need the clipboard.
 - **Query options.** `?mem_mib=` and `?blob_mib=` set the sizes (defaults 1024 and 256, at most 4095),
-  `?runs=` sets the counted runs (default 5), and `?autorun=1` starts without the button.
+  `?runs=` sets the counted runs (default 6), and `?autorun=1` starts without the button.
 
 `npm run dev` serves unbuilt modules, so measure with the preview.
 Close other tabs and applications first, and note the power mode. Throughput on a laptop on battery is
