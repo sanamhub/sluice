@@ -141,7 +141,7 @@ be combined with `--relay`.
   has the measurements).
 - `--rendezvous-ca` adds the certificates in a PEM file to the roots trusted for the server, for a
   self-signed one in tests. The certificate must say `CA:FALSE`, or the handshake fails with
-  `CaUsedAsEndEntity`. A server with a LetsEncrypt certificate needs none.
+  `CaUsedAsEndEntity`. A server with a certificate from a public CA needs none.
 - `--port-mapping` is `off` here and on in the product. With `on` the endpoint asks the router for a
   mapping through UPnP, PCP and NAT-PMP. iroh's `portmapper` feature is enabled in the workspace for it,
   because without the feature the option would read as on and nothing would run.

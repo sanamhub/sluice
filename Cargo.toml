@@ -20,10 +20,8 @@ assert_cmd = "2"
 blake3 = "1"
 clap = { version = "4", features = ["derive"] }
 # tls-aws-lc-rs and not the default tls-ring: ADR 0012. metrics turns on the socket counters,
-# which are no-ops without it. portmapper is what makes `--port-mapping on` do anything: iroh swaps
-# in a stub without it, and the probe's option would read as on while nothing ran. unstable-net-report
-# is the only way to read the address a rendezvous server reported.
-iroh = { version = "1.3", default-features = false, features = ["metrics", "portmapper", "tls-aws-lc-rs", "unstable-net-report"] }
+# which are no-ops without it.
+iroh = { version = "1.3", default-features = false, features = ["metrics", "tls-aws-lc-rs"] }
 # iroh does not re-export RelayQuicConfig, which names the UDP port of address discovery. Same release
 # as iroh, so the probe and the server in the rendezvous image come from one version. The probe tests
 # add its server feature.

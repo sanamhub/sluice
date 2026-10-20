@@ -15,7 +15,10 @@ path = "src/main.rs"
 anyhow.workspace = true
 blake3.workspace = true
 clap.workspace = true
-iroh.workspace = true
+# portmapper is what makes `--port-mapping on` do anything: iroh swaps in a stub without it, and the
+# option would read as on while nothing ran. unstable-net-report is the only way to read the address
+# a rendezvous server reported. Both stay here so no product crate inherits them from the workspace.
+iroh = { workspace = true, features = ["portmapper", "unstable-net-report"] }
 iroh-blobs.workspace = true
 iroh-relay.workspace = true
 n0-future.workspace = true

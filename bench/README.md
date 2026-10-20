@@ -180,7 +180,7 @@ relay, and moves 16 MiB over one raw stream with a 30 s timeout. The set runs tw
 port mapping `off` and then `on`, so the two settings are interleaved and a network that changes over
 the run does not land on one of them. `--runs` is the number of rounds, 20 by default, so 40 attempts.
 `--rendezvous-ca <path>` names a PEM file for a self-signed server. The path is passed to the probe as
-it is, so the file has to be at that path on both hosts. A server with a LetsEncrypt certificate needs
+it is, so the file has to be at that path on both hosts. A server with a certificate from a public CA needs
 none.
 
 It writes `bench/results/<UTC date>-<label>/`, or the place `--out-dir` names, and refuses to write into

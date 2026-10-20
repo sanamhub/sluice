@@ -29,13 +29,13 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
   -addext 'subjectAltName=DNS:rendezvous.example.net' \
   -addext 'basicConstraints=critical,CA:FALSE' \
   -addext 'keyUsage=digitalSignature' -addext 'extendedKeyUsage=serverAuth'
-chmod 644 default.key default.crt
+sudo chown 65532:65532 default.key && chmod 600 default.key
 cd ..
 docker run -d --name rendezvous -p 7842:7842/udp \
   -v "$PWD/certs:/etc/rendezvous/certs:ro" sluice-rendezvous
 ```
 
-The key has to be readable by uid 65532. Point a probe at it with the CA file:
+The key belongs to uid 65532, the user the server runs as, and no one else can read it. Point a probe at it with the CA file:
 
 ```
 probe serve --rendezvous https://rendezvous.example.net --rendezvous-ca certs/default.crt
@@ -47,27 +47,22 @@ here, because no public certificate was available.
 
 ## Certificates
 
-| Mode | Config | Works with the relay half off | Renewal |
-|---|---|---|---|
-| `Manual` | [manual.toml](manual.toml) | yes, with `--dev` (see below) | restart the container, the files are read once at start |
-| `LetsEncrypt` | [letsencrypt.toml](letsencrypt.toml) | **no** | automatic |
+The image takes `Manual` certificates only. `iroh-relay` 1.3.0 can fetch a LetsEncrypt certificate
+itself, but only with the relay half on, because the challenge is answered on the relay's HTTPS
+listener (below). A rendezvous that runs a relay listener is not the server ADR 0013 describes, so the
+certificate comes from outside the container.
 
-LetsEncrypt cannot run with the relay half off in 1.3.0, so [letsencrypt.toml](letsencrypt.toml) turns
-the half on and admits no endpoint (`access.allowlist = []`). The server then runs the HTTPS listener
-LetsEncrypt validates against and denies every relay connection, so it still moves no transfer bytes.
-That is a different server from the one ADR 0013 describes, and the choice is the maintainer's. Run it
-without `--dev`, with port 8443 published as 443:
+On the VPS, with nothing listening on TCP 80, `certbot` can fetch one with its own HTTP server and copy
+it into place after each renewal:
 
 ```
-docker run -d --name rendezvous -p 7842:7842/udp -p 443:8443/tcp \
-  -v rendezvous-state:/var/lib/rendezvous sluice-rendezvous \
-  --config-path /etc/rendezvous/letsencrypt.toml
+sudo certbot certonly --standalone -d rendezvous.example.net   --deploy-hook 'install -o 65532 -g 65532 -m 600 "$RENEWED_LINEAGE/privkey.pem" /srv/rendezvous/certs/default.key &&
+                 install -m 644 "$RENEWED_LINEAGE/fullchain.pem" /srv/rendezvous/certs/default.crt &&
+                 docker restart rendezvous'
 ```
 
-The volume has to be owned by uid 65532. The host name and contact in the file are placeholders
-(`rendezvous.example.net`, `ops@example.net`). Issuance was not tried against LetsEncrypt. The config was
-started with `IROH_RELAY_ACME_URL` pointing at a closed local port, and it bound its three ports and
-logged the failed ACME request.
+Mount `/srv/rendezvous/certs` as `/etc/rendezvous/certs`. The server reads the files once at start, so
+the hook restarts it. This recipe was not run here, because there was no public host name.
 
 ## What iroh-relay 1.3.0 does with the relay half off
 
@@ -77,14 +72,14 @@ observed.
 **Ports.** One: UDP 7842, the QUIC address discovery port (`defaults.rs:7`, ALPN `/iroh-qad/0` at
 `quic.rs:10`). Run: with `manual.toml` the container's namespace has no TCP listener and one UDP socket
 on 7842. A third listener would be the metrics server, which defaults to on at `[::]:9090` with no
-authentication (`main.rs:344-346`, `main.rs:778`). Both configs set `enable_metrics = false`, so it is
+authentication (`main.rs:344-346`, `main.rs:778`). The config sets `enable_metrics = false`, so it is
 off, as the run shows. This default was read from the source and not run.
-With `letsencrypt.toml` the container listens on TCP 8080 and 8443 as well.
 
 **HTTPS server.** It does not run. `Server::spawn` builds the HTTP and HTTPS listeners only inside
 `match config.relay` (`server.rs:712`), and the `None` arm returns no listener (`server.rs:833`). There
-is no plain HTTP port and no captive portal check either. That is why LetsEncrypt cannot validate: its
-TLS-ALPN-01 challenge is answered on the HTTPS listener (`server.rs:747-788`).
+is no plain HTTP port and no captive portal check either. That is why the built-in LetsEncrypt mode
+cannot run with the relay half off: its TLS-ALPN-01 challenge is answered on the HTTPS listener
+(`server.rs:747-788`).
 
 **The binary refuses this config without `--dev`.** `main.rs:762` builds the relay config only if
 `enable_relay` is true, and drops the TLS config with it. In the normal path the QUIC server is given no
