@@ -6,6 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+postcard.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 unicode-normalization.workspace = true
 

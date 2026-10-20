@@ -3650,7 +3650,9 @@ dependencies = [
 name = "sluice-core"
 version = "0.1.0"
 dependencies = [
+ "postcard",
  "proptest",
+ "serde",
  "serde_json",
  "thiserror 2.0.21",
  "unicode-normalization",
