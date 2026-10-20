@@ -1,0 +1,60 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color-scheme: light dark;
+}
+
+main {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 1rem;
+  line-height: 1.5;
+}
+
+button {
+  font: inherit;
+  padding: 0.4rem 1rem;
+}
+
+#error {
+  color: #b00020;
+  font-weight: 600;
+}
+
+#warning {
+  border: 2px solid #b00020;
+  padding: 0.5rem;
+}
+
+.scroll {
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  border: 1px solid #8884;
+  padding: 0.25rem 0.6rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+th:nth-child(-n + 3),
+td:nth-child(-n + 3) {
+  text-align: left;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+}

@@ -1,0 +1,18 @@
+{
+  "name": "sluice-wasm-hash-page",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Measures BLAKE3 hash throughput in the browser for ADR 0014",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "check": "biome check ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  }
+}

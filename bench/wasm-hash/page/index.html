@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BLAKE3 hash rate in this browser</title>
+    <!-- Without an icon the browser asks the server for /favicon.ico and logs a 404. -->
+    <link rel="icon" href="data:," />
+  </head>
+  <body data-state="idle">
+    <main>
+      <h1>BLAKE3 hash rate in this browser</h1>
+      <p>
+        Measures how fast one thread hashes with BLAKE3 compiled to WebAssembly, for ADR 0014. Each
+        rate is shown next to 500 Mbit/s, the browser target in docs/performance.md, and 1 Gbit/s.
+        The page reports the numbers and decides nothing.
+      </p>
+      <p>
+        Three cases per build. <strong>In memory</strong> hashes bytes already in WASM memory, which is
+        the hash rate alone. <strong>Copied in</strong> feeds the same bytes from JavaScript in 1 MiB
+        chunks, so it also pays the copy into WASM memory. <strong>From a file</strong> reads a Blob
+        through <code>stream()</code>, as a dropped file would be. The <em>simd</em> build is the one
+        ADR 0014 names, and <em>scalar</em> shows what SIMD is worth.
+      </p>
+      <p id="plan"></p>
+      <p>
+        Keep this tab in the foreground. Nothing is sent anywhere: the page makes no request except
+        for its own files.
+      </p>
+
+      <p><button id="run" type="button">Run</button></p>
+      <p id="status" role="status"></p>
+      <p id="error" role="alert"></p>
+
+      <div id="output" hidden>
+        <p id="warning" hidden>
+          This page is cross-origin isolated, so the host sets COOP and COEP headers. ADR 0014 assumes
+          it does not. Do not publish these numbers as its measurement.
+        </p>
+        <div class="scroll" id="table"></div>
+        <pre id="environment"></pre>
+        <h2>Result</h2>
+        <p>
+          <button id="copy" type="button">Copy JSON</button>
+          <button id="download" type="button">Download JSON</button>
+          <span id="copied" role="status"></span>
+        </p>
+        <textarea id="json" readonly rows="14" spellcheck="false"></textarea>
+      </div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
