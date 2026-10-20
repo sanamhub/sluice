@@ -126,20 +126,25 @@ pub fn log_paths(side: &str, entry: &Value) {
 /// that sent the most datagrams. `None` when iroh listed no such path, which passes only if
 /// `unlisted_path_ids` shows `noq` held one iroh did not list. That is iroh's fault and not the
 /// probe's, in either of its two shapes (an empty list, or a list of paths `noq` no longer holds).
-/// An `UNLISTED` line is printed whenever the ids are not empty, so a loop can count both.
+/// An `UNLISTED` line is printed whenever the ids are not empty, so a loop can count both. It
+/// also gives how many listed paths had a controller, which tells those two apart from the benign
+/// case of a path `noq` holds that iroh has not listed yet or has just closed.
 pub fn path_in_use<'a>(side: &str, entry: &'a Value) -> Option<&'a Value> {
     let listed = entry["paths"].as_array().expect("paths is an array");
     let unlisted = entry["unlisted_path_ids"]
         .as_array()
         .unwrap_or_else(|| panic!("no unlisted_path_ids: {entry}"));
+    let with_controller = || listed.iter().filter(|p| !p["controller"].is_null());
     if !unlisted.is_empty() {
+        // `with_controller=0` is the failure: iroh's list had nothing to read. With more, the
+        // unlisted ids are paths `noq` holds that iroh has not listed yet or has just closed.
         println!(
-            "UNLISTED side={side} ids={} listed={}",
+            "UNLISTED side={side} ids={} listed={} with_controller={}",
             entry["unlisted_path_ids"],
-            listed.len()
+            listed.len(),
+            with_controller().count()
         );
     }
-    let with_controller = || listed.iter().filter(|p| !p["controller"].is_null());
     let chosen = with_controller()
         .find(|p| p["selected"] == true)
         .or_else(|| with_controller().max_by_key(|p| p["sent_datagrams"].as_u64()));

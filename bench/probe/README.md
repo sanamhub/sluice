@@ -60,8 +60,9 @@ with `--success-output immediate`, or nextest hides the lines of passing tests. 
 starts `serve` with `RUST_LOG=warn,probe::paths=debug`, unless `RUST_LOG` is already set. `serve`
 then logs a `probe::paths` line for each path-list stream item, each tick and the close, with the
 open paths as `id@address`, `*` on the selected one. The target is off by default and adds nothing
-to the JSON. A report whose `unlisted_path_ids` is not empty prints an `UNLISTED` line with the ids and how many
-paths iroh listed, so a loop counts it apart from a failure.
+to the JSON. A report whose `unlisted_path_ids` is not empty prints an `UNLISTED` line with the ids,
+how many paths iroh listed and how many of those had a controller. `with_controller=0` is the
+failure. With more it is the benign case below.
 
 ## Run
 
@@ -390,9 +391,11 @@ and compared with the ids of the listed paths.
 There are two shapes. In the first, `paths` is `[]` and `paths_source` is `none`, because iroh
 never listed the path the data moved on. In the second, `paths` lists paths `noq` no longer holds a
 controller for (each has `controller` `null`), and the path in use is missing from it. The field is
-`[]` when iroh listed every path `noq` holds. A path iroh has just closed can show in it for a
-moment too, while `noq` still holds its controller, so a non-empty field is evidence that needs the
-datagram counters beside it. The cause is iroh not listing a path `noq` opened. A sentence naming
+`[]` when iroh listed every path `noq` holds. It is not always a failure. `noq` holds a controller
+for a path from the moment it adds it, and iroh lists a path only once `noq` has validated it and
+sent `Established`, which took 10 to 120 ms in the runs read. `noq` also keeps the controller of an
+abandoned path until it has drained. So a connection can show ids here for a moment with a listed
+path that has a controller, and only a report with no listed path that has one is the failure. The cause is iroh not listing a path `noq` opened. A sentence naming
 the iroh issue goes here once it is filed.
 
 The probe makes up nothing for those ids: no address, statistics, RTT or controller reading. The
