@@ -88,11 +88,54 @@ StaticBody = { root: [u8; 32], size: u64, format: u8 }   // format: 0 = raw, 1 =
 LiveBody   = { stream_id: [u8; 16], sender_key: [u8; 32] }
 ```
 
-**Encoding.** The struct is serialized with `postcard`, then encoded as Crockford base32 without padding,
-prefixed with `sluice1`. The result is URL-safe, case-insensitive, and double-click selectable.
+**Bytes.** The ticket is written as bytes, then as text. The little-endian rule of section 2 does not
+apply inside a ticket: its bytes follow the `postcard` 1.x encoding as stated here, so a third party
+needs no copy of postcard. The fields come in this order, with no padding and no tag except where the
+table says so:
 
-**Size.** A ticket with two addresses and no relay is about 120 bytes encoded. Implementations MUST
-accept tickets up to 4 KiB and MAY refuse larger ones.
+| Field | Bytes |
+|---|---|
+| `version` | 1 byte, `0x01` |
+| `kind` | 1 byte, `0x00` for Static or `0x01` for Live |
+| `endpoint_id` | 32 bytes, no length prefix |
+| `addrs` | the count as a varint, then that many addresses |
+| one address | a tag byte, `0x00` for IPv4 or `0x01` for IPv6, then the 4 or 16 address bytes in network order, then the port as a varint. No flow label and no scope id |
+| `relay_url` | `0x00` if absent. Otherwise `0x01`, the length in bytes as a varint, then that many bytes of UTF-8 |
+| `expiry` | `0x00` if absent. Otherwise `0x01`, then the value as a varint |
+| body, Static | `root` as 32 bytes, `size` as a varint, `format` as 1 byte |
+| body, Live | `stream_id` as 16 bytes, then `sender_key` as 32 bytes |
+
+The body has no tag of its own: `kind` selects it. A varint is LEB128: 7 bits per byte, the lowest
+group first, the high bit set on every byte but the last, and at most 10 bytes for a `u64` and 3 for a
+port. An encoder MUST write the shortest varint that holds the value.
+
+**Text.** The bytes are written as Crockford base32 without padding, after the prefix `sluice1`. The
+alphabet is `0123456789abcdefghjkmnpqrstvwxyz`, which leaves out `i`, `l`, `o` and `u`. Each character
+carries 5 bits, taken from the bytes most significant first. If the last character is not full, its
+unused low bits MUST be zero. The encoder writes lower case. The result is URL-safe and double-click
+selectable.
+
+A decoder reads the prefix and the body without regard to case. It MUST reject any character outside
+the alphabet, including `-`, `=`, white space, and `I`, `L`, `O` and `U` in either case, so one ticket
+has one spelling apart from case. Crockford's own rules would read `I` and `L` as `1`, `O` as `0`, and
+skip `-`.
+
+**Decoding.** A decoder MUST reject a ticket when:
+
+1. the text is longer than 4096 bytes. This is checked before any decoding
+2. the prefix is missing, a character is outside the alphabet, the body length is 1, 3 or 6 characters
+   more than a multiple of 8 (whole bytes cannot give it), or the unused bits of the last character
+   are not zero
+3. `version` is not 1, `kind` is not 0 or 1, or `format` is not 0 or 1
+4. bytes remain after the body, or the bytes end before it does
+5. an `Option` or address tag is not one of the two values in the table, `relay_url` is not UTF-8, or
+   a varint is longer than the shortest one for its value or does not fit its integer
+6. `relay_url` is present and empty. Absence is `0x00`, and a second spelling of it is not allowed
+
+**Size.** Two IPv4 addresses on ports from 16384 up, no relay, no expiry and a Static body of
+100 MiB make 90 bytes, which is 151 characters with the prefix. With two IPv6 addresses it is 114
+bytes and 190 characters. A Live ticket with the IPv4 pair is 101 bytes and 169 characters.
+Implementations MUST accept tickets up to 4096 bytes of text and MUST NOT write longer ones.
 
 **Short codes.** Where a rendezvous is configured, a ticket MAY be published under a short code. The
 code is a SPAKE2 password; the rendezvous stores only the ciphertext and MUST rate-limit attempts per
