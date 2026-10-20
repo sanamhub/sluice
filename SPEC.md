@@ -28,7 +28,7 @@ The transport, NAT traversal, and relay behaviour come from `iroh` and are out o
 - All signatures are Ed25519, 64 bytes, over the byte sequence stated at each use.
 - All variable-length fields are length-prefixed with a `varint` (LEB128, unsigned, max 10 bytes).
 - Paths in manifests are UTF-8, NFC-normalized, forward-slash separated, relative, and never begin with
-  `/` or contain a `..` component.
+  `/` or contain a `..` component, and pass the receiver rules in section 8.
 - Timestamps are UTC milliseconds since the Unix epoch, as `u64`.
 - "MUST", "SHOULD", "MAY" carry their RFC 2119 meaning.
 
@@ -210,9 +210,24 @@ Rules:
 - **Symlinks are recorded and never followed during send.** A receiver MUST NOT create a symlink unless
   explicitly enabled, and MUST reject any target that escapes the output root after normalization.
 - Hard links are not preserved. Implementations MUST document this.
-- A receiver MUST reject: absolute paths, any `..` component, empty components, NTFS alternate data
-  stream syntax, Windows reserved device names, and any path that after normalization escapes the
-  output root.
+- A receiver MUST reject a manifest path, on every platform, when:
+
+  1. it is empty, or longer than 4096 bytes in UTF-8
+  2. it is not in Unicode NFC. A receiver does not normalize it, because then two spellings would name
+     one file
+  3. it begins with `/`, or ends with `/`
+  4. a component is empty (`a//b`), `.` or `..`
+  5. a component is longer than 255 bytes in UTF-8
+  6. it contains `\`, `:`, a control character (U+0000 to U+001F, or U+007F), or any of `< > " | ? *`
+  7. a component ends with `.` or a space
+  8. a component is a Windows reserved device name, compared case-insensitively, with or without an
+     extension: `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, and `COM` or `LPT` followed by one of
+     `0` to `9`, `¹`, `²` or `³`. The name is the text before the first `.`, spaces before that `.`
+     are ignored, and U+0131 is compared as `I`. So `con`, `Nul.txt` and `LPT¹.log` are rejected, and
+     `CONSOLE` is not
+
+  With these rules no accepted path can leave the output root by its text alone, and a symlink already
+  on disk is the writer's concern, not these rules'.
 
 ---
 
