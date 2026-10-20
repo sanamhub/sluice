@@ -60,9 +60,8 @@ with `--success-output immediate`, or nextest hides the lines of passing tests. 
 starts `serve` with `RUST_LOG=warn,probe::paths=debug`, unless `RUST_LOG` is already set. `serve`
 then logs a `probe::paths` line for each path-list stream item, each tick and the close, with the
 open paths as `id@address`, `*` on the selected one. The target is off by default and adds nothing
-to the JSON. A report whose `unlisted_path_ids` is not empty prints an `UNLISTED` line with the ids,
-how many paths iroh listed and how many of those had a controller. `with_controller=0` is the
-failure. With more it is the benign case below.
+to the JSON. A report with `unlisted_path_ids` prints an `UNLISTED` line with the ids, how many paths
+iroh listed and how many had a controller. `with_controller=0` is the failure, as explained below.
 
 ## Run
 
@@ -221,8 +220,7 @@ connection:
 - `paths` lists the paths open at the end, each with its RTT, congestion window, congestion events,
   losses, MTU and `controller`. `paths_at_s` is the time it was read and `paths_source` what read it,
   which is earlier than the end when the peer closed first. See [Paths read late](#paths-read-late).
-  `unlisted_path_ids` has the paths `noq` holds that `paths` does not. See
-  [Paths iroh never listed](#paths-iroh-never-listed).
+  `unlisted_path_ids` is in [Paths iroh never listed](#paths-iroh-never-listed).
 
 These statistics are the receiver's. QUIC declares a packet lost at the end that sent it, so
 `lost_packets` here counts the receiver's own packets, which are mostly acknowledgements, and
@@ -383,19 +381,16 @@ are read at close and are final, so this does not touch them.
 
 ### Paths iroh never listed
 
-iroh can fail to list the path a connection runs on, and the report then has no reading of it.
 `unlisted_path_ids` names the ids, 0 to 63, that `noq` holds a controller for and `paths` does not
-include. It is read for every report, whatever `paths` holds, with `Connection::congestion_state`,
-and compared with the ids of the listed paths.
+include. It is read for every report with `Connection::congestion_state`, and compared with the ids
+of the listed paths.
 
-There are two shapes. In the first, `paths` is `[]` and `paths_source` is `none`, because iroh
-never listed the path the data moved on. In the second, `paths` lists paths `noq` no longer holds a
-controller for (each has `controller` `null`), and the path in use is missing from it. The field is
-`[]` when iroh listed every path `noq` holds. It is not always a failure. `noq` holds a controller
-for a path from the moment it adds it, and iroh lists a path only once `noq` has validated it and
-sent `Established`, which took 10 to 120 ms in the runs read. `noq` also keeps the controller of an
-abandoned path until it has drained. So a connection can show ids here for a moment with a listed
-path that has a controller, and only a report with no listed path that has one is the failure. The cause is iroh not listing a path `noq` opened. A sentence naming
+Two shapes are the failure, both from iroh not listing a path `noq` opened. In the first, `paths` is
+`[]` and `paths_source` is `none`. In the second, every listed path has `controller` `null`, because
+`noq` dropped it, and the path in use is missing. Most non-empty fields are benign: `noq` holds a
+controller from the moment it adds a path, iroh lists the path only once `noq` has validated it and
+sent `Established` (10 to 120 ms in the runs read), and `noq` keeps an abandoned path's controller
+until it has drained. A report with a listed path that has a controller is fine. A sentence naming
 the iroh issue goes here once it is filed.
 
 The probe makes up nothing for those ids: no address, statistics, RTT or controller reading. The
