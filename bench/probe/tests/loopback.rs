@@ -6,7 +6,7 @@ use std::{io::BufReader, path::PathBuf, process::ChildStdout};
 use serde_json::Value;
 
 mod common;
-use common::{Probes, log_paths, probe, read_ticket, spawn_server, within_deadline};
+use common::{Probes, log_paths, paths_listed, probe, read_ticket, spawn_server, within_deadline};
 
 const SIZE: u64 = 8 << 20;
 
@@ -173,7 +173,7 @@ fn check_connection_stats(result: &Value, connections: u16) {
         log_paths("fetch", conn);
         assert!(conn["received_datagrams"].as_u64().is_some_and(|n| n > 0));
         assert!(conn["sent_datagrams"].as_u64().is_some_and(|n| n > 0));
-        assert!(conn["paths"].as_array().is_some_and(|p| !p.is_empty()));
+        paths_listed("fetch", conn);
     }
 }
 

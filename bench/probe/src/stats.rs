@@ -17,7 +17,7 @@ const KEY_LABEL: &[u8] = b"sluice-probe/connection-key";
 
 /// One open path of a connection. Congestion state is per path, and a connection can hold a direct
 /// and a relay path at once.
-#[derive(Serialize)]
+#[derive(Default, Serialize)]
 pub struct PathReport {
     /// `noq`'s id for the path. It only breaks ties between equally busy paths, so it is not
     /// printed.
@@ -83,9 +83,36 @@ pub struct ConnReport {
     /// Where `paths` came from: `live` at the report, `stream` for the path-change event the list
     /// was read at, `sample` for the once-a-second reading, or `none`.
     pub paths_source: Source,
+    /// Only when `paths` is empty: the ids of the paths `noq` holds a controller for, which iroh
+    /// never listed. A path `noq` opened carries the transfer while iroh's list stays empty, and
+    /// this is the evidence of it, with no address, statistics or RTT to go with it. Empty
+    /// whenever `paths` has a path, and a lower bound: see `UNLISTED_ID_LIMIT`.
+    pub unlisted_path_ids: Vec<u32>,
     /// This end's controller once a second during the transfer. Empty for a transfer shorter than
     /// a second.
     pub controller_series: Vec<Sample>,
+}
+
+/// How many path ids `unlisted_path_ids` asks `noq` about. A path id is never reused, and only the
+/// client opens paths (`noq-proto` 1.3.0 `connection/mod.rs:565`), numbering the next one after the
+/// highest id used or abandoned (`:569-572`). It may not pass `min(local, remote)` of the peers'
+/// maximum path id, which starts at `MAX_MULTIPATH_PATHS - 1` = 7 (iroh `socket.rs:137`, `noq-proto`
+/// `config/transport.rs:439`) and grows by one for each `PATH_ABANDON` received (`:5372`). So the
+/// highest id a connection can reach is 7 plus the paths its peer abandoned, which has no bound,
+/// and `noq` has no public accessor for the current maximum. A connection abandons a path a few
+/// times at most in the first seconds (id 4 in the runs that motivated this), so 64 is eight
+/// times the starting window. An id beyond it is not reported, and the field then reads as empty.
+const UNLISTED_ID_LIMIT: u32 = 64;
+
+/// The ids `noq` holds a controller for when iroh listed no path, and none otherwise.
+/// `holds_controller` answers for one id, so the choice can be tested without a connection.
+fn unlisted_path_ids(listed: &[PathReport], holds_controller: impl Fn(PathId) -> bool) -> Vec<u32> {
+    if !listed.is_empty() {
+        return Vec::new();
+    }
+    (0..UNLISTED_ID_LIMIT)
+        .filter(|&id| holds_controller(PathId::from(id)))
+        .collect()
 }
 
 /// Reads the counters of `conn`. `series` is what the caller sampled while the transfer ran, and
@@ -98,6 +125,8 @@ pub fn report(
 ) -> ConnReport {
     let total = conn.stats();
     let closing = series.close(read_paths(conn), now);
+    let unlisted_path_ids =
+        unlisted_path_ids(&closing.paths, |id| conn.congestion_state(id).is_some());
     ConnReport {
         key: key(conn),
         remote_id: conn.remote_id().to_string(),
@@ -109,6 +138,7 @@ pub fn report(
         paths: closing.paths,
         paths_at_s: closing.paths_at_s,
         paths_source: closing.paths_source,
+        unlisted_path_ids,
         controller_series: closing.samples,
     }
 }
@@ -153,3 +183,6 @@ fn key(conn: &Connection) -> Option<String> {
         .ok()?;
     Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
+
+#[cfg(test)]
+mod tests;

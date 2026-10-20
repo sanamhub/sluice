@@ -59,8 +59,9 @@ sample is stale prints a `STALE` line. That is how a loop of the suite counts th
 with `--success-output immediate`, or nextest hides the lines of passing tests. The same variable
 starts `serve` with `RUST_LOG=warn,probe::paths=debug`, unless `RUST_LOG` is already set. `serve`
 then logs a `probe::paths` line for each path-list stream item, each tick and the close, with the
-open paths as `id@address`, `*` on the selected one, and the path ids `noq` holds a controller for at
-the close. The target is off by default and adds nothing to the JSON.
+open paths as `id@address`, `*` on the selected one. The target is off by default and adds nothing
+to the JSON. A report with no path from iroh, which only `unlisted_path_ids` explains, prints an
+`UNLISTED` line, so a loop counts it apart from a failure.
 
 ## Run
 
@@ -219,6 +220,7 @@ connection:
 - `paths` lists the paths open at the end, each with its RTT, congestion window, congestion events,
   losses, MTU and `controller`. `paths_at_s` is the time it was read and `paths_source` what read it,
   which is earlier than the end when the peer closed first. See [Paths read late](#paths-read-late).
+  `unlisted_path_ids` is `[]` unless `paths` is empty. See [Paths iroh never listed](#paths-iroh-never-listed).
 
 These statistics are the receiver's. QUIC declares a packet lost at the end that sent it, so
 `lost_packets` here counts the receiver's own packets, which are mostly acknowledgements, and
@@ -376,3 +378,17 @@ read a list the later one is kept. The probe does not make a path up when there 
 
 The connection-level counters (`sent_datagrams`, `received_datagrams`, `lost_packets`, `lost_bytes`)
 are read at close and are final, so this does not touch them.
+
+### Paths iroh never listed
+
+Both ends can still end with `"paths":[]` and `paths_source` `none`, with no list ever read that had
+a path. Then `unlisted_path_ids` has the ids `noq` holds a controller for, found with
+`Connection::congestion_state`, and it is `[]` whenever `paths` has a path. A non-empty field means
+the connection had a path `noq` opened and iroh did not list, and no reading of iroh's list could
+have found it. The connection's datagram counters show whether data moved on it. The field comes
+from iroh not listing a path `noq` opened. A sentence naming the iroh issue goes here once it is filed.
+
+The probe makes up nothing for those ids: no address, statistics, RTT or controller reading. The
+field is a lower bound. `noq` has no accessor for the highest path id a connection may use, which
+starts at 7 and rises by one for every path the peer abandons, so the probe asks about ids 0 to 63.
+An id above that is not reported, and the report looks like an empty list with no evidence.

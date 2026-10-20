@@ -10,7 +10,6 @@ use iroh::{
 };
 use iroh_blobs::BlobsProtocol;
 use n0_future::StreamExt;
-use noq::PathId;
 use serde::Serialize;
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -147,17 +146,6 @@ fn listing(list: &PathList<'_>) -> String {
     format!("[{}]", paths.join(" "))
 }
 
-/// The path ids `noq` holds a controller for, up to 8, whatever iroh lists. For the `probe::paths`
-/// log only, to tell a path iroh dropped from one `noq` never had.
-fn controllers(conn: &Connection) -> String {
-    let held: Vec<String> = (0..8u32)
-        .map(PathId::from)
-        .filter(|id| conn.congestion_state(*id).is_some())
-        .map(|id| id.to_string())
-        .collect();
-    format!("[{}]", held.join(" "))
-}
-
 /// Reads the connection once a second until it closes, then prints the closing counters with the
 /// series. The clock starts at accept, so it runs a handshake ahead of the receiver's `progress`.
 async fn report_on_close(conn: Connection, lines: Lines, accepted: Instant) {
@@ -204,7 +192,6 @@ async fn report_on_close(conn: Connection, lines: Lines, accepted: Instant) {
         target: "probe::paths",
         elapsed_s = origin.elapsed().as_secs_f64(),
         paths = %listing(&conn.paths()),
-        controllers = %controllers(&conn),
         "closed"
     );
     let cpu = lines.cpu_since_ticket();
@@ -219,6 +206,7 @@ async fn report_on_close(conn: Connection, lines: Lines, accepted: Instant) {
         target: "probe::paths",
         paths = closed.connection.paths.len(),
         source = ?closed.connection.paths_source,
+        unlisted = ?closed.connection.unlisted_path_ids,
         "report"
     );
     match serde_json::to_string(&closed) {

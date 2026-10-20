@@ -121,6 +121,26 @@ pub fn log_paths(side: &str, entry: &Value) {
     }
 }
 
+/// Whether `entry` has a path to read. An empty `paths` passes only when `unlisted_path_ids` names
+/// the paths `noq` held while iroh listed none, which is iroh's fault and not the probe's, and it
+/// prints an `UNLISTED` line so a loop can count it. Any other empty list fails.
+pub fn paths_listed(side: &str, entry: &Value) -> bool {
+    let unlisted = entry["unlisted_path_ids"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no unlisted_path_ids: {entry}"));
+    if entry["paths"].as_array().is_some_and(|p| !p.is_empty()) {
+        assert!(unlisted.is_empty(), "{entry}");
+        return true;
+    }
+    assert!(
+        !unlisted.is_empty(),
+        "no paths and no unlisted ids: {entry}"
+    );
+    assert_eq!(entry["paths_source"], "none", "{entry}");
+    println!("UNLISTED side={side} ids={}", entry["unlisted_path_ids"]);
+    false
+}
+
 /// Runs `case` on a worker thread and fails if it has not finished within `DEADLINE`. Every fetch
 /// and serve it starts through `Probes` is killed and reaped when this returns or panics,
 /// including after the deadline.

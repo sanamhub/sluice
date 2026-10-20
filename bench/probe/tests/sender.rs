@@ -5,7 +5,9 @@ use std::collections::BTreeSet;
 use serde_json::Value;
 
 mod common;
-use common::{log_paths, probe, read_line, read_ticket, spawn_server, within_deadline};
+use common::{
+    log_paths, paths_listed, probe, read_line, read_ticket, spawn_server, within_deadline,
+};
 
 const CONNECTIONS: usize = 2;
 
@@ -60,6 +62,9 @@ fn serve_lines(congestion: &'static str) {
             assert!(line["sent_datagrams"].as_u64().is_some_and(|n| n > 0));
             // The sender is the other end of the fetch, so the two never name the same peer.
             assert_ne!(line["remote_id"], received[0]["remote_id"]);
+            if !paths_listed("serve", line) {
+                continue;
+            }
             let path = &line["paths"][0];
             assert!(path["cwnd_bytes"].as_u64().is_some_and(|n| n > 0), "{line}");
             let controller = &path["controller"];
