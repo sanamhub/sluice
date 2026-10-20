@@ -138,6 +138,13 @@ fn both_ends_learn_an_address_and_connect_directly_without_a_relay() {
         let served = learned(&carried["discovery"]);
         assert!(!served.is_empty(), "serve learnt no address: {carried}");
         assert_eq!(carried["discovery"]["complete"], true);
+        // On loopback iroh merges the reported address well inside the deadline, so nothing is added
+        // by hand. A non-empty list here means the wait did not work.
+        assert_eq!(
+            carried["discovery"]["added_from_report"],
+            serde_json::json!([]),
+            "{carried}"
+        );
         assert!(
             carried["discovery"]["took_s"]
                 .as_f64()

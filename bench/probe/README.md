@@ -133,6 +133,12 @@ be combined with `--relay`.
   printing the ticket, so the ticket carries the public address, and `fetch` does it before dialling, so
   its address is known when the two ends try to reach each other. If no answer comes, the probe goes on
   without one and records that.
+- The answer reaches the probe before iroh has copied it into the endpoint's own address. After the
+  wait, `serve` therefore waits again, inside what is left of the same 10 s, until the endpoint's
+  address holds every address the server reported to it. If one is still missing, `serve` puts it in the
+  ticket itself and lists it under `added_from_report`, so a run where iroh never merged it can be
+  told apart from one where it did. Without this a ticket could lack the public address, and `fetch`
+  would dial private addresses only and record a `no_path` that is not real.
 - `endpoint.online()` is not used. It waits for a relay connection, and with no relay half it never
   returns.
 - iroh adds the URL as its home relay anyway, so the ticket carries it and the endpoint keeps retrying
@@ -147,8 +153,9 @@ be combined with `--relay`.
   because without the feature the option would read as on and nothing would run.
 - mDNS is off in both modes: the probe builds its endpoint with no address lookup.
 
-The ticket line then carries a `discovery` object: `took_s`, `complete`, and `learned`, the public
-addresses the server reported. The addresses in the ticket include them. The `fetch` result has the
+The ticket line then carries a `discovery` object: `took_s`, `complete`, `learned`, the public
+addresses the server reported, and `added_from_report`, the ones `serve` had to add by hand. The
+addresses in the ticket include all of `learned`. The `fetch` result has the
 same object for its own side, `rendezvous` (the URL), and `connect_s`, which runs from the start of the
 dial to the connections being up, after the wait for the server. Each path in `connection_stats` has a
 `remote_addr`, on `fetch` and on `serve`, which is the address the other end was reached at.

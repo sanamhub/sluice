@@ -1,6 +1,6 @@
 //! `probe serve`: serve generated data, print one ticket line, then one line per closed connection.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use iroh::protocol::Router;
@@ -78,13 +78,27 @@ pub async fn run(args: ServeArgs) -> Result<()> {
     }
 
     // Before the ticket, so the ticket carries the public address the server reported.
-    let discovery = match args.shared.rendezvous {
-        Some(_) => Some(rendezvous::discover(&endpoints).await),
+    let started = Instant::now();
+    let mut discovery = match args.shared.rendezvous {
+        Some(_) => Some(rendezvous::discover_from(&endpoints, started).await),
         None => None,
     };
     let mut addrs = Vec::new();
+    let mut added = Vec::new();
     for endpoint in &endpoints {
-        addrs.push(net::dialable_addr(endpoint, &args.shared.relay).await?);
+        let addr = net::dialable_addr(endpoint, &args.shared.relay).await?;
+        if discovery.is_none() {
+            addrs.push(addr);
+            continue;
+        }
+        // The report arrives before iroh has put it into the endpoint's address.
+        let (addr, from_report) =
+            rendezvous::merged_addr(endpoint, started + rendezvous::DEADLINE).await;
+        addrs.push(addr);
+        added.extend(from_report);
+    }
+    if let Some(discovery) = &mut discovery {
+        discovery.added_from_report = added;
     }
     let ticket = Ticket {
         mode: args.shared.mode,
