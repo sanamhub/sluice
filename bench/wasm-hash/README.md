@@ -88,6 +88,13 @@ The `wasm-bindgen` CLI version has to equal the crate's. The task reads the crat
 ignores, and prints each `.wasm` file's raw and brotli size. The budget in `docs/performance.md` is
 1.5 MB brotli for the whole WASM build, and the sizes go into the result JSON.
 
+The task also checks each shipped `.wasm` with `wasmparser`. The scalar build must validate with SIMD
+switched off, and the simd build must not, so a `+simd128` that never reached the simd build fails the
+task and does not ship a second scalar build under the simd name. It then writes the `+` entries of each
+module's `target_features` section to `sizes.json`, and so to the result JSON. Rust 1.99 compiles
+both builds with `bulk-memory` and `reference-types`, among others, by default, so a load failure on an
+old Safari can be traced to a name in that list.
+
 ## Run
 
 ```

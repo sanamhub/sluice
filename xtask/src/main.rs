@@ -1,6 +1,7 @@
 //! The workspace's task runner. Run it as `cargo xtask <command>`, through the alias in
 //! `.cargo/config.toml`.
 
+mod wasm_features;
 mod wasm_hash;
 
 use clap::{Parser, Subcommand};

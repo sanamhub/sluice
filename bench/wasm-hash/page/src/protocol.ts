@@ -21,6 +21,8 @@ export interface Params {
 export interface WasmSize {
   raw_bytes: number;
   brotli_bytes: number;
+  /** What the build was compiled with. A module that will not load in an old browser names a feature here. */
+  target_features: string[];
 }
 
 export interface Stats {

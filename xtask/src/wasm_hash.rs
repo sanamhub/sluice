@@ -11,6 +11,8 @@ use std::{env, fs};
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
+use crate::wasm_features;
+
 const CRATE: &str = "sluice-wasm-hash";
 const TARGET: &str = "wasm32-unknown-unknown";
 const OUT_NAME: &str = "sluice_wasm_hash";
@@ -20,6 +22,8 @@ struct Variant {
     name: &'static str,
     features: &'static [&'static str],
     rustflags: &'static str,
+    /// Whether the build must contain SIMD instructions. `check_simd` fails if it does not match.
+    simd: bool,
 }
 
 // The two builds differ only here. `simd` is the build ADR 0014 names. `scalar` shows what SIMD is
@@ -29,11 +33,13 @@ const VARIANTS: [Variant; 2] = [
         name: "simd",
         features: &["simd"],
         rustflags: "-Ctarget-feature=+simd128",
+        simd: true,
     },
     Variant {
         name: "scalar",
         features: &[],
         rustflags: "",
+        simd: false,
     },
 ];
 
@@ -72,6 +78,8 @@ struct Dep {
 struct Sizes {
     raw_bytes: u64,
     brotli_bytes: u64,
+    /// From the module's `target_features` section, without the `+`.
+    target_features: Vec<String>,
 }
 
 pub fn run() -> Result<()> {
@@ -91,7 +99,7 @@ pub fn run() -> Result<()> {
         bindgen(&wasm, &out_dir)?;
         sizes.insert(
             variant.name,
-            measure(&out_dir.join(format!("{OUT_NAME}_bg.wasm")))?,
+            measure(&out_dir.join(format!("{OUT_NAME}_bg.wasm")), variant)?,
         );
     }
 
@@ -225,8 +233,11 @@ fn bindgen(wasm: &Path, out_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn measure(wasm: &Path) -> Result<Sizes> {
+/// Checks the module that ships, which is what the browser loads, not the one `cargo` wrote.
+fn measure(wasm: &Path, variant: &Variant) -> Result<Sizes> {
     let raw = fs::read(wasm).with_context(|| format!("cannot read {}", wasm.display()))?;
+    wasm_features::check_simd(variant.name, &raw, variant.simd)?;
+    let target_features = wasm_features::target_features(&raw)?;
     let mut packed = Vec::new();
     {
         // Quality 11 and a 4 MiB window are what a static host's pre-compressed `.br` file uses.
@@ -236,6 +247,7 @@ fn measure(wasm: &Path) -> Result<Sizes> {
     Ok(Sizes {
         raw_bytes: raw.len() as u64,
         brotli_bytes: packed.len() as u64,
+        target_features,
     })
 }
 
@@ -251,4 +263,20 @@ fn print_sizes(sizes: &BTreeMap<&str, Sizes>) {
     println!(
         "budget (docs/performance.md): {BUDGET_BROTLI_BYTES} brotli bytes for the whole WASM build"
     );
+    println!();
+    for variant in &VARIANTS {
+        let uses = if variant.simd {
+            "uses SIMD (invalid with SIMD off)"
+        } else {
+            "no SIMD (valid with SIMD off)"
+        };
+        println!("{:<8} {uses}", variant.name);
+    }
+    println!();
+    for (name, s) in sizes {
+        println!(
+            "{name:<8} target features: {}",
+            s.target_features.join(", ")
+        );
+    }
 }

@@ -54,6 +54,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Pinned exactly: the version has to equal the wasm-bindgen CLI that the wasm-hash workflow installs
 # and `cargo xtask wasm-hash` runs, and a lockfile update must not move it on its own.
 wasm-bindgen = "=0.2.129"
+# Only xtask uses it, to check which features each wasm-hash build needs. Without its `simd` feature it
+# cannot read SIMD instructions, and the defaults add a component-model parser and serde that xtask never uses.
+wasmparser = { version = "=0.262.0", default-features = false, features = ["std", "validate", "features", "simd"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

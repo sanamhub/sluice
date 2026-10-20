@@ -42,7 +42,10 @@ test.describe("page (Playwright engines, WebKit here is not Safari)", () => {
     for (const variant of ["simd", "scalar"] as const) {
       expect(result.wasm[variant].raw_bytes).toBeGreaterThan(0);
       expect(result.wasm[variant].brotli_bytes).toBeGreaterThan(0);
+      expect(result.wasm[variant].target_features.length).toBeGreaterThan(0);
     }
+    expect(result.wasm.simd.target_features).toContain("simd128");
+    expect(result.wasm.scalar.target_features).not.toContain("simd128");
 
     const built = result.variants.map((v) => v.variant);
     if (result.simd_supported) {
