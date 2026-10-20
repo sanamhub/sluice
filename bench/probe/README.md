@@ -51,7 +51,9 @@ server in the test process with its relay half off and a generated certificate, 
 carries the address, that the server counted a discovery connection from each end, and that the
 connection is direct. Two more cases check that a dial to a dead address is a `no_path` result, and that
 a server that does not answer is waited for and recorded as empty. The `iroh-relay` server feature is a
-dev-dependency, so no probe binary carries it.
+dev-dependency, so no probe binary carries it. With `PROBE_TEST_LOG_PATHS` set, the tests also print a
+`PATHS` line per connection with its `paths_source` and `paths_at_s`, which is how a loop of the suite
+counts the fallbacks. Run it with `--success-output immediate`, or nextest hides the lines of passing tests.
 
 ## Run
 
@@ -208,8 +210,8 @@ connection:
   path the connection has used. `noq` does not count QUIC packets, so datagrams are the nearest it
   exposes.
 - `paths` lists the paths open at the end, each with its RTT, congestion window, congestion events,
-  losses, MTU and `controller`. `paths_at_s` is the time it was read, which is earlier than the end
-  when the peer closed first. See [Paths read late](#paths-read-late).
+  losses, MTU and `controller`. `paths_at_s` is the time it was read and `paths_source` what read it,
+  which is earlier than the end when the peer closed first. See [Paths read late](#paths-read-late).
 
 These statistics are the receiver's. QUIC declares a packet lost at the end that sent it, so
 `lost_packets` here counts the receiver's own packets, which are mostly acknowledgements, and
@@ -238,8 +240,8 @@ The line also has `cpu_user_s` and `cpu_sys_s`: the CPU time the `serve` process
 printed the ticket, read when that connection closed. The reading at the ticket is the zero point,
 so generating the data and hashing the blob are not in it. The process is shared, so with several
 connections the line of the last one to close holds the whole transfer. Both are `null` on Windows,
-as on `fetch`. The two full example lines above leave out `paths_at_s`, the series and the CPU
-fields.
+as on `fetch`. The two full example lines above leave out `paths_at_s`, `paths_source`, the series
+and the CPU fields.
 
 Join a `serve` line to its `fetch` entry on `key`. Both ends derive it from the TLS session
 (`export_keying_material`, 8 bytes in hex), so nothing extra crosses the wire, no two connections
@@ -316,17 +318,31 @@ the table above. A transfer shorter than a second has an empty series.
 
 `Connection::paths()` leaves out closed paths (iroh 1.3.0, `connection.rs:1171-1177`). When the peer
 closes first, the list is `[]` by the time this end reads it. Before this was handled, that gave
-`"paths":[]` in 3 of 40 full-suite loopback runs: 2 of 20 on Windows and 1 of 20 in WSL. So each end
-keeps the path list from its latest reading that had a path in it. It reads one as the transfer
-starts, and another with every controller sample.
+`"paths":[]` in 3 of 40 full-suite loopback runs: 2 of 20 on Windows and 1 of 20 in WSL.
 
-- If the list at report time has a path, `paths` is that list and `paths_at_s` is the report time:
-  `elapsed_s` of the result on `fetch`, and seconds since accept on `serve`.
-- If it is empty, `paths` is the kept list and `paths_at_s` is when that was read. Its RTT, window,
-  losses and datagram counts are up to a second old. For a transfer shorter than a second they are
-  from the start, so they sit near zero and no path may be marked `selected` yet.
-- If no reading ever had a path, `paths` is `[]` and `paths_at_s` is `null`. The probe does not make
-  one up.
+So each end keeps the newest list that had a path in it, from two sources. One is the
+once-a-second controller sample. The other is `Connection::paths_stream()` (`connection.rs:1186-1199`),
+which yields the current list when first polled and a fresh one whenever a path opens, closes or is
+selected, and ends when the connection closes. The stream covers what the sample cannot: a transfer
+under a second, which has no sample, and a connection whose first path is not in the list yet when
+it is accepted. `fetch` polls one stream per connection inside the transfer loop, and `serve`
+inside the loop that already waits for the close, so there is no extra task and no wakeup while
+no path changes.
+
+`paths_source` says which reading `paths` is, and `paths_at_s` when it was read:
+
+| `paths_source` | `paths`                                         | `paths_at_s`                                                             |
+| -------------- | ----------------------------------------------- | ------------------------------------------------------------------------ |
+| `live`         | the list at report time, which had a path       | the report time: `elapsed_s` on `fetch`, seconds since accept on `serve` |
+| `stream`       | the list read when the stream reported a change | when the change was received                                             |
+| `sample`       | the list read with the latest controller sample | the sample's time                                                        |
+| `none`         | `[]`, because no reading ever had a path        | `null`                                                                   |
+
+A `stream` or `sample` list is older than the connection's counters. A sample is up to a second old.
+A stream list can be older still: it is from the last path change, which for a short transfer is
+before the data flowed, so its RTT, window and datagram counts sit near zero and no path may be
+marked `selected` yet. Both sources are tried because neither is enough alone, and when both have
+read a list the later one is kept. The probe does not make a path up when there is none.
 
 The connection-level counters (`sent_datagrams`, `received_datagrams`, `lost_packets`, `lost_bytes`)
 are read at close and are final, so this does not touch them.

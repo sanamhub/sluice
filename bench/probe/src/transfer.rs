@@ -11,9 +11,13 @@ use std::{
 use anyhow::{Context, Result};
 use iroh::endpoint::Connection;
 use iroh_blobs::{Hash, api::Store};
+use n0_future::{MergeUnbounded, StreamExt};
 use tokio::{task::JoinSet, time::MissedTickBehavior};
 
-use crate::{blobs, raw, stats::Series};
+use crate::{
+    blobs, raw,
+    stats::{self, Series},
+};
 
 /// What each connection is asked for.
 pub enum Plan {
@@ -91,9 +95,12 @@ pub async fn run(
     let mut clock = tokio::time::interval_at(origin + second, second);
     // A late tick must not be followed by a burst, or the samples stop being one second apart.
     clock.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    for (conn, series) in conns.iter().zip(series.iter_mut()) {
-        series.keep_paths(conn, Duration::ZERO);
-    }
+    // Each stream borrows its connection from `conns`, so nothing here outlives the transfer or
+    // keeps a connection open. A stream ends when its connection closes.
+    let mut changes = MergeUnbounded::from_iter(conns.iter().enumerate().map(|(i, conn)| {
+        conn.paths_stream()
+            .map(move |list| (i, stats::read_list(conn, &list)))
+    }));
     let mut total = 0;
     loop {
         tokio::select! {
@@ -101,6 +108,7 @@ pub async fn run(
                 Some(joined) => total += joined.context("transfer task panicked")??,
                 None => return Ok(total),
             },
+            Some((i, paths)) = changes.next() => series[i].changed(paths, origin.elapsed()),
             _ = clock.tick() => {
                 let bytes = counters.total();
                 progress.push(bytes);

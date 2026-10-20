@@ -12,7 +12,7 @@ use rustls::pki_types::PrivatePkcs8KeyDer;
 use serde_json::Value;
 
 mod common;
-use common::{probe, read_ticket, spawn_server, within_deadline};
+use common::{log_paths, probe, read_ticket, spawn_server, within_deadline};
 
 const SIZE: &str = "8MiB";
 
@@ -182,6 +182,7 @@ fn both_ends_learn_an_address_and_connect_directly_without_a_relay() {
         assert!(result["connect_s"].as_f64().is_some_and(|s| s > 0.0));
         assert!(result["error"].is_null());
         // A direct connection names the address the other end was reached at, never a relay URL.
+        log_paths("fetch", &result["connection_stats"][0]);
         let paths = &result["connection_stats"][0]["paths"];
         assert!(
             paths

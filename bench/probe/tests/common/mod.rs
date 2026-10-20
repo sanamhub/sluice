@@ -8,6 +8,8 @@ use std::{
     time::Duration,
 };
 
+use serde_json::Value;
+
 /// Well under the 60 seconds the suite is allowed, so a hang fails here with a message instead of
 /// being killed by the runner.
 pub const DEADLINE: Duration = Duration::from_secs(45);
@@ -62,6 +64,19 @@ pub fn read_ticket(server_stdout: &mut BufReader<ChildStdout>) -> String {
     let ticket = read_line(server_stdout);
     assert!(!ticket.is_empty(), "serve exited before printing a ticket");
     ticket
+}
+
+/// With `PROBE_TEST_LOG_PATHS` set, prints where a connection's `paths` came from, so a loop of
+/// the suite can count how often each source was used. Off by default.
+pub fn log_paths(side: &str, entry: &Value) {
+    if std::env::var_os("PROBE_TEST_LOG_PATHS").is_some() {
+        println!(
+            "PATHS side={side} source={} paths_at_s={} paths={}",
+            entry["paths_source"],
+            entry["paths_at_s"],
+            entry["paths"].as_array().map_or(0, Vec::len),
+        );
+    }
 }
 
 pub fn within_deadline(case: impl FnOnce() + Send + 'static) {

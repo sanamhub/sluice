@@ -9,6 +9,7 @@ use iroh::{
     protocol::{AcceptError, ProtocolHandler},
 };
 use iroh_blobs::BlobsProtocol;
+use n0_future::StreamExt;
 use serde::Serialize;
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -138,13 +139,17 @@ async fn report_on_close(conn: Connection, lines: Lines) {
     // Same rule as the receiver: a late tick must not be followed by a burst.
     clock.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut series = stats::Series::default();
-    series.keep_paths(&conn, Duration::ZERO);
+    // Borrows `conn`, wakes only when a path changes, and ends when the connection closes.
+    let mut paths = conn.paths_stream();
     let closed = conn.closed();
     tokio::pin!(closed);
     let reason = loop {
         tokio::select! {
             reason = &mut closed => break reason,
             _ = clock.tick() => series.tick(&conn, origin.elapsed()),
+            Some(list) = paths.next() => {
+                series.changed(stats::read_list(&conn, &list), origin.elapsed());
+            }
         }
     };
     let cpu = lines.cpu_since_ticket();

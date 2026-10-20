@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use serde_json::Value;
 
 mod common;
-use common::{probe, read_line, read_ticket, spawn_server, within_deadline};
+use common::{log_paths, probe, read_line, read_ticket, spawn_server, within_deadline};
 
 const CONNECTIONS: usize = 2;
 
@@ -47,8 +47,10 @@ fn serve_lines(congestion: &'static str) {
             .collect();
 
         assert_eq!(keys(lines.iter().cloned()), keys(received.iter().cloned()));
+        received.iter().for_each(|entry| log_paths("fetch", entry));
         assert_eq!(keys(lines.iter().cloned()).len(), CONNECTIONS);
         for line in &lines {
+            log_paths("serve", line);
             assert_eq!(line["event"], "connection_closed");
             assert!(line["close_reason"].as_str().is_some_and(|r| !r.is_empty()));
             assert!(line["received_bytes"].is_null());
@@ -145,7 +147,10 @@ fn both_ends_sample_the_controller_once_a_second() {
         assert_eq!(received.len(), progress.len());
 
         let line = read_line(&mut stdout);
-        let sent = series(&serde_json::from_str(&line).expect("serve prints JSON"));
+        let closed: Value = serde_json::from_str(&line).expect("serve prints JSON");
+        log_paths("fetch", &result["connection_stats"][0]);
+        log_paths("serve", &closed);
+        let sent = series(&closed);
         assert!(!sent.is_empty());
     });
 }
