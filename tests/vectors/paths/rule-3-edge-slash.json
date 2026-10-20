@@ -1,0 +1,17 @@
+{
+  "description": "Rule 3: a path neither begins nor ends with a slash.",
+  "cases": [
+    { "path": "/", "valid": false, "rule": 3 },
+    { "path": "/a", "valid": false, "rule": 3 },
+    { "path": "a/", "valid": false, "rule": 3 },
+    { "path": "/a/b", "valid": false, "rule": 3 },
+    { "path": "//a", "valid": false, "rule": 3 },
+    { "path": "a//", "valid": false, "rule": 3 },
+    { "path": "/etc/passwd", "valid": false, "rule": 3 },
+    { "path": "a/b/", "valid": false, "rule": 3 },
+    { "path": "///", "valid": false, "rule": 3 },
+    { "path": "a", "valid": true },
+    { "path": "a/b", "valid": true },
+    { "path": "a/b/c", "valid": true }
+  ]
+}

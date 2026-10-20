@@ -1,0 +1,28 @@
+{
+  "description": "Rule 7: no component ends with a dot or a space. Windows strips both, so `a.` and `a` would be one file there. A dot or space at the start or in the middle is fine.",
+  "cases": [
+    { "path": "a.", "valid": false, "rule": 7 },
+    { "path": "a ", "valid": false, "rule": 7 },
+    { "path": "a/b.", "valid": false, "rule": 7 },
+    { "path": "a/b ", "valid": false, "rule": 7 },
+    { "path": "dir./a", "valid": false, "rule": 7 },
+    { "path": "dir /a", "valid": false, "rule": 7 },
+    { "path": "...", "valid": false, "rule": 7 },
+    { "path": "a. ", "valid": false, "rule": 7 },
+    { "path": " ", "valid": false, "rule": 7 },
+    { "path": "a/ ", "valid": false, "rule": 7 },
+    { "path": "a..", "valid": false, "rule": 7 },
+    { "path": "x.txt.", "valid": false, "rule": 7 },
+    { "path": "x.txt ", "valid": false, "rule": 7 },
+    { "path": "a/b/c.", "valid": false, "rule": 7 },
+    { "path": "a.b", "valid": true },
+    { "path": " a", "valid": true },
+    { "path": "a b", "valid": true },
+    { "path": "a/ b", "valid": true },
+    { "path": "a/.b", "valid": true },
+    { "path": "a .b", "valid": true },
+    { "path": "a. b", "valid": true },
+    { "path": ".a", "valid": true },
+    { "path": "a/b.c/d", "valid": true }
+  ]
+}

@@ -11,6 +11,8 @@ unicode-normalization.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+# Reads the path vectors, to check the `rule` field that the conformance runner leaves alone.
+serde_json.workspace = true
 
 # A crate cannot inherit the workspace table and override one entry, so this repeats it with
 # unsafe_code at deny. This crate may need unsafe later, and forbid cannot be relaxed by `allow`.

@@ -1,0 +1,28 @@
+{
+  "description": "Rule 2: a path is in Unicode NFC. A receiver rejects any other spelling and never normalizes it. Characters a reader cannot tell apart are written as \\u escapes.",
+  "cases": [
+    { "path": "e\u0301", "valid": false, "rule": 2 },
+    { "path": "cafe\u0301.txt", "valid": false, "rule": 2 },
+    { "path": "dir/Ame\u0301lie", "valid": false, "rule": 2 },
+    { "path": "a/b/e\u0301", "valid": false, "rule": 2 },
+    { "path": "A\u030a", "valid": false, "rule": 2 },
+    { "path": "\u212b", "valid": false, "rule": 2 },
+    { "path": "\u2126", "valid": false, "rule": 2 },
+    { "path": "\u1100\u1161", "valid": false, "rule": 2 },
+    { "path": "q\u0307\u0323", "valid": false, "rule": 2 },
+    { "path": "n\u0303.txt", "valid": false, "rule": 2 },
+    { "path": "é", "valid": true },
+    { "path": "café.txt", "valid": true },
+    { "path": "dir/Amélie", "valid": true },
+    { "path": "Å", "valid": true },
+    { "path": "Ω", "valid": true },
+    { "path": "ñ.txt", "valid": true },
+    { "path": "가", "valid": true },
+    { "path": "\ufb01.txt", "valid": true },
+    { "path": "\u0301", "valid": true },
+    { "path": "日本語/ファイル.txt", "valid": true },
+    { "path": "Файл.txt", "valid": true },
+    { "path": "ملف.txt", "valid": true },
+    { "path": "😀.txt", "valid": true }
+  ]
+}

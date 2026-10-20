@@ -258,3 +258,5 @@ fn is_reserved_device_name(component: &str) -> bool {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod vectors;

@@ -1,0 +1,33 @@
+{
+  "description": "Ordinary paths a receiver has to accept: nested directories, dotfiles, spaces and punctuation inside a name, and non-Latin text in NFC.",
+  "cases": [
+    { "path": "a", "valid": true },
+    { "path": "README.md", "valid": true },
+    { "path": "src/main.rs", "valid": true },
+    { "path": "docs/a b/c.txt", "valid": true },
+    { "path": "photos/2026/IMG_0001.jpg", "valid": true },
+    { "path": ".git/config", "valid": true },
+    { "path": "a/b/c/d/e/f/g/h", "valid": true },
+    { "path": "node_modules/@scope/pkg/index.js", "valid": true },
+    { "path": "file(1).txt", "valid": true },
+    { "path": "100%.txt", "valid": true },
+    { "path": "#1.txt", "valid": true },
+    { "path": "~backup", "valid": true },
+    { "path": "a,b;c.txt", "valid": true },
+    { "path": "a&b", "valid": true },
+    { "path": "a.tar.gz", "valid": true },
+    { "path": "UPPER/lower/MiXed", "valid": true },
+    { "path": "emoji-😀.txt", "valid": true },
+    { "path": "Ünïcödé", "valid": true },
+    { "path": "日本語/ファイル.txt", "valid": true },
+    { "path": "Файл.txt", "valid": true },
+    { "path": "한국어/파일.txt", "valid": true },
+    { "path": "a/b c/d e f", "valid": true },
+    { "path": "a.b.c/d.e.f", "valid": true },
+    { "path": "0", "valid": true },
+    { "path": "-rf", "valid": true },
+    { "path": "-", "valid": true },
+    { "path": "_", "valid": true },
+    { "path": "a/_/b", "valid": true }
+  ]
+}

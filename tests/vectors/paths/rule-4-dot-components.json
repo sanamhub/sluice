@@ -1,0 +1,28 @@
+{
+  "description": "Rule 4: no component is empty, `.` or `..`. A component that merely contains or begins with dots is fine.",
+  "cases": [
+    { "path": "a//b", "valid": false, "rule": 4 },
+    { "path": ".", "valid": false, "rule": 4 },
+    { "path": "..", "valid": false, "rule": 4 },
+    { "path": "a/./b", "valid": false, "rule": 4 },
+    { "path": "a/../b", "valid": false, "rule": 4 },
+    { "path": "../a", "valid": false, "rule": 4 },
+    { "path": "a/..", "valid": false, "rule": 4 },
+    { "path": "a/b/../../..", "valid": false, "rule": 4 },
+    { "path": "./a", "valid": false, "rule": 4 },
+    { "path": "a/.", "valid": false, "rule": 4 },
+    { "path": "a///b", "valid": false, "rule": 4 },
+    { "path": "a/b/./c", "valid": false, "rule": 4 },
+    { "path": "a/b//c", "valid": false, "rule": 4 },
+    { "path": "..a", "valid": true },
+    { "path": "a..b", "valid": true },
+    { "path": ".hidden", "valid": true },
+    { "path": "a/.hidden/b", "valid": true },
+    { "path": "...a", "valid": true },
+    { "path": ".a", "valid": true },
+    { "path": "a/..b", "valid": true },
+    { "path": "a.b", "valid": true },
+    { "path": ".git/config", "valid": true },
+    { "path": "a/.b/c", "valid": true }
+  ]
+}

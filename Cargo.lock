@@ -3651,6 +3651,7 @@ name = "sluice-core"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "serde_json",
  "thiserror 2.0.21",
  "unicode-normalization",
 ]
@@ -4907,6 +4908,7 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "sluice-core",
  "wasmparser",
 ]
 
