@@ -2,6 +2,8 @@
 
 mod ceilings;
 mod check;
+mod connect;
+mod connect_summary;
 mod env;
 mod host;
 mod hosts;
@@ -9,6 +11,7 @@ mod mscp;
 mod netem;
 mod probe_cmd;
 mod probe_run;
+mod rendezvous;
 mod results;
 mod runner;
 mod scenarios;
@@ -42,6 +45,36 @@ enum Command {
         /// Hosts file, see bench/hosts.example.toml.
         #[arg(long)]
         hosts: PathBuf,
+        /// A rendezvous server, https://host[:udp-port]. Adds, for each host, whether the name
+        /// resolves and whether the server answers over UDP.
+        #[arg(long)]
+        rendezvous: Option<String>,
+        /// A PEM file with the server's root certificate, at this path on every host.
+        #[arg(long, requires = "rendezvous")]
+        rendezvous_ca: Option<String>,
+    },
+    /// Measure how often the two hosts connect with a rendezvous server and no relay, and write
+    /// bench/results/<UTC date>-<label>/.
+    Connect {
+        /// Hosts file, see bench/hosts.example.toml.
+        #[arg(long)]
+        hosts: PathBuf,
+        /// A rendezvous server, https://host[:udp-port].
+        #[arg(long)]
+        rendezvous: String,
+        /// A PEM file with the server's root certificate, at this path on both hosts. A server with
+        /// a LetsEncrypt certificate needs none.
+        #[arg(long)]
+        rendezvous_ca: Option<String>,
+        /// Names the results directory. Letters, digits, dot, dash and underscore.
+        #[arg(long)]
+        label: String,
+        /// Attempts per port mapping setting.
+        #[arg(long, default_value_t = 20)]
+        runs: u32,
+        /// Where the results directory goes.
+        #[arg(long, default_value = "bench/results")]
+        out_dir: PathBuf,
     },
     /// Run the scenarios and write bench/results/<UTC date>-<label>/.
     Run {
@@ -93,7 +126,34 @@ async fn main() -> ExitCode {
 /// True if everything the command did went cleanly.
 async fn execute(cli: Cli) -> Result<bool> {
     match cli.command {
-        Command::Check { hosts } => check::run(&hosts::load(&hosts)?).await,
+        Command::Check {
+            hosts,
+            rendezvous,
+            rendezvous_ca,
+        } => {
+            let rendezvous = rendezvous
+                .map(|url| rendezvous::Rendezvous::parse(&url, rendezvous_ca))
+                .transpose()?;
+            check::run(&hosts::load(&hosts)?, rendezvous.as_ref()).await
+        }
+        Command::Connect {
+            hosts,
+            rendezvous,
+            rendezvous_ca,
+            label,
+            runs,
+            out_dir,
+        } => {
+            if runs == 0 {
+                bail!("--runs must be at least 1");
+            }
+            let rendezvous = rendezvous::Rendezvous::parse(&rendezvous, rendezvous_ca)?;
+            let hosts = hosts::load(&hosts)?;
+            let results = Results::create(&out_dir, &label)?;
+            let finished = connect::run(&hosts, &rendezvous, results, &label, runs).await?;
+            println!("results: {}", finished.dir.display());
+            Ok(finished.clean)
+        }
         Command::Run {
             hosts,
             label,

@@ -7,13 +7,14 @@ use anyhow::Result;
 use crate::{
     host::{Ctx, Host, Os, quote},
     hosts::Hosts,
+    rendezvous::{self, Rendezvous},
     tools::{self, Tool, found},
 };
 
 const QUICK: Duration = Duration::from_secs(30);
 
 // Wide enough for `sudo -n tc`, the longest label. At 10 it filled the column and ran into its result.
-const LABEL: usize = 12;
+pub const LABEL: usize = 12;
 
 /// What each optional tool is for, so a missing one is not a mystery.
 fn purpose(name: &str) -> &'static str {
@@ -27,14 +28,20 @@ fn purpose(name: &str) -> &'static str {
 }
 
 /// Prints a report for both hosts and returns true if a run can start: both hosts reachable,
-/// the probe present, and the data directories writable.
-pub async fn run(hosts: &Hosts) -> Result<bool> {
+/// the probe present, the data directories writable, and the rendezvous server, if one was named,
+/// answering on both.
+pub async fn run(hosts: &Hosts, rendezvous: Option<&Rendezvous>) -> Result<bool> {
     let ctx = Ctx::default();
     let mut ready = true;
     for (role, entry) in [("sender", &hosts.sender), ("receiver", &hosts.receiver)] {
         println!("{role}: {}", entry.host);
         match Host::connect(role, entry, &ctx).await {
-            Ok(host) => ready &= report(&host).await?,
+            Ok(host) => {
+                ready &= report(&host).await?;
+                if let Some(server) = rendezvous {
+                    ready &= rendezvous::check(&host, server).await;
+                }
+            }
             Err(e) => {
                 println!("  unreachable: {e:#}");
                 ready = false;

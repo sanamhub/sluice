@@ -48,7 +48,8 @@ people who run M0, not for users.
 **Tests:** unit tests cover the summary maths (median, spread, slow runs, percentage of the lower
 ceiling), the parsing of `scenarios.toml` and the hosts file, the checks on `tc qdisc show`, how netem
 is split between the two hosts, that a side already shaped is undone when the other fails, and the
-stall detector. On Unix one more test runs a shell script that behaves like a collapsed probe and
+stall detector. The connect tests cover the rendezvous URL parsing, the probe options the harness
+builds, reading the `discovery` object out of a ticket line, and the summary rows. On Unix one more test runs a shell script that behaves like a collapsed probe and
 checks that the run is stopped early and still has its `serve` line.
 `tests/smoke.rs` runs `bench smoke` as one integration test under `cargo nextest run` on all three
 operating systems. It uses the probe only, because CI runners may lack `iperf3`, `fio` and `mscp`, and
@@ -101,6 +102,12 @@ the interface exists, and whether `sudo -n tc` works without a password. It chan
 non-zero if a host is unreachable, the probe is missing or the data directory is not writable. A
 missing interface or `sudo -n tc` is reported and does not fail the check, because S1 does not need
 them.
+
+With `--rendezvous https://host[:udp-port]` it adds two lines per host: whether the name resolves on
+that host, and whether a probe started there gets an address back from the server over UDP, which is a
+round trip and a TLS handshake and not only an open port. A host that fails either makes the check exit
+non-zero, because `bench connect` cannot run from it. `--rendezvous-ca <path>` names a PEM file for a
+self-signed server, and the path is opened on each host.
 
 ## Run M0
 
@@ -156,6 +163,43 @@ write into a directory that exists.
 
 The files are written even if a scenario fails or the run is interrupted, so what was measured is
 kept.
+
+## Connect
+
+M0 also has to say how often two peers connect directly when the only infrastructure is a rendezvous
+server and there is no relay (ADR 0013). `bench connect` measures that on two hosts behind real NATs,
+with the [`rendezvous` image](../docker/rendezvous/README.md) on a small VPS:
+
+```
+target/release/bench check --hosts ~/m0-hosts.toml --rendezvous https://rendezvous.example.net
+target/release/bench connect --hosts ~/m0-hosts.toml --rendezvous https://rendezvous.example.net --label home-vs-office
+```
+
+Each attempt starts `serve` on the sender and `fetch` on the receiver, both with `--rendezvous` and no
+relay, and moves 16 MiB over one raw stream with a 30 s timeout. The set runs twice per round, with
+port mapping `off` and then `on`, so the two settings are interleaved and a network that changes over
+the run does not land on one of them. `--runs` is the number of rounds, 20 by default, so 40 attempts.
+`--rendezvous-ca <path>` names a PEM file for a self-signed server. The path is passed to the probe as
+it is, so the file has to be at that path on both hosts. A server with a LetsEncrypt certificate needs
+none.
+
+It writes `bench/results/<UTC date>-<label>/`, or the place `--out-dir` names, and refuses to write into
+a directory that exists:
+
+- `raw.jsonl`: one line per attempt with the `ticket` line, the `fetch` line and the `serve` lines, the
+  port mapping setting, and `status`: `ok`, `timeout` (the connection came up and the transfer ran out
+  of time), `no_path` or `failed`.
+- `env.json`: as for `bench run`.
+- `summary.md`: one row per port mapping setting with the attempts, how many connected, how many were
+  `no_path`, how many gave no result (`other`), the median and the slowest `connect_s`, and the
+  public addresses the server reported for each end. An IP is listed once, with the number of
+  different ports the server reported for it, because every attempt gets a new source port.
+
+A connection that came up is direct, because there is no relay for it to be anything else, and a dial
+that fails is the result and not an error. One rendezvous server cannot tell whether a NAT gives a
+different public port for each destination, because that takes a second server to compare against. The
+summary says so, and the harness does not guess a NAT type from what the server reported. State which
+NATs sat in front of the two hosts when you publish the table, because the table does not.
 
 ## Smoke
 
