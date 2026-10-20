@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 use iroh::endpoint::Connection;
+use noq::congestion::Controller;
 use serde::Serialize;
 
 use crate::controller::{self, ControllerReport};
@@ -52,7 +53,8 @@ pub struct Sample {
     /// `progress` uses, so entry `i` pairs with `progress[i]`. In a `serve` line it starts when the
     /// connection is accepted, a little before the transfer.
     pub elapsed_s: f64,
-    /// Congestion window of the selected path, in bytes. `null` while no path can be chosen.
+    /// Congestion window of the selected path, in bytes. `null` while no path can be chosen, and
+    /// when the path closed before its controller could be read.
     pub cwnd_bytes: Option<u64>,
     /// Pacing rate in bytes per second. `null` for controllers that do not pace.
     pub pacing_rate_bytes_s: Option<u64>,
@@ -137,26 +139,22 @@ fn sample(conn: &Connection, elapsed: Duration) -> Sample {
         .iter()
         .find(|p| p.is_selected())
         .or_else(|| paths.iter().next().filter(|_| paths.len() == 1));
-    let controller = in_use
-        .as_ref()
-        .and_then(|p| conn.congestion_state(p.id()))
-        .map(|c| controller::read(c.as_ref()));
-    let (pacing, state, max_bw, app_limited) = match controller {
-        Some(c) => (
-            c.pacing_rate_bytes_s,
-            c.bbr_state,
-            c.bbr_max_bw_bytes_s,
-            c.bbr_app_limited,
-        ),
-        None => (None, None, None, None),
-    };
+    let controller = in_use.and_then(|p| conn.congestion_state(p.id()));
+    reading(elapsed, controller.as_deref())
+}
+
+/// A sample taken from one controller. A path can close between choosing it and asking `noq` for
+/// its controller, so the window comes from the controller too: a window with no state would
+/// pass for a reading when it is half of one.
+fn reading(elapsed: Duration, ctl: Option<&dyn Controller>) -> Sample {
+    let read = ctl.map(controller::read);
     Sample {
         elapsed_s: (elapsed.as_secs_f64() * 1000.0).round() / 1000.0,
-        cwnd_bytes: in_use.map(|p| p.stats().cwnd),
-        pacing_rate_bytes_s: pacing,
-        bbr_state: state,
-        bbr_max_bw_bytes_s: max_bw,
-        bbr_app_limited: app_limited,
+        cwnd_bytes: ctl.map(Controller::window),
+        pacing_rate_bytes_s: read.as_ref().and_then(|c| c.pacing_rate_bytes_s),
+        bbr_state: read.as_ref().and_then(|c| c.bbr_state.clone()),
+        bbr_max_bw_bytes_s: read.as_ref().and_then(|c| c.bbr_max_bw_bytes_s),
+        bbr_app_limited: read.as_ref().and_then(|c| c.bbr_app_limited),
     }
 }
 
@@ -239,6 +237,10 @@ fn key(conn: &Connection) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::{sync::Arc, time::Instant};
+
+    use noq::congestion::{Bbr3Config, ControllerFactory, CubicConfig};
+
     use super::*;
 
     fn path(remote_addr: &str) -> PathReport {
@@ -287,5 +289,29 @@ mod tests {
         let (paths, at) = choose(Vec::new(), Duration::from_secs(4), None);
         assert!(paths.is_empty());
         assert_eq!(at, None);
+    }
+
+    #[test]
+    fn a_sample_with_no_controller_is_null_apart_from_its_time() {
+        let sample = reading(Duration::from_millis(3_013), None);
+        assert_eq!(sample.elapsed_s, 3.013);
+        assert!(sample.cwnd_bytes.is_none());
+        assert!(sample.pacing_rate_bytes_s.is_none());
+        assert!(sample.bbr_state.is_none());
+        assert!(sample.bbr_max_bw_bytes_s.is_none());
+        assert!(sample.bbr_app_limited.is_none());
+    }
+
+    #[test]
+    fn a_sample_takes_the_window_and_the_state_from_one_controller() {
+        let bbr = Arc::new(Bbr3Config::default()).build(Instant::now(), 1452);
+        let sample = reading(Duration::from_secs(1), Some(bbr.as_ref()));
+        assert_eq!(sample.cwnd_bytes, Some(bbr.window()));
+        assert_eq!(sample.bbr_state.as_deref(), Some("Startup"));
+
+        let cubic = Arc::new(CubicConfig::default()).build(Instant::now(), 1452);
+        let sample = reading(Duration::from_secs(1), Some(cubic.as_ref()));
+        assert_eq!(sample.cwnd_bytes, Some(cubic.window()));
+        assert!(sample.bbr_state.is_none());
     }
 }

@@ -306,7 +306,9 @@ the table above. A transfer shorter than a second has an empty series.
   `progress` clock by the handshake and the setup before the first request, so compare the two by
   position and expect the offset to be small, not zero.
 - The sample reads the selected path, or the only open path. With several open and none selected
-  the sample is all `null`, because choosing one would be a guess.
+  the sample is all `null`, because choosing one would be a guess. It is all `null` too if the
+  path closed before `noq` could return its controller, so the window never appears without the
+  state it belongs to.
 - Reading a BBR controller clones it and formats its state, which is the reason for one sample a
   second and not more.
 
