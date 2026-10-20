@@ -12,7 +12,7 @@ disagrees, and `cargo nextest run` runs the same check.
 ```
 tests/vectors/
   paths/        manifest path rules, SPEC.md section 8
-  tickets/      not written yet
+  tickets/      ticket text and bytes, SPEC.md section 4
   manifests/    not written yet
   packs/        not written yet
   live/         not written yet
@@ -76,3 +76,69 @@ Some points a reader cannot see from the rules alone:
 - Each file is named for the rule it tests. It holds the paths that break that rule, and next to
   them the closest paths that must pass, such as `..a` for rule 4 and `CONSOLE` for rule 8.
   `accepted.json` holds ordinary paths.
+
+## `tickets/`
+
+A ticket is a secret, and these are made-up ones: the keys are patterns such as `11` repeated, and the
+addresses are in the documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `2001:db8::/32`). A
+case is a ticket text and a verdict. The text is a JSON string and not always canonical, so a
+decoder must be given it exactly.
+
+A valid case says what the ticket decodes to and what an encoder writes for it:
+
+```json
+{
+  "ticket": "SLUICE1...",
+  "valid": true,
+  "canonical": "sluice1...",
+  "fields": {
+    "version": 1,
+    "kind": "static",
+    "endpoint_id": "1111...",
+    "addrs": ["192.0.2.1:50000", "[2001:db8::1]:443"],
+    "relay_url": null,
+    "expiry_ms": null,
+    "root": "2222...",
+    "size": "104857600",
+    "format": "raw"
+  }
+}
+```
+
+A rejected case has a `reason` for people, which a runner does not compare:
+
+```json
+{ "ticket": "sluice2...", "valid": false, "reason": "the wrong prefix" }
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `ticket` | string | The text given to the decoder |
+| `valid` | boolean | `true` if a decoder MUST accept it, `false` if it MUST reject it |
+| `canonical` | string | Valid cases. The text an encoder writes for `fields`, in lower case. It can differ from `ticket` only in case |
+| `fields` | object | Valid cases. What the ticket decodes to |
+| `reason` | string | Rejected cases. What is wrong with it |
+
+In `fields`, `kind` is `static` or `live`. A static ticket has `root`, `size` and `format` (`raw` or
+`hash_sequence`). A live ticket has `stream_id` and `sender_key`. Keys and ids are lower-case hex.
+`addrs` are written as `ip:port`, with the IPv6 address in square brackets, and are compared as
+addresses, not as text. `relay_url` and `expiry_ms` are `null` when absent. `size` and `expiry_ms` are
+decimal strings, because a JSON number does not hold a `u64` in every language.
+
+To check an implementation, for every valid case decode `ticket`, compare the result with `fields`,
+and encode the fields: the result must be `canonical`. For every rejected case, decoding `ticket` must
+fail.
+
+Where a rejected ticket can be a valid ticket with one fault, it is, so that fault is the reason it
+fails. The files split them by where the fault is:
+
+- `invalid-text.json`: the prefix, a character outside the alphabet (each of `i`, `l`, `o`, `u` in
+  both cases, `-`, `=`, white space, a non-ASCII character), a body length that whole bytes cannot
+  give, spare bits that are not zero, and text of 4097 bytes. The largest ticket that fits is 4095
+  characters, because the base32 body can only end at certain lengths, and it is in `valid-static.json`.
+- `invalid-bytes.json`: the bytes under well formed base32. An unknown version, kind or format, bytes
+  after the body or missing from it, an empty `relay_url`, a tag that is neither value, text that is not
+  UTF-8, and a varint with a zero byte too many.
+
+The bytes were written by a second encoder, built from the table in `SPEC.md` and not from the Rust
+code, so the vectors check the spec and the implementation against each other.
