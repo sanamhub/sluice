@@ -1,10 +1,10 @@
 //! The once-a-second readings of a connection: the controller series, and the path list kept for the
 //! report when the peer closes the connection before this end reads it.
 
-use std::time::Duration;
+use std::{cmp::Reverse, time::Duration};
 
 use iroh::endpoint::Connection;
-use noq::congestion::Controller;
+use noq::{PathId, congestion::Controller};
 use serde::Serialize;
 
 use crate::{
@@ -23,8 +23,9 @@ pub struct Sample {
     /// How many paths were open when the sample was read.
     pub open_paths: usize,
     /// Which path the sample read: `selected` for the one iroh marked, `only` for a single open
-    /// path, or `null` when none could be chosen. The choice is recorded even if the path closed
-    /// before its controller was read, which shows as `null` fields below.
+    /// path, `busiest` when several are open and none is selected, or `null` when none is open.
+    /// The choice is recorded even if the path closed before its controller was read, which shows
+    /// as `null` fields below.
     pub path: Option<Chosen>,
     /// Congestion window of that path, in bytes. `null` while no path can be chosen, and
     /// when the path closed before its controller could be read.
@@ -90,7 +91,7 @@ impl Series {
     }
 }
 
-/// How a sample's path was chosen.
+/// How a path was chosen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Chosen {
@@ -98,29 +99,60 @@ pub enum Chosen {
     Selected,
     /// It is the only open path.
     Only,
+    /// Several paths are open and none is selected, so it is the one with the most datagrams.
+    Busiest,
 }
 
 /// What choosing a path needs to know about one open path.
 struct Candidate {
+    id: PathId,
     selected: bool,
+    /// Sent plus received over the path's life.
+    datagrams: u64,
 }
 
-/// The path a sample reads, as an index into `open`, and why it was chosen.
+/// The path to read, as an index into `open`, and why it was chosen. iroh can hold two paths for a
+/// whole transfer without marking one, and a reading that is `null` then says nothing while data
+/// moves, so the path that has carried the most datagrams stands in. A tie goes to the lower path
+/// id, so the choice does not depend on the order of the list.
 fn pick(open: &[Candidate]) -> Option<(usize, Chosen)> {
     if let Some(i) = open.iter().position(|c| c.selected) {
         return Some((i, Chosen::Selected));
     }
-    (open.len() == 1).then_some((0, Chosen::Only))
+    if open.len() == 1 {
+        return Some((0, Chosen::Only));
+    }
+    open.iter()
+        .enumerate()
+        .max_by_key(|(_, c)| (c.datagrams, Reverse(c.id)))
+        .map(|(i, _)| (i, Chosen::Busiest))
 }
 
-/// Reads `conn`'s controller on the path `pick` chooses. With several open and none selected there
-/// is no honest choice, so the reading is `null`.
+/// The path `pick` chooses among `paths`. `fetch` summarises with the same path a sample reads.
+pub fn in_use(paths: &[PathReport]) -> Option<&PathReport> {
+    let open: Vec<Candidate> = paths
+        .iter()
+        .map(|p| Candidate {
+            id: p.id,
+            selected: p.selected,
+            datagrams: p.sent_datagrams + p.received_datagrams,
+        })
+        .collect();
+    pick(&open).map(|(i, _)| &paths[i])
+}
+
+/// Reads `conn`'s controller on the path `pick` chooses.
 fn sample(conn: &Connection, elapsed: Duration) -> Sample {
     let list = conn.paths();
     let open: Vec<Candidate> = list
         .iter()
-        .map(|p| Candidate {
-            selected: p.is_selected(),
+        .map(|p| {
+            let stats = p.stats();
+            Candidate {
+                id: p.id(),
+                selected: p.is_selected(),
+                datagrams: stats.udp_tx.datagrams + stats.udp_rx.datagrams,
+            }
         })
         .collect();
     let picked = pick(&open);
@@ -197,141 +229,4 @@ fn choose(
 }
 
 #[cfg(test)]
-mod tests {
-    use std::{sync::Arc, time::Instant};
-
-    use noq::congestion::{Bbr3Config, ControllerFactory, CubicConfig};
-
-    use super::*;
-
-    fn path(remote_addr: &str) -> PathReport {
-        PathReport {
-            selected: false,
-            relay: false,
-            remote_addr: remote_addr.to_string(),
-            rtt_ms: 0.0,
-            cwnd_bytes: 0,
-            congestion_events: 0,
-            spurious_congestion_events: 0,
-            lost_packets: 0,
-            lost_bytes: 0,
-            sent_datagrams: 0,
-            received_datagrams: 0,
-            mtu: 0,
-            controller: None,
-        }
-    }
-
-    fn kept(at_s: u64, source: Source, remote_addr: &str) -> Option<Kept> {
-        Some(Kept {
-            at: Duration::from_secs(at_s),
-            source,
-            paths: vec![path(remote_addr)],
-        })
-    }
-
-    #[test]
-    fn a_live_list_wins_and_is_stamped_with_the_report_time() {
-        let now = Duration::from_millis(4_250);
-        let kept = kept(3, Source::Stream, "kept");
-        let (paths, at, source) = choose(vec![path("live")], now, kept);
-        assert_eq!(paths[0].remote_addr, "live");
-        assert_eq!(at, Some(4.25));
-        assert_eq!(source, Source::Live);
-    }
-
-    #[test]
-    fn the_kept_list_stands_in_for_an_empty_live_one_with_its_own_time_and_source() {
-        let kept = kept(3, Source::Sample, "kept");
-        let (paths, at, source) = choose(Vec::new(), Duration::from_secs(4), kept);
-        assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0].remote_addr, "kept");
-        assert_eq!(at, Some(3.0));
-        assert_eq!(source, Source::Sample);
-    }
-
-    #[test]
-    fn with_neither_there_are_no_paths_and_no_time() {
-        let (paths, at, source) = choose(Vec::new(), Duration::from_secs(4), None);
-        assert!(paths.is_empty());
-        assert_eq!(at, None);
-        assert_eq!(source, Source::None);
-    }
-
-    #[test]
-    fn the_newer_reading_is_kept_and_an_empty_one_is_ignored() {
-        let mut series = Series::default();
-        series.keep(Source::Sample, vec![path("a")], Duration::from_secs(1));
-        series.keep(
-            Source::Stream,
-            vec![path("b")],
-            Duration::from_millis(1_400),
-        );
-        series.keep(Source::Stream, Vec::new(), Duration::from_secs(2));
-        let kept = series.kept.expect("a list was kept");
-        assert_eq!(kept.source, Source::Stream);
-        assert_eq!(kept.paths[0].remote_addr, "b");
-        assert_eq!(kept.at, Duration::from_millis(1_400));
-    }
-
-    #[test]
-    fn a_sample_with_no_controller_is_null_apart_from_its_time_and_the_path_facts() {
-        let sample = reading(
-            Duration::from_millis(3_013),
-            2,
-            Some(Chosen::Selected),
-            None,
-        );
-        assert_eq!(sample.elapsed_s, 3.013);
-        assert_eq!(sample.open_paths, 2);
-        assert_eq!(sample.path, Some(Chosen::Selected));
-        assert!(sample.cwnd_bytes.is_none());
-        assert!(sample.pacing_rate_bytes_s.is_none());
-        assert!(sample.bbr_state.is_none());
-        assert!(sample.bbr_max_bw_bytes_s.is_none());
-        assert!(sample.bbr_app_limited.is_none());
-    }
-
-    #[test]
-    fn a_sample_takes_the_window_and_the_state_from_one_controller() {
-        let bbr = Arc::new(Bbr3Config::default()).build(Instant::now(), 1452);
-        let sample = reading(
-            Duration::from_secs(1),
-            1,
-            Some(Chosen::Only),
-            Some(bbr.as_ref()),
-        );
-        assert_eq!(sample.cwnd_bytes, Some(bbr.window()));
-        assert_eq!(sample.bbr_state.as_deref(), Some("Startup"));
-
-        let cubic = Arc::new(CubicConfig::default()).build(Instant::now(), 1452);
-        let sample = reading(
-            Duration::from_secs(1),
-            1,
-            Some(Chosen::Only),
-            Some(cubic.as_ref()),
-        );
-        assert_eq!(sample.cwnd_bytes, Some(cubic.window()));
-        assert!(sample.bbr_state.is_none());
-    }
-
-    fn open(selected: &[bool]) -> Vec<Candidate> {
-        selected
-            .iter()
-            .map(|&selected| Candidate { selected })
-            .collect()
-    }
-
-    #[test]
-    fn the_selected_path_is_read_and_a_lone_path_is_read_as_the_only_one() {
-        assert_eq!(pick(&open(&[false, true])), Some((1, Chosen::Selected)));
-        assert_eq!(pick(&open(&[true])), Some((0, Chosen::Selected)));
-        assert_eq!(pick(&open(&[false])), Some((0, Chosen::Only)));
-    }
-
-    #[test]
-    fn several_open_paths_with_none_selected_have_no_choice_yet() {
-        assert_eq!(pick(&open(&[false, false])), None);
-        assert_eq!(pick(&open(&[])), None);
-    }
-}
+mod tests;

@@ -220,11 +220,14 @@ These statistics are the receiver's. QUIC declares a packet lost at the end that
 needs). The congestion state that limits a download lives on the sender, and `serve` reports it.
 
 After a timeout `received_bytes` is what arrived and `verified_hash` is the root the bytes would
-have been checked against. `path` is `relay` if a selected path is a relay and `direct` if none is,
-or if no open path is a relay, read from the same list as `paths`. iroh marks a path selected a
-little after the first bytes flow, so a
-short transfer on a host with two addresses can end with two paths open and none selected. Then
-`rtt_ms` is `null`, and so is `path` if one of the open paths is a relay. Otherwise `fetch`
+have been checked against. `path` is `relay` if any connection's chosen path is a relay and
+`direct` otherwise, and `rtt_ms` is the RTT of the first connection's chosen path. The chosen path
+is the one a sample reads, from the same list as `paths`: the one iroh marked selected, the only
+open path, or, with several open and none selected, the one with the most datagrams sent plus
+received, a tie going to the lower path id. iroh marks a path a little after the first bytes flow,
+and on a host with two addresses it can leave two open for the whole transfer, so both fields have
+a value whenever a path is open. They are `null` only if a connection's list has no path while
+another connection has a relay open. `fetch`
 exits non-zero, without a result line, if the received byte count differs from `size_bytes`, if a blob
 does not verify against the root, or if any connection negotiated a key exchange group other than
 `X25519MLKEM768`.
@@ -307,18 +310,21 @@ an empty series.
 ```
 
 - `open_paths` is how many paths were open when the sample was read, and `path` says which one the
-  sample read: `selected` for the path iroh marked, `only` for a single open path, or `null` when
-  none could be chosen. Together they explain a series of `null` readings without a rerun.
-
+  sample read: `selected` for the path iroh marked, `only` for a single open path, `busiest` when
+  several are open and none is selected, or `null` when none is open. Together they explain a series
+  of `null` readings without a rerun.
 - On `fetch` the samples are taken on the tick that appends to `progress`, so entry `i` of the
   series pairs with `progress[i]` on every connection.
 - On `serve` the clock starts when the connection is accepted. It runs ahead of the receiver's
   `progress` clock by the handshake and the setup before the first request, so compare the two by
   position and expect the offset to be small, not zero.
-- The sample reads the selected path, or the only open path. With several open and none selected
-  the sample is all `null`, because choosing one would be a guess. It is all `null` too if the
-  path closed before `noq` could return its controller, so the window never appears without the
-  state it belongs to.
+- A sample reads one path: the selected one, the only open one, or with several open and none
+  selected, the one that has moved the most UDP datagrams so far (sent plus received), a tie going
+  to the lower path id. iroh can hold two paths for a whole transfer without marking one, and a
+  sample that said nothing then would say nothing for the length of the run. The busiest path is
+  where the traffic is, but it is a stand-in, so `path` says `busiest` and not `selected`. A sample
+  is all `null` when no path is open, and also when the chosen path closed before `noq` could return
+  its controller, so the window never appears without the state it belongs to.
 - Reading a BBR controller clones it and formats its state, which is the reason for one sample a
   second and not more.
 

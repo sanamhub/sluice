@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 use iroh::endpoint::{Connection, PathList};
+use noq::PathId;
 use serde::Serialize;
 
 use crate::{
@@ -18,6 +19,10 @@ const KEY_LABEL: &[u8] = b"sluice-probe/connection-key";
 /// and a relay path at once.
 #[derive(Serialize)]
 pub struct PathReport {
+    /// `noq`'s id for the path. It only breaks ties between equally busy paths, so it is not
+    /// printed.
+    #[serde(skip)]
+    pub id: PathId,
     /// iroh's choice for application data. It marks a path late, so a short run can show none.
     pub selected: bool,
     /// Whether the path goes through a relay.
@@ -119,6 +124,7 @@ pub fn read_list(conn: &Connection, list: &PathList<'_>) -> Vec<PathReport> {
         .map(|path| {
             let s = path.stats();
             PathReport {
+                id: path.id(),
                 selected: path.is_selected(),
                 relay: path.is_relay(),
                 remote_addr: path.remote_addr().to_string(),

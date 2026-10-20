@@ -21,7 +21,7 @@ use crate::{
     net, raw,
     rendezvous::{self, Discovery},
     result::{Outcome, Output},
-    sampling::Series,
+    sampling::{self, Series},
     stats::{self, ConnReport},
     ticket::Ticket,
     transfer::{self, Counters, Plan},
@@ -312,20 +312,19 @@ fn expected_root(ticket: &Ticket) -> Result<Hash> {
     Ok(expected)
 }
 
-/// `relay` if any connection's selected path goes through a relay, and `direct` if none is, or if
-/// no open path is a relay, since then whichever is selected is direct. Otherwise `None`. iroh marks
-/// a path selected a little after the first bytes flow, so a short transfer can finish with several
-/// paths open and none selected, as it does on a host with two addresses. A connection with exactly
-/// one open path has nowhere else to send, so that path counts. The RTT is the first known
-/// connection's, `None` if no path is known.
+/// `relay` if any connection's chosen path goes through a relay, and `direct` if none does. The
+/// chosen path is the one a sample reads (`sampling::in_use`): the selected one, the only one, or
+/// with several open and none selected, the busiest. iroh marks a path selected a little after the
+/// first bytes flow, and on a host with two addresses it can leave two open and none selected for a
+/// whole transfer. `None` only if a connection has no path in its list while another has a relay
+/// open. The RTT is the first connection's chosen path, `None` if no path is known.
 fn path_summary(conns: &[ConnReport]) -> (Option<&'static str>, Option<f64>) {
     let (mut relay_in_use, mut relay_open, mut all_known) = (false, false, true);
     let mut first_rtt = None;
     for conn in conns {
         let paths = &conn.paths;
         relay_open |= paths.iter().any(|p| p.relay);
-        let selected = paths.iter().find(|p| p.selected);
-        match selected.or_else(|| paths.first().filter(|_| paths.len() == 1)) {
+        match sampling::in_use(paths) {
             Some(in_use) => {
                 relay_in_use |= in_use.relay;
                 first_rtt.get_or_insert(in_use.rtt_ms);
