@@ -389,9 +389,9 @@ Two shapes are the failure, both from iroh not listing a path `noq` opened. In t
 `[]` and `paths_source` is `none`. In the second, every listed path has `controller` `null`, because
 `noq` dropped it, and the path in use is missing. Most non-empty fields are benign: `noq` holds a
 controller from the moment it adds a path, iroh lists the path only once `noq` has validated it and
-sent `Established` (10 to 120 ms in the runs read), and `noq` keeps an abandoned path's controller
-until it has drained. A report with a listed path that has a controller is fine. A sentence naming
-the iroh issue goes here once it is filed.
+sent `Established` (10 to 120 ms in the loopback test runs read, under the suite's load), and `noq`
+keeps an abandoned path's controller until it has drained. A report with a listed path that has a
+controller is fine.
 
 The probe makes up nothing for those ids: no address, statistics, RTT or controller reading. The
 field is a lower bound. `noq` has no accessor for the highest path id a connection may use, which
