@@ -1,0 +1,23 @@
+[package]
+name = "sluice-wasm-hash"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+# cdylib is what wasm-bindgen reads. rlib is what lets the unit tests and doc tests run on the host.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# The `simd` page variant. Needs `-C target-feature=+simd128`, which `cargo xtask wasm-hash` sets.
+# On the host the feature changes nothing, because blake3 only reads it on wasm32.
+simd = ["blake3/wasm32_simd"]
+
+[dependencies]
+blake3 = { workspace = true }
+wasm-bindgen = { workspace = true }
+
+[lints]
+workspace = true

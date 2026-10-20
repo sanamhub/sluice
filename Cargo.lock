@@ -3613,6 +3613,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sluice-wasm-hash"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.16.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

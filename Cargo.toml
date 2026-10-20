@@ -6,6 +6,7 @@ members = [
   "crates/sluice-cli",
   "bench/probe",
   "bench/harness",
+  "bench/wasm-hash",
 ]
 
 [workspace.package]
@@ -47,6 +48,8 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "tim
 toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# The version has to equal the wasm-bindgen CLI that `cargo xtask wasm-hash` runs, and the task checks it.
+wasm-bindgen = "0.2.129"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
