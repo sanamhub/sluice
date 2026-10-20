@@ -17,9 +17,9 @@ fn keys(values: impl Iterator<Item = Value>) -> BTreeSet<String> {
 
 fn serve_lines(congestion: &'static str) {
     let (_server, mut stdout) = spawn_server("raw", congestion, "8MiB", &[]);
-    within_deadline(move |fetches| {
+    within_deadline(move |probes| {
         let ticket = read_ticket(&mut stdout);
-        let fetched = fetches.run(
+        let fetched = probes.fetch(
             probe()
                 .args([
                     "fetch",
@@ -145,9 +145,9 @@ fn both_ends_sample_the_controller_once_a_second() {
     // Sized so that no machine finishes in `SERIES_TIMEOUT`, which makes the run take that long
     // everywhere. A size that finishes is a test that takes as long as the machine is slow.
     let (_server, mut stdout) = spawn_server("raw", "bbr3", "64GiB", &[]);
-    within_deadline(move |fetches| {
+    within_deadline(move |probes| {
         let ticket = read_ticket(&mut stdout);
-        let fetched = fetches.run(probe().args([
+        let fetched = probes.fetch(probe().args([
             "fetch",
             &ticket,
             "--mode",

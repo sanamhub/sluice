@@ -6,7 +6,7 @@ use std::{io::BufReader, path::PathBuf, process::ChildStdout};
 use serde_json::Value;
 
 mod common;
-use common::{Fetches, log_paths, probe, read_ticket, spawn_server, within_deadline};
+use common::{Probes, log_paths, probe, read_ticket, spawn_server, within_deadline};
 
 const SIZE: u64 = 8 << 20;
 
@@ -67,9 +67,9 @@ fn one_json_line(stdout: Vec<u8>) -> Value {
     serde_json::from_str(stdout.trim()).expect("stdout is JSON")
 }
 
-fn run_case(fetches: &Fetches, mut server_stdout: BufReader<ChildStdout>, case: &Case) {
+fn run_case(probes: &Probes, mut server_stdout: BufReader<ChildStdout>, case: &Case) {
     let ticket = read_ticket(&mut server_stdout);
-    let output = fetches.run(
+    let output = probes.fetch(
         probe()
             .args([
                 "fetch",
@@ -180,7 +180,7 @@ fn check_connection_stats(result: &Value, connections: u16) {
 fn with_deadline(case: Case) {
     // The guard stays on this thread so it kills the server on a panic or a timeout alike.
     let (_server, stdout) = spawn_server(case.mode, case.congestion, "8MiB", &case.serve);
-    within_deadline(move |fetches| run_case(fetches, stdout, &case));
+    within_deadline(move |probes| run_case(probes, stdout, &case));
 }
 
 #[test]
@@ -262,10 +262,10 @@ fn blobs_bbr3_one_connection_from_a_file_store() {
 fn a_timeout_prints_what_was_measured_and_exits_non_zero() {
     // 64 GiB cannot cross loopback in 2 seconds on any machine this runs on.
     let (_server, mut stdout) = spawn_server("raw", "bbr3", "64GiB", &[]);
-    within_deadline(move |fetches| {
+    within_deadline(move |probes| {
         let ticket = read_ticket(&mut stdout);
         let output =
-            fetches.run(probe().args(["fetch", &ticket, "--mode", "raw", "--timeout", "2"]));
+            probes.fetch(probe().args(["fetch", &ticket, "--mode", "raw", "--timeout", "2"]));
         assert!(!output.status.success(), "a timeout must exit non-zero");
         assert!(String::from_utf8_lossy(&output.stderr).contains("timed out"));
 

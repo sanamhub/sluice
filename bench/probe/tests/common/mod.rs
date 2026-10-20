@@ -20,14 +20,21 @@ use serde_json::Value;
 /// being killed by the runner.
 pub const DEADLINE: Duration = Duration::from_secs(45);
 
-pub struct Server(Child);
+/// A running `probe serve`. Shared with the `Probes` it was started through, if any, so that either
+/// can kill it.
+pub struct Server(Arc<Mutex<Child>>);
 
 impl Drop for Server {
     fn drop(&mut self) {
         // `serve` runs until killed, and a failing or hung test must not leave it behind.
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        kill_and_wait(&self.0);
     }
+}
+
+fn kill_and_wait(child: &Mutex<Child>) {
+    let mut child = lock(child);
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 pub fn probe() -> Command {
@@ -63,7 +70,7 @@ pub fn spawn_server(
         .spawn()
         .expect("start probe serve");
     let stdout = child.stdout.take().expect("piped stdout");
-    (Server(child), BufReader::new(stdout))
+    (Server(Arc::new(Mutex::new(child))), BufReader::new(stdout))
 }
 
 /// The next line `serve` printed, without its newline. Empty if `serve` exited.
@@ -115,22 +122,23 @@ pub fn log_paths(side: &str, entry: &Value) {
 }
 
 /// Runs `case` on a worker thread and fails if it has not finished within `DEADLINE`. Every fetch
-/// it starts is killed and reaped when this returns or panics, including after the deadline.
-pub fn within_deadline(case: impl FnOnce(&Fetches) + Send + 'static) {
+/// and serve it starts through `Probes` is killed and reaped when this returns or panics,
+/// including after the deadline.
+pub fn within_deadline(case: impl FnOnce(&Probes) + Send + 'static) {
     within_deadline_of(DEADLINE, &Arc::default(), case);
 }
 
-/// `within_deadline` with the deadline and the fetches given, so a test can shorten the one and
+/// `within_deadline` with the deadline and the processes given, so a test can shorten the one and
 /// look at the other afterwards.
 pub fn within_deadline_of(
     deadline: Duration,
-    fetches: &Arc<Fetches>,
-    case: impl FnOnce(&Fetches) + Send + 'static,
+    probes: &Arc<Probes>,
+    case: impl FnOnce(&Probes) + Send + 'static,
 ) {
     // On this thread, so it runs when the wait below gives up and the worker is still blocked.
-    let _reaper = Reaper(Arc::clone(fetches));
+    let _reaper = Reaper(Arc::clone(probes));
     let (done, finished) = mpsc::channel();
-    let shared = Arc::clone(fetches);
+    let shared = Arc::clone(probes);
     let worker = thread::spawn(move || {
         case(&shared);
         let _ = done.send(());
@@ -145,9 +153,12 @@ pub fn within_deadline_of(
     }
 }
 
-/// The `probe fetch` processes a test has started.
+/// The `probe fetch` and `probe serve` processes a test has started inside `within_deadline`.
 #[derive(Default)]
-pub struct Fetches(Mutex<Vec<Arc<Started>>>);
+pub struct Probes {
+    fetches: Mutex<Vec<Arc<Started>>>,
+    servers: Mutex<Vec<Arc<Mutex<Child>>>>,
+}
 
 struct Started {
     child: Mutex<Child>,
@@ -183,11 +194,25 @@ impl Started {
     }
 }
 
-impl Fetches {
+impl Probes {
+    /// Starts a `probe serve` like `spawn_server`, and kills it when the test ends even if the
+    /// worker never returns.
+    pub fn serve(
+        &self,
+        mode: &str,
+        congestion: &str,
+        size: &str,
+        extra: &[String],
+    ) -> (Server, BufReader<ChildStdout>) {
+        let (server, stdout) = spawn_server(mode, congestion, size, extra);
+        lock(&self.servers).push(Arc::clone(&server.0));
+        (server, stdout)
+    }
+
     /// Runs a `probe fetch` to the end. Its stderr is read as it arrives. With
     /// `PROBE_TEST_LOG_PATHS` set each line is printed at once, to be counted by a loop. Without
     /// it the lines are printed only if the test fails, which is when `Reaper` runs on a panic.
-    pub fn run(&self, cmd: &mut Command) -> Output {
+    pub fn fetch(&self, cmd: &mut Command) -> Output {
         let mut child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -203,7 +228,7 @@ impl Fetches {
         });
         let reader = Arc::clone(&started);
         *lock(&started.reader) = Some(thread::spawn(move || reader.read_stderr(stderr)));
-        lock(&self.0).push(Arc::clone(&started));
+        lock(&self.fetches).push(Arc::clone(&started));
 
         // Both pipes end when the process does, whether it exits or the reaper kills it.
         let mut out = Vec::new();
@@ -218,35 +243,34 @@ impl Fetches {
         }
     }
 
-    /// True when every fetch started so far has been waited for.
+    /// True when every fetch and serve started so far has been waited for.
     pub fn all_reaped(&self) -> bool {
-        lock(&self.0).iter().all(|s| {
-            lock(&s.child)
-                .try_wait()
-                .is_ok_and(|status| status.is_some())
-        })
+        let exited =
+            |child: &Mutex<Child>| lock(child).try_wait().is_ok_and(|status| status.is_some());
+        lock(&self.fetches).iter().all(|s| exited(&s.child))
+            && lock(&self.servers).iter().all(|c| exited(c))
     }
 }
 
-/// Kills and waits for every fetch when dropped, like `Server` does for `serve`. A fetch whose
-/// worker gave up at the deadline would otherwise run on after the test, up to its own `--timeout`.
-struct Reaper(Arc<Fetches>);
+/// Kills and waits for every fetch and serve when dropped, as `Server` does for one `serve`. A
+/// process whose worker gave up at the deadline would otherwise run on after the test, a fetch up to
+/// its own `--timeout` and a serve for ever.
+struct Reaper(Arc<Probes>);
 
 impl Drop for Reaper {
     fn drop(&mut self) {
         let failing = thread::panicking();
-        for started in lock(&self.0.0).iter() {
-            {
-                let mut child = lock(&started.child);
-                let _ = child.kill();
-                let _ = child.wait();
-            }
+        for started in lock(&self.0.fetches).iter() {
+            kill_and_wait(&started.child);
             started.join_reader();
             if failing && !logging() {
                 for line in lock(&started.stderr).lines() {
                     println!("STDERR side=fetch {line}");
                 }
             }
+        }
+        for server in lock(&self.0.servers).iter() {
+            kill_and_wait(server);
         }
     }
 }
