@@ -44,6 +44,13 @@ allow = ["CDLA-Permissive-2.0"]
 crate = "webpki-root-certs"
 allow = ["CDLA-Permissive-2.0"]
 
+# MPL-2.0 is copyleft per file, so it binds attohttpc's own files and not what links to it. It is the
+# HTTP client igd-next uses for UPnP, which comes with the iroh `portmapper` feature that
+# `probe --port-mapping on` needs.
+[[licenses.exceptions]]
+crate = "attohttpc"
+allow = ["MPL-2.0"]
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"

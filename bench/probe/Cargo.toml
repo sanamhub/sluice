@@ -17,6 +17,7 @@ blake3.workspace = true
 clap.workspace = true
 iroh.workspace = true
 iroh-blobs.workspace = true
+iroh-relay.workspace = true
 n0-future.workspace = true
 noq.workspace = true
 rustls.workspace = true
@@ -28,6 +29,12 @@ tracing-subscriber.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 nix.workspace = true
+
+# The rendezvous test runs a real iroh-relay server in the test process. test-utils is where the
+# self-signed helpers live, and `server` pulls in the whole server, which no probe binary carries.
+[dev-dependencies]
+iroh-relay = { workspace = true, features = ["server", "test-utils"] }
+rcgen.workspace = true
 
 [lints]
 workspace = true

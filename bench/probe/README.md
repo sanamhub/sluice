@@ -11,6 +11,8 @@ JSON line from `serve` for every connection that closes, and everything else on 
 - be a dependency of a product crate
 - choose a relay silently. `--relay` defaults to `disabled`, and a ticket made without one carries
   only direct addresses (ADR 0011).
+- turn on port mapping or mDNS by itself. `--port-mapping` defaults to `off` and address lookup is
+  empty, so a result shows what hole punching did and not what the router or the LAN offered.
 - report a number it did not read. A field iroh does not expose is `null`.
 - keep going after a handshake that did not negotiate `X25519MLKEM768` (ADR 0012). `fetch` exits
   non-zero instead.
@@ -43,7 +45,13 @@ with the key of the matching `fetch` entry, and that the CPU fields are numbers 
 on Windows. One more case moves 512 MiB and checks that both ends
 return a `controller_series` with increasing `elapsed_s`, that the `fetch` series is as long as
 `progress`, and, with `--progress-lines`, that there is one progress line per second with the same
-reading as `progress` and that the result is the last line.
+reading as `progress` and that the result is the last line. `tests/rendezvous.rs` runs an `iroh-relay`
+server in the test process with its relay half off and a generated certificate, passed to the probe with
+`--rendezvous-ca`. It checks that `serve` and `fetch` both learn an address from it, that the ticket
+carries the address, that the server counted a discovery connection from each end, and that the
+connection is direct. Two more cases check that a dial to a dead address is a `no_path` result, and that
+a server that does not answer is waited for and recorded as empty. The `iroh-relay` server feature is a
+dev-dependency, so no probe binary carries it.
 
 ## Run
 
@@ -69,6 +77,9 @@ limit throughput.
 | `--congestion`     | `bbr3`, `cubic`, `newreno`      | `bbr3`                   | yes               | yes                        |
 | `--window`         | `default`, `tuned`              | `default`                | yes               | yes                        |
 | `--relay`          | `disabled` or a relay URL       | `disabled`               | yes               | yes                        |
+| `--rendezvous`     | `https://host[:udp-port]`       | none                     | yes               | yes                        |
+| `--rendezvous-ca`  | a PEM file                      | none                     | yes               | yes                        |
+| `--port-mapping`   | `on`, `off`                     | `off`                    | yes               | yes                        |
 | `--size`           | bytes, with `KiB`, `MiB`, `GiB` | `1GiB`                   | yes               | no                         |
 | `--seed`           | `u64`                           | `0`                      | yes               | no                         |
 | `--connections`    | 1 to 16                         | `1`                      | no                | yes                        |
@@ -112,6 +123,36 @@ the end. The bench harness uses the lines to stop a transfer that has collapsed.
 `tuned` sets the stream and connection receive windows and the send window to 75 000 000 bytes, the
 bandwidth-delay product of 10 Gbit/s at 60 ms. The values in force are in every result.
 
+`--rendezvous` points both ends at a rendezvous server, which is `iroh-relay` with its relay half off
+(ADR 0013, [the image](../../docker/rendezvous/README.md)). It goes into iroh's relay map with QUIC
+address discovery on its UDP port, which is the URL's port or 7842. The endpoint asks the server for its
+public address and uses it for nothing else, so a connection is direct or it does not exist. It cannot
+be combined with `--relay`.
+
+- Both ends wait up to 10 s for the server's answer before anything else. `serve` does it before
+  printing the ticket, so the ticket carries the public address, and `fetch` does it before dialling, so
+  its address is known when the two ends try to reach each other. If no answer comes, the probe goes on
+  without one and records that.
+- `endpoint.online()` is not used. It waits for a relay connection, and with no relay half it never
+  returns.
+- iroh adds the URL as its home relay anyway, so the ticket carries it and the endpoint keeps retrying
+  the relay connection, which is refused, with a backoff that reaches 16 s before jitter. Neither the
+  ticket nor the connection waits for it ([the image's README](../../docker/rendezvous/README.md)
+  has the measurements).
+- `--rendezvous-ca` adds the certificates in a PEM file to the roots trusted for the server, for a
+  self-signed one in tests. The certificate must say `CA:FALSE`, or the handshake fails with
+  `CaUsedAsEndEntity`. A server with a LetsEncrypt certificate needs none.
+- `--port-mapping` is `off` here and on in the product. With `on` the endpoint asks the router for a
+  mapping through UPnP, PCP and NAT-PMP. iroh's `portmapper` feature is enabled in the workspace for it,
+  because without the feature the option would read as on and nothing would run.
+- mDNS is off in both modes: the probe builds its endpoint with no address lookup.
+
+The ticket line then carries a `discovery` object: `took_s`, `complete`, and `learned`, the public
+addresses the server reported. The addresses in the ticket include them. The `fetch` result has the
+same object for its own side, `rendezvous` (the URL), and `connect_s`, which runs from the start of the
+dial to the connections being up, after the wait for the server. Each path in `connection_stats` has a
+`remote_addr`, on `fetch` and on `serve`, which is the address the other end was reached at.
+
 ## Result
 
 One line. This one is wrapped for reading, and comes from a same-machine run on Windows (`serve` and
@@ -143,7 +184,10 @@ link. On Windows `cpu_user_s` and `cpu_sys_s` are `null` and no GRO batches are 
  "verified_hash":"7b343701fd41de622e1208b9490efd7f5a54eee0fe68c052e522500f55aa0fbc"}
 ```
 
-`outcome` is `ok` or `timeout`. `serve_endpoints` is the number of addresses in the ticket and
+`outcome` is `ok`, `timeout` or `no_path`. `no_path` means no connection came up, because the dial
+failed or `--timeout` passed first. Without a relay that is the answer to whether the two ends could
+reach each other, so `fetch` prints a result line with `received_bytes` 0, `connect_s` and
+`key_exchange_group` `null`, and the reason in `error`, then exits non-zero. `serve_endpoints` is the number of addresses in the ticket and
 `fetch_endpoints` the number of endpoints `fetch` bound, 1 for `shared` and the connection count for
 `separate`. `serve_store` is `mem` or `fs` in blobs mode and `null` in raw mode. `progress` has one
 entry per whole second of the transfer: the total payload bytes received so far. It is read from a

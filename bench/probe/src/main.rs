@@ -6,10 +6,12 @@ mod cli;
 mod controller;
 mod cpu;
 mod data;
+mod dial;
 mod disk;
 mod fetch;
 mod net;
 mod raw;
+mod rendezvous;
 mod result;
 mod sender;
 mod serve;
@@ -40,12 +42,17 @@ async fn main() -> Result<()> {
         Command::Fetch(args) => {
             let output = fetch::run(args).await?;
             println!("{}", output.line()?);
-            if output.outcome == Outcome::Timeout {
-                bail!(
+            match output.outcome {
+                Outcome::Ok => {}
+                Outcome::Timeout => bail!(
                     "timed out with {} of {} bytes received",
                     output.received_bytes,
                     output.size_bytes
-                );
+                ),
+                Outcome::NoPath => bail!(
+                    "no path: {}",
+                    output.error.as_deref().unwrap_or("the dial failed")
+                ),
             }
             Ok(())
         }

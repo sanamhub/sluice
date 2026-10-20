@@ -10,6 +10,7 @@ use crate::{
     cli::{Mode, ServeArgs, StoreKind},
     data, disk, net,
     raw::RawHandler,
+    rendezvous,
     sender::{self, Reporting},
     ticket::Ticket,
 };
@@ -76,6 +77,11 @@ pub async fn run(args: ServeArgs) -> Result<()> {
         }
     }
 
+    // Before the ticket, so the ticket carries the public address the server reported.
+    let discovery = match args.shared.rendezvous {
+        Some(_) => Some(rendezvous::discover(&endpoints).await),
+        None => None,
+    };
     let mut addrs = Vec::new();
     for endpoint in &endpoints {
         addrs.push(net::dialable_addr(endpoint, &args.shared.relay).await?);
@@ -87,6 +93,7 @@ pub async fn run(args: ServeArgs) -> Result<()> {
         seed: args.seed,
         hash: hash.map(|h| h.to_hex()),
         store: (args.shared.mode == Mode::Blobs).then_some(args.store),
+        discovery,
     };
     lines.mark_ticket();
     println!("{}", ticket.encode()?);

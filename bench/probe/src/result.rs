@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::{
     cli::{Congestion, Mode, Sink, StoreKind},
     net::Windows,
+    rendezvous::Discovery,
     stats::ConnReport,
 };
 
@@ -17,13 +18,18 @@ pub enum Outcome {
     Ok,
     /// `--timeout` expired first. The counters are what had been measured by then.
     Timeout,
+    /// The dial failed or did not finish within `--timeout`, so no connection was ever up. Without a
+    /// relay that is the answer to whether the two ends could reach each other.
+    #[serde(rename = "no_path")]
+    NoPath,
 }
 
 /// A transfer, finished or cut off by `--timeout`. Fields iroh does not expose are `null`, never
 /// estimated.
 #[derive(Serialize)]
 pub struct Output {
-    /// `ok` or `timeout`. A timeout is still a result, and `fetch` exits non-zero after printing it.
+    /// `ok`, `timeout` or `no_path`. The last two are still results, and `fetch` exits non-zero after
+    /// printing them.
     pub outcome: Outcome,
     /// `raw` or `blobs`.
     pub mode: Mode,
@@ -47,6 +53,15 @@ pub struct Output {
     pub sink: Option<Sink>,
     /// `disabled` or the relay URL.
     pub relay: String,
+    /// The rendezvous server's URL, `null` without one.
+    pub rendezvous: Option<String>,
+    /// What the rendezvous server told `fetch`, and how long it took. `null` without one.
+    pub discovery: Option<Discovery>,
+    /// Seconds from starting the dial to the connections being up, after address discovery. `null`
+    /// for `no_path`. With no relay, a connection that is up is a direct one.
+    pub connect_s: Option<f64>,
+    /// Why a `no_path` dial failed, as iroh words it. `null` otherwise.
+    pub error: Option<String>,
     /// Seconds from sending the first request to the last verified byte, or to the timeout.
     /// Handshakes are excluded.
     pub elapsed_s: f64,
@@ -67,8 +82,8 @@ pub struct Output {
     pub cpu_user_s: Option<f64>,
     /// System CPU seconds of this process during the transfer. `null` on Windows.
     pub cpu_sys_s: Option<f64>,
-    /// Negotiated TLS key exchange group.
-    pub key_exchange_group: String,
+    /// Negotiated TLS key exchange group. `null` for `no_path`.
+    pub key_exchange_group: Option<String>,
     /// Always `null`: `noq` only reports GSO segments per socket, and iroh does not expose it.
     pub gso_segments: Option<u64>,
     /// Always `null`: iroh counts GRO batches, not the segments in them.

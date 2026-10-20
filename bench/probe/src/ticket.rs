@@ -4,7 +4,10 @@ use anyhow::{Context, Result, bail};
 use iroh::EndpointAddr;
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{Mode, StoreKind};
+use crate::{
+    cli::{Mode, StoreKind},
+    rendezvous::Discovery,
+};
 
 const PREFIX: &str = "sluiceprobe2";
 
@@ -24,6 +27,10 @@ pub struct Ticket {
     pub hash: Option<String>,
     /// Where `serve` keeps the data. Blobs mode only.
     pub store: Option<StoreKind>,
+    /// What the rendezvous server told `serve`, and how long it took. `null` without one. It is in
+    /// the ticket so that the harness, which reads this one line, records it.
+    #[serde(default)]
+    pub discovery: Option<Discovery>,
 }
 
 impl Ticket {
@@ -68,6 +75,7 @@ mod tests {
             seed: 3,
             hash: Some("ab".repeat(32)),
             store: Some(StoreKind::Fs),
+            discovery: None,
         };
         let decoded = Ticket::decode(&ticket.encode().unwrap()).unwrap();
         assert_eq!(decoded.mode, Mode::Blobs);

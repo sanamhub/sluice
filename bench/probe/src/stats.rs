@@ -19,6 +19,8 @@ pub struct PathReport {
     pub selected: bool,
     /// Whether the path goes through a relay.
     pub relay: bool,
+    /// The address the other end is reached at on this path: `ip:port`, or the relay URL.
+    pub remote_addr: String,
     /// Round-trip time estimate.
     pub rtt_ms: f64,
     /// Congestion window of this end's controller, in bytes. In a download only the sender's
@@ -132,6 +134,7 @@ pub fn report(conn: &Connection, received_bytes: Option<u64>, series: Vec<Sample
             PathReport {
                 selected: path.is_selected(),
                 relay: path.is_relay(),
+                remote_addr: path.remote_addr().to_string(),
                 rtt_ms: s.rtt.as_secs_f64() * 1000.0,
                 cwnd_bytes: s.cwnd,
                 congestion_events: s.congestion_events,

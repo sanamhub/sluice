@@ -4,6 +4,7 @@ use std::{path::PathBuf, str::FromStr};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use iroh::RelayUrl;
+use iroh_relay::defaults::DEFAULT_RELAY_QUIC_PORT;
 use serde::{Deserialize, Serialize};
 
 /// Transport probe for iroh and iroh-blobs.
@@ -124,6 +125,51 @@ pub struct Shared {
     /// `disabled` or a relay URL.
     #[arg(long, default_value = "disabled")]
     pub relay: Relay,
+    /// A rendezvous server, `https://host[:port]`, used to learn this host's public address and for
+    /// nothing else. The port is the UDP port of address discovery, 7842 if left out. Not with
+    /// `--relay`.
+    #[arg(long, conflicts_with = "relay")]
+    pub rendezvous: Option<Rendezvous>,
+    /// A PEM file with a root certificate to trust for the rendezvous server, for a self-signed one
+    /// in tests. A server with a LetsEncrypt certificate never needs it.
+    #[arg(long, requires = "rendezvous")]
+    pub rendezvous_ca: Option<PathBuf>,
+    /// UPnP, PCP and NAT-PMP. Off here, unlike in the product, so a result shows hole punching and
+    /// not what the router offered.
+    #[arg(long, value_enum, default_value_t = PortMapping::Off)]
+    pub port_mapping: PortMapping,
+}
+
+/// Whether the endpoint may ask the router for a port mapping.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PortMapping {
+    /// No gateway probing.
+    Off,
+    /// UPnP, PCP and NAT-PMP.
+    On,
+}
+
+/// A rendezvous server: `iroh-relay` with its relay half off (ADR 0013).
+#[derive(Clone, Debug)]
+pub struct Rendezvous {
+    /// What the user typed, which also names the host.
+    pub url: RelayUrl,
+    /// UDP port of address discovery.
+    pub quic_port: u16,
+}
+
+impl FromStr for Rendezvous {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let url = RelayUrl::from_str(s).map_err(|e| format!("not a URL: {e}"))?;
+        if url.scheme() != "https" || url.host_str().is_none() {
+            return Err("expected https://host[:port], address discovery is always TLS".into());
+        }
+        let quic_port = url.port().unwrap_or(DEFAULT_RELAY_QUIC_PORT);
+        Ok(Self { url, quic_port })
+    }
 }
 
 /// Options for `probe serve`.
@@ -173,7 +219,8 @@ pub struct FetchArgs {
     #[arg(long)]
     pub dir: Option<PathBuf>,
     /// Seconds the transfer may take, handshakes excluded. On expiry `fetch` prints what it
-    /// measured, with outcome `timeout`, and exits non-zero.
+    /// measured, with outcome `timeout`, and exits non-zero. A dial that has not finished in this
+    /// many seconds, or that fails, prints outcome `no_path` instead.
     #[arg(long, default_value_t = 600, value_parser = clap::value_parser!(u64).range(1..))]
     pub timeout: u64,
     /// Print one `{"event":"progress","t":<s>,"bytes":<n>}` line on stdout each second, before
@@ -212,7 +259,23 @@ pub fn parse_size(s: &str) -> Result<u64, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_size;
+    use std::str::FromStr;
+
+    use super::{Rendezvous, parse_size};
+
+    #[test]
+    fn a_rendezvous_url_names_the_udp_port_or_leaves_it_at_7842() {
+        let plain = Rendezvous::from_str("https://rendezvous.example.net").unwrap();
+        assert_eq!(plain.quic_port, 7842);
+        let named = Rendezvous::from_str("https://127.0.0.1:9000").unwrap();
+        assert_eq!(named.quic_port, 9000);
+    }
+
+    #[test]
+    fn a_rendezvous_url_has_to_be_https_because_discovery_is_always_tls() {
+        assert!(Rendezvous::from_str("http://rendezvous.example.net").is_err());
+        assert!(Rendezvous::from_str("rendezvous.example.net").is_err());
+    }
 
     #[test]
     fn sizes_parse_with_binary_suffixes() {

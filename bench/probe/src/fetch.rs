@@ -9,18 +9,20 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, ensure};
 use iroh::{
-    Endpoint, EndpointAddr,
+    Endpoint,
     endpoint::{Connection, VarInt},
 };
 use iroh_blobs::{Hash, store::fs::FsStore};
 use rustls::NamedGroup;
-use tokio::task::JoinSet;
 
 use crate::{
     blobs,
     cli::{EndpointMode, FetchArgs, Mode, Relay, Sink},
     cpu::{self, Cpu},
-    data, net, raw,
+    data,
+    dial::{self, DialFailed},
+    net, raw,
+    rendezvous::{self, Discovery},
     result::{Outcome, Output},
     stats::{self, ConnReport, Sample},
     ticket::Ticket,
@@ -32,6 +34,8 @@ struct Measured {
     outcome: Outcome,
     received: u64,
     elapsed: Duration,
+    /// From starting the dials to the connections being up.
+    connect: Duration,
     progress: Vec<u64>,
     connections: Vec<ConnReport>,
     cpu: Option<Cpu>,
@@ -69,12 +73,37 @@ pub async fn run(args: FetchArgs) -> Result<Output> {
     };
 
     let endpoints = bind_endpoints(&args).await?;
+    let discovery = match args.shared.rendezvous {
+        // Before the dial, so this end's public address is known when the two ends try to reach
+        // each other, and so the dial time does not include the wait.
+        Some(_) => Some(rendezvous::discover(&endpoints).await),
+        None => None,
+    };
     let measured = measure(&endpoints, &args, &ticket, verified).await;
     // Closed on every path, or iroh logs an ungraceful abort over the real error.
     for endpoint in &endpoints {
         endpoint.close().await;
     }
-    Ok(output(&args, &ticket, verified, endpoints.len(), measured?))
+    match measured {
+        Ok(m) => Ok(output(
+            &args,
+            &ticket,
+            verified,
+            endpoints.len(),
+            discovery,
+            m,
+        )),
+        Err(e) => match e.downcast_ref::<DialFailed>() {
+            Some(failed) => Ok(dial::no_path(
+                &args,
+                &ticket,
+                endpoints.len(),
+                discovery,
+                failed,
+            )),
+            None => Err(e),
+        },
+    }
 }
 
 /// One endpoint, or one per connection. Separate endpoints mean separate sockets and socket
@@ -101,7 +130,9 @@ async fn measure(
         Mode::Raw => net::RAW_ALPN,
         Mode::Blobs => iroh_blobs::ALPN,
     };
-    let conns = connect_all(endpoints, &ticket.addrs, alpn, args.connections).await?;
+    let limit = Duration::from_secs(args.timeout);
+    let dialed = dial::connect_all(endpoints, &ticket.addrs, alpn, args.connections, limit).await?;
+    let (conns, connect) = (dialed.conns, dialed.took);
     let group = net::require_post_quantum(&conns[0])?;
     tracing::info!(connections = conns.len(), ?group, "connected");
 
@@ -207,6 +238,7 @@ async fn measure(
         outcome,
         received,
         elapsed,
+        connect,
         progress,
         connections,
         cpu,
@@ -223,6 +255,7 @@ fn output(
     ticket: &Ticket,
     verified: Option<Hash>,
     fetch_endpoints: usize,
+    discovery: Option<Discovery>,
     m: Measured,
 ) -> Output {
     let seconds = m.elapsed.as_secs_f64();
@@ -242,6 +275,10 @@ fn output(
             Relay::Disabled => "disabled".to_string(),
             Relay::Url(url) => url.to_string(),
         },
+        rendezvous: args.shared.rendezvous.as_ref().map(|rv| rv.url.to_string()),
+        discovery,
+        connect_s: Some(m.connect.as_secs_f64()),
+        error: None,
         elapsed_s: seconds,
         throughput_gbit_s: m.received as f64 * 8.0 / 1e9 / seconds,
         progress: m.progress,
@@ -250,7 +287,7 @@ fn output(
         rtt_ms: m.rtt.map(|rtt| rtt.as_secs_f64() * 1000.0),
         cpu_user_s: m.cpu.map(|c| c.user_s),
         cpu_sys_s: m.cpu.map(|c| c.sys_s),
-        key_exchange_group: format!("{:?}", m.group),
+        key_exchange_group: Some(format!("{:?}", m.group)),
         gso_segments: None,
         gro_segments: None,
         recv_datagrams: m.datagrams,
@@ -277,35 +314,6 @@ fn expected_root(ticket: &Ticket) -> Result<Hash> {
         ticket.size
     );
     Ok(expected)
-}
-
-/// Opens all connections at once and checks each one's key exchange. Connection `i` goes out
-/// of endpoint `i % endpoints` to address `i % addrs`, and the result is in `i` order, so the
-/// per-connection statistics line up with the endpoints.
-async fn connect_all(
-    endpoints: &[Endpoint],
-    addrs: &[EndpointAddr],
-    alpn: &'static [u8],
-    count: u16,
-) -> Result<Vec<Connection>> {
-    ensure!(!addrs.is_empty(), "the ticket carries no address");
-    let mut dials = JoinSet::new();
-    for i in 0..usize::from(count) {
-        let endpoint = endpoints[i % endpoints.len()].clone();
-        let addr = addrs[i % addrs.len()].clone();
-        dials.spawn(async move {
-            let conn = endpoint.connect(addr, alpn).await.context("connect")?;
-            Ok::<_, anyhow::Error>((i, conn))
-        });
-    }
-    let mut conns = Vec::with_capacity(usize::from(count));
-    while let Some(joined) = dials.join_next().await {
-        let (i, conn) = joined.context("dial task panicked")??;
-        net::require_post_quantum(&conn)?;
-        conns.push((i, conn));
-    }
-    conns.sort_by_key(|(i, _)| *i);
-    Ok(conns.into_iter().map(|(_, conn)| conn).collect())
 }
 
 /// `relay` if any connection's selected path goes through a relay, and `direct` if none is, or if

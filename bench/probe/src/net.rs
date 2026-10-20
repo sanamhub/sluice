@@ -5,13 +5,17 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result, anyhow, bail};
 use iroh::{
-    Endpoint, EndpointAddr, NET_REPORT_TIMEOUT, RelayMap, RelayMode, Watcher,
-    endpoint::{Connection, QuicTransportConfig, VarInt, presets},
+    Endpoint, EndpointAddr, NET_REPORT_TIMEOUT, RelayConfig, RelayMap, RelayMode, Watcher,
+    endpoint::{Connection, PortmapperConfig, QuicTransportConfig, VarInt, presets},
 };
+use iroh_relay::RelayQuicConfig;
 use noq::congestion::{Bbr3Config, CubicConfig, NewRenoConfig};
 use rustls::NamedGroup;
 
-use crate::cli::{Congestion, Relay, Shared, WindowMode};
+use crate::{
+    cli::{Congestion, PortMapping, Relay, Shared, WindowMode},
+    rendezvous,
+};
 
 /// ALPN of the raw-streams protocol.
 pub const RAW_ALPN: &[u8] = b"sluice-probe/raw/1";
@@ -81,18 +85,32 @@ fn transport_config(shared: &Shared) -> QuicTransportConfig {
 
 /// Binds an endpoint with the `aws-lc-rs` provider passed explicitly (ADR 0012). Without address
 /// lookup, and with relay mode taken from `shared`, so nothing reaches a relay unasked (ADR 0011).
+/// A rendezvous server goes in as a relay map entry whose QUIC address discovery port is set. The
+/// relay half of it is not running, and iroh keeps trying to reach it (README.md).
 pub async fn bind(shared: &Shared) -> Result<Endpoint> {
-    let relay_mode = match &shared.relay {
-        Relay::Disabled => RelayMode::Disabled,
-        Relay::Url(url) => RelayMode::Custom(RelayMap::from(url.clone())),
+    let relay_mode = match (&shared.relay, &shared.rendezvous) {
+        (_, Some(rv)) => {
+            let quic = Some(RelayQuicConfig::new(rv.quic_port));
+            RelayMode::Custom(RelayMap::from(RelayConfig::new(rv.url.clone(), quic)))
+        }
+        (Relay::Disabled, None) => RelayMode::Disabled,
+        (Relay::Url(url), None) => RelayMode::Custom(RelayMap::from(url.clone())),
     };
-    Endpoint::builder(presets::Empty)
+    // Off by default so a result is hole punching and not what the router offered. Address lookup
+    // stays empty, which also keeps mDNS off.
+    let portmapper = match shared.port_mapping {
+        PortMapping::Off => PortmapperConfig::Disabled,
+        PortMapping::On => PortmapperConfig::default(),
+    };
+    let mut builder = Endpoint::builder(presets::Empty)
         .crypto_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
         .relay_mode(relay_mode)
-        .transport_config(transport_config(shared))
-        .bind()
-        .await
-        .context("bind endpoint")
+        .portmapper_config(portmapper)
+        .transport_config(transport_config(shared));
+    if let Some(path) = &shared.rendezvous_ca {
+        builder = builder.ca_tls_config(rendezvous::trust(path)?);
+    }
+    builder.bind().await.context("bind endpoint")
 }
 
 /// The address to put in a ticket. With no relay it waits until the endpoint knows a direct
