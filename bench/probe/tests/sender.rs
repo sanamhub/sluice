@@ -6,7 +6,7 @@ use serde_json::Value;
 
 mod common;
 use common::{
-    log_paths, paths_listed, probe, read_line, read_ticket, spawn_server, within_deadline,
+    log_paths, path_in_use, probe, read_line, read_ticket, spawn_server, within_deadline,
 };
 
 const CONNECTIONS: usize = 2;
@@ -72,10 +72,9 @@ fn serve_lines(congestion: &'static str) {
             );
             // The sender is the other end of the fetch, so the two never name the same peer.
             assert_ne!(line["remote_id"], received[0]["remote_id"], "{line}");
-            if !paths_listed("serve", line) {
+            let Some(path) = path_in_use("serve", line) else {
                 continue;
-            }
-            let path = &line["paths"][0];
+            };
             assert!(path["cwnd_bytes"].as_u64().is_some_and(|n| n > 0), "{line}");
             let controller = &path["controller"];
             assert!(

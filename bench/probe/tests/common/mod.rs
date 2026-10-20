@@ -121,24 +121,38 @@ pub fn log_paths(side: &str, entry: &Value) {
     }
 }
 
-/// Whether `entry` has a path to read. An empty `paths` passes only when `unlisted_path_ids` names
-/// the paths `noq` held while iroh listed none, which is iroh's fault and not the probe's, and it
-/// prints an `UNLISTED` line so a loop can count it. Any other empty list fails.
-pub fn paths_listed(side: &str, entry: &Value) -> bool {
+/// Checks the paths of one `serve` line or `fetch` entry and returns the path to read, as the
+/// samples choose it among the listed paths that have a controller: the selected one, else the one
+/// that sent the most datagrams. `None` when iroh listed no such path, which passes only if
+/// `unlisted_path_ids` shows `noq` held one iroh did not list. That is iroh's fault and not the
+/// probe's, in either of its two shapes (an empty list, or a list of paths `noq` no longer holds).
+/// An `UNLISTED` line is printed whenever the ids are not empty, so a loop can count both.
+pub fn path_in_use<'a>(side: &str, entry: &'a Value) -> Option<&'a Value> {
+    let listed = entry["paths"].as_array().expect("paths is an array");
     let unlisted = entry["unlisted_path_ids"]
         .as_array()
         .unwrap_or_else(|| panic!("no unlisted_path_ids: {entry}"));
-    if entry["paths"].as_array().is_some_and(|p| !p.is_empty()) {
-        assert!(unlisted.is_empty(), "{entry}");
-        return true;
+    if !unlisted.is_empty() {
+        println!(
+            "UNLISTED side={side} ids={} listed={}",
+            entry["unlisted_path_ids"],
+            listed.len()
+        );
     }
-    assert!(
-        !unlisted.is_empty(),
-        "no paths and no unlisted ids: {entry}"
-    );
-    assert_eq!(entry["paths_source"], "none", "{entry}");
-    println!("UNLISTED side={side} ids={}", entry["unlisted_path_ids"]);
-    false
+    let with_controller = || listed.iter().filter(|p| !p["controller"].is_null());
+    let chosen = with_controller()
+        .find(|p| p["selected"] == true)
+        .or_else(|| with_controller().max_by_key(|p| p["sent_datagrams"].as_u64()));
+    if chosen.is_none() {
+        assert!(
+            !unlisted.is_empty(),
+            "no listed path has a controller and noq holds none iroh did not list: {entry}"
+        );
+    }
+    if listed.is_empty() {
+        assert_eq!(entry["paths_source"], "none", "{entry}");
+    }
+    chosen
 }
 
 /// Runs `case` on a worker thread and fails if it has not finished within `DEADLINE`. Every fetch

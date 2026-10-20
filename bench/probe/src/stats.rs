@@ -83,10 +83,13 @@ pub struct ConnReport {
     /// Where `paths` came from: `live` at the report, `stream` for the path-change event the list
     /// was read at, `sample` for the once-a-second reading, or `none`.
     pub paths_source: Source,
-    /// Only when `paths` is empty: the ids of the paths `noq` holds a controller for, which iroh
-    /// never listed. A path `noq` opened carries the transfer while iroh's list stays empty, and
-    /// this is the evidence of it, with no address, statistics or RTT to go with it. Empty
-    /// whenever `paths` has a path, and a lower bound: see `UNLISTED_ID_LIMIT`.
+    /// The ids, 0 to 63, that `noq` holds a controller for and `paths` does not include, whatever
+    /// `paths` holds. It has two shapes. `paths` is empty because iroh never listed the path the
+    /// data moved on. Or `paths` lists only paths `noq` no longer holds, and the path in use is
+    /// missing from it. Either way this is the evidence, with no address, statistics or RTT to go
+    /// with it, since none is known. `[]` when iroh listed every path `noq` holds. A path iroh has
+    /// just closed can show here for a moment too, while `noq` still holds its controller. A lower
+    /// bound: see `UNLISTED_ID_LIMIT`.
     pub unlisted_path_ids: Vec<u32>,
     /// This end's controller once a second during the transfer. Empty for a transfer shorter than
     /// a second.
@@ -101,17 +104,18 @@ pub struct ConnReport {
 /// highest id a connection can reach is 7 plus the paths its peer abandoned, which has no bound,
 /// and `noq` has no public accessor for the current maximum. A connection abandons a path a few
 /// times at most in the first seconds (id 4 in the runs that motivated this), so 64 is eight
-/// times the starting window. An id beyond it is not reported, and the field then reads as empty.
+/// times the starting window. An id beyond it is not reported, so the field can miss a path.
 const UNLISTED_ID_LIMIT: u32 = 64;
 
-/// The ids `noq` holds a controller for when iroh listed no path, and none otherwise.
-/// `holds_controller` answers for one id, so the choice can be tested without a connection.
+/// The ids below `UNLISTED_ID_LIMIT` that `noq` holds a controller for and `listed` does not
+/// include, compared by `PathReport::id`. `holds_controller` answers for one id, so the choice can
+/// be tested without a connection. It is asked only about ids iroh did not list.
 fn unlisted_path_ids(listed: &[PathReport], holds_controller: impl Fn(PathId) -> bool) -> Vec<u32> {
-    if !listed.is_empty() {
-        return Vec::new();
-    }
     (0..UNLISTED_ID_LIMIT)
-        .filter(|&id| holds_controller(PathId::from(id)))
+        .map(|id| (id, PathId::from(id)))
+        .filter(|&(_, id)| !listed.iter().any(|p| p.id == id))
+        .filter(|&(_, id)| holds_controller(id))
+        .map(|(n, _)| n)
         .collect()
 }
 
