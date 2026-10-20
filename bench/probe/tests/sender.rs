@@ -136,10 +136,15 @@ fn series(side: &str, entry: &Value) -> Vec<Value> {
     samples.clone()
 }
 
+/// Seconds `fetch` may transfer. Samples come at 1, 2, 3 and 4 seconds, and at 5 if that tick wins
+/// the race with the timeout. The check wants 3, so a machine that is a tick late still passes.
+const SERIES_TIMEOUT: &str = "5";
+
 #[test]
 fn both_ends_sample_the_controller_once_a_second() {
-    // 512 MiB, because the first sample comes a second in and loopback moves 8 MiB in far less.
-    let (_server, mut stdout) = spawn_server("raw", "bbr3", "512MiB", &[]);
+    // Sized so that no machine finishes in `SERIES_TIMEOUT`, which makes the run take that long
+    // everywhere. A size that finishes is a test that takes as long as the machine is slow.
+    let (_server, mut stdout) = spawn_server("raw", "bbr3", "64GiB", &[]);
     within_deadline(move |fetches| {
         let ticket = read_ticket(&mut stdout);
         let fetched = fetches.run(probe().args([
@@ -150,13 +155,16 @@ fn both_ends_sample_the_controller_once_a_second() {
             "--congestion",
             "bbr3",
             "--progress-lines",
+            "--timeout",
+            SERIES_TIMEOUT,
         ]));
-        assert!(fetched.status.success(), "fetch failed");
+        assert!(!fetched.status.success(), "a timeout must exit non-zero");
         // The same run shows the live stream: progress lines first, then the result line, which
         // is the only line that is not a progress event.
         let text = String::from_utf8(fetched.stdout).expect("UTF-8");
         let (live, result_line) = text.trim_end().rsplit_once('\n').expect("progress lines");
         let result: Value = serde_json::from_str(result_line).expect("fetch prints JSON");
+        assert_eq!(result["outcome"], "timeout");
         let ticks: Vec<Value> = live
             .lines()
             .map(|l| serde_json::from_str(l).expect("progress line"))
@@ -174,10 +182,11 @@ fn both_ends_sample_the_controller_once_a_second() {
 
         log_paths("fetch", &result["connection_stats"][0]);
         let received = series("fetch", &result["connection_stats"][0]);
-        assert!(!received.is_empty());
         // One tick feeds both, so the two arrays are the same length.
         assert_eq!(received.len(), progress.len());
+        assert!(received.len() >= 3, "{}", describe(&received));
 
+        // `fetch` closes the connection as it exits, which is when `serve` prints this line.
         let line = read_line(&mut stdout);
         let closed: Value = serde_json::from_str(&line).expect("serve prints JSON");
         log_paths("serve", &closed);
