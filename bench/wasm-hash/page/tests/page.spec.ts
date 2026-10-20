@@ -31,7 +31,7 @@ test.describe("page (Playwright engines, WebKit here is not Safari)", () => {
     expect(pageErrors).toEqual([]);
 
     const result: PageResult = JSON.parse(await page.inputValue("#json"));
-    expect(result.schema).toBe(1);
+    expect(result.schema).toBe(2);
     expect(result.cross_origin_isolated).toBe(false);
     expect(result.user_agent).toContain("Mozilla");
     expect(result.hardware_concurrency).toBeGreaterThan(0);
@@ -80,7 +80,25 @@ test.describe("page (Playwright engines, WebKit here is not Safari)", () => {
     const roots = new Set(result.variants.flatMap((v) => v.cases.map((c) => c.runs[0]?.root)));
     expect(roots.size).toBe(1);
 
+    // Round 0 is the warm-up. The builds alternate, and simd goes first in the even rounds.
+    for (const id of CASES) {
+      const inOrder = result.variants
+        .flatMap((v) =>
+          (v.cases.find((c) => c.case === id)?.runs ?? []).map((r) => ({ ...r, build: v.variant })),
+        )
+        .sort((a, b) => a.order - b.order);
+      expect(inOrder.map((r) => r.order)).toEqual(inOrder.map((_, i) => i + 1));
+      const expected = result.simd_supported
+        ? [0, 1, 2].flatMap((round) => (round % 2 === 0 ? ["simd", "scalar"] : ["scalar", "simd"]))
+        : ["scalar", "scalar", "scalar"];
+      expect(inOrder.map((r) => r.build)).toEqual(expected);
+      expect(inOrder.map((r) => r.round)).toEqual(
+        result.simd_supported ? [0, 0, 1, 1, 2, 2] : [0, 1, 2],
+      );
+    }
+
     await expect(page.locator("#table tbody tr")).toHaveCount(result.variants.length * 3);
+    await expect(page.locator("#runs tbody tr")).toHaveCount(result.variants.length * 3 * 3);
   });
 
   test("the page contacts only the server that serves it", async ({ page, baseURL }) => {

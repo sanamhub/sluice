@@ -20,7 +20,7 @@ Nothing here is wired into a product crate. `sluice-wasm` comes later and reuses
 
 Two builds of the same crate: `simd` (`wasm32_simd` and `+simd128`, the build ADR 0014 names) and
 `scalar` (neither, which shows what SIMD is worth and what a browser without it would get). Each runs
-three cases in a dedicated Worker, as the engine will. The input is the BLAKE3 test-vector pattern,
+three cases in dedicated Workers, as the engine will. The input is the BLAKE3 test-vector pattern,
 byte `i` being `i % 251`, so every root can be checked.
 
 | Case | Size | What it includes |
@@ -33,9 +33,23 @@ Each case runs one warm-up that is not counted, then five runs that are. The res
 and the range in MB/s and Gbit/s (MB is 10^6 bytes), and the median as a multiple of 500 Mbit/s and of
 1 Gbit/s. Every run, warm-up included, is in the JSON.
 
+The two builds alternate run by run, and the one that goes first swaps every round. Round 0 is the
+warm-up, and each build gets its own. On the laptop that built this page the build that ran first came
+out fastest, which points at thermal drift (a lead, not a measurement), and running one build to the
+end and then the other would charge all of it to the second.
+Each run in the JSON has its `round` and its `order` within the case, and the page lists every run in
+order under the table. With an odd number of counted rounds the first slot cannot split evenly: simd
+goes first in rounds 0, 2 and 4, and scalar in rounds 1, 3 and 5.
+
+Each build keeps its own Worker for the whole case, and the page terminates both when the case is
+done, which is how memory goes back between cases. Both builds hold the case's data at once, so a
+case needs twice the memory it would for one build. If they land on different sizes after a retry, both
+are resized to the smaller.
+
 Before measuring, each build hashes 1025 and 102400 bytes of the pattern and compares the roots with
 the official BLAKE3 test vectors. A mismatch stops the page with the error. Every timed run's root is
-compared with a root computed apart from the timing, and the two builds must agree on every root.
+compared with a root computed apart from the timing, and every run of both builds must give the same
+root.
 
 A browser without WebAssembly SIMD, found with `WebAssembly.validate`, gets the `scalar` build only,
 and the result says so. The page sets no COOP or COEP header and records `crossOriginIsolated`, which

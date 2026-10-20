@@ -63,6 +63,32 @@ export function renderTable(result: PageResult): HTMLTableElement {
   return table;
 }
 
+/** Every run of every case, in the order it happened, so thermal drift can be read off. */
+export function renderRuns(result: PageResult): HTMLTableElement {
+  const table = document.createElement("table");
+  const head = table.createTHead().insertRow();
+  for (const title of ["Case", "Order", "Round", "Build", "MB/s", "Gbit/s"]) {
+    cell(head, title, true);
+  }
+  const body = table.createTBody();
+  const caseIds = result.variants[0]?.cases.map((c) => c.case) ?? [];
+  for (const id of caseIds) {
+    const runs = result.variants.flatMap((v) =>
+      (v.cases.find((c) => c.case === id)?.runs ?? []).map((r) => ({ build: v.variant, ...r })),
+    );
+    for (const r of runs.sort((a, b) => a.order - b.order)) {
+      const row = body.insertRow();
+      cell(row, CASE_LABELS[id]);
+      cell(row, String(r.order));
+      cell(row, r.warmup ? "warm-up" : String(r.round));
+      cell(row, r.build);
+      cell(row, r.mb_per_s.toFixed(0));
+      cell(row, r.gbit_per_s.toFixed(2));
+    }
+  }
+  return table;
+}
+
 export function renderEnvironment(result: PageResult): string {
   const lines = [
     `crossOriginIsolated: ${result.cross_origin_isolated}`,

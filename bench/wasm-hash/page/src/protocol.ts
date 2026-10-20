@@ -36,8 +36,12 @@ export interface Stats {
 }
 
 export interface Run {
-  /** The first run of a case. It is in the JSON and not in the statistics. */
+  /** The first run of a build in a case. It is in the JSON and not in the statistics. */
   warmup: boolean;
+  /** 0 for the warm-up round, then 1 to `counted_runs`. Both builds run once per round. */
+  round: number;
+  /** Position among all runs of the case, both builds together, from 1. Shows who ran when. */
+  order: number;
   seconds: number;
   mb_per_s: number;
   gbit_per_s: number;
@@ -72,7 +76,7 @@ export interface VariantResult {
 }
 
 export interface PageResult {
-  schema: 1;
+  schema: 2;
   started_at: string;
   user_agent: string;
   hardware_concurrency: number;
@@ -88,14 +92,27 @@ export interface PageResult {
   variants: VariantResult[];
 }
 
+/**
+ * A self-check worker answers once. A case worker lives for the whole case: it is opened, may be
+ * resized, runs once per request, and is terminated by the page.
+ */
 export type JobRequest =
   | { kind: "self_check"; variant: Variant }
-  | { kind: "case"; variant: Variant; case: CaseId; params: Params };
+  | { kind: "open"; variant: Variant; case: CaseId; requested: number }
+  | { kind: "resize"; bytes: number }
+  | { kind: "run" };
 
 export type JobReply =
-  | { type: "progress"; text: string }
-  | { type: "self_check"; roots: KnownRoot[] }
-  | { type: "case"; result: CaseResult }
+  | { type: "checked"; roots: KnownRoot[] }
+  | {
+      type: "prepared";
+      /** Null if no size down to the floor could be had, and `error` says why. */
+      bytes: number | null;
+      failed_sizes: number[];
+      chunk_bytes: number | null;
+      error: string | null;
+    }
+  | { type: "ran"; seconds: number; chunks: number; root: string }
   | { type: "error"; message: string };
 
 /** The part of the worker's global scope the worker uses. The DOM and WebWorker libs do not mix. */

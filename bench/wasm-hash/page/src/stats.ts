@@ -8,19 +8,20 @@ export function median(values: number[]): number {
 }
 
 export function run(
-  seconds: number,
+  timing: { seconds: number; chunks: number; root: string },
   bytes: number,
-  chunks: number,
-  root: string,
-  warmup: boolean,
+  round: number,
+  order: number,
 ): Run {
   return {
-    warmup,
-    seconds,
-    mb_per_s: bytes / 1e6 / seconds,
-    gbit_per_s: (bytes * 8) / 1e9 / seconds,
-    chunks,
-    root,
+    warmup: round === 0,
+    round,
+    order,
+    seconds: timing.seconds,
+    mb_per_s: bytes / 1e6 / timing.seconds,
+    gbit_per_s: (bytes * 8) / 1e9 / timing.seconds,
+    chunks: timing.chunks,
+    root: timing.root,
   };
 }
 
