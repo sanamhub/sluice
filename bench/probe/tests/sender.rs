@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use serde_json::Value;
 
 mod common;
-use common::{log_paths, probe, read_line, read_ticket, spawn_server, within_deadline};
+use common::{fetch, log_paths, probe, read_line, read_ticket, spawn_server, within_deadline};
 
 const CONNECTIONS: usize = 2;
 
@@ -19,18 +19,18 @@ fn serve_lines(congestion: &'static str) {
     let (_server, mut stdout) = spawn_server("raw", congestion, "8MiB", &[]);
     within_deadline(move || {
         let ticket = read_ticket(&mut stdout);
-        let fetched = probe()
-            .args([
-                "fetch",
-                &ticket,
-                "--mode",
-                "raw",
-                "--congestion",
-                congestion,
-            ])
-            .args(["--connections", &CONNECTIONS.to_string()])
-            .output()
-            .expect("run probe fetch");
+        let fetched = fetch(
+            probe()
+                .args([
+                    "fetch",
+                    &ticket,
+                    "--mode",
+                    "raw",
+                    "--congestion",
+                    congestion,
+                ])
+                .args(["--connections", &CONNECTIONS.to_string()]),
+        );
         assert!(fetched.status.success(), "fetch failed");
         let result: Value = serde_json::from_slice(&fetched.stdout).expect("fetch prints JSON");
         let received = result["connection_stats"]
@@ -131,18 +131,15 @@ fn both_ends_sample_the_controller_once_a_second() {
     let (_server, mut stdout) = spawn_server("raw", "bbr3", "512MiB", &[]);
     within_deadline(move || {
         let ticket = read_ticket(&mut stdout);
-        let fetched = probe()
-            .args([
-                "fetch",
-                &ticket,
-                "--mode",
-                "raw",
-                "--congestion",
-                "bbr3",
-                "--progress-lines",
-            ])
-            .output()
-            .expect("run probe fetch");
+        let fetched = fetch(probe().args([
+            "fetch",
+            &ticket,
+            "--mode",
+            "raw",
+            "--congestion",
+            "bbr3",
+            "--progress-lines",
+        ]));
         assert!(fetched.status.success(), "fetch failed");
         // The same run shows the live stream: progress lines first, then the result line, which
         // is the only line that is not a progress event.

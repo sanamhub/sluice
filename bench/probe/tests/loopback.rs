@@ -6,7 +6,7 @@ use std::{io::BufReader, path::PathBuf, process::ChildStdout};
 use serde_json::Value;
 
 mod common;
-use common::{log_paths, probe, read_ticket, spawn_server, within_deadline};
+use common::{fetch, log_paths, probe, read_ticket, spawn_server, within_deadline};
 
 const SIZE: u64 = 8 << 20;
 
@@ -69,19 +69,19 @@ fn one_json_line(stdout: Vec<u8>) -> Value {
 
 fn run_case(mut server_stdout: BufReader<ChildStdout>, case: &Case) {
     let ticket = read_ticket(&mut server_stdout);
-    let output = probe()
-        .args([
-            "fetch",
-            &ticket,
-            "--mode",
-            case.mode,
-            "--congestion",
-            case.congestion,
-        ])
-        .args(["--connections", &case.connections.to_string()])
-        .args(&case.fetch)
-        .output()
-        .expect("run probe fetch");
+    let output = fetch(
+        probe()
+            .args([
+                "fetch",
+                &ticket,
+                "--mode",
+                case.mode,
+                "--congestion",
+                case.congestion,
+            ])
+            .args(["--connections", &case.connections.to_string()])
+            .args(&case.fetch),
+    );
     assert!(
         output.status.success(),
         "fetch failed: {}",
@@ -264,10 +264,7 @@ fn a_timeout_prints_what_was_measured_and_exits_non_zero() {
     let (_server, mut stdout) = spawn_server("raw", "bbr3", "64GiB", &[]);
     within_deadline(move || {
         let ticket = read_ticket(&mut stdout);
-        let output = probe()
-            .args(["fetch", &ticket, "--mode", "raw", "--timeout", "2"])
-            .output()
-            .expect("run probe fetch");
+        let output = fetch(probe().args(["fetch", &ticket, "--mode", "raw", "--timeout", "2"]));
         assert!(!output.status.success(), "a timeout must exit non-zero");
         assert!(String::from_utf8_lossy(&output.stderr).contains("timed out"));
 

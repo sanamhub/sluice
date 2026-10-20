@@ -2,7 +2,7 @@
 
 use std::{
     io::{BufRead, BufReader},
-    process::{Child, ChildStdout, Command, Stdio},
+    process::{Child, ChildStdout, Command, Output, Stdio},
     sync::mpsc::{self, RecvTimeoutError},
     thread,
     time::Duration,
@@ -66,10 +66,26 @@ pub fn read_ticket(server_stdout: &mut BufReader<ChildStdout>) -> String {
     ticket
 }
 
+fn logging() -> bool {
+    std::env::var_os("PROBE_TEST_LOG_PATHS").is_some()
+}
+
+/// Runs a `probe fetch` to the end. `output()` captures its stderr, so a passing test would lose
+/// iroh's warnings. With `PROBE_TEST_LOG_PATHS` set they are printed, to be counted by a loop.
+pub fn fetch(cmd: &mut Command) -> Output {
+    let output = cmd.output().expect("run probe fetch");
+    if logging() {
+        for line in String::from_utf8_lossy(&output.stderr).lines() {
+            println!("STDERR side=fetch {line}");
+        }
+    }
+    output
+}
+
 /// With `PROBE_TEST_LOG_PATHS` set, prints where a connection's `paths` came from and how its
 /// samples chose a path, so a loop of the suite can count how often each was used. Off by default.
 pub fn log_paths(side: &str, entry: &Value) {
-    if std::env::var_os("PROBE_TEST_LOG_PATHS").is_none() {
+    if !logging() {
         return;
     }
     println!(

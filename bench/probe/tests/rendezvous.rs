@@ -12,7 +12,7 @@ use rustls::pki_types::PrivatePkcs8KeyDer;
 use serde_json::Value;
 
 mod common;
-use common::{log_paths, probe, read_ticket, spawn_server, within_deadline};
+use common::{fetch, log_paths, probe, read_ticket, spawn_server, within_deadline};
 
 const SIZE: &str = "8MiB";
 
@@ -159,10 +159,7 @@ fn both_ends_learn_an_address_and_connect_directly_without_a_relay() {
             );
         }
 
-        let output = probe()
-            .args(fetch_args(&ticket, &rendezvous.args()))
-            .output()
-            .expect("run probe fetch");
+        let output = fetch(probe().args(fetch_args(&ticket, &rendezvous.args())));
         assert!(
             output.status.success(),
             "fetch failed: {}",
@@ -213,7 +210,7 @@ fn a_dial_that_goes_nowhere_is_a_no_path_result() {
         };
         let mut args = fetch_args(&ticket, &rendezvous.args());
         args.extend(["--timeout".to_string(), "3".to_string()]);
-        let output = probe().args(args).output().expect("run probe fetch");
+        let output = fetch(probe().args(args));
         assert!(!output.status.success(), "a failed dial must not exit 0");
         let result: Value =
             serde_json::from_slice(output.stdout.trim_ascii()).expect("one JSON line");
