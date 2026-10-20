@@ -11,6 +11,8 @@ obj/
 node_modules/
 dist/
 .svelte-kit/
+# Written by `cargo xtask wasm-hash`.
+bench/wasm-hash/page/src/generated/
 
 # local state and benchmark output
 .sluice/
