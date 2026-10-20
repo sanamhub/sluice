@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use serde_json::Value;
 
 mod common;
-use common::{fetch, log_paths, probe, read_line, read_ticket, spawn_server, within_deadline};
+use common::{log_paths, probe, read_line, read_ticket, spawn_server, within_deadline};
 
 const CONNECTIONS: usize = 2;
 
@@ -17,9 +17,9 @@ fn keys(values: impl Iterator<Item = Value>) -> BTreeSet<String> {
 
 fn serve_lines(congestion: &'static str) {
     let (_server, mut stdout) = spawn_server("raw", congestion, "8MiB", &[]);
-    within_deadline(move || {
+    within_deadline(move |fetches| {
         let ticket = read_ticket(&mut stdout);
-        let fetched = fetch(
+        let fetched = fetches.run(
             probe()
                 .args([
                     "fetch",
@@ -140,9 +140,9 @@ fn series(side: &str, entry: &Value) -> Vec<Value> {
 fn both_ends_sample_the_controller_once_a_second() {
     // 512 MiB, because the first sample comes a second in and loopback moves 8 MiB in far less.
     let (_server, mut stdout) = spawn_server("raw", "bbr3", "512MiB", &[]);
-    within_deadline(move || {
+    within_deadline(move |fetches| {
         let ticket = read_ticket(&mut stdout);
-        let fetched = fetch(probe().args([
+        let fetched = fetches.run(probe().args([
             "fetch",
             &ticket,
             "--mode",

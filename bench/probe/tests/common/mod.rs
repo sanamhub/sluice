@@ -1,10 +1,16 @@
 //! Helpers for the tests that run `probe serve` and `probe fetch` as processes.
 
+// Each test binary uses its own part of these helpers.
+#![allow(dead_code)]
+
 use std::{
-    io::{BufRead, BufReader},
-    process::{Child, ChildStdout, Command, Output, Stdio},
-    sync::mpsc::{self, RecvTimeoutError},
-    thread,
+    io::{BufRead, BufReader, Read},
+    process::{Child, ChildStderr, ChildStdout, Command, Output, Stdio},
+    sync::{
+        Arc, Mutex, MutexGuard, PoisonError,
+        mpsc::{self, RecvTimeoutError},
+    },
+    thread::{self, JoinHandle},
     time::Duration,
 };
 
@@ -70,18 +76,6 @@ fn logging() -> bool {
     std::env::var_os("PROBE_TEST_LOG_PATHS").is_some()
 }
 
-/// Runs a `probe fetch` to the end. `output()` captures its stderr, so a passing test would lose
-/// iroh's warnings. With `PROBE_TEST_LOG_PATHS` set they are printed, to be counted by a loop.
-pub fn fetch(cmd: &mut Command) -> Output {
-    let output = cmd.output().expect("run probe fetch");
-    if logging() {
-        for line in String::from_utf8_lossy(&output.stderr).lines() {
-            println!("STDERR side=fetch {line}");
-        }
-    }
-    output
-}
-
 /// With `PROBE_TEST_LOG_PATHS` set, prints where a connection's `paths` came from and how its
 /// samples chose a path, so a loop of the suite can count how often each was used. Off by default.
 pub fn log_paths(side: &str, entry: &Value) {
@@ -113,18 +107,139 @@ pub fn log_paths(side: &str, entry: &Value) {
     }
 }
 
-pub fn within_deadline(case: impl FnOnce() + Send + 'static) {
+/// Runs `case` on a worker thread and fails if it has not finished within `DEADLINE`. Every fetch
+/// it starts is killed and reaped when this returns or panics, including after the deadline.
+pub fn within_deadline(case: impl FnOnce(&Fetches) + Send + 'static) {
+    within_deadline_of(DEADLINE, &Arc::default(), case);
+}
+
+/// `within_deadline` with the deadline and the fetches given, so a test can shorten the one and
+/// look at the other afterwards.
+pub fn within_deadline_of(
+    deadline: Duration,
+    fetches: &Arc<Fetches>,
+    case: impl FnOnce(&Fetches) + Send + 'static,
+) {
+    // On this thread, so it runs when the wait below gives up and the worker is still blocked.
+    let _reaper = Reaper(Arc::clone(fetches));
     let (done, finished) = mpsc::channel();
+    let shared = Arc::clone(fetches);
     let worker = thread::spawn(move || {
-        case();
+        case(&shared);
         let _ = done.send(());
     });
-    match finished.recv_timeout(DEADLINE) {
+    match finished.recv_timeout(deadline) {
         Ok(()) => worker.join().expect("worker panicked"),
         // The worker panicked before sending, which drops the sender.
         Err(RecvTimeoutError::Disconnected) => {
             std::panic::resume_unwind(worker.join().expect_err("worker ended without a result"))
         }
-        Err(RecvTimeoutError::Timeout) => panic!("no result within {DEADLINE:?}"),
+        Err(RecvTimeoutError::Timeout) => panic!("no result within {deadline:?}"),
+    }
+}
+
+/// The `probe fetch` processes a test has started.
+#[derive(Default)]
+pub struct Fetches(Mutex<Vec<Arc<Started>>>);
+
+struct Started {
+    child: Mutex<Child>,
+    /// What `fetch` has written to stderr so far, filled as it arrives so a hung run still has it.
+    stderr: Mutex<String>,
+    /// Taken by whoever joins it first, the worker or the reaper.
+    reader: Mutex<Option<JoinHandle<()>>>,
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    // A panicking test is the normal way for this to be poisoned, and the data is still good.
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl Started {
+    fn read_stderr(&self, stderr: ChildStderr) {
+        let mut reader = BufReader::new(stderr);
+        let mut raw = Vec::new();
+        while reader.read_until(b'\n', &mut raw).is_ok_and(|n| n > 0) {
+            let line = String::from_utf8_lossy(&raw).into_owned();
+            if logging() {
+                println!("STDERR side=fetch {}", line.trim_end());
+            }
+            lock(&self.stderr).push_str(&line);
+            raw.clear();
+        }
+    }
+
+    fn join_reader(&self) {
+        if let Some(reader) = lock(&self.reader).take() {
+            let _ = reader.join();
+        }
+    }
+}
+
+impl Fetches {
+    /// Runs a `probe fetch` to the end. Its stderr is read as it arrives. With
+    /// `PROBE_TEST_LOG_PATHS` set each line is printed at once, to be counted by a loop. Without
+    /// it the lines are printed only if the test fails, which is when `Reaper` runs on a panic.
+    pub fn run(&self, cmd: &mut Command) -> Output {
+        let mut child = cmd
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("run probe fetch");
+        let mut stdout = child.stdout.take().expect("piped stdout");
+        let stderr = child.stderr.take().expect("piped stderr");
+        let started = Arc::new(Started {
+            child: Mutex::new(child),
+            stderr: Mutex::default(),
+            reader: Mutex::default(),
+        });
+        let reader = Arc::clone(&started);
+        *lock(&started.reader) = Some(thread::spawn(move || reader.read_stderr(stderr)));
+        lock(&self.0).push(Arc::clone(&started));
+
+        // Both pipes end when the process does, whether it exits or the reaper kills it.
+        let mut out = Vec::new();
+        stdout.read_to_end(&mut out).expect("read fetch's stdout");
+        started.join_reader();
+        let status = lock(&started.child).wait().expect("wait for probe fetch");
+        let stderr = lock(&started.stderr).clone().into_bytes();
+        Output {
+            status,
+            stdout: out,
+            stderr,
+        }
+    }
+
+    /// True when every fetch started so far has been waited for.
+    pub fn all_reaped(&self) -> bool {
+        lock(&self.0).iter().all(|s| {
+            lock(&s.child)
+                .try_wait()
+                .is_ok_and(|status| status.is_some())
+        })
+    }
+}
+
+/// Kills and waits for every fetch when dropped, like `Server` does for `serve`. A fetch whose
+/// worker gave up at the deadline would otherwise run on after the test, up to its own `--timeout`.
+struct Reaper(Arc<Fetches>);
+
+impl Drop for Reaper {
+    fn drop(&mut self) {
+        let failing = thread::panicking();
+        for started in lock(&self.0.0).iter() {
+            {
+                let mut child = lock(&started.child);
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            started.join_reader();
+            if failing && !logging() {
+                for line in lock(&started.stderr).lines() {
+                    println!("STDERR side=fetch {line}");
+                }
+            }
+        }
     }
 }

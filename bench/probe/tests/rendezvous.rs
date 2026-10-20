@@ -12,7 +12,7 @@ use rustls::pki_types::PrivatePkcs8KeyDer;
 use serde_json::Value;
 
 mod common;
-use common::{fetch, log_paths, probe, read_ticket, spawn_server, within_deadline};
+use common::{log_paths, probe, read_ticket, spawn_server, within_deadline};
 
 const SIZE: &str = "8MiB";
 
@@ -129,7 +129,7 @@ fn fetch_args(ticket: &str, extra: &[String]) -> Vec<String> {
 
 #[test]
 fn both_ends_learn_an_address_and_connect_directly_without_a_relay() {
-    within_deadline(|| {
+    within_deadline(|fetches| {
         let rendezvous = Rendezvous::start("rv-direct");
         let (_serve, mut stdout) = spawn_server("raw", "bbr3", SIZE, &rendezvous.args());
         let ticket = read_ticket(&mut stdout);
@@ -159,7 +159,7 @@ fn both_ends_learn_an_address_and_connect_directly_without_a_relay() {
             );
         }
 
-        let output = fetch(probe().args(fetch_args(&ticket, &rendezvous.args())));
+        let output = fetches.run(probe().args(fetch_args(&ticket, &rendezvous.args())));
         assert!(
             output.status.success(),
             "fetch failed: {}",
@@ -201,7 +201,7 @@ fn both_ends_learn_an_address_and_connect_directly_without_a_relay() {
 
 #[test]
 fn a_dial_that_goes_nowhere_is_a_no_path_result() {
-    within_deadline(|| {
+    within_deadline(|fetches| {
         let rendezvous = Rendezvous::start("rv-nopath");
         let ticket = {
             let (_serve, mut stdout) = spawn_server("raw", "bbr3", SIZE, &rendezvous.args());
@@ -210,7 +210,7 @@ fn a_dial_that_goes_nowhere_is_a_no_path_result() {
         };
         let mut args = fetch_args(&ticket, &rendezvous.args());
         args.extend(["--timeout".to_string(), "3".to_string()]);
-        let output = fetch(probe().args(args));
+        let output = fetches.run(probe().args(args));
         assert!(!output.status.success(), "a failed dial must not exit 0");
         let result: Value =
             serde_json::from_slice(output.stdout.trim_ascii()).expect("one JSON line");
@@ -224,7 +224,7 @@ fn a_dial_that_goes_nowhere_is_a_no_path_result() {
 
 #[test]
 fn a_rendezvous_that_does_not_answer_is_waited_for_and_then_recorded_as_empty() {
-    within_deadline(|| {
+    within_deadline(|_| {
         // Nothing listens on port 1, so no address can come back.
         let args = ["--rendezvous", "https://127.0.0.1:1"].map(str::to_string);
         let (_serve, mut stdout) = spawn_server("raw", "bbr3", SIZE, &args);
