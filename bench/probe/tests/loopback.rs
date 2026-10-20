@@ -163,16 +163,26 @@ fn check_connection_stats(result: &Value, connections: u16) {
     let stats = result["connection_stats"]
         .as_array()
         .expect("connection_stats is an array");
-    assert_eq!(stats.len(), usize::from(connections));
+    assert_eq!(stats.len(), usize::from(connections), "{result}");
     let received: u64 = stats
         .iter()
         .map(|c| c["received_bytes"].as_u64().expect("received_bytes"))
         .sum();
-    assert_eq!(received, result["received_bytes"].as_u64().unwrap());
+    assert_eq!(
+        received,
+        result["received_bytes"].as_u64().unwrap(),
+        "{result}"
+    );
     for conn in stats {
         log_paths("fetch", conn);
-        assert!(conn["received_datagrams"].as_u64().is_some_and(|n| n > 0));
-        assert!(conn["sent_datagrams"].as_u64().is_some_and(|n| n > 0));
+        assert!(
+            conn["received_datagrams"].as_u64().is_some_and(|n| n > 0),
+            "{conn}"
+        );
+        assert!(
+            conn["sent_datagrams"].as_u64().is_some_and(|n| n > 0),
+            "{conn}"
+        );
         paths_listed("fetch", conn);
     }
 }

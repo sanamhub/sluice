@@ -48,29 +48,50 @@ fn serve_lines(congestion: &'static str) {
             })
             .collect();
 
-        assert_eq!(keys(lines.iter().cloned()), keys(received.iter().cloned()));
+        assert_eq!(
+            keys(lines.iter().cloned()),
+            keys(received.iter().cloned()),
+            "serve lines {lines:?}, fetch entries {received:?}"
+        );
         received.iter().for_each(|entry| log_paths("fetch", entry));
-        assert_eq!(keys(lines.iter().cloned()).len(), CONNECTIONS);
+        assert_eq!(keys(lines.iter().cloned()).len(), CONNECTIONS, "{lines:?}");
         for line in &lines {
             log_paths("serve", line);
-            assert_eq!(line["event"], "connection_closed");
-            assert!(line["close_reason"].as_str().is_some_and(|r| !r.is_empty()));
-            assert!(line["received_bytes"].is_null());
+            assert_eq!(line["event"], "connection_closed", "{line}");
+            assert!(
+                line["close_reason"].as_str().is_some_and(|r| !r.is_empty()),
+                "{line}"
+            );
+            assert!(line["received_bytes"].is_null(), "{line}");
             // Read with getrusage, which Windows has no safe call for.
             assert_eq!(line["cpu_user_s"].is_f64(), cfg!(unix), "{line}");
             assert_eq!(line["cpu_sys_s"].is_f64(), cfg!(unix), "{line}");
-            assert!(line["sent_datagrams"].as_u64().is_some_and(|n| n > 0));
+            assert!(
+                line["sent_datagrams"].as_u64().is_some_and(|n| n > 0),
+                "{line}"
+            );
             // The sender is the other end of the fetch, so the two never name the same peer.
-            assert_ne!(line["remote_id"], received[0]["remote_id"]);
+            assert_ne!(line["remote_id"], received[0]["remote_id"], "{line}");
             if !paths_listed("serve", line) {
                 continue;
             }
             let path = &line["paths"][0];
             assert!(path["cwnd_bytes"].as_u64().is_some_and(|n| n > 0), "{line}");
             let controller = &path["controller"];
-            assert!(controller["pacing_rate_bytes_s"].is_u64() == (congestion == "bbr3"));
-            assert_eq!(controller["bbr_state"].is_string(), congestion == "bbr3");
-            assert_eq!(controller["bytes_in_flight"].is_u64(), congestion == "bbr3");
+            assert!(
+                controller["pacing_rate_bytes_s"].is_u64() == (congestion == "bbr3"),
+                "{line}"
+            );
+            assert_eq!(
+                controller["bbr_state"].is_string(),
+                congestion == "bbr3",
+                "{line}"
+            );
+            assert_eq!(
+                controller["bytes_in_flight"].is_u64(),
+                congestion == "bbr3",
+                "{line}"
+            );
         }
     });
 }
