@@ -60,7 +60,7 @@ fn a_row_reports_the_median_spread_slow_runs_and_percent() {
     // Three finished runs of 4, 5 and 6 Gbit/s, one timeout, and two runs with a second
     // under a tenth of the peak: the one at 201 and the stalled timeout. The dip leaves out
     // the first and last second, so every run with a middle is steady or has no ratio, and
-    // 6 Gbit/s is exactly 1.5 times 4, which is not an outlier.
+    // 4 Gbit/s takes 1.25 times as long as the median 5, which is not an outlier.
     assert_eq!(
         line,
         "| one-file | raw bbr3 default x1 shared | 3 / 4 | 1 | 0 | 0 | 2 | 1.00 | 0 | 5.00 | 4.00 to 6.00 | 50% |"
@@ -70,7 +70,7 @@ fn a_row_reports_the_median_spread_slow_runs_and_percent() {
 #[test]
 fn a_dip_and_a_late_run_that_the_ten_percent_rule_misses_show_in_their_own_columns() {
     // The second run has a second at exactly a tenth of its peak, which is not slow, but it is
-    // a tenth of its typical second. It also took three times as long as the first.
+    // a tenth of its typical second. It also took twice as long as the median of the two.
     let row = Row {
         workload: "one-file".to_string(),
         name: "raw bbr3 default x1 shared".to_string(),

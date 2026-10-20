@@ -247,7 +247,7 @@ fn render_scenario(out: &mut String, s: &ScenarioReport) {
         out,
         "\nWorst dip is the lowest second of a run over the median second of the same run, leaving out \
          the first and last second, as the lowest across the runs, and an outlier is a finished run \
-         that took more than 1.5 times as long as the fastest finished run."
+         that took more than 1.5 times as long as the median finished run."
     );
     if !s.not_measured.is_empty() {
         let _ = writeln!(out, "\nNot measured:\n");

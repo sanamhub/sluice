@@ -152,7 +152,7 @@ write into a directory that exists.
   below 10% of the run's peak second), in plain tables. Two more columns catch what that rule
   misses. The worst dip is the lowest second of a run over the median second of the same run,
   leaving out the first and last second, as the lowest across the runs. The outliers are finished
-  runs that took more than 1.5 times as long as the fastest finished run.
+  runs that took more than 1.5 times as long as the median finished run.
 
 The files are written even if a scenario fails or the run is interrupted, so what was measured is
 kept.

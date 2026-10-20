@@ -12,6 +12,9 @@ use crate::{
 
 const QUICK: Duration = Duration::from_secs(30);
 
+// Wide enough for `sudo -n tc`, the longest label. At 10 it filled the column and ran into its result.
+const LABEL: usize = 12;
+
 /// What each optional tool is for, so a missing one is not a mystery.
 fn purpose(name: &str) -> &'static str {
     match name {
@@ -65,7 +68,7 @@ async fn report(host: &Host) -> Result<bool> {
     }
     let writable = data_dir_writable(host).await;
     println!(
-        "  {:<10} {}",
+        "  {:<LABEL$} {}",
         "data_dir",
         if writable {
             format!("ok, {} is writable", host.entry.data_dir)
@@ -77,7 +80,7 @@ async fn report(host: &Host) -> Result<bool> {
     if let Some(interface) = &host.entry.interface {
         let exists = interface_exists(host, interface).await;
         println!(
-            "  {:<10} {}",
+            "  {:<LABEL$} {}",
             "interface",
             if exists {
                 format!("ok, {interface}")
@@ -87,7 +90,7 @@ async fn report(host: &Host) -> Result<bool> {
         );
     } else {
         println!(
-            "  {:<10} not set, netem scenarios need it on both hosts",
+            "  {:<LABEL$} not set, netem scenarios need it on both hosts",
             "interface"
         );
     }
@@ -95,7 +98,7 @@ async fn report(host: &Host) -> Result<bool> {
         let out = host.run(&["sudo", "-n", "tc", "-V"], QUICK).await;
         let allowed = out.is_ok_and(|o| o.success());
         println!(
-            "  {:<10} {}",
+            "  {:<LABEL$} {}",
             "sudo -n tc",
             if allowed {
                 "ok"
@@ -124,13 +127,16 @@ fn line(host: &Host, tool: &Tool) -> bool {
         } else {
             String::new()
         };
-        println!("  {name:<10} ok, {version}{at}");
+        println!("  {name:<LABEL$} ok, {version}{at}");
         true
     } else if name == "probe" {
-        println!("  {name:<10} FAIL, not runnable at {}", host.entry.probe);
+        println!(
+            "  {name:<LABEL$} FAIL, not runnable at {}",
+            host.entry.probe
+        );
         false
     } else {
-        println!("  {name:<10} missing, used for the {}", purpose(name));
+        println!("  {name:<LABEL$} missing, used for the {}", purpose(name));
         true
     }
 }

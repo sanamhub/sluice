@@ -72,13 +72,14 @@ pub fn worst_dip<'a>(runs: impl IntoIterator<Item = &'a [u64]>) -> Option<f64> {
     runs.into_iter().filter_map(dip).min_by(f64::total_cmp)
 }
 
-/// How many finished runs took more than 1.5 times as long as the fastest one. All runs of a
-/// configuration move the same bytes, so a run's time is in inverse proportion to its Gbit/s.
+/// How many finished runs took more than 1.5 times as long as the median finished run. All runs
+/// of a configuration move the same bytes, so a run's time is in inverse proportion to its Gbit/s.
+/// The median is the baseline because one lucky fast run would make every other run an outlier.
 pub fn outliers(gbit_s: &[f64]) -> usize {
-    let Some(fastest) = gbit_s.iter().copied().max_by(f64::total_cmp) else {
+    let Some(typical) = median(gbit_s) else {
         return 0;
     };
-    gbit_s.iter().filter(|&&g| g * 1.5 < fastest).count()
+    gbit_s.iter().filter(|&&g| g * 1.5 < typical).count()
 }
 
 /// `value` as a percentage of `ceiling`. `None` if there is no usable ceiling.
@@ -190,11 +191,22 @@ mod tests {
     }
 
     #[test]
-    fn a_run_is_an_outlier_above_one_and_a_half_times_the_fastest() {
-        // 2.0 Gbit/s takes 3 times as long as 6.0, 4.0 takes exactly 1.5 times, 4.1 less.
+    fn a_run_is_an_outlier_above_one_and_a_half_times_the_median() {
+        // The median is 4.1. 2.0 Gbit/s takes about 2 times as long, 4.0 about the same.
         assert_eq!(outliers(&[6.0, 6.0, 2.0, 4.0, 4.1]), 1);
-        assert_eq!(outliers(&[6.0, 3.9]), 1);
         assert_eq!(outliers(&[]), 0);
         assert_eq!(outliers(&[5.0]), 0);
+    }
+
+    #[test]
+    fn exactly_one_and_a_half_times_the_median_is_not_an_outlier() {
+        assert_eq!(outliers(&[4.0, 6.0, 6.0]), 0);
+        assert_eq!(outliers(&[3.9, 6.0, 6.0]), 1);
+    }
+
+    #[test]
+    fn one_lucky_fast_run_does_not_make_the_others_outliers() {
+        // Against the fastest run, the four steady ones would all count.
+        assert_eq!(outliers(&[4.0, 4.0, 4.0, 4.0, 9.0]), 0);
     }
 }
