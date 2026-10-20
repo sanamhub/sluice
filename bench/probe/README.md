@@ -56,7 +56,11 @@ dev-dependency, so no probe binary carries it. With `PROBE_TEST_LOG_PATHS` set, 
 many of its samples chose each `path` and how many had a stale path. The stderr of each `fetch` run is
 printed as `STDERR side=fetch` lines, because the tests capture it, and a series in which every
 sample is stale prints a `STALE` line. That is how a loop of the suite counts the fallbacks. Run it
-with `--success-output immediate`, or nextest hides the lines of passing tests.
+with `--success-output immediate`, or nextest hides the lines of passing tests. The same variable
+starts `serve` with `RUST_LOG=warn,probe::paths=debug`, unless `RUST_LOG` is already set. `serve`
+then logs a `probe::paths` line for each path-list stream item, each tick and the close, with the
+open paths as `id@address`, `*` on the selected one, and the path ids `noq` holds a controller for at
+the close. The target is off by default and adds nothing to the JSON.
 
 ## Run
 

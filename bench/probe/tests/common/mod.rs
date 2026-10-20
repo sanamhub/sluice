@@ -40,7 +40,14 @@ pub fn spawn_server(
     size: &str,
     extra: &[String],
 ) -> (Server, BufReader<ChildStdout>) {
-    let mut child = probe()
+    let mut command = probe();
+    if logging() && std::env::var_os("RUST_LOG").is_none() {
+        // `serve` has no `fetch` result to carry its path readings, so its debug lines are how a
+        // loop sees which reading a `paths` list came from. A `RUST_LOG` set by hand wins, to add
+        // iroh's own targets.
+        command.env("RUST_LOG", "warn,probe::paths=debug");
+    }
+    let mut child = command
         .args([
             "serve",
             "--size",

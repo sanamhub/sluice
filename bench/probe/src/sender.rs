@@ -5,11 +5,12 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use iroh::{
-    endpoint::Connection,
+    endpoint::{Connection, PathList},
     protocol::{AcceptError, ProtocolHandler},
 };
 use iroh_blobs::BlobsProtocol;
 use n0_future::StreamExt;
+use noq::PathId;
 use serde::Serialize;
 use tokio::{
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -95,7 +96,11 @@ impl Reporting {
 
 impl ProtocolHandler for Reporting {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
-        tokio::spawn(report_on_close(conn.clone(), self.lines.clone()));
+        tokio::spawn(report_on_close(
+            conn.clone(),
+            self.lines.clone(),
+            Instant::now(),
+        ));
         match &self.served {
             Served::Raw(handler) => handler.accept(conn).await,
             Served::Blobs(protocol) => protocol.accept(conn).await,
@@ -130,11 +135,40 @@ pub async fn print_lines(mut lines: UnboundedReceiver<String>) {
     }
 }
 
+/// The open paths as `id@address`, with `*` on the selected one, for the `probe::paths` log.
+fn listing(list: &PathList<'_>) -> String {
+    let paths: Vec<String> = list
+        .iter()
+        .map(|p| {
+            let star = if p.is_selected() { "*" } else { "" };
+            format!("{}@{}{star}", p.id(), p.remote_addr())
+        })
+        .collect();
+    format!("[{}]", paths.join(" "))
+}
+
+/// The path ids `noq` holds a controller for, up to 8, whatever iroh lists. For the `probe::paths`
+/// log only, to tell a path iroh dropped from one `noq` never had.
+fn controllers(conn: &Connection) -> String {
+    let held: Vec<String> = (0..8u32)
+        .map(PathId::from)
+        .filter(|id| conn.congestion_state(*id).is_some())
+        .map(|id| id.to_string())
+        .collect();
+    format!("[{}]", held.join(" "))
+}
+
 /// Reads the connection once a second until it closes, then prints the closing counters with the
 /// series. The clock starts at accept, so it runs a handshake ahead of the receiver's `progress`.
-async fn report_on_close(conn: Connection, lines: Lines) {
+async fn report_on_close(conn: Connection, lines: Lines, accepted: Instant) {
     let second = Duration::from_secs(1);
     let origin = Instant::now();
+    tracing::debug!(
+        target: "probe::paths",
+        scheduled_after_s = origin.duration_since(accepted).as_secs_f64(),
+        paths = %listing(&conn.paths()),
+        "started"
+    );
     let mut clock = tokio::time::interval_at(origin + second, second);
     // Same rule as the receiver: a late tick must not be followed by a burst.
     clock.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -146,12 +180,33 @@ async fn report_on_close(conn: Connection, lines: Lines) {
     let reason = loop {
         tokio::select! {
             reason = &mut closed => break reason,
-            _ = clock.tick() => series.tick(&conn, origin.elapsed()),
+            _ = clock.tick() => {
+                series.tick(&conn, origin.elapsed());
+                tracing::debug!(
+                    target: "probe::paths",
+                    elapsed_s = origin.elapsed().as_secs_f64(),
+                    paths = %listing(&conn.paths()),
+                    "tick"
+                );
+            }
             Some(list) = paths.next() => {
+                tracing::debug!(
+                    target: "probe::paths",
+                    elapsed_s = origin.elapsed().as_secs_f64(),
+                    paths = %listing(&list),
+                    "stream item"
+                );
                 series.changed(stats::read_list(&conn, &list), origin.elapsed());
             }
         }
     };
+    tracing::debug!(
+        target: "probe::paths",
+        elapsed_s = origin.elapsed().as_secs_f64(),
+        paths = %listing(&conn.paths()),
+        controllers = %controllers(&conn),
+        "closed"
+    );
     let cpu = lines.cpu_since_ticket();
     let closed = Closed {
         event: "connection_closed",
@@ -160,6 +215,12 @@ async fn report_on_close(conn: Connection, lines: Lines) {
         cpu_sys_s: cpu.map(|c| c.sys_s),
         connection: stats::report(&conn, None, series, origin.elapsed()),
     };
+    tracing::debug!(
+        target: "probe::paths",
+        paths = closed.connection.paths.len(),
+        source = ?closed.connection.paths_source,
+        "report"
+    );
     match serde_json::to_string(&closed) {
         // A closed channel means `serve` is shutting down without waiting for the line.
         Ok(line) => drop(lines.queue.send(line)),
