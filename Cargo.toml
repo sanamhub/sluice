@@ -43,6 +43,9 @@ rustls = { version = "0.23.46", default-features = false, features = ["std", "aw
 nix = { version = "0.31", default-features = false, features = ["resource"] }
 # Self-signed certificate for the rendezvous test. Already resolved through iroh-relay's server feature.
 rcgen = "0.14"
+# Property tests for parsers. Without default features it skips fork and timeout, which add rusty-fork
+# and tempfile to run each case in a child process. No test here needs that.
+proptest = { version = "1.12", default-features = false, features = ["std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -51,6 +54,8 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "tim
 toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# The NFC check on manifest paths (SPEC.md section 8, rule 2). Its only dependency is tinyvec.
+unicode-normalization = "0.1.26"
 # Pinned exactly: the version has to equal the wasm-bindgen CLI that the wasm-hash workflow installs
 # and `cargo xtask wasm-hash` runs, and a lockfile update must not move it on its own.
 wasm-bindgen = "=0.2.129"
