@@ -87,3 +87,25 @@ Run, and keep the tab in the foreground.
 `npm run dev` serves unbuilt modules, so measure with the preview.
 Close other tabs and applications first, and note the power mode. Throughput on a laptop on battery is
 a different number.
+
+## Tests
+
+The crate's unit tests run with the rest of the workspace (`cargo nextest run`). They check the pattern's
+root at 0, 1, 1024, 1025 and 102400 bytes against the official BLAKE3 vectors, and that chunked and
+one-shot hashing agree for chunk sizes that do not divide the length.
+
+The page has Playwright tests, in `page/tests/`:
+
+```
+cd bench/wasm-hash/page
+npx playwright install chromium firefox webkit
+npx playwright test
+```
+
+Each test runs the page headless at 64 MiB and checks that both builds finish with matching roots, that
+the result has the right shape, and that the page asks for nothing but its own files. Playwright's
+WebKit is not Safari, and the project is named `webkit-not-safari` for that reason. The numbers from
+these runs, in CI or here, are not results. The only results are runs on the devices ADR 0014 names.
+
+The workflow `.github/workflows/wasm-hash.yml` runs the build, Biome, `npm audit --audit-level=high` and
+these tests, and only for changes under `bench/wasm-hash/`, `xtask/` or the workflow.

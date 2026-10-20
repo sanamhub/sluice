@@ -13,6 +13,8 @@ dist/
 .svelte-kit/
 # Written by `cargo xtask wasm-hash`.
 bench/wasm-hash/page/src/generated/
+# Playwright output.
+bench/wasm-hash/page/test-results/
 
 # local state and benchmark output
 .sluice/

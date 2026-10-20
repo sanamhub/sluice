@@ -1,0 +1,58 @@
+name: wasm-hash
+
+# Only the crate, the page, the task runner and this file can break the page build, so only a change
+# to them runs it. A separate workflow because `paths` filters a whole workflow and not a job, and
+# ci.yml has to run on every change.
+on:
+  push:
+    branches: [main]
+    paths:
+      - bench/wasm-hash/**
+      - xtask/**
+      - .github/workflows/wasm-hash.yml
+  pull_request:
+    paths:
+      - bench/wasm-hash/**
+      - xtask/**
+      - .github/workflows/wasm-hash.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wasm-hash-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  page:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install --profile minimal
+      # Not in rust-toolchain.toml: the rest of the workspace never builds for wasm32.
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # Keep in step with wasm-bindgen in the root Cargo.toml. `cargo xtask wasm-hash` fails with
+      # the install command if the two differ, so a stale version here cannot pass quietly.
+      - run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+      - run: cargo xtask wasm-hash
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: bench/wasm-hash/page/package-lock.json
+      - run: npm ci
+        working-directory: bench/wasm-hash/page
+      - run: npm run check
+        working-directory: bench/wasm-hash/page
+      # A high or critical advisory fails the job. Lower ones are listed and do not.
+      - run: npm audit --audit-level=high
+        working-directory: bench/wasm-hash/page
+      - run: npx playwright install --with-deps chromium firefox webkit
+        working-directory: bench/wasm-hash/page
+      # The config builds and serves the page. These are Playwright's engines and Playwright's WebKit
+      # is not Safari, so a pass says the page works and says nothing about speed.
+      - run: npx playwright test
+        working-directory: bench/wasm-hash/page
