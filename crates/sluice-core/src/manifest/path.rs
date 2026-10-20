@@ -210,11 +210,25 @@ fn component_violation(component: &str) -> Option<Violation<'_>> {
 }
 
 /// Rule 6: the characters Windows refuses in a name, the two that mean something on some
-/// platform (`\` and `:`), and the control characters.
+/// platform (`\` and `:`), the C0 and C1 controls, and the bidirectional controls. The last reorder
+/// what a UI draws, so a name with U+202E in it can show `exe.txt` for a file that ends in `.exe`.
 fn is_forbidden(c: char) -> bool {
     matches!(
         c,
-        '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*' | '\u{0}'..='\u{1f}' | '\u{7f}'
+        '\\' | ':'
+            | '<'
+            | '>'
+            | '"'
+            | '|'
+            | '?'
+            | '*'
+            | '\u{0}'..='\u{1f}'
+            | '\u{7f}'..='\u{9f}'
+            | '\u{61c}'
+            | '\u{200e}'
+            | '\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2066}'..='\u{2069}'
     )
 }
 

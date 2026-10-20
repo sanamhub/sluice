@@ -67,6 +67,8 @@ Some points a reader cannot see from the rules alone:
 - Rule 2 is a check. An implementation must not normalize a path and then accept it.
 - Rule 8 takes the name from the text before the first `.`, ignores spaces before that dot, and
   compares U+0131 as `I`. So `con.tar.gz` and `CON .txt` break rule 8, and `a.con` does not.
+- Rule 6 rejects the C1 and bidirectional controls and accepts the zero-width characters U+200B,
+  U+200C, U+200D and U+FEFF. A UI that shows a name has to escape them.
 - A path with control characters, decomposed accents, ligatures or look-alike characters is written
   with `\u` escapes, so the file shows what it holds. Read the JSON with a parser, not by eye.
 - A path is a JSON string, so it is valid Unicode. A manifest decoder rejects bytes that are not

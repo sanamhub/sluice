@@ -107,10 +107,46 @@ fn rule_6_forbidden_characters() {
         assert_eq!(rule(&path), Some(6), "{path:?}");
     }
     rejects(6, &["a\\b", "C:/a", "C:", "file.txt:stream", "dir/a?b.txt"]);
-    // Neighbours of the control range and the C1 controls are plain characters to the rules.
+    // The C1 controls, all 32 of them, and the edges around them.
+    for c in '\u{80}'..='\u{9f}' {
+        let path = format!("a{c}b");
+        assert_eq!(rule(&path), Some(6), "{path:?}");
+    }
+    accepts(&["a\u{a0}b", "a\u{ff}b", "a\u{7e}b"]);
+}
+
+#[test]
+fn rule_6_bidirectional_controls() {
+    let bidi = [
+        '\u{61c}', '\u{200e}', '\u{200f}', '\u{202a}', '\u{202b}', '\u{202c}', '\u{202d}',
+        '\u{202e}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}',
+    ];
+    for c in bidi {
+        let path = format!("invoice{c}txt.exe");
+        assert_eq!(rule(&path), Some(6), "{path:?}");
+    }
+    // The neighbours: the zero-width characters that emoji sequences and Persian need, the
+    // marks next to the bidirectional range, and ordinary text in a right-to-left script.
     accepts(&[
-        "a b", "a!b", "a#b", "a~b", "a\u{80}b", "a\u{a0}b", "a\u{ff}b", "a;b", "a'b",
+        "a\u{200b}b",
+        "a\u{200c}b",
+        "a\u{200d}b",
+        "a\u{feff}b",
+        "a\u{200d}",
+        "a\u{2060}b",
+        "a\u{2065}b",
+        "a\u{206a}b",
+        "a\u{2029}b",
+        "a\u{202f}b",
+        "\u{645}\u{644}\u{641}.txt",
     ]);
+}
+
+#[test]
+fn rule_6_beats_rules_7_and_8() {
+    // A C1 control in a name that is also a device name: rule 6 comes before rule 8.
+    assert_eq!(rule("con\u{85}"), Some(6));
+    assert_eq!(rule("a\u{202e}."), Some(6));
 }
 
 #[test]

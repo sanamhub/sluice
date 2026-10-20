@@ -218,7 +218,9 @@ Rules:
   3. it begins with `/`, or ends with `/`
   4. a component is empty (`a//b`), `.` or `..`
   5. a component is longer than 255 bytes in UTF-8
-  6. it contains `\`, `:`, a control character (U+0000 to U+001F, or U+007F), or any of `< > " | ? *`
+  6. it contains `\`, `:`, a control character (U+0000 to U+001F, or U+007F to U+009F), a
+     bidirectional control (U+061C, U+200E, U+200F, U+202A to U+202E, or U+2066 to U+2069), or any of
+     `< > " | ? *`
   7. a component ends with `.` or a space
   8. a component is a Windows reserved device name, compared case-insensitively, with or without an
      extension: `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, and `COM` or `LPT` followed by one of
