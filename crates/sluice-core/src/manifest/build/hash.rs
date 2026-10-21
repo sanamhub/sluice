@@ -29,6 +29,9 @@ pub(super) enum HashFault {
 pub(super) struct Opened {
     file: File,
     before: Metadata,
+    /// On Windows, the handle of a reparse point that is not a link, held while `file` is read
+    /// through its filter, so the path cannot be renamed or deleted in between.
+    _held: Option<File>,
 }
 
 impl Opened {
@@ -59,10 +62,18 @@ pub(super) fn open(path: &Path) -> Result<Opened, HashFault> {
     let before = file
         .metadata()
         .map_err(|e| HashFault::Unreadable(e.kind()))?;
+    #[cfg(windows)]
+    if let windows::Handle::ReparsePoint = windows::classify(&before) {
+        return windows::through_filter(path, file);
+    }
     if !before.is_file() {
         return Err(HashFault::Changed);
     }
-    Ok(Opened { file, before })
+    Ok(Opened {
+        file,
+        before,
+        _held: None,
+    })
 }
 
 /// Reads all of `opened` into `hasher`. `between` runs after the last byte is read and before the
@@ -76,7 +87,12 @@ pub(super) fn read_into(
     between: impl FnOnce(),
 ) -> Result<Facts, HashFault> {
     let unreadable = |e: io::Error| HashFault::Unreadable(e.kind());
-    let Opened { file, before } = opened;
+    // `_held` is a binding and not `_`, so the first handle stays open until the second look.
+    let Opened {
+        file,
+        before,
+        _held,
+    } = opened;
     let mut reader = Counting {
         inner: file,
         bytes: 0,
@@ -122,10 +138,16 @@ fn no_follow(options: &mut OpenOptions) {
     options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
 }
 
-/// A link is opened as itself, and its metadata then says it is not a regular file.
+/// A link is opened as itself, and its metadata then says it is not a regular file. Without
+/// `FILE_SHARE_DELETE`, nobody can rename or delete the file while the handle is open.
 #[cfg(windows)]
 fn no_follow(options: &mut OpenOptions) {
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
-    options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    options
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .share_mode(windows::SHARE);
 }
+
+#[cfg(windows)]
+mod windows;
