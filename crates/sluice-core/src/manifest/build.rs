@@ -5,6 +5,7 @@
 //! lists them all, so one run tells the user everything to fix. It returns that list as data and
 //! not as an error message: error text can reach a log, and file names stay out of logs.
 
+mod assemble;
 mod collide;
 mod disk;
 mod finding;
@@ -12,17 +13,13 @@ mod hash;
 mod meta;
 mod walk;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub use disk::DiskPaths;
 pub use finding::{Finding, Reason};
 
-use super::entry::{Entry, Kind, Loc};
-use super::path::ManifestPath;
 use super::{Limits, Manifest};
 use crate::Error;
-use hash::{HashFault, Hashed};
-use walk::{Item, What};
 
 /// A manifest, where its files are on disk, and the entries that were left out of it.
 ///
@@ -132,9 +129,11 @@ pub enum Build {
 }
 
 impl Manifest {
-    /// Builds the manifest of a folder, with a `Dir` entry for every folder under it and a
-    /// BLAKE3 root for every file. The folder itself is not an entry. It is read in place and
-    /// not changed.
+    /// Builds the manifest of a folder, with a `Dir` entry for every folder under it. A file of 1
+    /// byte to under [`PACK_THRESHOLD`](super::pack::PACK_THRESHOLD) goes into a pack, as
+    /// `SPEC.md` section 9 says, and any other file is a blob with its BLAKE3 root. The packs are
+    /// in [`Manifest::packs`]. The folder itself is not an entry. It is read in place and not
+    /// changed, and no pack is written to disk.
     ///
     /// The walk never follows a symlink, except `root` itself when it is one. Hidden files are
     /// included. Hard links are separate files. A name a receiver would reject refuses the whole
@@ -199,17 +198,14 @@ impl Manifest {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build_with_limits(root: &Path, limits: Limits) -> Result<Build, Error> {
-        build(root, limits, hash::hash_file)
+        build(root, limits, |_| {})
     }
 }
 
-/// [`Manifest::build_with_limits`] with the hashing passed in, so a test can change a file
-/// between the two reads of its size and time, which a real run cannot do on purpose.
-fn build(
-    root: &Path,
-    limits: Limits,
-    hash_file: impl Fn(&Path) -> Result<Hashed, HashFault>,
-) -> Result<Build, Error> {
+/// [`Manifest::build_with_limits`] with a hook that runs for each file between its last byte and
+/// the second look at its size and time, so a test can change a file there, which a real run
+/// cannot do on purpose.
+fn build(root: &Path, limits: Limits, between: impl Fn(&Path)) -> Result<Build, Error> {
     let walked = walk::walk(root)?;
     // Before the names are compared and before any file is hashed: renaming files does not
     // bring the count down, so a list of names to fix would not help.
@@ -219,27 +215,21 @@ fn build(
     if !problems.is_empty() {
         return Ok(refuse(problems, walked.skipped));
     }
-    let mut entries = Vec::with_capacity(walked.items.len());
-    for item in walked.items {
-        match entry_of(item, &hash_file) {
-            Made::Entry(entry, disk) => entries.push((entry, disk)),
-            Made::Listed(finding) => problems.push(finding),
-            Made::Changed => {
-                return Err(Error::Storage(
-                    "a file changed while it was read, so its hash would match no version of it"
-                        .to_string(),
-                ));
-            }
-        }
+    let mut items = walked.items;
+    // Packing follows manifest order, so the files are read in that order.
+    items.sort_by(|a, b| a.path.as_str().cmp(b.path.as_str()));
+    let assembled = assemble::assemble(items, &between).map_err(|assemble::Changed| {
+        Error::Storage(
+            "a file changed while it was read, so its hash would match no version of it"
+                .to_string(),
+        )
+    })?;
+    if !assembled.problems.is_empty() {
+        return Ok(refuse(assembled.problems, walked.skipped));
     }
-    if !problems.is_empty() {
-        return Ok(refuse(problems, walked.skipped));
-    }
-    // Sorted as pairs, so each disk path stays at the index of its entry.
-    entries.sort_by(|(a, _), (b, _)| a.path.as_str().cmp(b.path.as_str()));
-    let (entries, disk): (Vec<Entry>, Vec<Option<PathBuf>>) = entries.into_iter().unzip();
-    // The walk and `collide` found everything `new` looks for, so this is a check of the builder.
-    let manifest = Manifest::new(entries, Vec::new()).map_err(|e| {
+    // The walk and `collide` found everything `new` looks for, and the planner follows rule 16,
+    // so this is a check of the builder.
+    let manifest = Manifest::new(assembled.entries, assembled.packs).map_err(|e| {
         Error::Bug(format!(
             "the builder made a manifest that fails a rule: {e}"
         ))
@@ -251,7 +241,7 @@ fn build(
     skipped.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(Build::Ready(Built {
         manifest,
-        disk: DiskPaths::new(disk),
+        disk: DiskPaths::new(assembled.disk),
         skipped,
     }))
 }
@@ -284,68 +274,6 @@ fn refuse(mut problems: Vec<Finding>, mut skipped: Vec<Finding>) -> Build {
     problems.sort_by(|a, b| a.path.cmp(&b.path));
     skipped.sort_by(|a, b| a.path.cmp(&b.path));
     Build::Refused(Refusal { problems, skipped })
-}
-
-/// What one item came to.
-enum Made {
-    /// The entry, and the disk path of a file.
-    Entry(Entry, Option<PathBuf>),
-    /// A file that cannot be read. Listed, and the build goes on so every such file is found.
-    Listed(Finding),
-    /// A file that changed while it was read. The build stops.
-    Changed,
-}
-
-/// The entry for one item. A file is hashed here.
-fn entry_of(item: Item, hash_file: &impl Fn(&Path) -> Result<Hashed, HashFault>) -> Made {
-    let Item { path, shown, what } = item;
-    match what {
-        What::Dir { mtime_ms, mode } => Made::Entry(folder_entry(path, mtime_ms, mode), None),
-        What::Symlink { target, mtime_ms } => {
-            let entry = Entry {
-                path,
-                kind: Kind::Symlink,
-                size: 0,
-                mtime_ms,
-                mode: 0,
-                loc: Loc::None,
-                link_target: Some(target),
-            };
-            Made::Entry(entry, None)
-        }
-        What::File { disk } => match hash_file(&disk) {
-            Ok(hashed) => Made::Entry(file_entry(path, hashed), Some(disk)),
-            Err(HashFault::Unreadable(kind)) => Made::Listed(Finding {
-                path: shown,
-                reason: Reason::Unreadable(kind),
-            }),
-            Err(HashFault::Changed) => Made::Changed,
-        },
-    }
-}
-
-fn folder_entry(path: ManifestPath, mtime_ms: u64, mode: u32) -> Entry {
-    Entry {
-        path,
-        kind: Kind::Dir,
-        size: 0,
-        mtime_ms,
-        mode,
-        loc: Loc::None,
-        link_target: None,
-    }
-}
-
-fn file_entry(path: ManifestPath, hashed: Hashed) -> Entry {
-    Entry {
-        path,
-        kind: Kind::File,
-        size: hashed.size,
-        mtime_ms: hashed.mtime_ms,
-        mode: hashed.mode,
-        loc: Loc::Blob { root: hashed.root },
-        link_target: None,
-    }
 }
 
 #[cfg(test)]

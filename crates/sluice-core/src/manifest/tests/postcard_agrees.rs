@@ -56,7 +56,8 @@ fn postcard_reads_the_bytes_of_the_encoder_as_the_fields_of_the_spec() {
             },
             symlink("d/l", "big"),
             Raw {
-                loc: packed(0, 128, 5),
+                size: varint(70_000),
+                loc: packed(0, 0, 70_000),
                 ..file("d/small")
             },
         ],
@@ -80,8 +81,8 @@ fn postcard_reads_the_bytes_of_the_encoder_as_the_fields_of_the_spec() {
         read.entries[3].loc,
         MirrorLoc::Packed {
             pack_index: 0,
-            offset: 128,
-            len: 5
+            offset: 0,
+            len: 70_000
         }
     );
     assert_eq!(read.entries[2].kind, 2);

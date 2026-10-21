@@ -256,12 +256,10 @@ fn in_pack(offset: u64, len: u64, size: u64, pack_index: u32) -> Raw {
 #[test]
 fn rule_14_a_packed_entry_fits_its_pack() {
     let packs = [(9u8, 100u64)];
-    let ok = |entry: Raw| decode(&with_packs(&[entry], &packs)).is_ok();
     let bad = |entry: Raw| broken(&with_packs(&[entry], &packs));
-    assert!(ok(in_pack(0, 100, 100, 0)));
-    assert!(ok(in_pack(95, 5, 5, 0)));
-    // A file of no bytes at the very end of the pack.
-    assert!(ok(in_pack(100, 0, 0, 0)));
+    // One entry that fills the pack keeps rule 16 too. The layout of several is in layout_rules.
+    assert_eq!(bad(in_pack(0, 100, 100, 0)), None);
+    // Each of these breaks rule 16 as well, and rule 14 is the one checked first.
     assert_eq!(bad(in_pack(0, 101, 101, 0)), Some((14, None)));
     assert_eq!(bad(in_pack(96, 5, 5, 0)), Some((14, None)));
     assert_eq!(bad(in_pack(101, 0, 0, 0)), Some((14, None)));
@@ -303,7 +301,11 @@ fn rule_14_for_typed_entries_and_with_several_packs() {
             len,
         )
     };
-    assert!(Manifest::new(vec![at(1, 990, 10)], packs.clone()).is_ok());
+    let second = crate::manifest::Entry {
+        path: path("b"),
+        ..at(1, 0, 1000)
+    };
+    assert!(Manifest::new(vec![at(0, 0, 10), second], packs.clone()).is_ok());
     assert_eq!(new_fails(vec![at(0, 990, 10)], packs.clone()), 14);
     assert_eq!(new_fails(vec![at(2, 0, 1)], packs.clone()), 14);
     let wrong_size = typed(
@@ -362,11 +364,11 @@ fn the_empty_manifest_and_a_rich_one_decode_and_encode_to_the_same_bytes() {
             file("d/f"),
             symlink("d/l", "f"),
             Raw {
-                loc: packed(0, 10, 5),
+                loc: packed(0, 0, 5),
                 ..file("p")
             },
         ],
-        &[(7, 100)],
+        &[(7, 5)],
     );
     let manifest = decode(&bytes).expect("rich");
     assert_eq!(manifest.encode(), bytes);

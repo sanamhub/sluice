@@ -8,6 +8,7 @@
 mod build;
 mod entry;
 pub mod link;
+pub mod pack;
 pub mod path;
 mod rules;
 #[cfg(test)]

@@ -5,4 +5,5 @@ mod files;
 mod limits;
 mod links;
 mod names;
+mod packs;
 mod swap;

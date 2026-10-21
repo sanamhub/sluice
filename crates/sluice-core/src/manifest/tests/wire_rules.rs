@@ -185,7 +185,7 @@ fn rule_6_every_proper_prefix_of_a_manifest_ends_early() {
                 ..file("p")
             },
         ],
-        &[(7, 100)],
+        &[(7, 5)],
     );
     assert!(decode(&bytes).is_ok());
     for cut in 0..bytes.len() {

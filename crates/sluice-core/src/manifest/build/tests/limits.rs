@@ -3,7 +3,7 @@
 
 use super::common::*;
 use crate::Error;
-use crate::manifest::build::{build, hash::HashFault};
+use crate::manifest::build::build;
 use crate::manifest::{Build, Limits, Manifest};
 
 fn entries(max_entries: u64) -> Limits {
@@ -19,7 +19,7 @@ fn a_folder_over_the_entry_limit_fails_before_any_file_is_hashed() {
     put(dir.path(), "secret-a.txt", b"x");
     put(dir.path(), "secret-b.txt", b"y");
     put(dir.path(), "secret-c.txt", b"z");
-    let result = build(dir.path(), entries(2), |_| -> Result<_, HashFault> {
+    let result = build(dir.path(), entries(2), |_| {
         panic!("a file was read although the build was over the entry limit")
     });
     let Err(Error::Policy(message)) = result else {

@@ -53,15 +53,9 @@ fn attrs() -> impl Strategy<Value = Attrs> {
         })
 }
 
-fn packs() -> impl Strategy<Value = Vec<PackRef>> {
-    prop::collection::vec(
-        (any::<[u8; 32]>(), 0..100_000u64).prop_map(|(root, size)| PackRef { root, size }),
-        0..4,
-    )
-}
-
-/// One entry for `path`, of the kind `attrs.pick` selects. `is_parent` forces a folder.
-fn entry(path_text: &str, attrs: &Attrs, is_parent: bool, packs: &[PackRef]) -> Entry {
+/// One entry for `path`, of the kind `attrs.pick` selects. `is_parent` forces a folder. A packed
+/// file gets its place from [`Packs`], which needs the entries before it.
+fn entry(path_text: &str, attrs: &Attrs, is_parent: bool) -> Entry {
     let kind_pick = if is_parent { 1 } else { attrs.pick % 4 };
     let (kind, size, loc, link_target) = match kind_pick {
         1 => (Kind::Dir, 0, Loc::None, None),
@@ -69,17 +63,13 @@ fn entry(path_text: &str, attrs: &Attrs, is_parent: bool, packs: &[PackRef]) -> 
             let target = LinkTarget::parse(TARGETS[attrs.target]).expect("a target");
             (Kind::Symlink, 0, Loc::None, Some(target))
         }
-        3 if !packs.is_empty() => {
-            let pack_index = (attrs.spot % packs.len() as u64) as u32;
-            let room = packs[pack_index as usize].size;
-            let len = attrs.size % (room + 1);
-            let offset = (attrs.spot / 7) % (room - len + 1);
+        3 => {
             let loc = Loc::Packed {
-                pack_index,
-                offset,
-                len,
+                pack_index: 0,
+                offset: 0,
+                len: 0,
             };
-            (Kind::File, len, loc, None)
+            (Kind::File, attrs.size % 1000, loc, None)
         }
         _ => (Kind::File, attrs.size, Loc::Blob { root: attrs.root }, None),
     };
@@ -107,7 +97,7 @@ fn tree(
         ),
         0..12,
     );
-    (paths, packs()).prop_map(move |(paths, packs)| {
+    paths.prop_map(move |paths| {
         let mut texts: BTreeMap<String, Attrs> = BTreeMap::new();
         let mut parents = std::collections::BTreeSet::new();
         for (parts, attrs) in paths {
@@ -129,12 +119,52 @@ fn tree(
         for parent in &parents {
             texts.entry(parent.clone()).or_insert_with(|| blank.clone());
         }
+        let mut packs = Packs::default();
         let entries = texts
             .iter()
-            .map(|(text, attrs)| entry(text, attrs, parents.contains(text), &packs))
+            .map(|(text, attrs)| packs.place(entry(text, attrs, parents.contains(text)), attrs))
             .collect();
-        (entries, packs)
+        (entries, packs.finish())
     })
+}
+
+/// Lays the packed entries out end to end, as rule 16 asks, starting a new pack where `spot`
+/// says so, so that a manifest has any number of packs of any size.
+#[derive(Default)]
+struct Packs {
+    closed: Vec<PackRef>,
+    /// The size and root of the open pack, once a file is in it.
+    open: Option<(u64, [u8; 32])>,
+}
+
+impl Packs {
+    fn place(&mut self, mut entry: Entry, attrs: &Attrs) -> Entry {
+        if !matches!(entry.loc, Loc::Packed { .. }) {
+            return entry;
+        }
+        if self.open.is_some_and(|(size, _)| size > 0) && attrs.spot.is_multiple_of(3) {
+            self.close();
+        }
+        let (size, _) = self.open.get_or_insert((0, attrs.root));
+        entry.loc = Loc::Packed {
+            pack_index: self.closed.len() as u32,
+            offset: *size,
+            len: entry.size,
+        };
+        *size += entry.size;
+        entry
+    }
+
+    fn close(&mut self) {
+        if let Some((size, root)) = self.open.take() {
+            self.closed.push(PackRef { root, size });
+        }
+    }
+
+    fn finish(mut self) -> Vec<PackRef> {
+        self.close();
+        self.closed
+    }
 }
 
 fn valid() -> impl Strategy<Value = Manifest> {

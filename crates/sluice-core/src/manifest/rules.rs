@@ -29,10 +29,12 @@ pub(super) mod rule {
     pub const KIND_LOC: u8 = 13;
     pub const PACKED: u8 = 14;
     pub const MODE: u8 = 15;
+    pub const LAYOUT: u8 = 16;
 }
 
-/// A rule a manifest breaks. `sub` is the number of the path rule or link target rule inside rules
-/// 9 and 11. It is a number and never text of the manifest, so the error is safe to log.
+/// A rule a manifest breaks. `sub` is the number of the path rule, link target rule or pack layout
+/// rule inside rules 9, 11 and 16. It is a number and never text of the manifest, so the error is
+/// safe to log.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Fault {
     rule: u8,
@@ -55,6 +57,7 @@ impl Fault {
         let which = match (self.rule, self.sub) {
             (rule::PATH, Some(sub)) => format!(" (path rule {sub})"),
             (rule::LINK_TARGET, Some(sub)) => format!(" (link target rule {sub})"),
+            (rule::LAYOUT, Some(sub)) => format!(" (pack layout rule {sub})"),
             _ => String::new(),
         };
         Error::Policy(format!(
@@ -83,7 +86,8 @@ fn describe(rule: u8) -> &'static str {
         rule::COLLISION => "has two paths that are the same after case folding",
         rule::KIND_LOC => "has an entry whose kind, loc and size disagree",
         rule::PACKED => "has a packed entry that does not fit its pack",
-        _ => "has a mode above 0o7777",
+        rule::MODE => "has a mode above 0o7777",
+        _ => "has packs whose files do not lie end to end and fill them",
     }
 }
 
@@ -147,9 +151,15 @@ fn parent_is_a_folder(before: &[Entry], next: &Entry) -> Result<(), Fault> {
     }
 }
 
-/// Rule 14, for every packed entry. It needs the whole pack list, which comes after the entries
-/// in the bytes, so it runs once both are known.
+/// Rules 14 and 16. They need the whole pack list, which comes after the entries in the bytes, so
+/// they run once both are known.
 pub(super) fn check_packs(entries: &[Entry], packs: &[PackRef]) -> Result<(), Fault> {
+    each_packed_entry_fits(entries, packs)?;
+    packs_are_laid_out_end_to_end(entries, packs)
+}
+
+/// Rule 14, for every packed entry on its own.
+fn each_packed_entry_fits(entries: &[Entry], packs: &[PackRef]) -> Result<(), Fault> {
     for entry in entries {
         let Loc::Packed {
             pack_index,
@@ -168,6 +178,60 @@ pub(super) fn check_packs(entries: &[Entry], packs: &[PackRef]) -> Result<(), Fa
         if !fits {
             return Err(Fault::new(rule::PACKED));
         }
+    }
+    Ok(())
+}
+
+/// Rule 16: the packed entries, in manifest order, fill the packs one after another with no gap
+/// and no overlap, and no pack is left over. Every byte of a pack then has exactly one file, so a
+/// receiver knows where each byte goes before it fetches any.
+fn packs_are_laid_out_end_to_end(entries: &[Entry], packs: &[PackRef]) -> Result<(), Fault> {
+    let fault = |sub| Fault::within(rule::LAYOUT, sub);
+    // Rule 14 ran first, so every index names a pack and no `offset + len` wraps.
+    let pack_size = |index: u32| {
+        usize::try_from(index)
+            .ok()
+            .and_then(|at| packs.get(at))
+            .map(|pack| pack.size)
+    };
+    let mut open: Option<(u32, u64)> = None;
+    for entry in entries {
+        let Loc::Packed {
+            pack_index,
+            offset,
+            len,
+        } = entry.loc
+        else {
+            continue;
+        };
+        let start = match open {
+            None if pack_index == 0 => 0,
+            Some((index, end)) if pack_index == index => end,
+            Some((index, end)) if index.checked_add(1) == Some(pack_index) => {
+                if pack_size(index) != Some(end) {
+                    return Err(fault(3));
+                }
+                0
+            }
+            _ => return Err(fault(1)),
+        };
+        if offset != start {
+            return Err(fault(2));
+        }
+        open = Some((pack_index, offset + len));
+    }
+    let Some((last, end)) = open else {
+        return if packs.is_empty() {
+            Ok(())
+        } else {
+            Err(fault(4))
+        };
+    };
+    if pack_size(last) != Some(end) {
+        return Err(fault(3));
+    }
+    if packs.len() as u64 != u64::from(last) + 1 {
+        return Err(fault(4));
     }
     Ok(())
 }

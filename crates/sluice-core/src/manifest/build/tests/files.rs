@@ -6,8 +6,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::common::*;
 use crate::Error;
-use crate::manifest::build::hash::{HashFault, hash_file_with};
-use crate::manifest::{Build, Kind, Limits, Loc, Manifest, build::build};
+use crate::manifest::build::hash::{HashFault, open, read_into};
+use crate::manifest::{Build, Kind, Limits, Loc, Manifest, PackRef, build::build};
 
 #[test]
 fn every_folder_has_an_entry_and_the_folder_that_was_sent_has_none() {
@@ -81,8 +81,21 @@ fn the_root_of_a_file_is_the_blake3_hash_of_its_content() {
         root: *blake3::hash(bytes).as_bytes(),
     };
     assert_eq!(root_of("big"), (3_200_000, blob(&big)));
-    assert_eq!(root_of("small"), (5, blob(b"hello")));
     assert_eq!(root_of("empty"), (0, blob(b"")));
+    // A small file is packed, and its bytes are the whole of the one pack.
+    let packed = Loc::Packed {
+        pack_index: 0,
+        offset: 0,
+        len: 5,
+    };
+    assert_eq!(root_of("small"), (5, packed));
+    assert_eq!(
+        built.manifest.packs(),
+        [PackRef {
+            root: *blake3::hash(b"hello").as_bytes(),
+            size: 5
+        }]
+    );
 }
 
 #[test]
@@ -110,7 +123,10 @@ fn a_hard_link_is_a_separate_file() {
     let entries = built.manifest.entries();
     assert_eq!(entries.len(), 2);
     assert!(entries.iter().all(|e| e.kind == Kind::File && e.size == 10));
-    assert_eq!(entries[0].loc, entries[1].loc);
+    // Both are in the pack, one after the other, so the bytes are there twice.
+    let pack = built.manifest.packs()[0];
+    assert_eq!(pack.size, 20);
+    assert_eq!(pack.root, *blake3::hash(b"same bytessame bytes").as_bytes());
 }
 
 #[test]
@@ -223,10 +239,8 @@ fn a_file_that_grew_while_it_was_read_fails_the_build_without_naming_it() {
     let dir = tempfile::tempdir().expect("a temporary folder");
     put(dir.path(), "secret-name.txt", b"hello");
     let result = build(dir.path(), Limits::default(), |path| {
-        hash_file_with(path, || {
-            let mut file = OpenOptions::new().append(true).open(path).expect("open");
-            std::io::Write::write_all(&mut file, b" and more").expect("append");
-        })
+        let mut file = OpenOptions::new().append(true).open(path).expect("open");
+        std::io::Write::write_all(&mut file, b" and more").expect("append");
     });
     let Err(Error::Storage(message)) = result else {
         panic!("expected a storage error");
@@ -240,11 +254,9 @@ fn a_file_whose_time_changed_while_it_was_read_fails_the_build() {
     let dir = tempfile::tempdir().expect("a temporary folder");
     put(dir.path(), "a.txt", b"hello");
     let result = build(dir.path(), Limits::default(), |path| {
-        hash_file_with(path, || {
-            let file = OpenOptions::new().write(true).open(path).expect("open");
-            let later = SystemTime::now() + Duration::from_secs(3600);
-            file.set_modified(later).expect("set the time");
-        })
+        let file = OpenOptions::new().write(true).open(path).expect("open");
+        let later = SystemTime::now() + Duration::from_secs(3600);
+        file.set_modified(later).expect("set the time");
     });
     assert!(matches!(result, Err(Error::Storage(_))));
 }
@@ -254,9 +266,7 @@ fn a_file_that_shrank_while_it_was_read_fails_the_build() {
     let dir = tempfile::tempdir().expect("a temporary folder");
     put(dir.path(), "a.txt", b"hello world");
     let result = build(dir.path(), Limits::default(), |path| {
-        hash_file_with(path, || {
-            File::create(path).expect("truncate");
-        })
+        File::create(path).expect("truncate");
     });
     assert!(matches!(result, Err(Error::Storage(_))));
 }
@@ -266,11 +276,14 @@ fn a_file_that_does_not_change_is_hashed_with_its_size_and_time_from_the_same_lo
     let dir = tempfile::tempdir().expect("a temporary folder");
     put(dir.path(), "a.txt", b"hello");
     let path = dir.path().join("a.txt");
-    let hashed = hash_file_with(&path, || {}).expect("an unchanged file hashes");
-    assert_eq!(hashed.size, 5);
-    assert_eq!(hashed.root, *blake3::hash(b"hello").as_bytes());
+    let opened = open(&path).expect("a regular file opens");
+    assert_eq!(opened.size(), 5);
+    let mut hasher = blake3::Hasher::new();
+    let facts = read_into(opened, &mut hasher, || {}).expect("an unchanged file is read");
+    assert_eq!(facts.size, 5);
+    assert_eq!(hasher.finalize(), blake3::hash(b"hello"));
     assert!(matches!(
-        hash_file_with(&dir.path().join("missing"), || {}),
+        open(&dir.path().join("missing")),
         Err(HashFault::Unreadable(_))
     ));
 }

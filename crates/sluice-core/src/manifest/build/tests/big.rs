@@ -43,10 +43,13 @@ fn a_tree_of_100000_files_is_built_and_timed() {
     let decoded_in = started.elapsed();
     assert_eq!(decoded, built.manifest);
 
+    let packs = built.manifest.packs();
     eprintln!(
-        "BUILD {entries} entries ({FOLDERS} folders, {} files): {built_in:?}; manifest {} bytes; \
-         encode {encoded_in:?}; decode with the collision check {decoded_in:?}",
+        "BUILD {entries} entries ({FOLDERS} folders, {} files): {built_in:?}; {} packs, {} B; \
+         manifest {} bytes; encode {encoded_in:?}; decode with the collision check {decoded_in:?}",
         FOLDERS * FILES_PER_FOLDER,
+        packs.len(),
+        packs.iter().map(|p| p.size).sum::<u64>(),
         bytes.len(),
     );
 }

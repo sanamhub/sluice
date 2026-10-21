@@ -1,15 +1,15 @@
-//! The BLAKE3 hash of one file, taken so that it names a version of the file that existed.
+//! Reading one file into a BLAKE3 hasher, so that what was hashed is a version of the file that
+//! existed. The hasher is the file's own for a blob, and its pack's for a packed file.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read};
 use std::path::Path;
 
 use super::meta;
 
-/// What hashing a file found out about it.
+/// What reading a file found out about it, besides its bytes.
 #[derive(Debug)]
-pub(super) struct Hashed {
-    pub root: [u8; 32],
+pub(super) struct Facts {
     pub size: u64,
     pub mtime_ms: u64,
     pub mode: u32,
@@ -19,9 +19,23 @@ pub(super) struct Hashed {
 pub(super) enum HashFault {
     /// The file could not be opened or read.
     Unreadable(io::ErrorKind),
-    /// Its size or modification time changed while it was read, or it gave a number of bytes
-    /// other than its size, so the hash is of no version of it.
+    /// It is no longer a regular file, its size or modification time changed while it was read,
+    /// or it gave a number of bytes other than its size, so the hash is of no version of it.
     Changed,
+}
+
+/// A file that is open and was a regular file when it was opened, with its first look.
+#[derive(Debug)]
+pub(super) struct Opened {
+    file: File,
+    before: Metadata,
+}
+
+impl Opened {
+    /// The size from the open handle. It decides whether the file is packed.
+    pub(super) fn size(&self) -> u64 {
+        self.before.len()
+    }
 }
 
 /// Counts what passes through, to compare with the size the file reported.
@@ -38,28 +52,35 @@ impl<R: Read> Read for Counting<R> {
     }
 }
 
-pub(super) fn hash_file(path: &Path) -> Result<Hashed, HashFault> {
-    hash_file_with(path, || {})
-}
-
-/// Hashes `path`. `between` runs after the last byte is read and before the second look at the
-/// file, which is the window a writer can use. A test puts its write there.
-///
-/// The size and time are taken from the open handle and not from the path, so a file swapped
-/// for another between the walk and this read is the file that is hashed and described. The
-/// walk saw a regular file here, so a handle to anything else means the folder changed.
-pub(super) fn hash_file_with(path: &Path, between: impl FnOnce()) -> Result<Hashed, HashFault> {
-    let unreadable = |e: io::Error| HashFault::Unreadable(e.kind());
-    let file = open(path)?;
-    let before = file.metadata().map_err(unreadable)?;
+/// Opens `path` and takes the first look at it. The walk saw a regular file here, so a handle to
+/// anything else means the folder changed.
+pub(super) fn open(path: &Path) -> Result<Opened, HashFault> {
+    let file = open_no_follow(path)?;
+    let before = file
+        .metadata()
+        .map_err(|e| HashFault::Unreadable(e.kind()))?;
     if !before.is_file() {
         return Err(HashFault::Changed);
     }
+    Ok(Opened { file, before })
+}
+
+/// Reads all of `opened` into `hasher`. `between` runs after the last byte is read and before the
+/// second look at the file, which is the window a writer can use. A test puts its write there.
+///
+/// The size and time are taken from the open handle and not from the path, so a file swapped for
+/// another between the walk and this read is the file that is hashed and described.
+pub(super) fn read_into(
+    opened: Opened,
+    hasher: &mut blake3::Hasher,
+    between: impl FnOnce(),
+) -> Result<Facts, HashFault> {
+    let unreadable = |e: io::Error| HashFault::Unreadable(e.kind());
+    let Opened { file, before } = opened;
     let mut reader = Counting {
         inner: file,
         bytes: 0,
     };
-    let mut hasher = blake3::Hasher::new();
     hasher.update_reader(&mut reader).map_err(unreadable)?;
     between();
     let after = reader.inner.metadata().map_err(unreadable)?;
@@ -69,8 +90,7 @@ pub(super) fn hash_file_with(path: &Path, between: impl FnOnce()) -> Result<Hash
     if !unchanged {
         return Err(HashFault::Changed);
     }
-    Ok(Hashed {
-        root: *hasher.finalize().as_bytes(),
+    Ok(Facts {
         size: before.len(),
         mtime_ms: meta::mtime_ms(&before),
         mode: meta::mode(&before),
@@ -80,7 +100,7 @@ pub(super) fn hash_file_with(path: &Path, between: impl FnOnce()) -> Result<Hash
 /// Opens `path` without following a link at its last component. Another user who can write into
 /// the folder could swap the file for a link after the walk, and a plain open would then hash
 /// and send whatever the link points at that this user can read, such as an SSH key.
-fn open(path: &Path) -> Result<File, HashFault> {
+fn open_no_follow(path: &Path) -> Result<File, HashFault> {
     let mut options = OpenOptions::new();
     options.read(true);
     no_follow(&mut options);

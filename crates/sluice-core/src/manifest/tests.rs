@@ -3,6 +3,7 @@ mod common;
 mod echo;
 mod entry_rules;
 mod folding;
+mod layout_rules;
 mod postcard_agrees;
 mod props;
 mod vectors;

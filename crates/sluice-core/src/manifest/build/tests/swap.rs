@@ -3,7 +3,7 @@
 //! link or wait on the FIFO.
 
 use super::common::*;
-use crate::manifest::build::hash::{HashFault, hash_file_with};
+use crate::manifest::build::hash::{HashFault, open};
 use crate::manifest::build::walk::portable;
 use crate::manifest::link::LinkTarget;
 use crate::manifest::path::ManifestPath;
@@ -16,7 +16,7 @@ fn hashing_a_path_that_is_now_a_symlink_to_a_readable_file_is_a_change() {
     if !symlink("id_ed25519", &swapped) {
         return;
     }
-    let result = hash_file_with(&swapped, || {});
+    let result = open(&swapped);
     assert!(matches!(result, Err(HashFault::Changed)), "{result:?}");
 }
 
@@ -71,7 +71,7 @@ mod unix {
         // the timeout fails the test instead of the whole run hanging.
         let (sent, got) = mpsc::channel();
         std::thread::spawn(move || {
-            let _ = sent.send(hash_file_with(&pipe, || {}));
+            let _ = sent.send(open(&pipe));
         });
         let result = got
             .recv_timeout(Duration::from_secs(10))
