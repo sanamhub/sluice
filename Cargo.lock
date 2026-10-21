@@ -3719,6 +3719,12 @@ dependencies = [
 [[package]]
 name = "sluice-live"
 version = "0.1.0"
+dependencies = [
+ "blake3",
+ "ed25519-dalek",
+ "proptest",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "sluice-probe"

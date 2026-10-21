@@ -5,5 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+# No sluice-core: it brings getrandom and filesystem code, and the browser build of this crate must
+# need neither.
+[dependencies]
+blake3.workspace = true
+ed25519-dalek.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true

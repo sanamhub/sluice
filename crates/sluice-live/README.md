@@ -1,11 +1,16 @@
 # sluice-live
 
-**Owns:** the segment log for files that are still being written. Sealing segments, the
-`prev_entry_hash` chain, signature checks, the provisional tail, and the switch to a static root on
-close. Specified in `SPEC.md` section 6.
+**Owns:** the segment log for files that are still being written. The four records and their bytes,
+signing them, the `prev_entry_hash` chain, the checks a receiver makes on records from untrusted
+providers, and the switch to a static root on close. Specified in `SPEC.md` section 6.
 
-**Must never:** touch the network, the filesystem or the clock. Bytes and timer ticks go in, actions
-come out, and there is no `tokio` dependency. The browser build uses this crate unchanged.
+**Does not own:** fetching segments and the provisional tail. Those belong to the transfer layer,
+which this crate hands the sealed `segment_root` and `len` to re-verify the tail against.
 
-**Tests:** state machine tests in `tests/`, `proptest` for the chain, a fuzz target for frame parsing,
-and the `live/` vectors in `tests/vectors/`.
+**Must never:** touch the network, the filesystem or the clock. Bytes go in, outcomes come out, and
+there is no `tokio` dependency and no dependency on `sluice-core`. The browser build uses this crate
+unchanged, and `cargo check -p sluice-live --target wasm32-unknown-unknown` checks that it builds.
+
+**Tests:** a test per rule of section 6 in `tests/`, `proptest` for the chain, the fuzz target `log`
+in `fuzz/`, and the `live/` vectors in `tests/vectors/`. Tests and examples sign with the secret key
+of RFC 8032 section 7.1 TEST 1, which is published.
