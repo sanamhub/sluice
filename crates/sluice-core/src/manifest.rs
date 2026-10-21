@@ -17,7 +17,7 @@ mod wire;
 use crate::Error;
 use rules::{Fault, check_all, rule};
 
-pub use build::{Build, Built, Finding, Reason, Refusal};
+pub use build::{Build, Built, DiskPaths, Finding, Reason, Refusal};
 pub use entry::{Entry, Kind, Loc, PackRef};
 
 /// How much a receiver reads before it refuses a manifest.

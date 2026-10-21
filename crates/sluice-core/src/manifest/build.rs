@@ -6,13 +6,16 @@
 //! not as an error message: error text can reach a log, and file names stay out of logs.
 
 mod collide;
+mod disk;
 mod hash;
 mod meta;
 mod walk;
 
 use std::fmt;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+pub use disk::DiskPaths;
 
 use super::Manifest;
 use super::entry::{Entry, Kind, Loc};
@@ -94,7 +97,7 @@ pub struct Finding {
     pub reason: Reason,
 }
 
-/// A manifest, and the entries that were left out of it.
+/// A manifest, where its files are on disk, and the entries that were left out of it.
 ///
 /// # Examples
 ///
@@ -115,6 +118,8 @@ pub struct Finding {
 pub struct Built {
     /// The manifest of everything that was sent.
     pub manifest: Manifest,
+    /// The file on disk behind each `File` entry, by the entry's index.
+    pub disk: DiskPaths,
     /// Symlinks with a target another machine cannot use, and special files. Left out, and
     /// listed so the user knows.
     pub skipped: Vec<Finding>,
@@ -255,7 +260,7 @@ fn build(
     let mut entries = Vec::with_capacity(walked.items.len());
     for item in walked.items {
         match entry_of(item, &hash_file) {
-            Made::Entry(entry) => entries.push(entry),
+            Made::Entry(entry, disk) => entries.push((entry, disk)),
             Made::Listed(finding) => problems.push(finding),
             Made::Changed => {
                 return Err(Error::Storage(
@@ -268,7 +273,9 @@ fn build(
     if !problems.is_empty() {
         return Ok(refuse(problems, walked.skipped));
     }
-    entries.sort_by(|a, b| a.path.as_str().cmp(b.path.as_str()));
+    // Sorted as pairs, so each disk path stays at the index of its entry.
+    entries.sort_by(|(a, _), (b, _)| a.path.as_str().cmp(b.path.as_str()));
+    let (entries, disk): (Vec<Entry>, Vec<Option<PathBuf>>) = entries.into_iter().unzip();
     // The walk and `collide` found everything `new` looks for, so this is a check of the builder.
     let manifest = Manifest::new(entries, Vec::new()).map_err(|e| {
         Error::Bug(format!(
@@ -277,7 +284,11 @@ fn build(
     })?;
     let mut skipped = walked.skipped;
     skipped.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(Build::Ready(Built { manifest, skipped }))
+    Ok(Build::Ready(Built {
+        manifest,
+        disk: DiskPaths::new(disk),
+        skipped,
+    }))
 }
 
 fn refuse(mut problems: Vec<Finding>, mut skipped: Vec<Finding>) -> Build {
@@ -288,7 +299,8 @@ fn refuse(mut problems: Vec<Finding>, mut skipped: Vec<Finding>) -> Build {
 
 /// What one item came to.
 enum Made {
-    Entry(Entry),
+    /// The entry, and the disk path of a file.
+    Entry(Entry, Option<PathBuf>),
     /// A file that cannot be read. Listed, and the build goes on so every such file is found.
     Listed(Finding),
     /// A file that changed while it was read. The build stops.
@@ -299,18 +311,21 @@ enum Made {
 fn entry_of(item: Item, hash_file: &impl Fn(&Path) -> Result<Hashed, HashFault>) -> Made {
     let Item { path, shown, what } = item;
     match what {
-        What::Dir { mtime_ms, mode } => Made::Entry(folder_entry(path, mtime_ms, mode)),
-        What::Symlink { target, mtime_ms } => Made::Entry(Entry {
-            path,
-            kind: Kind::Symlink,
-            size: 0,
-            mtime_ms,
-            mode: 0,
-            loc: Loc::None,
-            link_target: Some(target),
-        }),
+        What::Dir { mtime_ms, mode } => Made::Entry(folder_entry(path, mtime_ms, mode), None),
+        What::Symlink { target, mtime_ms } => {
+            let entry = Entry {
+                path,
+                kind: Kind::Symlink,
+                size: 0,
+                mtime_ms,
+                mode: 0,
+                loc: Loc::None,
+                link_target: Some(target),
+            };
+            Made::Entry(entry, None)
+        }
         What::File { disk } => match hash_file(&disk) {
-            Ok(hashed) => Made::Entry(file_entry(path, hashed)),
+            Ok(hashed) => Made::Entry(file_entry(path, hashed), Some(disk)),
             Err(HashFault::Unreadable(kind)) => Made::Listed(Finding {
                 path: shown,
                 reason: Reason::Unreadable(kind),
