@@ -4,11 +4,13 @@
 use clap::{Parser, Subcommand};
 
 use crate::colour::ColorWhen;
+use crate::completions;
 use crate::id;
 use crate::output::Format;
 
 #[derive(Parser)]
-// `bin_name` too: clap otherwise prints the name of the executable, which is `sluice.exe` on Windows.
+// `bin_name` too: clap otherwise prints the name of the executable, which is `sluice.exe` on
+// Windows.
 #[command(name = "sluice", bin_name = "sluice", version)]
 pub struct Cli {
     /// Print JSON, one object per line, instead of text. A failure is then a JSON line on stderr
@@ -37,4 +39,6 @@ impl Cli {
 pub enum Command {
     /// Print the endpoint id of this machine's identity, or replace the identity
     Id(id::Args),
+    /// Print the completion script for a shell
+    Completions(completions::Args),
 }

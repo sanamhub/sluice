@@ -26,6 +26,11 @@ blake3 = "1"
 # Only xtask uses it, to report the brotli size of the .wasm files.
 brotli = "9"
 clap = { version = "4", features = ["derive"] }
+# The completion scripts of `sluice completions`. Same release train as clap, and it adds no runtime work
+# to any other command: the scripts are written only when asked for.
+clap_complete = "4"
+# The man pages, written by `cargo xtask man`. Only xtask uses it, so the binary does not carry it.
+clap_mangen = "0.3"
 # The identity key. The same crate and release that iroh resolves, so the tree holds one copy. Without the
 # default features it drops the precomputed tables, which a key made once per process does not need.
 # `zeroize` wipes the secret when the key drops.

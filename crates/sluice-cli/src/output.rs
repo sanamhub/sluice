@@ -23,6 +23,9 @@ pub enum Format {
 pub enum Outcome {
     /// The endpoint id, as 64 lower-case hex characters.
     Id { endpoint_id: String },
+    /// Text that is the whole output, such as a completion script. It is printed as it is with or
+    /// without `--json`, because a script is not a JSON value.
+    Text(String),
 }
 
 pub struct Output {
@@ -47,6 +50,7 @@ impl Output {
             (Outcome::Id { endpoint_id }, Format::Json) => {
                 format!("{}\n", json!({ "endpoint_id": endpoint_id }))
             }
+            (Outcome::Text(text), _) => text.clone(),
         };
         let mut stdout = io::stdout().lock();
         // Not `println!`, which panics when it cannot write.

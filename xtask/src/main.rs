@@ -2,8 +2,11 @@
 //! `.cargo/config.toml`.
 
 mod conformance;
+mod man;
 mod wasm_features;
 mod wasm_hash;
+
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
@@ -20,11 +23,17 @@ enum Command {
     WasmHash,
     /// Run every test vector under `tests/vectors/` against this implementation
     Conformance,
+    /// Write the man pages of `sluice` into a folder
+    Man {
+        /// The folder to write `sluice.1` and one page per subcommand into
+        dir: PathBuf,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::WasmHash => wasm_hash::run(),
         Command::Conformance => conformance::run(),
+        Command::Man { dir } => man::run(&dir),
     }
 }

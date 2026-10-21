@@ -4,6 +4,7 @@
 mod bug;
 mod cli;
 mod colour;
+mod completions;
 mod exit;
 mod id;
 mod output;
@@ -70,6 +71,7 @@ fn execute(command: Command, output: &Output) -> Result<(), sluice_core::Error> 
     bug::panic_if_asked();
     let outcome = match command {
         Command::Id(args) => id::run(&args, output.format())?,
+        Command::Completions(args) => completions::run(&args)?,
     };
     output.print(&outcome)
 }

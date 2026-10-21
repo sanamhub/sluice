@@ -11,11 +11,17 @@ anyhow = { workspace = true }
 # Only here: it measures the shipped size of the .wasm files against the 1.5 MB brotli budget.
 brotli = { workspace = true }
 clap = { workspace = true }
+clap_mangen = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # The conformance runner calls the same parsers the product uses.
 sluice-core = { path = "../crates/sluice-core" }
+# The man pages are made from the same clap definition as the binary.
+sluice-cli = { path = "../crates/sluice-cli" }
 wasmparser = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [lints]
 workspace = true
