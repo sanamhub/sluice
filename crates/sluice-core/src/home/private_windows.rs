@@ -60,8 +60,11 @@ pub(super) fn restrict_file(file: &File) -> io::Result<()> {
 
 /// A handle to a folder with the access that changing its list needs: `WRITE_DAC`, and
 /// `READ_CONTROL` because `SetSecurityInfo` reads the list it replaces and answers "Access is
-/// denied" without it. `BACKUP_SEMANTICS` is what lets Windows open a folder at all. `OPEN_REPARSE_POINT` means a junction put in the
-/// folder's place is changed itself and not followed to wherever it points.
+/// denied" without it. `BACKUP_SEMANTICS` is what lets Windows open a folder at all.
+/// `OPEN_REPARSE_POINT` means a junction put in the folder's place is changed itself and not
+/// followed to wherever it points. The default share mode stays, and the access is named and not
+/// `MAXIMUM_ALLOWED`, because with either changed `SetSecurityInfo` stops pushing the inheritable
+/// entries into children that already exist.
 fn open_dir(path: &Path) -> io::Result<File> {
     OpenOptions::new()
         .access_mode(READ_CONTROL | WRITE_DAC)

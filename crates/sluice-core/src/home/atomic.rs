@@ -69,7 +69,8 @@ fn write_and_rename(
 }
 
 /// A new file only the owner can read, with the mode set by the `open` call itself. On Windows
-/// the open asks for `WRITE_DAC` as well, which is what `keep_private` needs to set the access list.
+/// the open asks for `WRITE_DAC` as well, which is what `keep_private` needs to set the access
+/// list.
 fn create_private(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);

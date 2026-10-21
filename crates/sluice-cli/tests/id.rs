@@ -101,7 +101,9 @@ fn a_key_at_mode_0644_exits_6_and_is_left_as_it_is() {
     let key = dir.path().join("identity.key");
     fs::set_permissions(&key, fs::Permissions::from_mode(0o644)).unwrap();
     let assert = sluice(dir.path()).arg("id").assert().code(6);
-    assert!(stderr_of(&assert).contains("chmod 600"));
+    let stderr = stderr_of(&assert);
+    assert!(stderr.contains("chmod 600"));
+    assert!(!stderr.contains("  "), "a run of spaces in: {stderr}");
     let mode = fs::metadata(&key).unwrap().permissions().mode() & 0o7777;
     assert_eq!(mode, 0o644);
 }

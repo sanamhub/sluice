@@ -36,6 +36,7 @@ fn a_key_that_group_or_other_can_reach_is_refused_and_left_as_it_is() {
         assert!(message.contains(&key.display().to_string()), "{message}");
         assert!(message.contains(&format!("{mode:04o}")), "{message}");
         assert!(message.contains("chmod 600"), "{message}");
+        assert!(!message.contains("  "), "a run of spaces in: {message}");
         // Compared as booleans so that a failure does not print the key.
         assert!(fs::read(&key).unwrap() == [7u8; 32], "mode {mode:04o}");
         assert_eq!(mode_of(dir.path()), mode);

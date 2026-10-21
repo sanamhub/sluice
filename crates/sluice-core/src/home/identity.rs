@@ -139,14 +139,16 @@ fn refuse_readable_by_others(file: &File, path: &Path) -> Result<(), Error> {
         return Ok(());
     }
     Err(Error::Policy(format!(
-        "{} has mode {mode:04o}, so other users may be able to read the identity key.          Run `chmod 600 {}` and try again",
+        "{} has mode {mode:04o}, so other users may be able to read the identity key. \
+         Run `chmod 600 {}` and try again",
         path.display(),
         path.display()
     )))
 }
 
 /// Windows has no mode bits. A new key gets its own access list when it is made, and one that
-/// was loosened afterwards is not looked for, because that would need a security call on every load.
+/// was loosened afterwards is not looked for, because that would need a security call on every
+/// load.
 #[cfg(not(unix))]
 fn refuse_readable_by_others(_file: &File, _path: &Path) -> Result<(), Error> {
     Ok(())
