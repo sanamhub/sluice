@@ -294,7 +294,7 @@ same six variants to their own error types, one to one.
 
 | Client | Shape |
 |---|---|
-| CLI | The engine in process for one-shot commands, or a client of the running daemon. Human output on a TTY, `--json` otherwise |
+| CLI | The engine in process for one-shot commands, or a client of the running daemon. Human output unless `--json` is given, on a terminal or not. A terminal decides only colour, progress and whether to prompt |
 | Desktop | Tauri 2 shell with the engine compiled in. One process, no sidecar |
 | Browser | Svelte 5 PWA with the WASM build loaded when a transfer starts. Writes through the File System Access API on Chromium, OPFS elsewhere |
 | MCP | `sluice mcp` over stdio, in the same binary |
