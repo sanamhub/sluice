@@ -79,8 +79,8 @@ ordinary static root. ADR 0004 covers the differences.
 
 | Crate | Version | Notes |
 |---|---|---|
-| `iroh`, `iroh-relay` | 1.3 | Wire-stable since 1.0. Negotiates ALPNs in `Router` registration order |
-| `noq` | 1.3 | n0's fork of quinn. Cubic, BBRv3 and NewReno ship; we select BBRv3 (ADR 0015). GSO and GRO on by default, with a silent fallback |
+| `iroh`, `iroh-relay` | 1.4 | Wire-stable since 1.0. Negotiates ALPNs in `Router` registration order |
+| `noq` | 1.4 | n0's fork of quinn. Cubic, BBRv3 and NewReno ship; we select BBRv3 (ADR 0015). GSO and GRO on by default, with a silent fallback |
 | `iroh-blobs` | 0.103.1 or later | Pre-1.0. Versions 0.94.0 to 0.103.0 accept unauthenticated push and are yanked |
 | `bao-tree`, `range-collections` | 0.16, 0.4 | Small and single-author; vendorable in days |
 | `rustls` | 0.23.46 or later | Earlier releases leak session secrets through `Debug` |
