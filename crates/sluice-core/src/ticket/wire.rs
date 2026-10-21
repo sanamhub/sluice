@@ -44,10 +44,12 @@ pub(super) fn write(ticket: &Ticket) -> Vec<u8> {
 }
 
 fn put<T: Serialize>(out: &mut Vec<u8>, value: &T) {
-    // The values are integers, byte arrays, strings and addresses: encoding them cannot fail.
-    if let Ok(bytes) = postcard::to_allocvec(value) {
-        out.extend_from_slice(&bytes);
-    }
+    // Postcard fails to a `Vec` only for a type whose `Serialize` returns an error, or for a
+    // sequence of unknown length. These are integers, byte arrays, strings and addresses, all of
+    // known size, so a failure here is a bug. Skipping the field would write a corrupt ticket
+    // with no sign of it, so this stops instead.
+    let bytes = postcard::to_allocvec(value).expect("postcard encodes a ticket field into a Vec");
+    out.extend_from_slice(&bytes);
 }
 
 fn kind_byte(body: &Body) -> u8 {
