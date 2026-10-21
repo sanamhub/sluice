@@ -49,6 +49,11 @@ vulnerability, see [`SECURITY.md`](../SECURITY.md).
 - **`spake2` has no independent audit**, by its own README. It is used only for short codes, which are
   optional, off by default and rate-limited. Use full tickets when that matters.
 - **Rotating the identity key** breaks every pairing and every unexpired ticket naming the old id.
+- **A folder swapped for a link while a sender reads it.** The sender opens each file without
+  following a link, but it still follows a folder on the way to that file. Another local user who
+  can write into the folder being sent can swap a subfolder for a link between the listing and the
+  read, and make the sender send a file its own user can read. Send folders that only you can write
+  to. Closing this takes opening each folder by handle.
 
 ## Supply chain
 
