@@ -38,7 +38,8 @@ fn the_checked_in_vectors_pass() {
     assert!(
         report.passed_in("paths") >= 60
             && report.passed_in("tickets") >= 40
-            && report.passed_in("manifests") >= 60,
+            && report.passed_in("manifests") >= 60
+            && report.passed_in("packs") >= 20,
         "{}",
         report.lines.join("\n")
     );
@@ -82,21 +83,21 @@ fn a_long_path_is_cut_in_the_failure_line() {
 #[test]
 fn a_directory_without_a_runner_is_skipped_and_not_counted() {
     let dir = TempDir::new("skipped");
-    dir.write("packs/x.json", r#"{ "description": "d", "cases": [] }"#);
+    dir.write("live/x.json", r#"{ "description": "d", "cases": [] }"#);
     dir.write(
         "paths/x.json",
         r#"{ "description": "d", "cases": [ { "path": "a", "valid": true } ] }"#,
     );
     let report = check(dir.path()).expect("run");
-    assert_eq!(report.skipped, ["packs"]);
+    assert_eq!(report.skipped, ["live"]);
     assert_eq!(report.failed, 0);
     assert_eq!(report.passed_in("paths"), 1);
-    assert_eq!(report.passed_in("packs"), 0);
+    assert_eq!(report.passed_in("live"), 0);
     assert!(
         report
             .lines
             .iter()
-            .any(|l| l.starts_with("packs/") && l.contains("skipped"))
+            .any(|l| l.starts_with("live/") && l.contains("skipped"))
     );
 }
 
@@ -297,4 +298,65 @@ fn an_invalid_manifest_case_must_be_rejected_with_the_limits_it_names() {
         "{text}"
     );
     assert!(text.contains(r#"FAIL "at": expected rejected"#), "{text}");
+}
+
+/// One small file in one pack, with its content and every root.
+const PACK_CASE: &str = r#"{ "name": "one small file", "entries": [ { "path": "hello.txt",
+    "kind": "file", "size": "5", "content": "68656c6c6f", "mtime_ms": "1800000000000", "mode": 420,
+    "loc": { "type": "packed", "pack_index": 0, "offset": "0", "len": "5" } } ],
+    "packs": [ { "size": "5",
+        "root": "ea8f163db38682925e4491c5e58d4bb3506ef8c14eb78a86e908c5624a67200f" } ],
+    "manifest_root": "1477ec03fbf6492d49a86cb4803e30befec193afbe39f35e1dd0d01ebfb3e3b7" }"#;
+
+fn pack_report(name: &str, case: &str) -> super::Report {
+    let dir = TempDir::new(name);
+    dir.write(
+        "packs/x.json",
+        &format!(r#"{{ "description": "d", "cases": [ {case} ] }}"#),
+    );
+    check(dir.path()).expect("run")
+}
+
+#[test]
+fn a_pack_case_must_lay_out_hash_and_unpack_as_written() {
+    let report = pack_report("pack-ok", PACK_CASE);
+    assert_eq!(report.failed, 0, "{:?}", report.lines);
+    assert_eq!(report.passed_in("packs"), 1);
+    for (name, from, to, expect) in [
+        (
+            "offset",
+            r#""offset": "0""#,
+            r#""offset": "1""#,
+            "is placed",
+        ),
+        (
+            "pack-size",
+            r#"{ "size": "5","#,
+            r#"{ "size": "6","#,
+            "pack sizes",
+        ),
+        ("pack-root", "ea8f163d", "ea8f163e", "pack root"),
+        ("manifest-root", "1477ec03", "1477ec04", "manifest root"),
+        ("content", "68656c6c6f", "68656c6c70", "pack root"),
+    ] {
+        assert!(PACK_CASE.contains(from), "{name}");
+        let text = pack_report(name, &PACK_CASE.replacen(from, to, 1))
+            .lines
+            .join("\n");
+        assert!(text.contains(expect), "{name}: {text}");
+        assert!(text.contains(r#"FAIL "one small file""#), "{name}: {text}");
+    }
+}
+
+#[test]
+fn a_pack_case_without_content_checks_the_layout_alone() {
+    let case = r#"{ "name": "two files", "entries": [
+        { "path": "a", "kind": "file", "size": "3",
+          "loc": { "type": "packed", "pack_index": 0, "offset": "0", "len": "3" } },
+        { "path": "b", "kind": "file", "size": "1048576", "loc": { "type": "blob" } } ],
+        "packs": [ { "size": "3" } ] }"#;
+    let report = pack_report("pack-layout", case);
+    assert_eq!(report.failed, 0, "{:?}", report.lines);
+    let wrong = case.replace(r#""type": "blob""#, r#""type": "none""#);
+    assert_eq!(pack_report("pack-layout-wrong", &wrong).failed, 1);
 }

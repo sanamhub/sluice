@@ -58,7 +58,8 @@ fn check_valid(name: &str, bytes: &[u8], case: &Value, decoded: Result<Manifest,
     assert_eq!(manifest.root().to_vec(), root, "{name}");
 }
 
-/// A rejected case breaks the rule it names, and the path rule or link target rule inside it.
+/// A rejected case breaks the rule it names, and the path rule, link target rule or pack layout
+/// rule inside it.
 fn check_rejected(name: &str, case: &Value, decoded: Result<Manifest, Error>) -> (u8, Option<u8>) {
     let err = decoded.err().unwrap_or_else(|| panic!("{name}: accepted"));
     let rule = case["rule"].as_u64().expect("rule") as u8;
@@ -89,7 +90,7 @@ fn every_rejected_case_breaks_the_rule_it_names_and_every_rule_has_a_case() {
         valid >= 20 && rejected >= 100,
         "{valid} valid, {rejected} rejected"
     );
-    for rule in 1..=15u8 {
+    for rule in 1..=16u8 {
         assert!(
             rules.iter().any(|(r, _)| *r == rule),
             "no case for rule {rule}"
@@ -105,6 +106,12 @@ fn every_rejected_case_breaks_the_rule_it_names_and_every_rule_has_a_case() {
         assert!(
             rules.contains(&(11, Some(sub))),
             "no case for link target rule {sub}"
+        );
+    }
+    for sub in 1..=4u8 {
+        assert!(
+            rules.contains(&(16, Some(sub))),
+            "no case for pack layout rule {sub}"
         );
     }
 }

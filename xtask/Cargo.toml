@@ -8,6 +8,9 @@ publish = false
 
 [dependencies]
 anyhow = { workspace = true }
+# The packs runner hashes the contents a vector gives, to check the blob, pack and manifest roots.
+# Already in the tree through sluice-core.
+blake3 = { workspace = true }
 # Only here: it measures the shipped size of the .wasm files against the 1.5 MB brotli budget.
 brotli = { workspace = true }
 clap = { workspace = true }

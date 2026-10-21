@@ -14,7 +14,7 @@ tests/vectors/
   paths/        manifest path rules, SPEC.md section 8
   tickets/      ticket text and bytes, SPEC.md section 4
   manifests/    directory manifests as bytes, SPEC.md section 8
-  packs/        not written yet
+  packs/        small-file packing, SPEC.md section 9
   live/         not written yet
   delta/        not written yet
 ```
@@ -171,7 +171,7 @@ directory trees. A case is the bytes as hex and a verdict:
 | `root` | string | Valid cases. The BLAKE3 hash of `bytes`, as hex |
 | `fields` | object | Valid cases. What `bytes` decode to |
 | `rule` | integer | Rejected cases. The decoding rule of `SPEC.md` section 8 that the bytes break |
-| `sub_rule` | integer | Rejected cases of rule 9 and 11. The path rule or the link target rule inside it |
+| `sub_rule` | integer | Rejected cases of rule 9, 11 and 16. The path rule, the link target rule or the pack layout rule inside it |
 | `reason` | string | Rejected cases. What is wrong with it, for people |
 | `limits` | object | Optional. `max_bytes` and `max_entries`, decimal strings, in place of the defaults |
 
@@ -207,7 +207,55 @@ Some points a reader cannot see from the rules alone:
   case names rule 9, because a decoder reads the path before it looks for the parent. Whichever it
   names, it rejects the case, and the verdict is all a runner compares.
 
+- Rule 16 is about the packs as a whole, so a manifest breaks it only through its pack list and the
+  `Packed` entries together. A case that breaks rule 14 also breaks rule 16 when the range runs past
+  its pack, and names rule 14, which is checked first. A small file that is a blob of its own, and a
+  `Packed` entry of no bytes at its place in the layout, are valid.
+
 The files are `valid.json`, `limits.json`, `invalid-wire.json` (rules 3 to 6) and
-`invalid-entries.json` (rules 7 to 15). The bytes and the roots were written by a second encoder in
+`invalid-entries.json` (rules 7 to 16). The bytes and the roots were written by a second encoder in
 Python, built from the table in `SPEC.md` section 8 with its own varints and its own BLAKE3, and not
 from the Rust code, so the vectors check the spec and the implementation against each other.
+
+## `packs/`
+
+These vectors test the packing algorithm of `SPEC.md` section 9: where a sender puts each file. A
+case is the entries of a manifest in manifest order, and the layout the algorithm gives them:
+
+```json
+{
+  "name": "one small file",
+  "entries": [
+    { "path": "hello.txt", "kind": "file", "size": "5",
+      "loc": { "type": "packed", "pack_index": 0, "offset": "0", "len": "5" } }
+  ],
+  "packs": [ { "size": "5" } ]
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | What the case is. A runner prints it next to a failure and does not compare it |
+| `entries` | array | The entries in manifest order. Each has `path`, `kind` (`file` or `dir`) and `loc`, and a file has `size` |
+| `packs` | array | The packs in order of index. Each has `size`, and `root` in a case with content |
+| `manifest_root` | string | Cases with content. The BLAKE3 hash of the manifest's bytes, as hex |
+
+A `loc` is `{"type": "packed", "pack_index": n, "offset": s, "len": s}`, `{"type": "blob"}` or
+`{"type": "none"}` for a folder. Sizes, offsets and lengths are decimal strings.
+
+Most cases have sizes and no content, so a boundary at 64 MiB needs no 64 MiB of bytes. A case with
+content also gives, for every entry, `mtime_ms` (a decimal string) and `mode` (a number), and for a
+file its `content` as lower-case hex. Its blob locs carry `root`, the BLAKE3 hash of the content.
+The bytes of a pack are the contents of its files end to end, and its `root` is their BLAKE3 hash.
+`manifest_root` is the root of the manifest of those entries and packs, encoded as section 8 says.
+
+To check an implementation, give the sizes in order to its packing step, with no size for a folder,
+and compare every `loc` and every pack `size`. For a case with content, compare the roots too. The
+runner in this repository also splits each pack back into files and compares each one with its
+content.
+
+The files are `boundaries.json` (the threshold, the target, empty files and no files),
+`mixed.json` (small, large and empty files together, nested folders, and layouts of two and three
+packs) and `content.json`. They were written by a second planner in Python, built from the steps
+in section 9 with the manifest encoder and the BLAKE3 of the `manifests/` vectors, and not from the
+Rust code.

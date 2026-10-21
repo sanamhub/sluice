@@ -2,6 +2,7 @@
 //! and exits non-zero if one disagrees. The format is in `tests/vectors/README.md`.
 
 mod manifests;
+mod packs;
 mod paths;
 #[cfg(test)]
 mod tests;
@@ -78,6 +79,7 @@ pub fn check(root: &Path) -> Result<Report> {
             .unwrap_or_default();
         match kind.as_str() {
             "manifests" => manifests::run(&dir, &mut report)?,
+            "packs" => packs::run(&dir, &mut report)?,
             "paths" => paths::run(&dir, &mut report)?,
             "tickets" => tickets::run(&dir, &mut report)?,
             _ => {
