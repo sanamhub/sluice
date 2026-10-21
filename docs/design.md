@@ -100,7 +100,8 @@ The `iroh-blobs` protocol, unchanged: BLAKE3 addressing, 16 KiB chunk groups, ve
 hash sequences for collections. `sendme` and DashBeam can fetch our static tickets.
 
 The 16 KiB block size is a constant in `iroh-blobs`. Verified ranges are quantized to it, and live
-segment and pack sizes must be multiples of it.
+segment sizes must be multiples of it. Pack sizes need not be: a pack holds its files end to end with
+no padding, a receiver fetches a pack whole, and its last group is verified like the end of any blob.
 
 ### Live content
 
@@ -139,8 +140,9 @@ are not preserved.
 
 ### Small-file packing
 
-Files under 1 MiB are concatenated into pack blobs of about 64 MiB, in path order, so identical trees
-produce identical packs. Large files stay standalone so ranges and mount work on them. The receiver
+Files under 1 MiB are concatenated into pack blobs of at most 64 MiB, in path order, so identical
+trees produce identical packs. The sizes are fixed constants, not settings, and empty files are never
+packed. Large files stay standalone so ranges and mount work on them. The receiver
 unpacks while streaming. Without this, 100k small files spend more time on per-file overhead than on
 data.
 

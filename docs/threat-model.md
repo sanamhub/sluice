@@ -21,7 +21,7 @@ vulnerability, see [`SECURITY.md`](../SECURITY.md).
 | Recording traffic now to decrypt later with a quantum computer | Hybrid `X25519MLKEM768` key exchange (RFC 10024) on native builds. The `aws-lc-rs` provider is passed in explicitly, and a connection that negotiated any other group is closed, because a build or feature change can downgrade it with no error. ADR 0018 |
 | A malicious manifest writes outside the output folder | The receiver rejects absolute paths, `..`, empty components, NTFS alternate data streams, Windows reserved names and symlinks that escape the root. Fuzzed |
 | A malicious manifest makes two entries one file on a case-insensitive disk | Paths that are equal after full Unicode case folding and NFC are rejected on every platform, so `README.md` and `Readme.md` never both arrive. Fuzzed |
-| A malicious manifest exhausts the receiver's memory | The byte length and the entry count are checked against limits (2 GiB and 10,000,000 by default) before anything is read or reserved. Fuzzed |
+| A malicious manifest exhausts the receiver's memory | The byte length and the entry count are checked against limits (256 MiB and 1,000,000 by default) before anything is read or reserved. Fuzzed |
 | A malicious manifest plants a setuid binary | `mode` holds permission bits only, and a receiver never applies the setuid or setgid bit, whatever the manifest says |
 | A ticket holder fills the sender's disk | `iroh-blobs` push is disabled, and the `get`, `get_many` and `observe` modes are set together to the ticket's allowlist. Restricting `get` alone would leave the other two open. Tested |
 | A leaked relay URL is used as free bandwidth | Relays run with authorization on. `open` mode needs a flag and has a per-client byte rate limit. ADR 0011 |
