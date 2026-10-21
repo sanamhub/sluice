@@ -8,7 +8,7 @@ use std::path::Path;
 use ed25519_dalek::SigningKey;
 use zeroize::Zeroizing;
 
-use super::atomic::write_atomic;
+use super::atomic::write_atomic_secret;
 use super::storage;
 use crate::Error;
 
@@ -114,7 +114,7 @@ fn create(dir: &Path) -> Result<Identity, Error> {
             "cannot read random bytes from the operating system: {e}"
         ))
     })?;
-    write_atomic(dir, KEY_FILE, &seed[..])?;
+    write_atomic_secret(dir, KEY_FILE, &seed[..])?;
     Ok(Identity::from_seed(&seed))
 }
 

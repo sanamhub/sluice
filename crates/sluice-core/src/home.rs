@@ -6,6 +6,10 @@ mod folder;
 mod identity;
 mod layout;
 mod lock;
+// The only unsafe code in the crate. Everything else stays under the crate's `deny`.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod private_windows;
 
 use std::env;
 use std::ffi::OsString;

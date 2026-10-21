@@ -20,6 +20,9 @@ proptest.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
 # A crate cannot inherit the workspace table and override one entry, so this repeats it with
 # unsafe_code at deny. This crate may need unsafe later, and forbid cannot be relaxed by `allow`.
 [lints.rust]

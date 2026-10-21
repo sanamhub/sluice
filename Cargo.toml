@@ -75,6 +75,9 @@ wasm-bindgen = "=0.2.129"
 # Only xtask uses it, to check which features each wasm-hash build needs. Without its `simd` feature it
 # cannot read SIMD instructions, and the defaults add a component-model parser and serde that xtask never uses.
 wasmparser = { version = "=0.262.0", default-features = false, features = ["std", "validate", "features", "simd"] }
+# The private access list of the identity key and of a new home on Windows. The release Cargo.lock
+# already resolves, so the tree gets no second copy. Only the modules the calls live in.
+windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

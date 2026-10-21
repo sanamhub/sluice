@@ -24,25 +24,68 @@ fn latest(steps: &[Step]) -> u32 {
 }
 
 /// Creates the home and its folders if they are missing. On Unix they get mode 0700, so the
-/// identity key is not readable through the folder even if its own mode were loosened by hand.
-/// A folder that already exists is left as it is.
+/// identity key is not readable through the folder even if its own mode were loosened by hand. On
+/// Windows a home that is new gets a private access list before anything is made inside it, so the
+/// folders inside inherit it. A folder that already exists is left as it is.
 pub(super) fn create_folders(home: &Path) -> Result<(), Error> {
+    if create_home(home)? {
+        keep_home_private(home)?;
+    }
+    let builder = folder_builder(false);
+    for name in FOLDERS {
+        let folder = home.join(name);
+        builder
+            .create(&folder)
+            .or_else(|e| exists_as_folder(e, &folder))
+            .map_err(|e| storage("create the folder", &folder, e))?;
+    }
+    Ok(())
+}
+
+/// Makes the parents of the home, then the home, and says whether the home was new. The home is
+/// made on its own because only a call that creates one folder can tell.
+fn create_home(home: &Path) -> Result<bool, Error> {
+    if let Some(parent) = home.parent().filter(|p| !p.as_os_str().is_empty()) {
+        folder_builder(true)
+            .create(parent)
+            .map_err(|e| storage("create the folder", parent, e))?;
+    }
+    match folder_builder(false).create(home) {
+        Ok(()) => Ok(true),
+        Err(e) => exists_as_folder(e, home)
+            .map(|()| false)
+            .map_err(|e| storage("create the folder", home, e)),
+    }
+}
+
+/// An error from creating a folder that is not an error if the folder is already there.
+fn exists_as_folder(error: io::Error, path: &Path) -> io::Result<()> {
+    if error.kind() == io::ErrorKind::AlreadyExists && path.is_dir() {
+        Ok(())
+    } else {
+        Err(error)
+    }
+}
+
+fn folder_builder(recursive: bool) -> DirBuilder {
     let mut builder = DirBuilder::new();
-    builder.recursive(true);
+    builder.recursive(recursive);
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
         builder.mode(0o700);
     }
     builder
-        .create(home)
-        .map_err(|e| storage("create the folder", home, e))?;
-    for name in FOLDERS {
-        let folder = home.join(name);
-        builder
-            .create(&folder)
-            .map_err(|e| storage("create the folder", &folder, e))?;
-    }
+}
+
+#[cfg(windows)]
+fn keep_home_private(home: &Path) -> Result<(), Error> {
+    super::private_windows::restrict_dir(home).map_err(|e| storage("restrict access to", home, e))
+}
+
+/// The mode 0700 was set by the call that made the folder.
+#[cfg(not(windows))]
+fn keep_home_private(_home: &Path) -> Result<(), Error> {
     Ok(())
 }
 
