@@ -127,3 +127,24 @@ fn a_folder_that_is_not_there_is_an_error_and_not_a_panic() {
     let error = super::restrict_dir(&parent.path().join("missing")).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
 }
+
+#[test]
+fn the_list_reaches_children_that_were_made_before_it_was_set() {
+    let parent = parent_that_lets_everyone_read();
+    let folder = parent.path().join("home");
+    let subfolder = folder.join("blobs");
+    let file = subfolder.join("data");
+    fs::create_dir_all(&subfolder).unwrap();
+    fs::write(&file, b"x").unwrap();
+    // The children took the parent's `Everyone` entry when they were made.
+    assert!(has_everyone(&subfolder) && has_everyone(&file));
+
+    super::restrict_dir(&folder).unwrap();
+
+    // Propagation is what a second process relies on when it makes a subfolder in a new home
+    // before the first process has set the list.
+    assert_private(&folder, INHERIT, true);
+    assert_private(&subfolder, "OICIID", false);
+    // On a file the inherit flags are dropped and only `ID` is left.
+    assert_private(&file, "ID", false);
+}
