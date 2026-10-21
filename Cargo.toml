@@ -18,6 +18,9 @@ license = "Apache-2.0 OR MIT"
 
 [workspace.dependencies]
 anyhow = "1"
+# Writes help and errors with colour on or off, and turns the escape codes on in a Windows console that
+# has them off. The release clap already resolves, so the tree gets no second copy.
+anstream = "1"
 assert_cmd = "2"
 blake3 = "1"
 # Only xtask uses it, to report the brotli size of the .wasm files.

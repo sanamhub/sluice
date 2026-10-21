@@ -5,12 +5,19 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[lib]
+name = "sluice_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "sluice"
 path = "src/main.rs"
 
 [dependencies]
+anstream.workspace = true
 clap.workspace = true
+# Only for the JSON error object, whose message needs escaping.
+serde_json.workspace = true
 sluice-core = { path = "../sluice-core" }
 
 [dev-dependencies]

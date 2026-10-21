@@ -1,14 +1,13 @@
-//! `sluice id`: print the endpoint id of this machine, or replace the identity.
+//! `sluice id`: the endpoint id of this machine, or a new identity.
 
 use std::io::{self, IsTerminal, Write};
 
-use sluice_core::{Error, Home, Identity};
+use sluice_core::{Error, Home};
+
+use crate::output::{Format, Outcome};
 
 #[derive(clap::Args)]
 pub struct Args {
-    /// Print {"endpoint_id":"..."} and a newline instead of the bare id
-    #[arg(long)]
-    json: bool,
     /// Replace the identity with a new one, after asking
     #[arg(long)]
     rotate: bool,
@@ -17,10 +16,10 @@ pub struct Args {
     yes: bool,
 }
 
-pub fn run(args: &Args) -> Result<(), Error> {
+pub fn run(args: &Args, format: Format) -> Result<Outcome, Error> {
     // Before the home is opened, so a refusal leaves no folder or lock file behind.
     if args.rotate {
-        confirm_rotation(args.yes)?;
+        confirm_rotation(args.yes, format)?;
     }
     let home = Home::open(&Home::locate()?)?;
     let identity = if args.rotate {
@@ -28,27 +27,25 @@ pub fn run(args: &Args) -> Result<(), Error> {
     } else {
         home.identity()?
     };
-    print_id(&identity, args.json)
-}
-
-fn print_id(identity: &Identity, json: bool) -> Result<(), Error> {
-    let id = identity.endpoint_id_hex();
-    let mut stdout = io::stdout().lock();
-    // Not `println!`, which panics on a closed pipe such as `sluice id | head -0`.
-    let written = if json {
-        writeln!(stdout, "{{\"endpoint_id\":\"{id}\"}}")
-    } else {
-        writeln!(stdout, "{id}")
-    };
-    written.map_err(|e| Error::Storage(format!("cannot write to standard output: {e}")))
+    Ok(Outcome::Id {
+        endpoint_id: identity.endpoint_id_hex(),
+    })
 }
 
 /// Rotating breaks every pairing and every unexpired ticket, so it is asked about unless `yes`.
 /// With no terminal to ask on it refuses, because a script that rotates by accident has no one to
-/// notice.
-fn confirm_rotation(yes: bool) -> Result<(), Error> {
+/// notice. With `--json` it refuses even on a terminal: the caller is a program, and a prompt it
+/// cannot read would hang it.
+fn confirm_rotation(yes: bool, format: Format) -> Result<(), Error> {
     if yes {
         return Ok(());
+    }
+    if format == Format::Json {
+        return Err(Error::Policy(
+            "--rotate asks before it replaces the identity, and with --json there is no one to ask. \
+             Pass --yes to rotate without asking"
+                .to_string(),
+        ));
     }
     if !(io::stdin().is_terminal() && io::stderr().is_terminal()) {
         return Err(Error::Policy(

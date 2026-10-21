@@ -3642,8 +3642,10 @@ dependencies = [
 name = "sluice-cli"
 version = "0.1.0"
 dependencies = [
+ "anstream",
  "assert_cmd",
  "clap",
+ "serde_json",
  "sluice-core",
  "tempfile",
 ]
