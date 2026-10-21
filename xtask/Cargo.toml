@@ -19,6 +19,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 # The conformance runner calls the same parsers the product uses.
 sluice-core = { path = "../crates/sluice-core" }
+sluice-live = { path = "../crates/sluice-live" }
 # The man pages are made from the same clap definition as the binary.
 sluice-cli = { path = "../crates/sluice-cli" }
 # A temporary home for the cold-start timing, and for the man page test.

@@ -4,23 +4,23 @@ use std::path::{Path, PathBuf};
 use super::{check, vectors_dir};
 
 /// A directory removed on drop.
-struct TempDir(PathBuf);
+pub(super) struct TempDir(PathBuf);
 
 impl TempDir {
-    fn new(name: &str) -> Self {
+    pub(super) fn new(name: &str) -> Self {
         let dir = std::env::temp_dir().join(format!("sluice-xtask-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp dir");
         Self(dir)
     }
 
-    fn write(&self, relative: &str, text: &str) {
+    pub(super) fn write(&self, relative: &str, text: &str) {
         let file = self.0.join(relative);
         fs::create_dir_all(file.parent().expect("a parent")).expect("create dir");
         fs::write(file, text).expect("write file");
     }
 
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         &self.0
     }
 }
@@ -39,7 +39,8 @@ fn the_checked_in_vectors_pass() {
         report.passed_in("paths") >= 60
             && report.passed_in("tickets") >= 40
             && report.passed_in("manifests") >= 60
-            && report.passed_in("packs") >= 20,
+            && report.passed_in("packs") >= 20
+            && report.passed_in("live") >= 60,
         "{}",
         report.lines.join("\n")
     );
@@ -83,21 +84,21 @@ fn a_long_path_is_cut_in_the_failure_line() {
 #[test]
 fn a_directory_without_a_runner_is_skipped_and_not_counted() {
     let dir = TempDir::new("skipped");
-    dir.write("live/x.json", r#"{ "description": "d", "cases": [] }"#);
+    dir.write("delta/x.json", r#"{ "description": "d", "cases": [] }"#);
     dir.write(
         "paths/x.json",
         r#"{ "description": "d", "cases": [ { "path": "a", "valid": true } ] }"#,
     );
     let report = check(dir.path()).expect("run");
-    assert_eq!(report.skipped, ["live"]);
+    assert_eq!(report.skipped, ["delta"]);
     assert_eq!(report.failed, 0);
     assert_eq!(report.passed_in("paths"), 1);
-    assert_eq!(report.passed_in("live"), 0);
+    assert_eq!(report.passed_in("delta"), 0);
     assert!(
         report
             .lines
             .iter()
-            .any(|l| l.starts_with("live/") && l.contains("skipped"))
+            .any(|l| l.starts_with("delta/") && l.contains("skipped"))
     );
 }
 

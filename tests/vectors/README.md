@@ -15,7 +15,7 @@ tests/vectors/
   tickets/      ticket text and bytes, SPEC.md section 4
   manifests/    directory manifests as bytes, SPEC.md section 8
   packs/        small-file packing, SPEC.md section 9
-  live/         not written yet
+  live/         the signed segment log, SPEC.md section 6
   delta/        not written yet
 ```
 
@@ -260,3 +260,78 @@ The files are `boundaries.json` (the threshold, the target, empty files and no f
 packs) and `content.json`. They were written by a second planner in Python, built from the steps
 in section 9 with the manifest encoder and the BLAKE3 of the `manifests/` vectors, and not from the
 Rust code.
+
+## `live/`
+
+These vectors test a receiver of the live log in `SPEC.md` section 6: what it answers to each record
+a provider gives it. A case is the `stream_id` and `sender_key` of a Live ticket, the records in the
+order they arrive, and where the stream stands at the end:
+
+```json
+{
+  "name": "a frame ahead of the next one, then the frames in order",
+  "stream_id": "5a5a...",
+  "sender_key": "d75a...",
+  "steps": [
+    { "record": "open", "bytes": "5a5a...", "outcome": "started" },
+    { "record": "frame", "bytes": "0100...", "outcome": "refused", "rule": 5 },
+    { "record": "frame", "bytes": "0000...", "outcome": "accepted", "seq": "0",
+      "segment_root": "...", "len": "1048576" }
+  ],
+  "final": { "state": "open", "next_seq": "2" }
+}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | What the case is. A runner prints it next to a failure and does not compare it |
+| `stream_id`, `sender_key` | string | The ticket's, as lower-case hex |
+| `steps` | array | The records in order. Each has `record` (`open`, `frame` or `close`), `bytes` as hex, and `outcome` |
+| `final` | object | Where the stream stands after the last step. Its `state` is `not started`, `open`, `closed` or `aborted` |
+
+An `outcome` is one of these, with the fields that go with it:
+
+| `outcome` | Fields | Meaning |
+|---|---|---|
+| `started` | | The `LogOpen` passed rules 1 to 4 |
+| `accepted` | `seq`, `segment_root`, `len` | The frame is the next entry of the chain |
+| `repeat` | `seq` | The frame repeats an accepted entry and was dropped |
+| `refused` | `rule` | The record was refused and changed nothing |
+| `closed` | `final_root`, `total_len` | The stream is closed, or was already |
+| `aborted` | `seq`, `rule` | The stream is aborted at `seq` |
+
+In `final`, `open` has `next_seq`, `closed` has `final_root` and `total_len`, and `aborted` has
+`seq` and `rule`. `rule` is the number of the receiver rule in section 6. Sequence numbers and
+lengths are decimal strings, because a JSON number does not hold a `u64` in every language.
+
+To check an implementation, start a receiver from the ticket's fields and the first `open` step that
+it accepts, give it every later step in order, and compare each answer and the state at the end. A
+step `open` comes only before the stream has started: an open that is refused starts nothing, and a
+later `open` step can give another one.
+
+The records are signed with the secret key of RFC 8032 section 7.1 TEST 1,
+`9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60`, which is published. Its public
+key `d75a...511a` is the `sender_key` of most cases. No other secret key is used. The cases with a
+key of small order use the neutral point `0100...00` as `sender_key`, and the cases with a sender
+that is not the ticket's use the public key of TEST 2.
+
+Some points a reader cannot see from the rules alone:
+
+- Each case breaks one rule, and the steps after the fault show what it changed: a refused record is
+  followed by the right one, which is accepted, and an aborted stream answers the next records with
+  the same abort.
+- A frame ahead of the next `seq` is refused before its signature is checked, so a frame with no
+  valid signature far ahead is refused by rule 5 and not rule 3.
+- A repeat is found by the hash of the entry, before the signature, so an accepted frame with a
+  damaged signature is a repeat.
+- Two cases have a signature that the group equation `[s]B = R + [k]A` accepts and strict
+  verification refuses: one with `s + L` in place of `s`, and one under the neutral point with `R`
+  the neutral point and `s` 0, which holds for every message.
+- A close before the entries it counts is refused by rule 12, and accepted once they have arrived.
+- The fork cases are in `aborted.json`, at `seq` 0 and at a later `seq`.
+
+The files are `clean.json` (whole chains), `open.json` (the opening record and every bound of
+`segment_bytes`), `refused.json`, `aborted.json`, `repeats.json` and `lengths.json` (every record
+one byte short and one byte long). They were written by a second implementation in Python, built
+from section 6 with its own Ed25519 from RFC 8032, checked against the test vectors of its section
+7.1, and the BLAKE3 of the `manifests/` vectors, and not from the Rust code.

@@ -694,5 +694,3 @@ implementation that passes these vectors is compatible with ours.
 6. Settle section 5 rule 2. `iroh-blobs` fixes its block size at 16 KiB, so a 64 KiB chunk group cannot
    be negotiated while static content goes through it. Either the rule goes, or the block size becomes
    configurable upstream.
-7. Add vectors to `live/` for the repeated-`seq` rule in section 6. The rule is set; no implementation
-   reads live frames yet.
