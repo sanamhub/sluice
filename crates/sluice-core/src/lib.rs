@@ -6,4 +6,4 @@ pub mod manifest;
 pub mod ticket;
 
 pub use error::Error;
-pub use home::Home;
+pub use home::{Home, Identity};

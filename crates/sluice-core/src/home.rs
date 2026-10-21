@@ -1,7 +1,9 @@
-//! The store's home on disk: the folder, its layout version, and the one-writer lock. Nothing here reads a config or touches the network, so opening a home is cheap.
+//! The store's home on disk: the folder, its layout version, the one-writer lock and the identity
+//! key. Nothing here reads a config or touches the network, so opening a home is cheap.
 
 mod atomic;
 mod folder;
+mod identity;
 mod layout;
 mod lock;
 
@@ -11,11 +13,14 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
+pub use identity::Identity;
+
 use crate::Error;
 
 /// The layout of a home:
 ///
 /// ```text
+/// identity.key   Ed25519 secret, mode 0600 on Unix
 /// VERSION        layout version, as decimal text and a newline
 /// lock           locked while a process uses the home
 /// lock.pid       the pid of that process, for the message of a refused open
@@ -51,7 +56,8 @@ impl Home {
     /// The folder a home lives in: `$SLUICE_HOME` if it is set and not empty, else `sluice` in the
     /// per-user data folder. That is `$XDG_DATA_HOME` or `~/.local/share` on Linux,
     /// `~/Library/Application Support` on macOS, and the local app data folder on Windows. It is
-    /// the local one and not the roaming one, so what is kept there does not sync to another machine. Nothing is created or read.
+    /// the local one and not the roaming one, so the identity key does not sync to another
+    /// machine. Nothing is created or read.
     ///
     /// Fails with [`Error::Storage`] if there is no `$SLUICE_HOME` and the user has no data folder.
     ///
@@ -121,6 +127,47 @@ impl Home {
     /// ```
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The identity of this home. The key is made the first time this is called, not when the home
+    /// is opened, and never replaced after that except by [`Home::rotate_identity`]. A key file
+    /// of the wrong length is an [`Error::Storage`] and is left alone.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sluice_core::Home;
+    ///
+    /// let dir = tempfile::tempdir()?;
+    /// let home = Home::open(dir.path())?;
+    /// assert!(!dir.path().join("identity.key").exists());
+    /// let first = home.identity()?;
+    /// assert!(dir.path().join("identity.key").exists());
+    /// assert_eq!(home.identity()?.endpoint_id(), first.endpoint_id());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn identity(&self) -> Result<Identity, Error> {
+        identity::load_or_create(&self.path)
+    }
+
+    /// Replaces the identity with a new one and returns it. Every pairing and every unexpired
+    /// ticket that names the old endpoint id stops working, so a caller asks first.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sluice_core::Home;
+    ///
+    /// let dir = tempfile::tempdir()?;
+    /// let home = Home::open(dir.path())?;
+    /// let before = home.identity()?.endpoint_id();
+    /// let after = home.rotate_identity()?.endpoint_id();
+    /// assert_ne!(before, after);
+    /// assert_eq!(home.identity()?.endpoint_id(), after);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn rotate_identity(&self) -> Result<Identity, Error> {
+        identity::rotate(&self.path)
     }
 }
 

@@ -230,3 +230,156 @@ fn another_process_holding_the_lock_is_named_and_a_killed_one_leaves_it_free() {
     assert_eq!(recorded.trim(), std::process::id().to_string());
     drop(home);
 }
+
+#[test]
+fn the_identity_is_made_on_first_use_and_is_the_same_afterwards() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = {
+        let home = Home::open(dir.path()).unwrap();
+        let id = home.identity().unwrap();
+        assert_eq!(home.identity().unwrap().endpoint_id(), id.endpoint_id());
+        id.endpoint_id()
+    };
+    let key = fs::read(dir.path().join("identity.key")).unwrap();
+    assert_eq!(key.len(), 32);
+    let home = Home::open(dir.path()).unwrap();
+    assert_eq!(home.identity().unwrap().endpoint_id(), first);
+    assert_eq!(fs::read(dir.path().join("identity.key")).unwrap(), key);
+    assert!(
+        !names(dir.path()).iter().any(|n| n.ends_with(".tmp")),
+        "{:?}",
+        names(dir.path())
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn on_unix_the_key_is_mode_0600() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(dir.path()).unwrap();
+    home.identity().unwrap();
+    let mode = fs::metadata(dir.path().join("identity.key"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+    home.rotate_identity().unwrap();
+    let mode = fs::metadata(dir.path().join("identity.key"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+}
+
+#[test]
+fn the_endpoint_id_is_the_public_key_of_the_seed_in_the_file() {
+    // The first test vector of RFC 8032.
+    let seed = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
+    let public = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    let bytes: Vec<u8> = (0..32)
+        .map(|i| u8::from_str_radix(&seed[2 * i..2 * i + 2], 16).unwrap())
+        .collect();
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("identity.key"), &bytes).unwrap();
+    let home = Home::open(dir.path()).unwrap();
+    let identity = home.identity().unwrap();
+    assert_eq!(identity.endpoint_id_hex(), public);
+    assert_eq!(
+        identity.endpoint_id().to_vec(),
+        (0..32)
+            .map(|i| u8::from_str_radix(&public[2 * i..2 * i + 2], 16).unwrap())
+            .collect::<Vec<u8>>()
+    );
+    // The file was read, not rewritten.
+    assert_eq!(fs::read(dir.path().join("identity.key")).unwrap(), bytes);
+}
+
+#[test]
+fn a_key_file_of_the_wrong_length_is_an_error_and_is_left_alone() {
+    for len in [0usize, 1, 31, 33, 64, 4096] {
+        let dir = tempfile::tempdir().unwrap();
+        let content = vec![7u8; len];
+        fs::write(dir.path().join("identity.key"), &content).unwrap();
+        let home = Home::open(dir.path()).unwrap();
+        let Err(Error::Storage(message)) = home.identity() else {
+            panic!("expected a storage error for {len} bytes");
+        };
+        assert!(
+            message.contains("identity.key") && message.contains("32"),
+            "{message}"
+        );
+        assert_eq!(
+            fs::read(dir.path().join("identity.key")).unwrap(),
+            content,
+            "{len}"
+        );
+    }
+}
+
+#[test]
+fn an_error_about_a_key_never_holds_the_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let content = b"SECRETSECRETSECRETSECRETSECRETSECRETSECRET".to_vec();
+    fs::write(dir.path().join("identity.key"), &content).unwrap();
+    let home = Home::open(dir.path()).unwrap();
+    let message = home.identity().unwrap_err().to_string();
+    assert!(!message.contains("SECRET"), "{message}");
+}
+
+#[test]
+fn debug_of_an_identity_shows_the_endpoint_id_and_none_of_the_secret() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(dir.path()).unwrap();
+    let identity = home.identity().unwrap();
+    let secret = fs::read(dir.path().join("identity.key")).unwrap();
+    let shown = format!("{identity:?} {identity:#?}");
+    assert!(shown.contains(&identity.endpoint_id_hex()));
+    let secret_hex: String = secret.iter().map(|b| format!("{b:02x}")).collect();
+    let secret_list = format!("{:?}", secret);
+    assert!(!shown.contains(&secret_hex), "{shown}");
+    assert!(!shown.contains(&secret_list), "{shown}");
+    assert!(
+        !shown.contains("SigningKey") && !shown.contains("secret"),
+        "{shown}"
+    );
+}
+
+#[test]
+fn rotating_replaces_the_key_and_a_later_open_sees_the_new_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let (old, new) = {
+        let home = Home::open(dir.path()).unwrap();
+        let old = home.identity().unwrap().endpoint_id();
+        let new = home.rotate_identity().unwrap().endpoint_id();
+        (old, new)
+    };
+    assert_ne!(old, new);
+    assert_eq!(
+        Home::open(dir.path())
+            .unwrap()
+            .identity()
+            .unwrap()
+            .endpoint_id(),
+        new
+    );
+    assert!(!names(dir.path()).iter().any(|n| n.ends_with(".tmp")));
+}
+
+#[test]
+fn rotating_a_home_that_has_no_key_yet_makes_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(dir.path()).unwrap();
+    let id = home.rotate_identity().unwrap().endpoint_id();
+    assert_eq!(home.identity().unwrap().endpoint_id(), id);
+}
+
+#[test]
+fn an_unfinished_temporary_key_from_a_crash_is_not_a_key_and_is_replaced() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("identity.key.tmp"), b"half").unwrap();
+    let home = Home::open(dir.path()).unwrap();
+    home.identity().unwrap();
+    assert_eq!(fs::read(dir.path().join("identity.key")).unwrap().len(), 32);
+    assert!(!dir.path().join("identity.key.tmp").exists());
+}
