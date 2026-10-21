@@ -1,0 +1,134 @@
+//! The store's home on disk: the folder, its layout version, and the places the later parts
+//! keep their state. Nothing here reads a config or touches the network, so opening a home is cheap.
+
+mod atomic;
+mod folder;
+mod layout;
+
+use std::env;
+use std::ffi::OsString;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use crate::Error;
+
+/// The layout of a home:
+///
+/// ```text
+/// VERSION        layout version, as decimal text and a newline
+/// blobs/  db/  logs/
+/// ```
+///
+/// Opening a home does not read a config or open a store, so it is cheap.
+///
+/// # Examples
+///
+/// ```
+/// use sluice_core::Home;
+///
+/// let dir = tempfile::tempdir()?;
+/// let home = Home::open(dir.path())?;
+/// assert!(dir.path().join("blobs").is_dir());
+/// assert_eq!(std::fs::read_to_string(dir.path().join("VERSION"))?, "1\n");
+/// assert_eq!(home.path(), dir.path());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[derive(Debug)]
+pub struct Home {
+    path: PathBuf,
+}
+
+impl Home {
+    /// The folder a home lives in: `$SLUICE_HOME` if it is set and not empty, else `sluice` in the
+    /// per-user data folder. That is `$XDG_DATA_HOME` or `~/.local/share` on Linux,
+    /// `~/Library/Application Support` on macOS, and the local app data folder on Windows. It is
+    /// the local one and not the roaming one, so what is kept there does not sync to another machine. Nothing is created or read.
+    ///
+    /// Fails with [`Error::Storage`] if there is no `$SLUICE_HOME` and the user has no data folder.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sluice_core::Home;
+    ///
+    /// // The answer is `SLUICE_HOME` if that is set, else a folder named `sluice`.
+    /// if let Ok(path) = Home::locate() {
+    ///     assert!(!path.as_os_str().is_empty());
+    /// }
+    /// ```
+    pub fn locate() -> Result<PathBuf, Error> {
+        locate_from(env::var_os("SLUICE_HOME"), folder::data_folder())
+    }
+
+    /// Opens the home at `path`, creating it and its `blobs`, `db` and `logs` folders if they are
+    /// missing, with mode 0700 on Unix.
+    ///
+    /// - A home with a newer layout version than this build reads fails with [`Error::Policy`]
+    ///   naming both versions, before anything is created or written.
+    /// - A `VERSION` file that does not hold a version fails with [`Error::Storage`].
+    /// - Any other failure of the filesystem is [`Error::Storage`] and names the path.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sluice_core::{Error, Home};
+    ///
+    /// let dir = tempfile::tempdir()?;
+    /// std::fs::write(dir.path().join("VERSION"), "2\n")?;
+    /// let err = Home::open(dir.path()).unwrap_err();
+    /// assert!(matches!(err, Error::Policy(_)));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn open(path: &Path) -> Result<Self, Error> {
+        // First without the lock and without writing, so a newer home is refused untouched.
+        if let Some(found) = layout::read_version(path)? {
+            layout::refuse_newer(found)?;
+        }
+        layout::create_folders(path)?;
+        layout::settle(path)?;
+        Ok(Self {
+            path: path.to_path_buf(),
+        })
+    }
+
+    /// The folder of this home.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sluice_core::Home;
+    ///
+    /// let dir = tempfile::tempdir()?;
+    /// let home = Home::open(dir.path())?;
+    /// assert_eq!(home.path(), dir.path());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// `$SLUICE_HOME` if it is set and not empty, else `sluice` in the data folder. Split from
+/// `locate` so the tests do not have to change the environment of the whole process.
+fn locate_from(
+    sluice_home: Option<OsString>,
+    data_folder: Option<PathBuf>,
+) -> Result<PathBuf, Error> {
+    match sluice_home {
+        Some(path) if !path.is_empty() => Ok(PathBuf::from(path)),
+        _ => data_folder.map(|dir| dir.join("sluice")).ok_or_else(|| {
+            Error::Storage(
+                "cannot find a data folder for this user. Set SLUICE_HOME to the folder to use"
+                    .to_string(),
+            )
+        }),
+    }
+}
+
+/// `Error::Storage` for a failed filesystem call, with what was being done and where.
+fn storage(doing: &str, path: &Path, source: io::Error) -> Error {
+    Error::Storage(format!("cannot {doing} {}: {source}", path.display()))
+}
+
+#[cfg(test)]
+mod tests;
