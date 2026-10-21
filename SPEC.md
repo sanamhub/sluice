@@ -416,6 +416,9 @@ new vectors.
 - skip a symlink whose target breaks a link target rule, because the target means nothing on another
   machine, and a socket, a FIFO or a device. It SHOULD list what it skipped
 - refuse the folder when a file cannot be read, and SHOULD list it as it lists a bad name
+- refuse the folder when its manifest would break decoding rule 1 or 2 at the default limits,
+  because a receiver on those limits would reject it. It SHOULD check the entry count before it
+  hashes any file
 - include hidden files, and have no ignore rules of its own
 - treat hard links as separate files
 - write the BLAKE3 hash of the content as the `root` of a file, read the size and the modification
@@ -478,7 +481,7 @@ lock is held by a live process it MUST connect to that process instead of openin
 | Vector | Contents |
 |---|---|
 | `tickets/` | Encoded tickets with expected decoded fields, including malformed ones that MUST be rejected |
-| `manifests/` | Directory trees with expected manifest bytes and root hash |
+| `manifests/` | Encoded manifests with expected fields and root, including ones that MUST be rejected |
 | `packs/` | Small-file trees with expected pack boundaries and offsets |
 | `live/` | Segment chains with expected entry hashes and signatures, plus chains that MUST fail |
 | `delta/` | File pairs with expected chunk boundaries and resulting need-ranges |

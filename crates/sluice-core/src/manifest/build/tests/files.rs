@@ -222,7 +222,7 @@ fn windows_writes_0o444_for_a_read_only_file_0o644_for_another_and_0o755_for_a_f
 fn a_file_that_grew_while_it_was_read_fails_the_build_without_naming_it() {
     let dir = tempfile::tempdir().expect("a temporary folder");
     put(dir.path(), "secret-name.txt", b"hello");
-    let result = build(dir.path(), |path| {
+    let result = build(dir.path(), Limits::default(), |path| {
         hash_file_with(path, || {
             let mut file = OpenOptions::new().append(true).open(path).expect("open");
             std::io::Write::write_all(&mut file, b" and more").expect("append");
@@ -239,7 +239,7 @@ fn a_file_that_grew_while_it_was_read_fails_the_build_without_naming_it() {
 fn a_file_whose_time_changed_while_it_was_read_fails_the_build() {
     let dir = tempfile::tempdir().expect("a temporary folder");
     put(dir.path(), "a.txt", b"hello");
-    let result = build(dir.path(), |path| {
+    let result = build(dir.path(), Limits::default(), |path| {
         hash_file_with(path, || {
             let file = OpenOptions::new().write(true).open(path).expect("open");
             let later = SystemTime::now() + Duration::from_secs(3600);
@@ -253,7 +253,7 @@ fn a_file_whose_time_changed_while_it_was_read_fails_the_build() {
 fn a_file_that_shrank_while_it_was_read_fails_the_build() {
     let dir = tempfile::tempdir().expect("a temporary folder");
     put(dir.path(), "a.txt", b"hello world");
-    let result = build(dir.path(), |path| {
+    let result = build(dir.path(), Limits::default(), |path| {
         hash_file_with(path, || {
             File::create(path).expect("truncate");
         })

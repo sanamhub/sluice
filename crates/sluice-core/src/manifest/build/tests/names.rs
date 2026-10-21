@@ -5,7 +5,7 @@
 use super::common::*;
 use crate::Error;
 use crate::manifest::build::{build, hash::HashFault};
-use crate::manifest::{Build, Kind, Manifest, Reason};
+use crate::manifest::{Build, Kind, Limits, Manifest, Reason};
 
 /// The decomposed spelling of `é`: `e` and a combining acute accent.
 const E_ACUTE_NFD: &str = "e\u{301}";
@@ -119,7 +119,7 @@ fn nothing_is_hashed_when_a_name_is_refused() {
     let dir = tempfile::tempdir().expect("a temporary folder");
     put(dir.path(), "big.bin", &[0; 1024]);
     put(dir.path(), "bad\u{202e}", b"x");
-    let result = build(dir.path(), |_| -> Result<_, HashFault> {
+    let result = build(dir.path(), Limits::default(), |_| -> Result<_, HashFault> {
         panic!("a file was read although the build was going to be refused")
     });
     assert!(matches!(result, Ok(Build::Refused(_))));

@@ -7,95 +7,22 @@
 
 mod collide;
 mod disk;
+mod finding;
 mod hash;
 mod meta;
 mod walk;
 
-use std::fmt;
-use std::io;
 use std::path::{Path, PathBuf};
 
 pub use disk::DiskPaths;
+pub use finding::{Finding, Reason};
 
-use super::Manifest;
 use super::entry::{Entry, Kind, Loc};
 use super::path::ManifestPath;
+use super::{Limits, Manifest};
 use crate::Error;
 use hash::{HashFault, Hashed};
 use walk::{Item, What};
-
-/// Why a name was listed. The wording is for people; a program reads the variant.
-///
-/// # Examples
-///
-/// ```
-/// use sluice_core::manifest::Reason;
-///
-/// assert_eq!(Reason::NotUtf8.to_string(), "the name is not valid UTF-8");
-/// assert_eq!(
-///     Reason::PathRule(7).to_string(),
-///     "a receiver rejects the name (path rule 7)"
-/// );
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Reason {
-    /// The name breaks path rule 1 to 8, the number given. Rule 2 is never given: the sender
-    /// writes the NFC form of every name.
-    PathRule(u8),
-    /// The name on disk is not valid UTF-8, so it has no path in a manifest.
-    NotUtf8,
-    /// Another name on disk is the same path after NFC. Which one a receiver would write is
-    /// not defined, so neither is sent.
-    SameAfterNfc,
-    /// The path is the same as another after full case folding and NFC.
-    CaseCollision,
-    /// A file or folder could not be opened or read.
-    Unreadable(io::ErrorKind),
-    /// A symlink whose target breaks link target rule 1 to 5, the number given. Skipped.
-    LinkTarget(u8),
-    /// A symlink whose target is not valid UTF-8. Skipped.
-    LinkTargetNotUtf8,
-    /// A socket, FIFO, device or other entry that is neither file, folder nor symlink. Skipped.
-    NotAFileOrFolder,
-}
-
-impl fmt::Display for Reason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::PathRule(rule) => write!(f, "a receiver rejects the name (path rule {rule})"),
-            Self::NotUtf8 => f.write_str("the name is not valid UTF-8"),
-            Self::SameAfterNfc => f.write_str("another name on disk is the same path after NFC"),
-            Self::CaseCollision => f.write_str("the same path as another after case folding"),
-            Self::Unreadable(kind) => write!(f, "cannot be read ({kind})"),
-            Self::LinkTarget(rule) => {
-                write!(f, "the link target breaks link target rule {rule}")
-            }
-            Self::LinkTargetNotUtf8 => f.write_str("the link target is not valid UTF-8"),
-            Self::NotAFileOrFolder => f.write_str("is not a file, a folder or a symlink"),
-        }
-    }
-}
-
-/// One name the build listed, and why. `path` is the path as the sender sees it, relative to the
-/// folder that was sent, with `/` between components and the bytes that are not UTF-8 replaced
-/// by U+FFFD. It is not escaped: a name can hold a newline or a terminal escape, and whoever
-/// prints it has to deal with that.
-///
-/// # Examples
-///
-/// ```
-/// use sluice_core::manifest::{Finding, Reason};
-///
-/// let finding = Finding { path: "a/con".to_string(), reason: Reason::PathRule(8) };
-/// assert_eq!(finding.reason, Reason::PathRule(8));
-/// ```
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Finding {
-    /// The path as the sender sees it.
-    pub path: String,
-    /// Why it was listed.
-    pub reason: Reason,
-}
 
 /// A manifest, where its files are on disk, and the entries that were left out of it.
 ///
@@ -218,10 +145,14 @@ impl Manifest {
     /// either changed, or the bytes read are not the size, the build fails with
     /// [`Error::Storage`], because the hash would match no version of the file.
     ///
+    /// A folder whose manifest a receiver on the default [`Limits`] would reject fails the build,
+    /// because it could never arrive. The entry count is checked before any file is hashed.
+    ///
     /// # Errors
     ///
     /// [`Error::Storage`] when `root` cannot be read or a file changed while it was read, and
-    /// [`Error::Policy`] when `root` is not a folder. Neither message holds a name.
+    /// [`Error::Policy`] when `root` is not a folder or the manifest would be over a limit. No
+    /// message holds a name.
     ///
     /// # Examples
     ///
@@ -241,17 +172,48 @@ impl Manifest {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build(root: &Path) -> Result<Build, Error> {
-        build(root, hash::hash_file)
+        Self::build_with_limits(root, Limits::default())
+    }
+
+    /// [`Manifest::build`], refusing a folder whose manifest would be over `limits` instead of
+    /// the defaults. A sender has no reason to raise them, because a receiver on the defaults
+    /// would reject what it sent. A test lowers them to reach them with a small folder.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Manifest::build`], with `limits` in place of the defaults.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sluice_core::{Error, manifest::{Limits, Manifest}};
+    ///
+    /// let folder = tempfile::tempdir()?;
+    /// for name in ["a", "b", "c"] {
+    ///     std::fs::write(folder.path().join(name), "x")?;
+    /// }
+    /// let limits = Limits { max_entries: 2, ..Limits::default() };
+    /// let err = Manifest::build_with_limits(folder.path(), limits).unwrap_err();
+    /// assert!(matches!(err, Error::Policy(_)));
+    /// assert!(err.to_string().contains("3 entries"));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn build_with_limits(root: &Path, limits: Limits) -> Result<Build, Error> {
+        build(root, limits, hash::hash_file)
     }
 }
 
-/// [`Manifest::build`] with the hashing passed in, so a test can change a file between the two
-/// reads of its size and time, which a real run cannot do on purpose.
+/// [`Manifest::build_with_limits`] with the hashing passed in, so a test can change a file
+/// between the two reads of its size and time, which a real run cannot do on purpose.
 fn build(
     root: &Path,
+    limits: Limits,
     hash_file: impl Fn(&Path) -> Result<Hashed, HashFault>,
 ) -> Result<Build, Error> {
     let walked = walk::walk(root)?;
+    // Before the names are compared and before any file is hashed: renaming files does not
+    // bring the count down, so a list of names to fix would not help.
+    check_entries(walked.items.len(), limits)?;
     let mut problems = walked.problems;
     problems.extend(collide::find(&walked.items));
     if !problems.is_empty() {
@@ -282,6 +244,9 @@ fn build(
             "the builder made a manifest that fails a rule: {e}"
         ))
     })?;
+    // The length depends on the sizes and times the hash read, so it is known only now. At the
+    // default limits a folder under the entry limit is rarely over the byte limit.
+    check_bytes(manifest.encode().len(), limits)?;
     let mut skipped = walked.skipped;
     skipped.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(Build::Ready(Built {
@@ -289,6 +254,30 @@ fn build(
         disk: DiskPaths::new(disk),
         skipped,
     }))
+}
+
+/// Decoding rule 2 at the sender. The message gives numbers and no name.
+fn check_entries(entries: usize, limits: Limits) -> Result<(), Error> {
+    if u64::try_from(entries).unwrap_or(u64::MAX) > limits.max_entries {
+        return Err(Error::Policy(format!(
+            "the folder has {entries} entries and a receiver accepts at most {}, so nothing was \
+             built",
+            limits.max_entries
+        )));
+    }
+    Ok(())
+}
+
+/// Decoding rule 1 at the sender.
+fn check_bytes(bytes: usize, limits: Limits) -> Result<(), Error> {
+    if u64::try_from(bytes).unwrap_or(u64::MAX) > limits.max_bytes {
+        return Err(Error::Policy(format!(
+            "the manifest of the folder would be {bytes} bytes and a receiver accepts at most {}, \
+             so it is not sent",
+            limits.max_bytes
+        )));
+    }
+    Ok(())
 }
 
 fn refuse(mut problems: Vec<Finding>, mut skipped: Vec<Finding>) -> Build {
