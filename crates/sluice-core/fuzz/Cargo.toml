@@ -18,6 +18,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "ticket"
+path = "fuzz_targets/ticket.rs"
+test = false
+doc = false
+bench = false
+
 # Its own workspace, so `cargo build --workspace` at the repository root never builds it. It needs a
 # nightly compiler and the sanitizer flags that `cargo fuzz` sets, which no other crate here wants.
 [workspace]
