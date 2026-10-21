@@ -328,15 +328,27 @@ is the root `iroh-blobs` gives it as a raw blob.
 14. a `Packed` entry has a `pack_index` that is not below the number of packs, a `len` that is not
     its `size`, or an `offset` plus `len` that is past the `size` of its pack. The sum MUST NOT wrap
 15. `mode` is above `0o7777`
+16. the packs are not laid out end to end, so that every byte of a pack belongs to exactly one
+    file. It is checked after rule 14, and it breaks one of these pack layout rules, taking the
+    `Packed` entries in manifest order:
+    1. the first has `pack_index` 0, and each later one has the `pack_index` of the one before it
+       or that number plus one
+    2. the first entry of a pack has `offset` 0, and each later one in the same pack starts where
+       the one before it ends: its `offset` is the `offset` plus `len` of that one
+    3. the last entry of each pack ends at that pack's `size`
+    4. the number of packs is the last `pack_index` plus one, or 0 when no entry is `Packed`
 
 A decoder reads from front to back and MAY stop at the first rule it finds broken. A manifest that
 breaks two rules is rejected either way, and the number a decoder reports for it is its own. The
 vectors in `tests/vectors/manifests/` break one rule each.
 
+Rule 16 does not ask that the sender packed as section 9 says. A small file that is a `Blob` of its
+own, or a `Packed` entry of no bytes at its place in the layout, breaks no rule.
+
 **Rejected manifests.** A decoder MUST NOT write a rejected manifest, or any path or link target in
-it, to a log, an error message or a crash report. The error names the rule, and the path rule or
-link target rule inside it, and nothing of the text. A path comes from a stranger, and file names
-stay out of logs.
+it, to a log, an error message or a crash report. The error names the rule, and the path rule,
+link target rule or pack layout rule inside it, and nothing of the text. A path comes from a
+stranger, and file names stay out of logs.
 
 **Path rules.** A receiver MUST reject a manifest path, on every platform, when:
 
@@ -421,9 +433,11 @@ new vectors.
   hashes any file
 - include hidden files, and have no ignore rules of its own
 - treat hard links as separate files
-- write the BLAKE3 hash of the content as the `root` of a file, read the size and the modification
-  time of the file before it hashes it and again after, and fail when either changed, because the
-  hash then names no version of the file
+- set the `loc` of every file and the list of packs by the packing algorithm of section 9
+- write the BLAKE3 hash of the content as the `root` of a file that is a `Blob`, and hash a file
+  that is packed into the root of its pack. For every file, packed or not, read the size and the
+  modification time before it hashes it and again after, and fail when either changed, because
+  the hash then names no version of the file
 - write `0` as the `mode` of a symlink on every platform, and the permission bits of the file as
   they are on Unix. On Windows write `0o444` for a read-only file, `0o644` for another file and
   `0o755` for a folder
@@ -433,17 +447,61 @@ new vectors.
 
 ## 9. Small-file packs
 
-Capability `PACKS`. Per-file overhead dominates on trees of many small files, which is the workload that
-makes transfer tools look slow.
+Capability `PACKS`. Each blob costs a request and its own verification, and on a tree of many small
+files that cost is most of the transfer. A sender joins small files end to end into pack blobs, so
+a tree of 100,000 small files is a few blob transfers and not 100,000.
 
-- Files smaller than `PACK_THRESHOLD` (default 1 MiB) are concatenated into pack blobs of at most
-  `PACK_TARGET` (default 64 MiB).
-- Packing order is manifest order, which is sorted by path, so packing is deterministic and identical
-  inputs dedup across transfers and across senders.
-- A file is never split across packs.
-- Each pack is an ordinary blob with its own BLAKE3 root, so ranges, resume, and verification work.
-- `PackRef = { root: [u8;32], size: u64 }`, indexed by `pack_index` in manifest entries.
-- A receiver MUST stream out of a pack while fetching it, never staging a whole pack in memory.
+`PackRef = { root: [u8;32], size: u64 }`. The manifest lists the packs, and a `Packed` entry names
+one by its position in that list.
+
+**Constants.**
+
+| Constant | Value |
+|---|---|
+| `PACK_THRESHOLD` | 1,048,576 bytes (1 MiB) |
+| `PACK_TARGET` | 67,108,864 bytes (64 MiB) |
+
+They are fixed and not settings. The same folder then gives the same packs and the same manifest
+root on every machine, so a second send and a second sender of the same tree dedup.
+
+**Algorithm.** A sender MUST set the `loc` of each File entry and the list of packs by these steps.
+It walks the entries in manifest order, which is sorted by path, and keeps one open pack. The open
+pack starts with no bytes and the index 0.
+
+1. An entry that is not a File is skipped.
+2. A file of 0 bytes is a `Blob`. Its `root` is the BLAKE3 hash of no bytes,
+   `af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262`. It is never packed, so a
+   folder of empty files makes no pack.
+3. A file of `PACK_THRESHOLD` bytes or more is a `Blob`, and its `root` is the BLAKE3 hash of its
+   content.
+4. Any other file, of 1 to `PACK_THRESHOLD - 1` bytes, goes into the open pack. If the open pack
+   has bytes, and its size plus the file's size is more than `PACK_TARGET`, the open pack is closed
+   first, and a new open pack starts with no bytes and the next index.
+5. The file is then `Packed { pack_index, offset, len }`, where `pack_index` is the index of the
+   open pack, `offset` is the size of the open pack before the file and `len` is the file's size.
+   The open pack grows by `len`.
+6. After the last entry, the open pack is closed if it has bytes. The closed packs, in order of
+   index, are the manifest's `packs`, each with its size in bytes.
+
+A file is never split across packs, so a pack is at most `PACK_TARGET` bytes, and every pack has at
+least one byte. A pack of exactly `PACK_TARGET` bytes is not closed early: step 4 closes a pack only
+when the next file would take it past `PACK_TARGET`.
+
+**Pack bytes and root.** The bytes of a pack are the contents of its files in manifest order, end
+to end, with no header, padding or separator. Its `root` is the BLAKE3 hash of those bytes, which is
+the root `iroh-blobs` gives the pack as a raw blob, so ranges, resume and verification work on a
+pack as on any blob. A sender can hash a pack while it reads the files, without writing the pack to
+disk or holding it in memory.
+
+**Receiver.** Rule 16 of section 8 means every byte of a pack belongs to exactly one file, so a
+receiver knows from the manifest which file each byte goes to.
+
+- A receiver MUST stream out of a pack while it fetches it, writing each run of bytes to its file,
+  and MUST NOT stage a whole pack in memory.
+- A pack that gives more bytes than its `size`, or ends before it, MUST fail.
+- A file of 0 bytes needs no fetch, whether it is a `Blob` or a `Packed` entry.
+- A receiver does not check that the sender followed the algorithm above, as section 8 says after
+  rule 16.
 
 ---
 
@@ -482,7 +540,7 @@ lock is held by a live process it MUST connect to that process instead of openin
 |---|---|
 | `tickets/` | Encoded tickets with expected decoded fields, including malformed ones that MUST be rejected |
 | `manifests/` | Encoded manifests with expected fields and root, including ones that MUST be rejected |
-| `packs/` | Small-file trees with expected pack boundaries and offsets |
+| `packs/` | Files in manifest order with their sizes, and the `loc` of each and the size of each pack that section 9 gives. Some also give the contents, the pack roots and the manifest root |
 | `live/` | Segment chains with expected entry hashes and signatures, plus chains that MUST fail |
 | `delta/` | File pairs with expected chunk boundaries and resulting need-ranges |
 | `paths/` | Hostile paths that MUST be rejected by a receiver |
