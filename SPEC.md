@@ -186,40 +186,159 @@ Two rules are ours:
 ## 6. Live content
 
 A growing file has no stable BLAKE3 root, because a bao tree's shape depends on total length. Live
-content is therefore a chain of independently verifiable segments.
+content is therefore a chain of segments, each sealed with its own root when it is full, and each
+entry of the chain signed by the sender. A receiver gets these records from providers it does not
+trust, so every rule below is checked before a segment is fetched or written.
 
 ```
-SEGMENT_BYTES = 8 MiB  (default; the provider announces the value in LogOpen)
-
-LogOpen  = { stream_id: [u8;16], sender_key: [u8;32], segment_bytes: u32, started: u64 }
+LogOpen  = { stream_id: [u8;16], sender_key: [u8;32], segment_bytes: u32, started: u64,
+             sig: [u8;64] }
 LogEntry = { seq: u64, segment_root: [u8;32], len: u32, prev_entry_hash: [u8;32] }
 Frame    = { entry: LogEntry, sig: [u8;64] }
-LogClose = { final_root: [u8;32], total_len: u64, closed: u64, sig: [u8;64] }
+LogClose = { final_root: [u8;32], total_len: u64, closed: u64, last_entry_hash: [u8;32],
+             sig: [u8;64] }
 ```
 
-Rules:
+A Live ticket (section 4) carries `stream_id` and `sender_key`. The provider serves one `LogOpen`,
+then one `Frame` per sealed segment, then one `LogClose` when the file is complete.
 
-- `seq` starts at 0 and increases by exactly 1. A gap MUST abort the stream.
-- Two validly signed frames with the same `seq` and different `LogEntry` encodings mean the sender
-  signed two histories, through a leaked key or a bug. A receiver MUST abort the stream as a
-  verification failure that names the `seq`, MUST keep only the segments it verified before that `seq`,
-  and MUST NOT accept an entry at or after it. A frame byte-identical to one already accepted is a
-  repeat, not a fork, and MAY be dropped.
-- `prev_entry_hash` is BLAKE3 of the previous `LogEntry` encoding. For `seq = 0` it is BLAKE3 of the
-  `LogOpen` encoding, which binds the chain to the stream identity.
-- `sig` covers the `LogEntry` encoding, under `sender_key`. A receiver MUST verify every signature.
-- `len` equals `segment_bytes` for every entry except the last, which MAY be shorter.
-- Segment content is fetched by `segment_root` using the static protocol, so range requests and resume
-  work inside a segment.
-- **The tail.** A provider MAY serve the incomplete final segment at its current length, with its own
-  tree over that prefix. Its `segment_root` changes as it grows and is therefore not part of the signed
-  chain until the segment is sealed. A receiver MUST treat tail bytes as provisional and MUST re-verify
-  against the sealed `segment_root` when the entry arrives.
-- `LogClose` publishes the whole-file BLAKE3 root, after which the content is ordinary static content
-  and is addressable and dedupable as such.
-- A receiver that joins late MUST be able to request the chain from `seq = 0`.
+**Bytes.** The little-endian rule of section 2 applies, and there are no varints and no length
+prefixes. Each record has a fixed length, and the fields come in the order of the table with no
+padding, so a record has one spelling.
 
-**Clock.** `started` and `closed` are informational. No verification depends on them, because peer
+| Record | Fields and their bytes | Length |
+|---|---|---|
+| `LogOpen` | `stream_id` 16, `sender_key` 32, `segment_bytes` as a `u32` in 4, `started` as a `u64` in 8, `sig` 64 | 124 |
+| `LogEntry` | `seq` as a `u64` in 8, `segment_root` 32, `len` as a `u32` in 4, `prev_entry_hash` 32 | 76 |
+| `Frame` | the 76 bytes of its `LogEntry`, then `sig` 64 | 140 |
+| `LogClose` | `final_root` 32, `total_len` as a `u64` in 8, `closed` as a `u64` in 8, `last_entry_hash` 32, `sig` 64 | 144 |
+
+`segment_bytes` is the size of a full segment. It is a multiple of 16,384 from 1,048,576 (1 MiB) to
+67,108,864 (64 MiB), and a sender uses 8,388,608 (8 MiB) unless it is told another. 16,384 is the
+block size of `iroh-blobs`, so a range inside a segment is a range of whole blocks. The lower bound
+keeps the receiver's memory small: it keeps 32 bytes per entry, which is 32 MiB for a file of 1 TB
+in segments of 1 MiB.
+
+**Signatures.** Each `sig` is an Ed25519 signature under `sender_key` of this message:
+
+1. the label of the record, in ASCII, from the table below
+2. one byte `0x00`
+3. the 16 bytes of `stream_id`
+4. the bytes of the record before its `sig`
+
+| Record | Label | Bytes signed after the `stream_id` |
+|---|---|---|
+| `LogOpen` | `sluice/live/open/1` | its first 60 bytes |
+| `Frame` | `sluice/live/entry/1` | the 76 bytes of its `LogEntry` |
+| `LogClose` | `sluice/live/close/1` | its first 80 bytes |
+
+The label and `stream_id` make a signature good for one kind of record in one stream. A frame
+signed for another stream, or the bytes of one kind of record signed as another, do not verify.
+The same key signs receipts (section 10), which carry neither, and the message lengths differ: 95,
+112 and 116 bytes here, against 80 for a receipt.
+
+A receiver verifies strictly, as `verify_strict` of `ed25519-dalek` does: `s` MUST be below the
+group order, neither `R` nor the key may be a point of small order, and the encoding of
+`[s]B - [k]A` MUST equal the 32 bytes of `R`, with `k` as in RFC 8032 section 5.1.7. So a signature
+has one spelling. A key of small order has signatures that hold for many messages, so under strict
+verification it has none, and a ticket that names one gives a stream that nothing can join.
+
+**The chain.** The hash of the `LogOpen` is the BLAKE3 hash of its first 60 bytes, without `sig`.
+The hash of an entry is the BLAKE3 hash of its 76 bytes. The `seq` of the first entry is 0, and each
+next one is one more. The `prev_entry_hash` of `seq` 0 is the hash of the `LogOpen`, and that of any
+other entry is the hash of the entry before it. The `last_entry_hash` of the `LogClose` is the hash
+of the last entry, or of the `LogOpen` when the stream has no entry. For a receiver, the head of the
+chain is the hash of the last entry it accepted, or of the `LogOpen` before it accepts one.
+
+`len` is the number of bytes of the segment, from 1 to `segment_bytes`. Every entry but the last has
+`len` equal to `segment_bytes`. The last entry is only known as last when the `LogClose` arrives.
+
+**Receiver.** A receiver keeps, for each accepted entry, the hash of its 76 bytes, and the sum of
+their `len`. A record that a provider could have made, because it does not verify or comes too
+early, is refused and changes nothing, so another provider can give the right one, and only a
+record the sender signed can abort the stream.
+
+The `LogOpen` comes first. A receiver MUST refuse it, and start no stream, when:
+
+1. a record is not the length its table gives. This rule is for every record, and the receiver
+   refuses it
+2. the `LogOpen`'s `stream_id` or `sender_key` is not the ticket's
+3. a signature does not verify, as **Signatures** says, under the ticket's `sender_key`. This rule
+   is for every record, and the receiver refuses it
+4. `segment_bytes` is outside its bounds. It is checked after the signature
+
+A frame is checked in this order:
+
+5. a frame whose `seq` is past the next one is refused. Its signature is not checked. A provider
+   that sends frames out of order loses nothing but the request
+6. a frame whose `seq` is below the next one, and whose `LogEntry` hashes to the hash kept for that
+   `seq`, is a repeat. The receiver drops it without checking its signature, and nothing changes
+7. a frame whose `seq` is below the next one, with another `LogEntry`, is checked by rule 3. If it
+   verifies, the sender signed two histories, through a leaked key or a bug, and the receiver
+   aborts the stream at that `seq`. This is the fork rule
+
+A frame at the next `seq` is checked by rule 3, and the receiver aborts the stream at that `seq`
+when the frame verifies and:
+
+8. its `prev_entry_hash` is not the head of the chain
+9. its `len` is 0 or more than `segment_bytes`
+10. the entry before it has a `len` below `segment_bytes`, so that entry was the last
+11. the receiver has already accepted a `LogClose`
+
+Any other frame at the next `seq` is accepted. The receiver keeps its hash, adds its `len` to the
+sum, and hands the caller its `seq`, `segment_root` and `len`.
+
+A `LogClose` is checked by rule 1 and rule 3, and then:
+
+12. a `LogClose` whose `total_len` is more than the sum is refused when no entry is accepted yet or
+    the last accepted one has a `len` of `segment_bytes`. The receiver is missing entries that the
+    sender sealed, and it can offer the `LogClose` again once it has them
+13. the receiver aborts the stream when `total_len` is not the sum in any other case: less than the
+    sum, or more than it after an entry with a `len` below `segment_bytes`
+14. the receiver aborts the stream when `last_entry_hash` is not the head of the chain
+15. once a `LogClose` is accepted, the receiver aborts the stream for another validly signed one
+    with other bytes. The sender signed two ends of one file
+
+An abort for a `LogClose` is at the next `seq`. The sum is kept without wrapping.
+
+A `LogClose` that breaks no rule closes the stream. The receiver hands the caller `final_root` and
+`total_len`, and it cannot check `final_root` itself, because it has no bytes. The caller hashes
+the file it assembled from the segments and MUST compare the result with `final_root` before it
+treats the file as complete. From then on the content is ordinary static content, addressable and
+dedupable as such.
+
+**Abort.** An abort is a verification failure that names the `seq`. The receiver MUST keep only the
+segments of entries before that `seq`, and MUST NOT accept an entry at or after it. After an abort
+it answers every record with the same failure. After a close it accepts nothing. A frame that breaks
+rule 7 or 11, or a `LogClose` that breaks rule 15, aborts the stream, and any other record is
+answered with the close.
+
+**Errors.** A receiver MUST NOT write a record it refused or aborted on, or any part of it, to a
+log or an error message. The error names the rule, and the `seq` when there is one.
+
+**Sender.** A sender MUST:
+
+- write `segment_bytes` within its bounds, and sign each record as **Signatures** says, with the
+  key the ticket names
+- seal segments in order: sign the entry of `seq` n only after the entry of `seq` n - 1, set its
+  `prev_entry_hash` by **The chain**, and never sign two entries for one `seq`
+- give every entry a `len` from 1 to `segment_bytes`, and give a `len` below `segment_bytes` only
+  to the last entry
+- sign one `LogClose`, after the last entry and never before it, with `total_len` the sum of every
+  `len`, `last_entry_hash` by **The chain**, and `final_root` the BLAKE3 hash of the whole file.
+  It signs no entry after it
+
+**Fetching.** Segment content is fetched by `segment_root` using the static protocol, so range
+requests and resume work inside a segment. A receiver fetches the segment of an entry it has
+accepted. A receiver that joins late MUST be able to request the chain from `seq` 0, and checks
+every frame by the same rules.
+
+**The tail.** A provider MAY serve the incomplete final segment at its current length, with its own
+tree over that prefix. Its root changes as it grows and is therefore not part of the signed chain
+until the segment is sealed. A receiver MUST treat tail bytes as provisional and MUST re-verify them
+against the `segment_root` and `len` of the entry when it is accepted.
+
+**Clock.** `started` and `closed` are signed, and no verification depends on them, because peer
 clocks disagree.
 
 ---
