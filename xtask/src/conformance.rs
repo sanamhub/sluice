@@ -1,6 +1,7 @@
 //! `cargo xtask conformance`: runs every vector under `tests/vectors/` against this implementation
 //! and exits non-zero if one disagrees. The format is in `tests/vectors/README.md`.
 
+mod manifests;
 mod paths;
 #[cfg(test)]
 mod tests;
@@ -76,6 +77,7 @@ pub fn check(root: &Path) -> Result<Report> {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         match kind.as_str() {
+            "manifests" => manifests::run(&dir, &mut report)?,
             "paths" => paths::run(&dir, &mut report)?,
             "tickets" => tickets::run(&dir, &mut report)?,
             _ => {

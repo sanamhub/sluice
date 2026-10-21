@@ -36,7 +36,9 @@ fn the_checked_in_vectors_pass() {
     let report = check(&vectors_dir()).expect("read the vectors");
     assert_eq!(report.failed, 0, "{}", report.lines.join("\n"));
     assert!(
-        report.passed_in("paths") >= 60 && report.passed_in("tickets") >= 40,
+        report.passed_in("paths") >= 60
+            && report.passed_in("tickets") >= 40
+            && report.passed_in("manifests") >= 60,
         "{}",
         report.lines.join("\n")
     );
@@ -80,21 +82,21 @@ fn a_long_path_is_cut_in_the_failure_line() {
 #[test]
 fn a_directory_without_a_runner_is_skipped_and_not_counted() {
     let dir = TempDir::new("skipped");
-    dir.write("manifests/x.json", r#"{ "description": "d", "cases": [] }"#);
+    dir.write("packs/x.json", r#"{ "description": "d", "cases": [] }"#);
     dir.write(
         "paths/x.json",
         r#"{ "description": "d", "cases": [ { "path": "a", "valid": true } ] }"#,
     );
     let report = check(dir.path()).expect("run");
-    assert_eq!(report.skipped, ["manifests"]);
+    assert_eq!(report.skipped, ["packs"]);
     assert_eq!(report.failed, 0);
     assert_eq!(report.passed_in("paths"), 1);
-    assert_eq!(report.passed_in("manifests"), 0);
+    assert_eq!(report.passed_in("packs"), 0);
     assert!(
         report
             .lines
             .iter()
-            .any(|l| l.starts_with("manifests/") && l.contains("skipped"))
+            .any(|l| l.starts_with("packs/") && l.contains("skipped"))
     );
 }
 
@@ -213,4 +215,86 @@ fn an_invalid_ticket_case_that_decodes_and_a_valid_one_without_fields_are_failur
     let text = report.lines.join("\n");
     assert!(text.contains("expected rejected, got accepted"), "{text}");
     assert!(text.contains("needs `canonical` and `fields`"), "{text}");
+}
+
+/// The empty manifest, as a valid case.
+const EMPTY_CASE: &str = r#"{ "name": "empty", "bytes": "010000", "valid": true,
+    "root": "396eab8ebe8b2247fed631cee54835e0c8678ab1cc0d5b8a73f9f86e813187d5",
+    "fields": { "version": 1, "entries": [], "packs": [] } }"#;
+
+fn manifest_report(name: &str, cases: &[&str]) -> super::Report {
+    let dir = TempDir::new(name);
+    dir.write(
+        "manifests/x.json",
+        &format!(
+            r#"{{ "description": "d", "cases": [ {} ] }}"#,
+            cases.join(", ")
+        ),
+    );
+    check(dir.path()).expect("run")
+}
+
+#[test]
+fn a_valid_manifest_case_must_decode_encode_and_hash_as_written() {
+    let report = manifest_report("manifest-valid", &[EMPTY_CASE]);
+    assert_eq!(
+        report.failed,
+        0,
+        "{}",
+        report.lines.join(
+            "
+"
+        )
+    );
+    assert_eq!(report.passed_in("manifests"), 1);
+
+    let wrong_root = EMPTY_CASE.replace("396eab", "396eac");
+    let wrong_fields = EMPTY_CASE.replace(
+        r#""entries": []"#,
+        r#""entries": [ { "path": "a", "kind": "dir", "size": "0", "mtime_ms": "0", "mode": 0,
+            "loc": { "type": "none" }, "link_target": null } ]"#,
+    );
+    let wrong_bytes = EMPTY_CASE.replace(r#""010000""#, r#""01000000""#);
+    for (case, expect) in [
+        (wrong_root, "the root is not the one"),
+        (wrong_fields, "decoded to other fields"),
+        (wrong_bytes, "expected accepted"),
+    ] {
+        let text = manifest_report("manifest-wrong", &[&case]).lines.join(
+            "
+",
+        );
+        assert!(text.contains(expect), "{text}");
+        assert!(text.contains(r#"FAIL "empty""#), "{text}");
+    }
+}
+
+#[test]
+fn an_invalid_manifest_case_must_be_rejected_with_the_limits_it_names() {
+    let refused = r#"{ "name": "version 2", "bytes": "020000", "valid": false }"#;
+    let accepted = r#"{ "name": "wrongly invalid", "bytes": "010000", "valid": false }"#;
+    // The empty manifest is 3 bytes. A limit of 2 makes it too long, and a limit of 3 does not.
+    let over = r#"{ "name": "over", "bytes": "010000", "valid": false,
+        "limits": { "max_bytes": "2", "max_entries": "10" } }"#;
+    let at = r#"{ "name": "at", "bytes": "010000", "valid": false,
+        "limits": { "max_bytes": "3", "max_entries": "10" } }"#;
+    let report = manifest_report("manifest-invalid", &[refused, accepted, over, at]);
+    assert_eq!(
+        report.failed,
+        2,
+        "{}",
+        report.lines.join(
+            "
+"
+        )
+    );
+    let text = report.lines.join(
+        "
+",
+    );
+    assert!(
+        text.contains(r#"FAIL "wrongly invalid": expected rejected"#),
+        "{text}"
+    );
+    assert!(text.contains(r#"FAIL "at": expected rejected"#), "{text}");
 }

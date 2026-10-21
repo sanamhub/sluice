@@ -4,4 +4,5 @@ mod entry_rules;
 mod folding;
 mod postcard_agrees;
 mod props;
+mod vectors;
 mod wire_rules;

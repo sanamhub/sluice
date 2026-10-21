@@ -13,7 +13,7 @@ disagrees, and `cargo nextest run` runs the same check.
 tests/vectors/
   paths/        manifest path rules, SPEC.md section 8
   tickets/      ticket text and bytes, SPEC.md section 4
-  manifests/    not written yet
+  manifests/    directory manifests as bytes, SPEC.md section 8
   packs/        not written yet
   live/         not written yet
   delta/        not written yet
@@ -152,3 +152,62 @@ and an IPv4 host, a path, a percent-encoded path and a URL of 2048 bytes. Its `c
 
 The bytes were written by a second encoder, built from the table in `SPEC.md` and not from the Rust
 code, so the vectors check the spec and the implementation against each other.
+
+## `manifests/`
+
+A receiver reads a manifest before it writes anything, so these vectors are manifest bytes and not
+directory trees. A case is the bytes as hex and a verdict:
+
+```json
+{ "name": "one file", "bytes": "0101...", "valid": true, "root": "2f26...", "fields": { ... } }
+{ "name": "version 2", "bytes": "020000", "valid": false, "rule": 3, "reason": "version is not 1" }
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | What the case is. A runner prints it next to a failure and does not compare it |
+| `bytes` | string | The manifest as lower-case hex. It can be empty: a manifest cut after 0 bytes |
+| `valid` | boolean | `true` if a decoder MUST accept it, `false` if it MUST reject it |
+| `root` | string | Valid cases. The BLAKE3 hash of `bytes`, as hex |
+| `fields` | object | Valid cases. What `bytes` decode to |
+| `rule` | integer | Rejected cases. The decoding rule of `SPEC.md` section 8 that the bytes break |
+| `sub_rule` | integer | Rejected cases of rule 9 and 11. The path rule or the link target rule inside it |
+| `reason` | string | Rejected cases. What is wrong with it, for people |
+| `limits` | object | Optional. `max_bytes` and `max_entries`, decimal strings, in place of the defaults |
+
+In `fields`, `entries` and `packs` are lists in manifest order. An entry has `path`, `kind` (`file`,
+`dir` or `symlink`), `size`, `mtime_ms`, `mode`, `loc` and `link_target` (`null` when absent). A
+`loc` is `{"type": "blob", "root": hex}`, `{"type": "packed", "pack_index": n, "offset": s, "len":
+s}` or `{"type": "none"}`. A pack has `root` and `size`. Sizes, times, offsets and lengths are
+decimal strings, because a JSON number does not hold a `u64` in every language. `mode` and
+`pack_index` are numbers. Roots are lower-case hex.
+
+To check an implementation, decode `bytes` with the limits of the case, or the defaults if there are
+none. For every valid case, compare the result with `fields`, encode it, and compare the bytes with
+`bytes` and the root with `root`. For every rejected case, decoding must fail. Compare `rule` only
+if your implementation reports the rule it stopped at: a case has one fault, so there is one to
+report.
+
+Some points a reader cannot see from the rules alone:
+
+- The limits of rule 1 and 2 are 2 GiB and 10,000,000 entries, and no vector is that big. A case
+  with a `limits` object tests the same check with small numbers. Two cases with no `limits` object
+  use the default entry limit: a count of 10,000,001 is rejected by rule 2, and a count of
+  10,000,000 with a few bytes behind it by rule 6, because the bytes cannot hold it.
+- The byte limit is checked first. A case of garbage bytes over `max_bytes` breaks rule 1, whatever
+  the garbage is.
+- The folder that was sent is not an entry, and every folder inside it is. `a/b` needs an entry `a`
+  of kind `dir` before it.
+- Entries are in byte order, so `a`, `a-b`, `a/b` is sorted (`-` is 0x2D and `/` is 0x2F) and `a`,
+  `B` is not.
+- Rule 12 folds the whole path. `A` and `a` are the same name, so `A/x` and `a/y` break it through
+  their folders. `straße` and `STRASSE` break it through the full folding of `ß`, and the pair
+  U+0390 and U+03AA U+0301 only through the NFC step that follows the fold.
+- A path in a rejected case of rule 9 has no entry for its parent, so it breaks rule 8 as well. The
+  case names rule 9, because a decoder reads the path before it looks for the parent. Whichever it
+  names, it rejects the case, and the verdict is all a runner compares.
+
+The files are `valid.json`, `limits.json`, `invalid-wire.json` (rules 3 to 6) and
+`invalid-entries.json` (rules 7 to 15). The bytes and the roots were written by a second encoder in
+Python, built from the table in `SPEC.md` section 8 with its own varints and its own BLAKE3, and not
+from the Rust code, so the vectors check the spec and the implementation against each other.
