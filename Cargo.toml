@@ -76,6 +76,11 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "tim
 toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Full Unicode case folding for the case-collision rule of SPEC.md section 8. Its tables are the
+# CaseFolding.txt of Unicode 18.0.0 (checked against that file for every code point), the version
+# that unicode-normalization implements, and it has no dependency. Pinned exactly: a release with
+# newer tables would change which manifests a receiver accepts, so it has to be a decision.
+unicase = "=2.10.0"
 # The NFC check on manifest paths (SPEC.md section 8, rule 2). Its only dependency is tinyvec.
 unicode-normalization = "0.1.26"
 # Rule 7 of the ticket decoder: a relay URL is checked against the WHATWG URL standard, which iroh's

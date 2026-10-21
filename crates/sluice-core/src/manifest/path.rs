@@ -9,7 +9,7 @@ use unicode_normalization::is_nfc;
 use crate::Error;
 
 /// The longest path, in UTF-8 bytes (rule 1).
-const MAX_PATH_BYTES: usize = 4096;
+pub(super) const MAX_PATH_BYTES: usize = 4096;
 /// The longest component, in UTF-8 bytes (rule 5). It is the NTFS and ext4 limit.
 const MAX_COMPONENT_BYTES: usize = 255;
 /// How many characters of an offending component an error quotes. A hostile path is up to
@@ -64,6 +64,14 @@ impl ManifestPath {
             Ok(()) => Ok(Self(path.to_owned())),
             Err(violation) => Err(Error::Policy(violation.message())),
         }
+    }
+
+    /// [`ManifestPath::parse`] for a decoder that reports the rule number and never the text, so
+    /// a manifest from a stranger cannot reach a log through its own error.
+    pub(super) fn parse_rule(path: &str) -> Result<Self, u8> {
+        check(path)
+            .map(|()| Self(path.to_owned()))
+            .map_err(|v| v.rule)
     }
 
     /// The path as it was parsed, with `/` between components.
@@ -174,6 +182,12 @@ fn check(path: &str) -> Result<(), Violation<'_>> {
         Some(violation) => Err(violation),
         None => Ok(()),
     }
+}
+
+/// The lowest rule among 2 and 4 to 8 that one name breaks. The sender asks it of one name at a
+/// time, so that a folder with a bad name is listed once and not once for everything below it.
+pub(super) fn component_rule(component: &str) -> Option<u8> {
+    component_violation(component).map(|v| v.rule)
 }
 
 /// The lowest rule among 2 and 4 to 8 that one component breaks.
