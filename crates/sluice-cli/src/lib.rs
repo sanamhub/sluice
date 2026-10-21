@@ -1,6 +1,7 @@
 //! The `sluice` command line. The binary in `main.rs` calls [`run`]. The library exists so that
 //! the completion scripts and the man pages can be made from the same clap definition.
 
+mod bug;
 mod cli;
 mod colour;
 mod exit;
@@ -14,6 +15,7 @@ use clap::{CommandFactory, Parser};
 
 use cli::{Cli, Command};
 use colour::Environment;
+use exit::Failure;
 use output::Output;
 
 /// The clap definition of the whole command line, for the completion scripts and the man pages.
@@ -41,6 +43,7 @@ pub fn command() -> clap::Command {
 /// assert_eq!(sluice_cli::run(args), std::process::ExitCode::SUCCESS);
 /// ```
 pub fn run(args: Vec<OsString>) -> ExitCode {
+    bug::install_hook();
     let environment = Environment::read();
     let cli = match Cli::try_parse_from(&args) {
         Ok(cli) => cli,
@@ -54,13 +57,17 @@ pub fn run(args: Vec<OsString>) -> ExitCode {
         }
     };
     let output = Output::new(cli.format(), environment.colour(cli.color));
-    match execute(cli.command, &output) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => output.print_failure(&error),
+    // A panic is caught here, so that it ends as a `Bug` and not as Rust's 101.
+    match bug::catch(|| execute(cli.command, &output)) {
+        Ok(Ok(())) => ExitCode::SUCCESS,
+        Ok(Err(error)) => output.print_failure(&Failure::Error(error)),
+        Err(message) => output.print_failure(&Failure::Panic(message)),
     }
 }
 
 fn execute(command: Command, output: &Output) -> Result<(), sluice_core::Error> {
+    #[cfg(debug_assertions)]
+    bug::panic_if_asked();
     let outcome = match command {
         Command::Id(args) => id::run(&args, output.format())?,
     };
