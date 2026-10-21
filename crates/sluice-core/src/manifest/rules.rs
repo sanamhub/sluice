@@ -94,11 +94,17 @@ pub(super) fn collision_key(path: &str) -> String {
     UniCase::unicode(path).to_folded_case().nfc().collect()
 }
 
-/// The checks that compare an entry with the ones before it. It holds the folded path of every
-/// entry accepted so far, so each new entry costs one hash lookup and the whole list is linear.
+/// The checks that compare an entry with the ones before it. It holds a hash of the folded path of
+/// every entry accepted so far, so each new entry costs one lookup and the whole list is linear.
+///
+/// The set holds the first 16 bytes of the BLAKE3 hash of each key, and not the key, because at
+/// 10,000,000 entries the keys alone would be hundreds of megabytes on top of the entries. Two
+/// equal keys always have equal hashes, so no collision is missed. A false alarm needs two
+/// different keys with the same 128 bits, about one chance in 2^82 at that many entries, and it
+/// would only reject the sender's own manifest, which no attacker gains from.
 #[derive(Default)]
 pub(super) struct Checker {
-    folded: HashSet<String>,
+    folded: HashSet<[u8; 16]>,
 }
 
 impl Checker {
@@ -113,11 +119,18 @@ impl Checker {
         }
         parent_is_a_folder(before, next)?;
         next.check()?;
-        if !self.folded.insert(collision_key(next.path.as_str())) {
+        let key = short_hash(&collision_key(next.path.as_str()));
+        if !self.folded.insert(key) {
             return Err(Fault::new(rule::COLLISION));
         }
         Ok(())
     }
+}
+
+fn short_hash(key: &str) -> [u8; 16] {
+    let mut short = [0; 16];
+    short.copy_from_slice(&blake3::hash(key.as_bytes()).as_bytes()[..16]);
+    short
 }
 
 /// Rule 8. The entries so far are sorted, and a parent sorts before its children, so a binary
