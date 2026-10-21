@@ -13,4 +13,7 @@ pages, progress display, `sluice doctor`, and `sluice mcp` (an MCP server over s
 **Notes:** the cold start budget is 30 ms. A command does no config parsing, store opening or network
 probing unless it needs them. Every transfer line shows whether it is direct or relayed.
 
-**Tests:** `insta` snapshots of output, `hyperfine` for cold start, and exit-code tests for scripts.
+**Tests:** `insta` snapshots of the help text, exit-code tests for scripts, and `cargo xtask cold-start` for
+the cold start budget. That command builds `sluice` in release, then times `sluice id` and
+`sluice --version`, 30 runs each after 3 warm-ups, and fails if a median is over 30 ms. CI runs it on
+Linux and Windows.

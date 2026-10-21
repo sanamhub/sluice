@@ -1,6 +1,7 @@
 //! The workspace's task runner. Run it as `cargo xtask <command>`, through the alias in
 //! `.cargo/config.toml`.
 
+mod cold_start;
 mod conformance;
 mod man;
 mod wasm_features;
@@ -23,6 +24,8 @@ enum Command {
     WasmHash,
     /// Run every test vector under `tests/vectors/` against this implementation
     Conformance,
+    /// Build `sluice` in release and fail if a median start takes over 30 ms
+    ColdStart,
     /// Write the man pages of `sluice` into a folder
     Man {
         /// The folder to write `sluice.1` and one page per subcommand into
@@ -34,6 +37,7 @@ fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::WasmHash => wasm_hash::run(),
         Command::Conformance => conformance::run(),
+        Command::ColdStart => cold_start::run(),
         Command::Man { dir } => man::run(&dir),
     }
 }

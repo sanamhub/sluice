@@ -18,10 +18,9 @@ serde_json = { workspace = true }
 sluice-core = { path = "../crates/sluice-core" }
 # The man pages are made from the same clap definition as the binary.
 sluice-cli = { path = "../crates/sluice-cli" }
-wasmparser = { workspace = true }
-
-[dev-dependencies]
+# A temporary home for the cold-start timing, and for the man page test.
 tempfile = { workspace = true }
+wasmparser = { workspace = true }
 
 [lints]
 workspace = true
