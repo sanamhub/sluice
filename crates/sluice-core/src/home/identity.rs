@@ -96,7 +96,10 @@ impl fmt::Debug for Identity {
 pub(super) fn load_or_create(dir: &Path) -> Result<Identity, Error> {
     let path = dir.join(KEY_FILE);
     match File::open(&path) {
-        Ok(file) => read_seed(file, &path).map(|seed| Identity::from_seed(&seed)),
+        Ok(file) => {
+            refuse_readable_by_others(&file, &path)?;
+            read_seed(file, &path).map(|seed| Identity::from_seed(&seed))
+        }
         Err(e) if e.kind() == ErrorKind::NotFound => create(dir),
         Err(e) => Err(storage("open", &path, e)),
     }
@@ -116,6 +119,37 @@ fn create(dir: &Path) -> Result<Identity, Error> {
     })?;
     write_atomic_secret(dir, KEY_FILE, &seed[..])?;
     Ok(Identity::from_seed(&seed))
+}
+
+/// Refuses a key that group or other can read, write or run. The mode comes from the handle that
+/// the key will be read through, so the file checked is the file read, even if the path is
+/// swapped in between. It only reads: loosening it was somebody's choice, and a file that sluice
+/// changed would hide that the key may have been exposed. [`rotate`] never reads the old key, so it
+/// is the way out that does not need the file fixed first.
+#[cfg(unix)]
+fn refuse_readable_by_others(file: &File, path: &Path) -> Result<(), Error> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = file
+        .metadata()
+        .map_err(|e| storage("inspect", path, e))?
+        .permissions()
+        .mode()
+        & 0o7777;
+    if mode & 0o077 == 0 {
+        return Ok(());
+    }
+    Err(Error::Policy(format!(
+        "{} has mode {mode:04o}, so other users may be able to read the identity key.          Run `chmod 600 {}` and try again",
+        path.display(),
+        path.display()
+    )))
+}
+
+/// Windows has no mode bits. A new key gets its own access list when it is made, and one that
+/// was loosened afterwards is not looked for, because that would need a security call on every load.
+#[cfg(not(unix))]
+fn refuse_readable_by_others(_file: &File, _path: &Path) -> Result<(), Error> {
+    Ok(())
 }
 
 /// The 32 bytes of the file. It reads one byte more than a key holds, to tell a file that is too

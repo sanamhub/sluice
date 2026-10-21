@@ -137,6 +137,11 @@ impl Home {
     /// is opened, and never replaced after that except by [`Home::rotate_identity`]. A key file
     /// of the wrong length is an [`Error::Storage`] and is left alone.
     ///
+    /// On Unix, an existing key that group or other has any access to is refused with
+    /// [`Error::Policy`] that names the path and its mode and says to run `chmod 600`. The file is
+    /// not changed. [`Home::rotate_identity`] does not read the old key, so it works on one like
+    /// that and leaves a key with mode 0600.
+    ///
     /// # Examples
     ///
     /// ```

@@ -10,6 +10,17 @@ use sluice_core::{Error, Home};
 /// Names the home that the child process of the lock tests holds. Only the parent sets it.
 const HOLD_ENV: &str = "SLUICE_TEST_HOLD_HOME";
 
+/// Puts `bytes` in the key file of `dir`, private as a key is made, which `identity` insists on.
+fn put_key(dir: &Path, bytes: &[u8]) {
+    let key = dir.join("identity.key");
+    fs::write(&key, bytes).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&key, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+}
+
 fn names(dir: &Path) -> Vec<String> {
     let mut names: Vec<String> = fs::read_dir(dir)
         .unwrap()
@@ -281,7 +292,7 @@ fn the_endpoint_id_is_the_public_key_of_the_seed_in_the_file() {
         .map(|i| u8::from_str_radix(&seed[2 * i..2 * i + 2], 16).unwrap())
         .collect();
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("identity.key"), &bytes).unwrap();
+    put_key(dir.path(), &bytes);
     let home = Home::open(dir.path()).unwrap();
     let identity = home.identity().unwrap();
     assert_eq!(identity.endpoint_id_hex(), public);
@@ -300,7 +311,7 @@ fn a_key_file_of_the_wrong_length_is_an_error_and_is_left_alone() {
     for len in [0usize, 1, 31, 33, 64, 4096] {
         let dir = tempfile::tempdir().unwrap();
         let content = vec![7u8; len];
-        fs::write(dir.path().join("identity.key"), &content).unwrap();
+        put_key(dir.path(), &content);
         let home = Home::open(dir.path()).unwrap();
         let Err(Error::Storage(message)) = home.identity() else {
             panic!("expected a storage error for {len} bytes");
@@ -321,7 +332,7 @@ fn a_key_file_of_the_wrong_length_is_an_error_and_is_left_alone() {
 fn an_error_about_a_key_never_holds_the_key() {
     let dir = tempfile::tempdir().unwrap();
     let content = b"SECRETSECRETSECRETSECRETSECRETSECRETSECRET".to_vec();
-    fs::write(dir.path().join("identity.key"), &content).unwrap();
+    put_key(dir.path(), &content);
     let home = Home::open(dir.path()).unwrap();
     let message = home.identity().unwrap_err().to_string();
     assert!(!message.contains("SECRET"), "{message}");
