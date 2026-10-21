@@ -64,6 +64,10 @@ Hello = {
 Unknown bits MUST be ignored, never treated as an error. A capability is usable only when both sides set
 it. A `proto_version` mismatch MUST close the connection with a clear reason string.
 
+A dialer MUST offer exactly one ALPN from this table per connection, so the order in which a listener
+registers or prefers them never decides which protocol runs. Static content and `sluice/1` use separate
+connections. A listener MAY close a connection that offers more than one.
+
 Wire-breaking changes bump the ALPN to `sluice/2`. Additive changes take a new capability bit.
 
 ---
@@ -156,6 +160,10 @@ Two rules are ours:
    through the application API or through a mounted filesystem.
 2. Chunk group size MAY be negotiated to 64 KiB for blobs above 8 GiB, to reduce outboard overhead from
    about 0.4% to about 0.1% of content size. The choice is recorded in the request.
+3. A provider MUST refuse every `iroh-blobs` push request. Content reaches a provider's store only
+   because its own user added it.
+4. A provider MUST apply one access policy to `get`, `get_many` and `observe`. A request that one of
+   them would refuse, the other two refuse as well, so no request type is a way around the policy.
 
 ---
 
@@ -176,6 +184,11 @@ LogClose = { final_root: [u8;32], total_len: u64, closed: u64, sig: [u8;64] }
 Rules:
 
 - `seq` starts at 0 and increases by exactly 1. A gap MUST abort the stream.
+- Two validly signed frames with the same `seq` and different `LogEntry` encodings mean the sender
+  signed two histories, through a leaked key or a bug. A receiver MUST abort the stream as a
+  verification failure that names the `seq`, MUST keep only the segments it verified before that `seq`,
+  and MUST NOT accept an entry at or after it. A frame byte-identical to one already accepted is a
+  repeat, not a fork, and MAY be dropped.
 - `prev_entry_hash` is BLAKE3 of the previous `LogEntry` encoding. For `seq = 0` it is BLAKE3 of the
   `LogOpen` encoding, which binds the chain to the stream identity.
 - `sig` covers the `LogEntry` encoding, under `sender_key`. A receiver MUST verify every signature.
@@ -235,13 +248,12 @@ Entry = {
   mtime_ms: u64,
   mode: u32,                   // Unix mode bits; 0 when unknown
   loc: Loc,
+  link_target: Option<String>, // present when kind is Symlink, absent otherwise
 }
 
 Loc = Blob { root: [u8;32] }
     | Packed { pack_index: u32, offset: u64, len: u64 }
     | None                     // Dir and Symlink
-
-Symlink entries carry the target in `path`'s sibling field `link_target: String`.
 ```
 
 Rules:
@@ -251,7 +263,21 @@ Rules:
 - `mtime_ms` is restored by default. Implementations MUST offer a way to skip it.
 - `mode` is applied on Unix. On Windows only the read-only bit is honored.
 - **Symlinks are recorded and never followed during send.** A receiver MUST NOT create a symlink unless
-  explicitly enabled, and MUST reject any target that escapes the output root after normalization.
+  explicitly enabled.
+- `link_target` is present exactly when `kind` is Symlink. A receiver MUST reject an entry where it is
+  missing on a Symlink or present on anything else.
+- A receiver MUST reject a `link_target` when:
+
+  1. it is empty, or longer than 4096 bytes in UTF-8
+  2. it begins with `/`, or ends with `/`, so an absolute target is never accepted
+  3. a component is empty or `.`. A `..` component is allowed, within rule 5
+  4. it breaks path rule 2, 5, 6, 7 or 8 below, applied the same way. Rule 6 rejects `\` and `:`, so
+     `C:\x` and `\\server\share` are rejected too
+  5. resolved from the folder that holds the link, one component at a time, a `..` would step above
+     the output root. So `a/link -> ../b` is accepted and `link -> ../x` is rejected
+
+  These rules look at the text only. A target that passes them can still reach another symlink on
+  disk, which is the writer's concern, as for paths.
 - Hard links are not preserved. Implementations MUST document this.
 - A receiver MUST reject a manifest path, on every platform, when:
 
@@ -357,9 +383,5 @@ implementation that passes these vectors is compatible with ours.
 6. Settle section 5 rule 2. `iroh-blobs` fixes its block size at 16 KiB, so a 64 KiB chunk group cannot
    be negotiated while static content goes through it. Either the rule goes, or the block size becomes
    configurable upstream.
-7. Add a rule for two validly signed live frames with the same `seq`, with vectors in `live/`.
-8. Add a rule that providers reject `iroh-blobs` push and apply one access policy to `get`, `get_many`
-   and `observe`.
-9. State the order in which `sluice/1` and the `iroh-blobs` ALPN are registered, since that order
-   decides negotiation.
-10. Give the symlink target a field in `Entry` instead of describing it in prose.
+7. Add vectors to `live/` for the repeated-`seq` rule in section 6. The rule is set; no implementation
+   reads live frames yet.
