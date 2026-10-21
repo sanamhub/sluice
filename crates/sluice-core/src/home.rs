@@ -1,12 +1,13 @@
-//! The store's home on disk: the folder, its layout version, and the places the later parts
-//! keep their state. Nothing here reads a config or touches the network, so opening a home is cheap.
+//! The store's home on disk: the folder, its layout version, and the one-writer lock. Nothing here reads a config or touches the network, so opening a home is cheap.
 
 mod atomic;
 mod folder;
 mod layout;
+mod lock;
 
 use std::env;
 use std::ffi::OsString;
+use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -16,10 +17,13 @@ use crate::Error;
 ///
 /// ```text
 /// VERSION        layout version, as decimal text and a newline
+/// lock           locked while a process uses the home
+/// lock.pid       the pid of that process, for the message of a refused open
 /// blobs/  db/  logs/
 /// ```
 ///
-/// Opening a home does not read a config or open a store, so it is cheap.
+/// A `Home` value holds the lock on its folder, so at most one process has a given home open. The
+/// lock is released when the value drops, or when the process ends.
 ///
 /// # Examples
 ///
@@ -30,12 +34,17 @@ use crate::Error;
 /// let home = Home::open(dir.path())?;
 /// assert!(dir.path().join("blobs").is_dir());
 /// assert_eq!(std::fs::read_to_string(dir.path().join("VERSION"))?, "1\n");
-/// assert_eq!(home.path(), dir.path());
+/// // A second open of the same folder is refused while the first is alive.
+/// assert!(Home::open(dir.path()).is_err());
+/// drop(home);
+/// assert!(Home::open(dir.path()).is_ok());
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[derive(Debug)]
 pub struct Home {
     path: PathBuf,
+    // Never read: it is held so the lock stays.
+    _lock: File,
 }
 
 impl Home {
@@ -61,11 +70,14 @@ impl Home {
     }
 
     /// Opens the home at `path`, creating it and its `blobs`, `db` and `logs` folders if they are
-    /// missing, with mode 0700 on Unix.
+    /// missing, with mode 0700 on Unix, and takes the exclusive lock on it.
     ///
     /// - A home with a newer layout version than this build reads fails with [`Error::Policy`]
     ///   naming both versions, before anything is created or written.
     /// - A `VERSION` file that does not hold a version fails with [`Error::Storage`].
+    /// - If another live process holds the lock, it fails with [`Error::Policy`] naming that
+    ///   process where the platform lets the id be read. A lock left by a process that died is not
+    ///   held by anyone, so it opens.
     /// - Any other failure of the filesystem is [`Error::Storage`] and names the path.
     ///
     /// # Examples
@@ -85,9 +97,13 @@ impl Home {
             layout::refuse_newer(found)?;
         }
         layout::create_folders(path)?;
+        let lock = lock::take(path)?;
+        // Again under the lock, which is the look that counts: the first one was only to refuse
+        // early, and another process can have migrated the home in between.
         layout::settle(path)?;
         Ok(Self {
             path: path.to_path_buf(),
+            _lock: lock,
         })
     }
 
