@@ -1,0 +1,30 @@
+---
+source: crates/sluice-cli/tests/help.rs
+expression: "help(&[\"id\", \"--help\"])"
+---
+Print the endpoint id of this machine's identity, or replace the identity
+
+Usage: sluice id [OPTIONS]
+
+Options:
+      --json
+          Print JSON, one object per line, instead of text. A failure is then a JSON line on stderr
+
+      --rotate
+          Replace the identity with a new one, after asking
+
+      --color <WHEN>
+          When to colour help, errors and other output. NO_COLOR set to anything turns it off
+
+          Possible values:
+          - auto:   Colour a stream only when it is a terminal
+          - always: Colour always, unless `NO_COLOR` is set
+          - never:  Never colour
+          
+          [default: auto]
+
+      --yes
+          Do not ask before rotating
+
+  -h, --help
+          Print help (see a summary with '-h')

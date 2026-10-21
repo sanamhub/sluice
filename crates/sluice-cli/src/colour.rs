@@ -100,3 +100,6 @@ pub fn peek(args: &[OsString]) -> ColorWhen {
     }
     found
 }
+
+#[cfg(test)]
+mod tests;

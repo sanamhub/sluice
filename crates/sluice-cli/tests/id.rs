@@ -1,29 +1,10 @@
 //! `sluice id` through the built binary, with a home in a temporary folder.
 
 use std::fs;
-use std::path::Path;
 
-use assert_cmd::Command;
+mod common;
 
-/// `sluice` with `SLUICE_HOME` set to `home`. A test never touches the user's real home.
-fn sluice(home: &Path) -> Command {
-    let mut command = Command::cargo_bin("sluice").unwrap();
-    command.env("SLUICE_HOME", home);
-    command
-}
-
-fn stdout_of(command: &mut Command) -> String {
-    let output = command.assert().success().get_output().stdout.clone();
-    String::from_utf8(output).unwrap()
-}
-
-fn stderr_of(assert: &assert_cmd::assert::Assert) -> String {
-    String::from_utf8(assert.get_output().stderr.clone()).unwrap()
-}
-
-fn is_endpoint_id(text: &str) -> bool {
-    text.len() == 64 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-}
+use common::{is_endpoint_id, sluice, stderr_text, stdout_of};
 
 #[test]
 fn the_first_run_makes_the_key_and_the_second_prints_the_same_id() {
@@ -59,7 +40,7 @@ fn rotate_without_a_terminal_and_without_yes_exits_6_and_changes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let before = stdout_of(sluice(dir.path()).arg("id"));
     let assert = sluice(dir.path()).args(["id", "--rotate"]).assert().code(6);
-    assert!(stderr_of(&assert).contains("--yes"));
+    assert!(stderr_text(&assert).contains("--yes"));
     assert_eq!(stdout_of(sluice(dir.path()).arg("id")), before);
 }
 
@@ -76,7 +57,7 @@ fn a_home_with_a_newer_layout_exits_6_and_is_not_written_to() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("VERSION"), "2\n").unwrap();
     let assert = sluice(dir.path()).arg("id").assert().code(6);
-    assert!(stderr_of(&assert).contains('2'));
+    assert!(stderr_text(&assert).contains('2'));
     let mut names: Vec<_> = fs::read_dir(dir.path())
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
@@ -101,7 +82,7 @@ fn a_key_at_mode_0644_exits_6_and_is_left_as_it_is() {
     let key = dir.path().join("identity.key");
     fs::set_permissions(&key, fs::Permissions::from_mode(0o644)).unwrap();
     let assert = sluice(dir.path()).arg("id").assert().code(6);
-    let stderr = stderr_of(&assert);
+    let stderr = stderr_text(&assert);
     assert!(stderr.contains("chmod 600"));
     assert!(!stderr.contains("  "), "a run of spaces in: {stderr}");
     let mode = fs::metadata(&key).unwrap().permissions().mode() & 0o7777;

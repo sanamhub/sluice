@@ -22,6 +22,7 @@ sluice-core = { path = "../sluice-core" }
 
 [dev-dependencies]
 assert_cmd.workspace = true
+insta.workspace = true
 tempfile.workspace = true
 
 [lints]
