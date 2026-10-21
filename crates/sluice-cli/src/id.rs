@@ -42,8 +42,8 @@ fn confirm_rotation(yes: bool, format: Format) -> Result<(), Error> {
     }
     if format == Format::Json {
         return Err(Error::Policy(
-            "--rotate asks before it replaces the identity, and with --json there is no one to ask. \
-             Pass --yes to rotate without asking"
+            "--rotate asks before it replaces the identity, and with --json there is no one to \
+             ask. Pass --yes to rotate without asking"
                 .to_string(),
         ));
     }
