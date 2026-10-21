@@ -303,10 +303,10 @@ is the root `iroh-blobs` gives it as a raw blob.
 
 **Decoding.** A receiver MUST reject a manifest when:
 
-1. it is longer than the byte limit, 2 GiB unless the receiver sets another. This is checked before
-   any byte is read. A receiver that is told the size of the manifest blob before it fetches it
-   applies this rule to that size and fetches nothing
-2. its entry count is over the entry limit, 10,000,000 unless the receiver sets another. This is
+1. it is longer than the byte limit, 256 MiB unless the receiver sets another. This is checked
+   before any byte is read. A receiver that is told the size of the manifest blob before it fetches
+   it applies this rule to that size and fetches nothing
+2. its entry count is over the entry limit, 1,000,000 unless the receiver sets another. This is
    checked before the first entry is read, and before any memory is set aside for entries
 3. `version` is not 1. Nothing after it is read
 4. a varint is longer than the shortest one for its value, or does not fit its integer

@@ -31,26 +31,26 @@ pub use entry::{Entry, Kind, Loc, PackRef};
 /// use sluice_core::manifest::Limits;
 ///
 /// let limits = Limits::default();
-/// assert_eq!(limits.max_bytes, 2 << 30);
-/// assert_eq!(limits.max_entries, 10_000_000);
+/// assert_eq!(limits.max_bytes, 256 << 20);
+/// assert_eq!(limits.max_entries, 1_000_000);
 ///
 /// // A caller that knows the size of the manifest blob refuses it before fetching it.
 /// assert!(limits.check_bytes(1 << 20).is_ok());
-/// assert!(limits.check_bytes((2 << 30) + 1).is_err());
+/// assert!(limits.check_bytes((256 << 20) + 1).is_err());
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
-    /// The most bytes a manifest may have. The default is 2 GiB.
+    /// The most bytes a manifest may have. The default is 256 MiB.
     pub max_bytes: u64,
-    /// The most entries a manifest may list. The default is 10,000,000.
+    /// The most entries a manifest may list. The default is 1,000,000.
     pub max_entries: u64,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_bytes: 2 << 30,
-            max_entries: 10_000_000,
+            max_bytes: 256 << 20,
+            max_entries: 1_000_000,
         }
     }
 }

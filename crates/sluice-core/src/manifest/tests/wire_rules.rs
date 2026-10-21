@@ -23,11 +23,11 @@ fn rule_1_the_byte_limit_is_checked_before_anything_is_read() {
 }
 
 #[test]
-fn rule_1_the_default_is_2_gib() {
+fn rule_1_the_default_is_256_mib() {
     let limits = Limits::default();
-    assert_eq!(limits.max_bytes, 2_147_483_648);
-    assert!(limits.check_bytes(2_147_483_648).is_ok());
-    assert!(limits.check_bytes(2_147_483_649).is_err());
+    assert_eq!(limits.max_bytes, 268_435_456);
+    assert!(limits.check_bytes(268_435_456).is_ok());
+    assert!(limits.check_bytes(268_435_457).is_err());
 }
 
 #[test]
@@ -48,15 +48,15 @@ fn rule_2_the_entry_limit_is_checked_before_the_first_entry() {
 }
 
 #[test]
-fn rule_2_the_default_is_10_million_and_a_huge_count_reserves_nothing() {
-    assert_eq!(Limits::default().max_entries, 10_000_000);
-    let over = [varint(1), varint(10_000_001)].concat();
+fn rule_2_the_default_is_1_million_and_a_huge_count_reserves_nothing() {
+    assert_eq!(Limits::default().max_entries, 1_000_000);
+    let over = [varint(1), varint(1_000_001)].concat();
     assert_eq!(broken(&over), Some((2, None)));
     let max = [varint(1), varint(u64::MAX)].concat();
     assert_eq!(broken(&max), Some((2, None)));
     // Under the limit and over what the bytes can hold: the manifest ends early. This must not
-    // reserve room for 10 million entries first.
-    let short = [varint(1), varint(10_000_000), vec![0; 100]].concat();
+    // reserve room for a million entries first.
+    let short = [varint(1), varint(1_000_000), vec![0; 100]].concat();
     assert_eq!(broken(&short), Some((6, None)));
 }
 

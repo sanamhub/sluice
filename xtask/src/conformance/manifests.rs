@@ -1,6 +1,6 @@
 //! The `manifests` vectors. A valid case gives the manifest bytes, the fields they decode to and
 //! the root. An invalid case only has to fail. A case can carry its own limits, so that the two
-//! limits are tested without a 2 GiB vector.
+//! limits are tested without a 256 MiB vector.
 
 use std::path::Path;
 

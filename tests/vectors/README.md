@@ -190,10 +190,10 @@ report.
 
 Some points a reader cannot see from the rules alone:
 
-- The limits of rule 1 and 2 are 2 GiB and 10,000,000 entries, and no vector is that big. A case
+- The limits of rule 1 and 2 are 256 MiB and 1,000,000 entries, and no vector is that big. A case
   with a `limits` object tests the same check with small numbers. Two cases with no `limits` object
-  use the default entry limit: a count of 10,000,001 is rejected by rule 2, and a count of
-  10,000,000 with a few bytes behind it by rule 6, because the bytes cannot hold it.
+  use the default entry limit: a count of 1,000,001 is rejected by rule 2, and a count of 1,000,000
+  with a few bytes behind it by rule 6, because the bytes cannot hold it.
 - The byte limit is checked first. A case of garbage bytes over `max_bytes` breaks rule 1, whatever
   the garbage is.
 - The folder that was sent is not an entry, and every folder inside it is. `a/b` needs an entry `a`

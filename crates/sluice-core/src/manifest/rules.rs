@@ -97,11 +97,12 @@ pub(super) fn collision_key(path: &str) -> String {
 /// The checks that compare an entry with the ones before it. It holds a hash of the folded path of
 /// every entry accepted so far, so each new entry costs one lookup and the whole list is linear.
 ///
-/// The set holds the first 16 bytes of the BLAKE3 hash of each key, and not the key, because at
-/// 10,000,000 entries the keys alone would be hundreds of megabytes on top of the entries. Two
-/// equal keys always have equal hashes, so no collision is missed. A false alarm needs two
-/// different keys with the same 128 bits, about one chance in 2^82 at that many entries, and it
-/// would only reject the sender's own manifest, which no attacker gains from.
+/// The set holds the first 16 bytes of the BLAKE3 hash of each key, and not the key, because the
+/// keys themselves cost about 100 MiB more per million entries (measured on a decode of 1,000,000
+/// realistic paths). Two equal keys always have equal hashes, so no collision is missed. A false
+/// alarm needs two different keys with the same 128 bits, about one chance in 2^89 at the default
+/// limit of 1,000,000 entries, and it would only reject the sender's own manifest, which no
+/// attacker gains from.
 #[derive(Default)]
 pub(super) struct Checker {
     folded: HashSet<[u8; 16]>,
