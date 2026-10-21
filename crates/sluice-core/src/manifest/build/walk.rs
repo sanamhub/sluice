@@ -87,14 +87,21 @@ struct Walker {
 
 impl Walker {
     fn read_folder(&mut self, folder: &Folder) {
+        // The folder that was sent has no name of its own, and a list shown to the user would
+        // have a blank line for it.
+        let shown = if folder.shown.is_empty() {
+            "."
+        } else {
+            &folder.shown
+        };
         let entries = match fs::read_dir(&folder.disk) {
             Ok(entries) => entries,
-            Err(e) => return self.problem(folder.shown.clone(), Reason::Unreadable(e.kind())),
+            Err(e) => return self.problem(shown.to_string(), Reason::Unreadable(e.kind())),
         };
         for entry in entries {
             match entry {
                 Ok(entry) => self.visit(folder, &entry),
-                Err(e) => self.problem(folder.shown.clone(), Reason::Unreadable(e.kind())),
+                Err(e) => self.problem(shown.to_string(), Reason::Unreadable(e.kind())),
             }
         }
     }
@@ -198,7 +205,7 @@ impl Walker {
         let Some(text) = target.to_str() else {
             return self.skip(shown, Reason::LinkTargetNotUtf8);
         };
-        let target = match LinkTarget::parse_rule(&portable(text)) {
+        let target = match LinkTarget::parse_rule(&portable(text, cfg!(windows))) {
             Ok(target) if target.stays_inside(&path) => target,
             Ok(_) => return self.skip(shown, Reason::LinkTarget(5)),
             Err(rule) => return self.skip(shown, Reason::LinkTarget(rule)),
@@ -222,12 +229,12 @@ fn join(folder: &str, name: &str) -> String {
 
 /// A Windows link points with `\`, which is its separator, so it is the `/` of a manifest. On
 /// Unix `\` is a character of a name, and a target that holds one is left for rule 4 to refuse.
-#[cfg(windows)]
-fn portable(target: &str) -> String {
-    target.replace('\\', "/")
-}
-
-#[cfg(not(windows))]
-fn portable(target: &str) -> String {
-    target.to_string()
+/// The platform is an argument so that both cases are tested on any machine, and a Windows one
+/// needs no symlink privilege for it.
+pub(super) fn portable(target: &str, windows: bool) -> String {
+    if windows {
+        target.replace('\\', "/")
+    } else {
+        target.to_string()
+    }
 }

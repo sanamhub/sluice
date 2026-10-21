@@ -472,6 +472,7 @@ dependencies = [
  "blake3",
  "ed25519-dalek",
  "getrandom",
+ "libc",
  "postcard",
  "serde",
  "thiserror",

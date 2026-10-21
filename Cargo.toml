@@ -56,6 +56,10 @@ n0-future = "0.3.2"
 # Earlier releases leak session secrets through Debug. prefer-post-quantum ranks X25519MLKEM768
 # first. Without it the group is offered but X25519 wins, and the handshake silently downgrades.
 rustls = { version = "0.23.46", default-features = false, features = ["std", "aws-lc-rs", "prefer-post-quantum"] }
+# `O_NOFOLLOW` and `O_NONBLOCK` for the open of a file the manifest builder hashes, which std does not
+# name. Unix only. The release Cargo.lock already resolves through getrandom and mio, so the tree gets no
+# second copy.
+libc = "0.2.191"
 # Safe getrusage for the CPU time fields. Unix only; rustix has no getrusage.
 nix = { version = "0.31", default-features = false, features = ["resource"] }
 # Self-signed certificate for the rendezvous test. Already resolved through iroh-relay's server feature.
