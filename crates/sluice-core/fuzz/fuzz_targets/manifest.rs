@@ -78,10 +78,7 @@ fn unpack(manifest: &Manifest, index: u32, cuts: &[u8]) {
     if size > FULL {
         return;
     }
-    for run in unpacker.finish().expect("the whole pack was fed") {
-        assert!(run.bytes.is_empty() && run.ends && !ended[run.entry]);
-        ended[run.entry] = true;
-    }
+    unpacker.finish().expect("the whole pack was fed");
     for (at, entry) in manifest.entries().iter().enumerate() {
         if let Loc::Packed { pack_index, len, .. } = entry.loc {
             if pack_index == index {

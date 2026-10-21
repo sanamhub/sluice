@@ -142,8 +142,13 @@ impl Packs {
         if !matches!(entry.loc, Loc::Packed { .. }) {
             return entry;
         }
-        if self.open.is_some_and(|(size, _)| size > 0) && attrs.spot.is_multiple_of(3) {
+        if self.open.is_some() && attrs.spot.is_multiple_of(3) {
             self.close();
+        }
+        // Only a file with bytes opens a pack, because a pack of no bytes breaks rule 16.
+        if entry.size == 0 && self.open.is_none() {
+            entry.loc = Loc::Blob { root: attrs.root };
+            return entry;
         }
         let (size, _) = self.open.get_or_insert((0, attrs.root));
         entry.loc = Loc::Packed {

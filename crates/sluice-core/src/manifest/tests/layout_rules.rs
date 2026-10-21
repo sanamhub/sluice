@@ -92,8 +92,15 @@ fn rule_4_no_pack_is_left_over() {
 fn a_packed_file_of_no_bytes_at_its_place_breaks_nothing() {
     let entries = vec![at("a", 0, 0, 0), at("b", 0, 0, 5), at("c", 0, 5, 0)];
     assert_eq!(verdict(entries, &[5]), None);
-    // A pack of only such files has no bytes. The sender never makes one, and it breaks no rule.
-    assert_eq!(verdict(vec![at("a", 0, 0, 0)], &[0]), None);
+}
+
+#[test]
+fn rule_5_no_pack_is_empty() {
+    // The smallest pack there can be, and a pack of only files of no bytes, first and later.
+    assert_eq!(verdict(vec![at("a", 0, 0, 1)], &[1]), None);
+    assert_eq!(verdict(vec![at("a", 0, 0, 0)], &[0]), layout(5));
+    let later = vec![at("a", 0, 0, 5), at("b", 1, 0, 0), at("c", 1, 0, 0)];
+    assert_eq!(verdict(later, &[5, 0]), layout(5));
 }
 
 #[test]

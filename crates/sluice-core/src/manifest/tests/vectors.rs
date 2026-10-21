@@ -108,7 +108,7 @@ fn every_rejected_case_breaks_the_rule_it_names_and_every_rule_has_a_case() {
             "no case for link target rule {sub}"
         );
     }
-    for sub in 1..=4u8 {
+    for sub in 1..=5u8 {
         assert!(
             rules.contains(&(16, Some(sub))),
             "no case for pack layout rule {sub}"

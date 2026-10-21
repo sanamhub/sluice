@@ -64,7 +64,7 @@ pub struct Run {
 ///     ]
 /// );
 /// assert_eq!(unpacker.feed(b"rld")?, [Run { entry: 1, bytes: 0..3, ends: true }]);
-/// assert!(unpacker.finish()?.is_empty());
+/// unpacker.finish()?;
 /// # Ok::<(), sluice_core::Error>(())
 /// ```
 #[derive(Debug)]
@@ -173,8 +173,8 @@ impl Unpacker {
         Ok(runs)
     }
 
-    /// Ends the pack. It returns the files of no bytes that no piece reached, which happens only
-    /// for a pack of no bytes.
+    /// Ends the pack. Every file has ended by then: rule 16 gives a pack at least one byte, and
+    /// the piece with the last byte also ends the files of no bytes after it.
     ///
     /// # Errors
     ///
@@ -183,16 +183,14 @@ impl Unpacker {
     /// # Examples
     ///
     /// See [`Unpacker`].
-    pub fn finish(mut self) -> Result<Vec<Run>, Error> {
+    pub fn finish(self) -> Result<(), Error> {
         if self.given != self.size {
             return Err(Error::Verify(format!(
                 "a pack of {} bytes ended after {}",
                 self.size, self.given
             )));
         }
-        let mut runs = Vec::new();
-        self.empty_files(0, &mut runs);
-        Ok(runs)
+        Ok(())
     }
 
     /// The files of no bytes that start where the pack has got to. They are complete already.

@@ -329,21 +329,24 @@ is the root `iroh-blobs` gives it as a raw blob.
     its `size`, or an `offset` plus `len` that is past the `size` of its pack. The sum MUST NOT wrap
 15. `mode` is above `0o7777`
 16. the packs are not laid out end to end, so that every byte of a pack belongs to exactly one
-    file. It is checked after rule 14, and it breaks one of these pack layout rules, taking the
-    `Packed` entries in manifest order:
+    file and every pack has a byte. It is checked after rule 14, and it breaks one of these pack
+    layout rules, taking the `Packed` entries in manifest order:
     1. the first has `pack_index` 0, and each later one has the `pack_index` of the one before it
        or that number plus one
     2. the first entry of a pack has `offset` 0, and each later one in the same pack starts where
        the one before it ends: its `offset` is the `offset` plus `len` of that one
     3. the last entry of each pack ends at that pack's `size`
     4. the number of packs is the last `pack_index` plus one, or 0 when no entry is `Packed`
+    5. every pack has a `size` of at least 1. A pack of 0 bytes could hold only files of no bytes,
+       which need no fetch
 
 A decoder reads from front to back and MAY stop at the first rule it finds broken. A manifest that
 breaks two rules is rejected either way, and the number a decoder reports for it is its own. The
 vectors in `tests/vectors/manifests/` break one rule each.
 
 Rule 16 does not ask that the sender packed as section 9 says. A small file that is a `Blob` of its
-own, or a `Packed` entry of no bytes at its place in the layout, breaks no rule.
+own breaks no rule, and nor does a `Packed` entry of no bytes at its place in a pack that has
+bytes.
 
 **Rejected manifests.** A decoder MUST NOT write a rejected manifest, or any path or link target in
 it, to a log, an error message or a crash report. The error names the rule, and the path rule,

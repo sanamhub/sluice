@@ -210,7 +210,8 @@ Some points a reader cannot see from the rules alone:
 - Rule 16 is about the packs as a whole, so a manifest breaks it only through its pack list and the
   `Packed` entries together. A case that breaks rule 14 also breaks rule 16 when the range runs past
   its pack, and names rule 14, which is checked first. A small file that is a blob of its own, and a
-  `Packed` entry of no bytes at its place in the layout, are valid.
+  `Packed` entry of no bytes at its place in a pack that has bytes, are valid. A pack of 0 bytes
+  breaks pack layout rule 5, even when the files in it are all of no bytes.
 
 The files are `valid.json`, `limits.json`, `invalid-wire.json` (rules 3 to 6) and
 `invalid-entries.json` (rules 7 to 16). The bytes and the roots were written by a second encoder in

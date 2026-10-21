@@ -46,7 +46,7 @@ fn a_real_folder_packs_its_small_files_and_unpacks_to_the_same_bytes() {
             got[run.entry].extend_from_slice(&piece[run.bytes]);
         }
     }
-    assert!(unpacker.finish().expect("the whole pack").is_empty());
+    unpacker.finish().expect("the whole pack");
     for (at, entry) in built.manifest.entries().iter().enumerate() {
         match entry.loc {
             Loc::Packed { .. } => {

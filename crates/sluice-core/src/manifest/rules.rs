@@ -183,8 +183,8 @@ fn each_packed_entry_fits(entries: &[Entry], packs: &[PackRef]) -> Result<(), Fa
 }
 
 /// Rule 16: the packed entries, in manifest order, fill the packs one after another with no gap
-/// and no overlap, and no pack is left over. Every byte of a pack then has exactly one file, so a
-/// receiver knows where each byte goes before it fetches any.
+/// and no overlap, no pack is left over, and no pack is empty. Every byte of a pack then has
+/// exactly one file, so a receiver knows where each byte goes before it fetches any.
 fn packs_are_laid_out_end_to_end(entries: &[Entry], packs: &[PackRef]) -> Result<(), Fault> {
     let fault = |sub| Fault::within(rule::LAYOUT, sub);
     // Rule 14 ran first, so every index names a pack and no `offset + len` wraps.
@@ -232,6 +232,11 @@ fn packs_are_laid_out_end_to_end(entries: &[Entry], packs: &[PackRef]) -> Result
     }
     if packs.len() as u64 != u64::from(last) + 1 {
         return Err(fault(4));
+    }
+    // A pack of no bytes holds only files of no bytes, which need no fetch. It would be a blob
+    // request that carries nothing, and a second layout of the same files.
+    if packs.iter().any(|pack| pack.size == 0) {
+        return Err(fault(5));
     }
     Ok(())
 }

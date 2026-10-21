@@ -159,7 +159,7 @@ fn unpack(manifest: &Manifest, index: u32, pack: &[u8], cuts: &[usize]) -> Vec<(
         take(unpacker.feed(piece).expect("within the pack"), piece);
         start = cut;
     }
-    take(unpacker.finish().expect("the whole pack"), &[]);
+    unpacker.finish().expect("the whole pack");
     assert!(
         files.iter().all(|(_, _, ended)| *ended),
         "a file never ended"
@@ -224,7 +224,7 @@ fn a_packed_file_of_no_bytes_is_a_run_of_its_own_wherever_it_sits() {
         .map(|r| (r.entry, r.bytes.len(), r.ends))
         .collect();
     assert_eq!(shape, [(0, 0, true), (1, 3, true), (2, 0, true)]);
-    assert!(unpacker.finish().expect("complete").is_empty());
+    unpacker.finish().expect("complete");
 }
 
 #[test]
