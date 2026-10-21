@@ -26,7 +26,16 @@ fn the_tables_are_those_of_unicode_18() {
     // accepted here and rejected by a receiver on the right tables.
     assert_eq!(collision_key("\u{a7ce}"), "\u{a7cf}");
     assert_eq!(collision_key("\u{a7cb}"), "\u{264}");
-    assert_eq!(unicode_normalization::UNICODE_VERSION, (18, 0, 0));
+}
+
+#[test]
+fn the_nfc_tables_are_those_of_unicode_18() {
+    assert_eq!(
+        unicode_normalization::UNICODE_VERSION,
+        (18, 0, 0),
+        "unicode-normalization moved to other tables. They decide which paths are NFC (path \
+         rule 2), so a change of version is a change of SPEC.md section 8, with new vectors"
+    );
 }
 
 #[test]

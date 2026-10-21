@@ -85,8 +85,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # that unicode-normalization implements, and it has no dependency. Pinned exactly: a release with
 # newer tables would change which manifests a receiver accepts, so it has to be a decision.
 unicase = "=2.10.0"
-# The NFC check on manifest paths (SPEC.md section 8, rule 2). Its only dependency is tinyvec.
-unicode-normalization = "0.1.26"
+# The NFC check on manifest paths (SPEC.md section 8, rule 2) and the NFC after case folding. Its only
+# dependency is tinyvec. 0.1.26 has the tables of Unicode 18.0.0, which section 8 names. Pinned exactly,
+# as unicase is: a release with newer tables would change which paths a receiver accepts, so it has to
+# be a decision and a change of SPEC.md.
+unicode-normalization = "=0.1.26"
 # Rule 7 of the ticket decoder: a relay URL is checked against the WHATWG URL standard, which iroh's
 # RelayUrl parses with, so a ticket that decodes is one iroh accepts. The release Cargo.lock already
 # resolves it. The default `std` feature is all it has.
