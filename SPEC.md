@@ -564,7 +564,9 @@ implementation that passes these vectors is compatible with ours.
 
 1. Confirm the exact `iroh-blobs` protocol version to pin, and whether its pre-1.0 ALPN change has landed.
 2. Measure the segment size curve. 8 MiB is a guess trading latency against signature overhead.
-3. Measure the pack size curve. 64 MiB and 1 MiB are guesses.
+3. Measure the pack constants of section 9. They are fixed so that one folder gives one root, but the
+   values are not measured. A change breaks no receiver, which does not check the algorithm, but a
+   folder sent before and after it no longer dedups.
 4. Decide whether `zstd` applies per chunk group or per pack. Per pack is simpler and probably enough.
 5. Decide whether the tail-serving rule needs an explicit provisional-length field on the wire.
 6. Settle section 5 rule 2. `iroh-blobs` fixes its block size at 16 KiB, so a 64 KiB chunk group cannot
