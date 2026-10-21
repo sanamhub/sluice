@@ -78,6 +78,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # The NFC check on manifest paths (SPEC.md section 8, rule 2). Its only dependency is tinyvec.
 unicode-normalization = "0.1.26"
+# Rule 7 of the ticket decoder: a relay URL is checked against the WHATWG URL standard, which iroh's
+# RelayUrl parses with, so a ticket that decodes is one iroh accepts. The release Cargo.lock already
+# resolves it. The default `std` feature is all it has.
+url = "2.5.8"
 # Wipes the buffers that held a secret key. ed25519-dalek already brings it into the tree.
 zeroize = { version = "1", default-features = false }
 # Pinned exactly: the version has to equal the wasm-bindgen CLI that the wasm-hash workflow installs

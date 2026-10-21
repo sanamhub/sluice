@@ -12,6 +12,7 @@ postcard.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 unicode-normalization.workspace = true
+url.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]

@@ -101,3 +101,11 @@ pub(super) fn refusal(ticket_text: &str) -> String {
 pub(super) fn refusal_of(bytes: &[u8]) -> String {
     refusal(&text(bytes))
 }
+
+/// The bytes of a present `relay_url`: the tag, the length and the text.
+pub(super) fn relay_bytes(relay: &str) -> Vec<u8> {
+    let mut out = vec![1];
+    out.extend(varint(relay.len() as u64));
+    out.extend(relay.as_bytes());
+    out
+}

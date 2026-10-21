@@ -23,28 +23,11 @@ fn the_largest_ticket_that_fits_is_built_and_one_more_address_is_not() {
 }
 
 #[test]
-fn a_relay_url_of_any_non_empty_text_is_kept() {
-    for relay in [
-        "r",
-        "https://relay.example.com./",
-        "\u{e9}\u{65e5}",
-        " ",
-        "\u{0}",
-    ] {
-        let ticket = Ticket::new(ID, vec![], Some(relay.into()), None, live_body()).unwrap();
-        assert_eq!(
-            Ticket::decode(&ticket.encode()).unwrap().relay_url(),
-            Some(relay)
-        );
-    }
-}
-
-#[test]
 fn debug_shows_the_kind_and_the_endpoint_id_and_nothing_else() {
     let ticket = Ticket::new(
         [0xab; 32],
         vec![addr("192.0.2.77:51515")],
-        Some("https://relay.secret.example".into()),
+        Some("https://relay.secret.example/".into()),
         Some(1_234_567_890_123),
         Body::Static {
             root: [0xcd; 32],
@@ -102,18 +85,33 @@ fn a_ticket_expires_at_its_expiry_and_one_without_never_does() {
 }
 
 #[test]
+fn the_expiry_boundary_is_the_one_of_a_jwt_exp() {
+    // A real date, not a small number, so a test that passes on 1000 is not luck.
+    let expiry = 1_800_000_000_000;
+    let ticket = Ticket::new(ID, vec![], None, Some(expiry), live_body()).unwrap();
+    assert!(!ticket.is_expired(expiry - 1));
+    assert!(ticket.is_expired(expiry));
+    assert!(ticket.is_expired(expiry + 1));
+    // The same after a trip through the text, where the expiry is a varint.
+    let decoded = Ticket::decode(&ticket.encode()).unwrap();
+    assert!(!decoded.is_expired(expiry - 1));
+    assert!(decoded.is_expired(expiry));
+    assert!(decoded.is_expired(expiry + 1));
+}
+
+#[test]
 fn the_accessors_return_what_was_given() {
     let ticket = Ticket::new(
         ID,
         vec![addr("[::1]:9")],
-        Some("r".into()),
+        Some("https://relay.example/".into()),
         Some(5),
         live_body(),
     )
     .unwrap();
     assert_eq!(ticket.endpoint_id(), &ID);
     assert_eq!(ticket.addrs(), [addr("[::1]:9")]);
-    assert_eq!(ticket.relay_url(), Some("r"));
+    assert_eq!(ticket.relay_url(), Some("https://relay.example/"));
     assert_eq!(ticket.expiry_ms(), Some(5));
     assert_eq!(ticket.body(), &live_body());
 }

@@ -104,7 +104,7 @@ table says so:
 | `endpoint_id` | 32 bytes, no length prefix |
 | `addrs` | the count as a varint, then that many addresses |
 | one address | a tag byte, `0x00` for IPv4 or `0x01` for IPv6, then the 4 or 16 address bytes in network order, then the port as a varint. No flow label and no scope id |
-| `relay_url` | `0x00` if absent. Otherwise `0x01`, the length in bytes as a varint, then that many bytes of UTF-8 |
+| `relay_url` | `0x00` if absent. Otherwise `0x01`, the length in bytes as a varint, then that many bytes of UTF-8, which rule 7 below limits to one spelling of an `https` or `http` URL |
 | `expiry` | `0x00` if absent. Otherwise `0x01`, then the value as a varint |
 | body, Static | `root` as 32 bytes, `size` as a varint, `format` as 1 byte |
 | body, Live | `stream_id` as 16 bytes, then `sender_key` as 32 bytes |
@@ -135,6 +135,22 @@ skip `-`.
 5. an `Option` or address tag is not one of the two values in the table, `relay_url` is not UTF-8, or
    a varint is longer than the shortest one for its value or does not fit its integer
 6. `relay_url` is present and empty. Absence is `0x00`, and a second spelling of it is not allowed
+7. `relay_url` is present and is not an absolute URL with the scheme `https` or `http`, at most 2048
+   bytes long, with a host, and with no user name, password, query or fragment. It MUST also equal
+   its own serialization by the WHATWG URL standard, so it has one spelling: a lower-case scheme and
+   host, `/` as the path when there is none (`https://relay.example/`, not `https://relay.example`),
+   no default port, and a host in punycode. A decoder parses it with an implementation of that
+   standard and compares the result with the text. The `url` crate is one, and the one iroh's
+   `RelayUrl` parses with, so a ticket that decodes is one iroh accepts later
+
+**Rejected tickets.** A decoder MUST NOT write a rejected ticket, or any part of it, to a log, an
+error message or a crash report. The error says which rule failed and nothing of the text. A
+rejected ticket can be a real one, mistyped or cut short, and it is still a secret.
+
+**Expiry.** A ticket is expired when the current UTC time in milliseconds is equal to or greater
+than `expiry`, the same boundary as the `exp` claim of a JWT: at `expiry - 1` it is still good, and
+at `expiry` it is not. A ticket with no `expiry` never expires. Expiry is not a decoding rule,
+because decoding reads no clock.
 
 **Size.** Two IPv4 addresses on ports from 16384 up, no relay, no expiry and a Static body of
 100 MiB make 90 bytes, which is 151 characters with the prefix. With two IPv6 addresses it is 114

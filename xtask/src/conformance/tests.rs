@@ -175,7 +175,7 @@ fn a_ticket_case_that_matches_passes_in_any_case_and_one_that_does_not_is_printe
         ),
         (
             "fields",
-            ticket_case(&lower, &lower, r#""r""#),
+            ticket_case(&lower, &lower, r#""https://relay.example/""#),
             "decoded to other fields",
         ),
         (

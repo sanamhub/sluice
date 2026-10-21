@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 
 use serde::{Serialize, de::DeserializeOwned};
 
-use super::{Body, Format, Ticket, VERSION, refuse};
+use super::{Body, Format, Ticket, VERSION, refuse, relay};
 use crate::Error;
 
 /// The shortest address: a tag byte, 4 address bytes and a one-byte port.
@@ -87,6 +87,9 @@ pub(super) fn read(bytes: &[u8]) -> Result<Ticket, Error> {
     }
     if relay_url.as_deref() == Some("") {
         return Err(refuse("has an empty relay_url, which absence already says"));
+    }
+    if let Some(fault) = relay_url.as_deref().and_then(|r| relay::check(r).err()) {
+        return Err(refuse(fault.describe()));
     }
     let ticket = Ticket {
         endpoint_id,

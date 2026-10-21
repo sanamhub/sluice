@@ -32,11 +32,33 @@ fn body() -> impl Strategy<Value = Body> {
     ]
 }
 
+/// A `relay_url` in the one spelling rule 7 allows. The host starts with a letter in every label,
+/// so it is never read as an IPv4 address, and the port is never the default one, which the URL
+/// standard drops. A path segment is never `.` or `..`, which it would fold away.
+fn relay_url() -> impl Strategy<Value = String> {
+    let host = prop_oneof![
+        "[a-z][a-z0-9]{0,10}(\\.[a-z][a-z0-9]{0,10}){0,2}",
+        any::<[u8; 4]>().prop_map(|ip| format!("{}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3])),
+    ];
+    (
+        any::<bool>(),
+        host,
+        prop::option::of(1000u16..),
+        "(/[a-z0-9_~-]{1,8}){0,3}",
+    )
+        .prop_map(|(secure, host, port, path)| {
+            let scheme = if secure { "https" } else { "http" };
+            let port = port.map(|p| format!(":{p}")).unwrap_or_default();
+            let path = if path.is_empty() { "/" } else { &path };
+            format!("{scheme}://{host}{port}{path}")
+        })
+}
+
 fn ticket() -> impl Strategy<Value = Ticket> {
     (
         any::<[u8; 32]>(),
         prop::collection::vec(socket_addr(), 0..8),
-        prop::option::of("[a-z0-9:/.\u{e9}\u{65e5}-]{1,40}"),
+        prop::option::of(relay_url()),
         prop::option::of(any::<u64>()),
         body(),
     )

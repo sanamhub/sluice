@@ -5,6 +5,7 @@
 //! [`Ticket::decode`] never quote the text they refused.
 
 mod base32;
+mod relay;
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -122,7 +123,14 @@ impl Ticket {
     /// stops working at `expiry` (UTC milliseconds since the Unix epoch) if there is one.
     ///
     /// Fails with [`Error::Policy`] if `relay_url` is an empty string, which would be a second
-    /// spelling of no relay, or if the ticket would be longer than 4096 bytes as text.
+    /// spelling of no relay, or is not an absolute `https` or `http` URL in its one spelling. That
+    /// is rule 7 of `SPEC.md` section 4: at most 2048 bytes, a host, no user name, password, query
+    /// or fragment, and equal to its serialization by the WHATWG URL standard. So it is
+    /// `https://relay.example/` and not `https://relay.example`. It also fails if the ticket would
+    /// be longer than 4096 bytes as text.
+    ///
+    /// The message of a refused relay URL names the form it expected. That is safe here because
+    /// the text came from the caller and not from a ticket.
     ///
     /// # Examples
     ///
@@ -130,8 +138,13 @@ impl Ticket {
     /// use sluice_core::ticket::{Body, Ticket};
     ///
     /// let live = Body::Live { stream_id: [3; 16], sender_key: [4; 32] };
-    /// assert!(Ticket::new([1; 32], vec![], None, None, live.clone()).is_ok());
-    /// assert!(Ticket::new([1; 32], vec![], Some(String::new()), None, live).is_err());
+    /// let with = |relay: Option<&str>| {
+    ///     Ticket::new([1; 32], vec![], relay.map(String::from), None, live.clone())
+    /// };
+    /// assert!(with(None).is_ok());
+    /// assert!(with(Some("https://relay.example/")).is_ok());
+    /// assert!(with(Some("https://relay.example")).is_err());
+    /// assert!(with(Some("")).is_err());
     /// ```
     pub fn new(
         endpoint_id: [u8; 32],
@@ -142,6 +155,13 @@ impl Ticket {
     ) -> Result<Self, Error> {
         if relay_url.as_deref() == Some("") {
             return Err(refuse("has an empty relay_url, which absence already says"));
+        }
+        if let Some(fault) = relay_url.as_deref().and_then(|r| relay::check(r).err()) {
+            return Err(refuse(&format!(
+                "{}; it must be an absolute https or http URL written as the URL standard \
+                 serializes it, such as https://relay.example/",
+                fault.describe()
+            )));
         }
         let ticket = Self {
             endpoint_id,
@@ -181,8 +201,9 @@ impl Ticket {
     /// The prefix and the body are read without regard to case. Nothing else is forgiven: a
     /// character outside the base32 alphabet (so no hyphen and no `I`, `L`, `O` or `U`), unused
     /// bits that are not zero, an unknown version, kind or format, bytes after the body, a varint
-    /// longer than it needs to be, an empty `relay_url`, or text over 4096 bytes all fail with
-    /// [`Error::Policy`]. The message names the rule and never quotes the text.
+    /// longer than it needs to be, an empty `relay_url` or one that is not an absolute `https` or
+    /// `http` URL in its one spelling, or text over 4096 bytes all fail with [`Error::Policy`].
+    /// The message names the rule and never quotes the text, or any part of it.
     ///
     /// # Examples
     ///
@@ -209,8 +230,10 @@ impl Ticket {
     }
 
     /// Whether the ticket has expired at `now_utc_ms`, in UTC milliseconds since the Unix epoch.
-    /// A ticket expires at its expiry time itself, so `expiry <= now` is expired. One with no
-    /// expiry never is. The ticket does not read the clock: the caller passes the time in.
+    /// The boundary is the one of a JWT `exp`: a ticket is expired when `now_utc_ms` is equal to
+    /// or greater than its expiry, so at `expiry - 1` it is still good and at `expiry` it is not.
+    /// One with no expiry never is. The ticket does not read the clock: the caller passes the time
+    /// in.
     ///
     /// # Examples
     ///
@@ -221,6 +244,7 @@ impl Ticket {
     /// let ticket = Ticket::new([0; 32], vec![], None, Some(1000), body)?;
     /// assert!(!ticket.is_expired(999));
     /// assert!(ticket.is_expired(1000));
+    /// assert!(ticket.is_expired(1001));
     /// # Ok::<(), sluice_core::Error>(())
     /// ```
     pub fn is_expired(&self, now_utc_ms: u64) -> bool {
@@ -237,7 +261,8 @@ impl Ticket {
         &self.addrs
     }
 
-    /// The relay to reach the provider through, if the ticket names one. Never empty.
+    /// The relay to reach the provider through, if the ticket names one. Never empty, and always
+    /// an absolute `https` or `http` URL in its serialized form.
     pub fn relay_url(&self) -> Option<&str> {
         self.relay_url.as_deref()
     }

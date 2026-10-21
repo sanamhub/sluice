@@ -8,7 +8,7 @@ fn the_bytes_follow_the_table_in_the_spec() {
     let ticket = Ticket::new(
         ID,
         vec![addr("192.0.2.1:50000"), addr("[2001:db8::1]:443")],
-        Some("r".into()),
+        Some("https://relay.example/".into()),
         Some(300),
         Body::Static {
             root: ROOT,
@@ -25,7 +25,8 @@ fn the_bytes_follow_the_table_in_the_spec() {
     expected.extend([
         0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xbb, 0x03,
     ]);
-    expected.extend([0x01, 0x01, b'r']);
+    expected.extend([0x01, 22]);
+    expected.extend(b"https://relay.example/");
     expected.extend([0x01, 0xac, 0x02]);
     expected.extend(ROOT);
     expected.extend([0xac, 0x02, 0x01]);
@@ -113,7 +114,7 @@ fn an_address_pair_round_trips_in_both_families() {
         let ticket = Ticket::new(
             ID,
             addrs,
-            Some("https://relay.example".into()),
+            Some("https://relay.example/".into()),
             Some(u64::MAX),
             static_body(u64::MAX),
         )

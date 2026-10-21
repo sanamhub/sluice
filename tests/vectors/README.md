@@ -139,6 +139,16 @@ fails. The files split them by where the fault is:
 - `invalid-bytes.json`: the bytes under well formed base32. An unknown version, kind or format, bytes
   after the body or missing from it, an empty `relay_url`, a tag that is neither value, text that is not
   UTF-8, and a varint with a zero byte too many.
+- `invalid-relay.json`: a `relay_url` that breaks rule 7. A scheme that is not `https` or `http`, a
+  relative URL, no scheme, a user name, a password, a query, a fragment, an upper-case scheme or
+  host, no `/` as the path, a default port, a host that is not in punycode, an upper-case IPv6 host,
+  a space, no host, and 2049 bytes. Rule 7 asks that the text equal its own serialization by the
+  WHATWG URL standard, so a case can be refused by that comparison alone. `https:///x` is one: the
+  standard skips the extra slash and reads `x` as the host.
+
+`valid-relay.json` is the other side of rule 7: an `https` URL with a port, an `http` URL, an IPv6
+and an IPv4 host, a path, a percent-encoded path and a URL of 2048 bytes. Its `canonical` is its
+`ticket`, because a `relay_url` has one spelling. A `relay_url` that is present is always ASCII.
 
 The bytes were written by a second encoder, built from the table in `SPEC.md` and not from the Rust
 code, so the vectors check the spec and the implementation against each other.

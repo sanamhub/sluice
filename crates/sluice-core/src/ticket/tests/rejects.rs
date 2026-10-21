@@ -143,12 +143,12 @@ fn an_empty_relay_url_is_refused_and_a_missing_one_is_not() {
     };
     assert!(refusal_of(&parts.bytes()).contains("empty relay_url"));
     let parts = Parts {
-        relay: vec![1, 1, b'r'],
+        relay: relay_bytes("https://relay.example/"),
         ..Parts::valid()
     };
     assert_eq!(
         Ticket::decode(&text(&parts.bytes())).unwrap().relay_url(),
-        Some("r")
+        Some("https://relay.example/")
     );
     assert_eq!(
         Ticket::decode(&text(&Parts::valid().bytes()))
@@ -261,9 +261,9 @@ fn a_varint_longer_than_it_needs_to_be_is_refused() {
             },
         ),
         (
-            "relay length 1 in two bytes",
+            "relay length 22 in two bytes",
             Parts {
-                relay: vec![1, 0x81, 0x00, b'r'],
+                relay: [&[1, 0x96, 0x00][..], b"https://relay.example/"].concat(),
                 ..Parts::valid()
             },
         ),
