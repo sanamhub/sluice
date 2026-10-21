@@ -1,5 +1,5 @@
 # Address discovery only. The relay half is off, so no HTTP or HTTPS server runs and no transfer
-# bytes pass through. Run with --dev: without it iroh-relay 1.3.0 refuses this config with
+# bytes pass through. Run with --dev: without it iroh-relay 1.4.0 refuses this config with
 # "TLS not configured" (README.md).
 enable_relay = false
 enable_quic_addr_discovery = true

@@ -7,7 +7,7 @@ FROM rust:1.99.1-slim-trixie@sha256:4df2ae8cfdfebdfc13a65da7f253b73d68983dc0339f
 
 # The release Cargo.lock resolves for iroh-relay, so the server and the probe's iroh come from the
 # same release. Move them together.
-ARG IROH_RELAY_VERSION=1.3.0
+ARG IROH_RELAY_VERSION=1.4.0
 
 # --locked uses the lockfile the crate was published with. The binary needs the server feature.
 RUN cargo install iroh-relay --version "=${IROH_RELAY_VERSION}" --locked --features server --root /out

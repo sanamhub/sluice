@@ -1,6 +1,6 @@
 # rendezvous
 
-The `rendezvous` image runs `iroh-relay` 1.3.0 with the relay half turned off. Peers behind NATs ask it
+The `rendezvous` image runs `iroh-relay` 1.4.0 with the relay half turned off. Peers behind NATs ask it
 for their own public address over QUIC and it answers. It carries no transfer bytes, so the smallest VPS
 runs it (ADR 0013). It is the upstream binary, built from crates.io with `--locked`, and nothing of ours.
 The version is the one `Cargo.lock` resolves for `iroh`, so the probe and the server come from one
@@ -47,7 +47,7 @@ here, because no public certificate was available.
 
 ## Certificates
 
-The image takes `Manual` certificates only. `iroh-relay` 1.3.0 can fetch a LetsEncrypt certificate
+The image takes `Manual` certificates only. `iroh-relay` 1.4.0 can fetch a LetsEncrypt certificate
 itself, but only with the relay half on, because the challenge is answered on the relay's HTTPS
 listener (below). A rendezvous that runs a relay listener is not the server ADR 0013 describes, so the
 certificate comes from outside the container.
@@ -64,40 +64,41 @@ sudo certbot certonly --standalone -d rendezvous.example.net   --deploy-hook 'in
 Mount `/srv/rendezvous/certs` as `/etc/rendezvous/certs`. The server reads the files once at start, so
 the hook restarts it. This recipe was not run here, because there was no public host name.
 
-## What iroh-relay 1.3.0 does with the relay half off
+## What iroh-relay 1.4.0 does with the relay half off
 
-Paths are in the `iroh-relay` 1.3.0 crate, `src/`. "Run" means it was started from this image and
-observed.
+Paths are in the `iroh-relay` 1.4.0 crate, `src/`. "Run" means it was started from this image and
+observed. The start with `--dev` and the refusal without it were run on 1.4.0. The other runs were
+made on 1.3.0, and the code they cite is the same in 1.4.0, with the line numbers moved to match.
 
 **Ports.** One: UDP 7842, the QUIC address discovery port (`defaults.rs:7`, ALPN `/iroh-qad/0` at
 `quic.rs:10`). Run: with `manual.toml` the container's namespace has no TCP listener and one UDP socket
 on 7842. A third listener would be the metrics server, which defaults to on at `[::]:9090` with no
-authentication (`main.rs:344-346`, `main.rs:778`). The config sets `enable_metrics = false`, so it is
+authentication (`main.rs:349-351`, `main.rs:783`). The config sets `enable_metrics = false`, so it is
 off, as the run shows. This default was read from the source and not run.
 
 **HTTPS server.** It does not run. `Server::spawn` builds the HTTP and HTTPS listeners only inside
-`match config.relay` (`server.rs:712`), and the `None` arm returns no listener (`server.rs:833`). There
+`match config.relay` (`server.rs:713`), and the `None` arm returns no listener (`server.rs:834`). There
 is no plain HTTP port and no captive portal check either. That is why the built-in LetsEncrypt mode
 cannot run with the relay half off: its TLS-ALPN-01 challenge is answered on the HTTPS listener
-(`server.rs:747-788`).
+(`server.rs:748-789`).
 
-**The binary refuses this config without `--dev`.** `main.rs:762` builds the relay config only if
+**The binary refuses this config without `--dev`.** `main.rs:767` builds the relay config only if
 `enable_relay` is true, and drops the TLS config with it. In the normal path the QUIC server is given no
-certificate of its own (`main.rs:694-697`), so `Server::spawn` finds none (`server.rs:846-848`). Run: the
+certificate of its own (`main.rs:699-702`), so `Server::spawn` finds none (`server.rs:847-849`). Run: the
 upstream binary with `enable_relay = false`, `enable_quic_addr_discovery = true` and a `Manual` certificate
 exits at once with `Failed to bind QAD listener` and `TLS not configured`. The `--dev` branch is the only
-one that hands the certificate to the QUIC server (`main.rs:706`). It accepts `Manual` only
-(`main.rs:709-711`), and its other effect, plain HTTP for the relay, has nothing to switch here. The image
+one that hands the certificate to the QUIC server (`main.rs:711`). It accepts `Manual` only
+(`main.rs:714-716`), and its other effect, plain HTTP for the relay, has nothing to switch here. The image
 passes `--dev` for this reason. It is an upstream bug, not a setting, and a later release may fix it.
 
-**Logs.** To stderr. The filter is `EnvFilter::from_default_env()` (`main.rs:570`), so with `RUST_LOG`
+**Logs.** To stderr. The filter is `EnvFilter::from_default_env()` (`main.rs:575`), so with `RUST_LOG`
 unset the server prints errors only. The image sets `RUST_LOG=info`, which prints one line:
 `QUIC server listening on bind_addr=0.0.0.0:7842` (`quic.rs:119`). Each address-discovery connection is
 logged at `debug` (`quic.rs:212`) with the client's address, `qad-conn{remote_addr=172.17.0.1:43145}`.
 Run with `RUST_LOG=iroh_relay=debug`.
 
 **What a client sees if it uses the relay half anyway.** Run, with the probe from this repository
-(`iroh` 1.3.0) and a rendezvous URL as its only relay:
+(`iroh` 1.3.0 at the time) and a rendezvous URL as its only relay:
 
 - The address-discovery round trip works: 0.37 s from binding to the server's answer on loopback.
 - iroh adds the URL as its home relay, so the ticket carries `{"Relay":"https://127.0.0.1:7842/"}`.
@@ -117,7 +118,7 @@ from the source and not run.
 
 ## The handshake is X25519, not post-quantum
 
-The upstream binary installs `ring` as its TLS provider (`main.rs:579` and `main.rs:617`), and `ring`
+The upstream binary installs `ring` as its TLS provider (`main.rs:584` and `main.rs:622`), and `ring`
 has no `X25519MLKEM768`. Address discovery therefore negotiates X25519. We do not patch it. The
 handshake carries the peer's observed address and moves no transfer data, and ADR 0018 covers the
 transfer connections.

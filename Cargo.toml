@@ -42,15 +42,15 @@ getrandom = "0.4"
 insta = { version = "1", default-features = false }
 # tls-aws-lc-rs and not the default tls-ring: ADR 0012. metrics turns on the socket counters,
 # which are no-ops without it.
-iroh = { version = "1.3", default-features = false, features = ["metrics", "tls-aws-lc-rs"] }
+iroh = { version = "1.4", default-features = false, features = ["metrics", "tls-aws-lc-rs"] }
 # iroh does not re-export RelayQuicConfig, which names the UDP port of address discovery. Same release
 # as iroh, so the probe and the server in the rendezvous image come from one version. The probe tests
 # add its server feature.
-iroh-relay = { version = "1.3", default-features = false }
+iroh-relay = { version = "1.4", default-features = false }
 # 0.94.0 to 0.103.0 accept unauthenticated push and are yanked.
 iroh-blobs = "0.103.1"
 # iroh re-exports neither the congestion controllers nor the rustls handshake data.
-noq = { version = "1.3", default-features = false, features = ["rustls"] }
+noq = { version = "1.4", default-features = false, features = ["rustls"] }
 # Only for StreamExt on iroh-blobs' GetProgress stream. The version Cargo.lock already resolves through iroh.
 n0-future = "0.3.2"
 # Earlier releases leak session secrets through Debug. prefer-post-quantum ranks X25519MLKEM768
