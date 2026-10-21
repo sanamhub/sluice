@@ -252,7 +252,9 @@ Delta is a hint layer. No verification outcome may ever depend on it.
 
 ## 8. Directory manifest
 
-Capability `MANIFEST_V1`. A directory is a manifest blob plus the blobs it references.
+Capability `MANIFEST_V1`. A directory is a manifest blob plus the blobs it references. A manifest
+comes from a stranger and tells the receiver where to write, so every rule below is checked before
+anything is written.
 
 ```
 Manifest = { version: u16, entries: [Entry], packs: [PackRef] }
@@ -260,61 +262,169 @@ Manifest = { version: u16, entries: [Entry], packs: [PackRef] }
 Entry = {
   path: String,                // relative, NFC, forward slashes
   kind: u8,                    // 0 = File, 1 = Dir, 2 = Symlink
-  size: u64,
-  mtime_ms: u64,
-  mode: u32,                   // Unix mode bits; 0 when unknown
+  size: u64,                   // bytes of content; 0 for Dir and Symlink
+  mtime_ms: u64,               // UTC ms; 0 for a time before 1970
+  mode: u32,                   // permission bits only, at most 0o7777; 0 when unknown
   loc: Loc,
   link_target: Option<String>, // present when kind is Symlink, absent otherwise
 }
 
-Loc = Blob { root: [u8;32] }
-    | Packed { pack_index: u32, offset: u64, len: u64 }
-    | None                     // Dir and Symlink
+Loc = Blob { root: [u8;32] }                             // File: BLAKE3 of its content
+    | Packed { pack_index: u32, offset: u64, len: u64 }  // File: a range of a pack
+    | None                                               // Dir and Symlink
 ```
 
-Rules:
+**Bytes.** The little-endian rule of section 2 does not apply inside a manifest: its bytes follow
+the `postcard` 1.x encoding as stated here, so a third party needs no copy of postcard. The fields
+come in this order, with no padding and no tag except where the table says so:
 
-- Entries MUST be sorted by `path`, byte-wise, so a manifest is deterministic and dedupable.
-- Empty directories MUST be preserved as `Dir` entries.
+| Field | Bytes |
+|---|---|
+| `version` | a varint, `0x01` |
+| `entries` | the count as a varint, then that many entries |
+| one entry: `path` | the length in bytes as a varint, then that many bytes of UTF-8 |
+| one entry: `kind` | 1 byte, `0x00` for File, `0x01` for Dir or `0x02` for Symlink |
+| one entry: `size` | a varint |
+| one entry: `mtime_ms` | a varint |
+| one entry: `mode` | a varint |
+| one entry: `loc` | the tag of the variant as a varint, `0x00` for Blob, `0x01` for Packed or `0x02` for None. For Blob, then `root` as 32 bytes with no length prefix. For Packed, then `pack_index`, `offset` and `len`, each as a varint. For None, nothing |
+| one entry: `link_target` | `0x00` if absent. Otherwise `0x01`, the length in bytes as a varint, then that many bytes of UTF-8 |
+| `packs` | the count as a varint, then for each pack `root` as 32 bytes and `size` as a varint |
+
+A varint is LEB128: 7 bits per byte, the lowest group first, the high bit set on every byte but the
+last. It is at most 3 bytes for a `u16`, 5 for a `u32` and 10 for a `u64`, and its value MUST fit
+the integer. An encoder MUST write the shortest varint that holds the value.
+
+The empty manifest is the three bytes `01 00 00`.
+
+**Root.** The root of a manifest is the BLAKE3 hash of its bytes, which is the root `iroh-blobs`
+gives the manifest as a blob. The `root` of a `Blob` is the BLAKE3 hash of the file's content, which
+is the root `iroh-blobs` gives it as a raw blob.
+
+**Decoding.** A receiver MUST reject a manifest when:
+
+1. it is longer than the byte limit, 2 GiB unless the receiver sets another. This is checked before
+   any byte is read. A receiver that is told the size of the manifest blob before it fetches it
+   applies this rule to that size and fetches nothing
+2. its entry count is over the entry limit, 10,000,000 unless the receiver sets another. This is
+   checked before the first entry is read, and before any memory is set aside for entries
+3. `version` is not 1. Nothing after it is read
+4. a varint is longer than the shortest one for its value, or does not fit its integer
+5. a `kind` is not 0, 1 or 2, a `loc` tag is not 0, 1 or 2, an `Option` tag is not 0 or 1, or a
+   `path` or `link_target` is not UTF-8
+6. the bytes end before the manifest does, or bytes remain after it. A count that the bytes left
+   cannot hold is the first case
+7. the paths are not in strictly ascending order, compared byte by byte. A repeated path is not in
+   order, so the sort has no ties
+8. an entry has a parent folder and no earlier entry has that path with `kind` Dir. The parent is
+   the path up to its last `/`. An entry with no `/` has none, because the folder that was sent is
+   not an entry
+9. a `path` breaks a path rule below
+10. `link_target` is absent on a Symlink or present on another kind
+11. a `link_target` breaks a link target rule below
+12. two paths collide, as the case collision rule below defines
+13. `kind`, `loc` and `size` disagree. A File has a `Blob` or a `Packed` loc. A Dir or a Symlink has
+    `None` and a `size` of 0
+14. a `Packed` entry has a `pack_index` that is not below the number of packs, a `len` that is not
+    its `size`, or an `offset` plus `len` that is past the `size` of its pack. The sum MUST NOT wrap
+15. `mode` is above `0o7777`
+
+A decoder reads from front to back and MAY stop at the first rule it finds broken. A manifest that
+breaks two rules is rejected either way, and the number a decoder reports for it is its own. The
+vectors in `tests/vectors/manifests/` break one rule each.
+
+**Rejected manifests.** A decoder MUST NOT write a rejected manifest, or any path or link target in
+it, to a log, an error message or a crash report. The error names the rule, and the path rule or
+link target rule inside it, and nothing of the text. A path comes from a stranger, and file names
+stay out of logs.
+
+**Path rules.** A receiver MUST reject a manifest path, on every platform, when:
+
+1. it is empty, or longer than 4096 bytes in UTF-8
+2. it is not in Unicode NFC. A receiver does not normalize it, because then two spellings would name
+   one file
+3. it begins with `/`, or ends with `/`
+4. a component is empty (`a//b`), `.` or `..`
+5. a component is longer than 255 bytes in UTF-8
+6. it contains `\`, `:`, a control character (U+0000 to U+001F, or U+007F to U+009F), a
+   bidirectional control (U+061C, U+200E, U+200F, U+202A to U+202E, or U+2066 to U+2069), or any of
+   `< > " | ? *`
+7. a component ends with `.` or a space
+8. a component is a Windows reserved device name, compared case-insensitively, with or without an
+   extension: `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, and `COM` or `LPT` followed by one of
+   `0` to `9`, `¹`, `²` or `³`. The name is the text before the first `.`, spaces before that `.`
+   are ignored, and U+0131 is compared as `I`. So `con`, `Nul.txt` and `LPT¹.log` are rejected, and
+   `CONSOLE` is not
+
+With these rules no accepted path can leave the output root by its text alone, and a symlink already
+on disk is the writer's concern, not these rules'.
+
+**Link target rules.** A receiver MUST reject a `link_target` when:
+
+1. it is empty, or longer than 4096 bytes in UTF-8
+2. it begins with `/`, or ends with `/`, so an absolute target is never accepted
+3. a component is empty or `.`. A `..` component is allowed, within rule 5
+4. it breaks path rule 2, 5, 6, 7 or 8 above, applied the same way. Rule 6 rejects `\` and `:`, so
+   `C:\x` and `\\server\share` are rejected too
+5. resolved from the folder that holds the link, one component at a time, a `..` would step above
+   the output root. So `a/link -> ../b` is accepted and `link -> ../x` is rejected
+
+These rules look at the text only. A target that passes them can still reach another symlink on
+disk, which is the writer's concern, as for paths.
+
+**Case collision.** Two paths collide when they are equal after full case folding followed by NFC.
+Full case folding maps every code point of the whole path by the entries of status `C` and `F` in
+`CaseFolding.txt` and no other: `ß` becomes `ss` and `ﬃ` becomes `ffi`, and the Turkic entries of
+status `T` and the simple entries of status `S` are not used. NFC comes last because a fold can
+leave NFC: U+0390 folds to three code points, and U+03AA followed by U+0301 folds to two, and NFC
+makes both the one code point U+0390. So `Readme.md` and `README.md` collide, and so do `straße` and
+`STRASSE`.
+
+Every pair of entries is compared, on every platform, whether or not the receiver's filesystem
+ignores case. A folder `A` and a folder `a` collide, so `A/x` and `a/y` are refused through them.
+The tables are those of Unicode 18.0.0, for the folding and for the NFC of path rule 2. A decoder
+MUST use those and no other: a later version adds pairs, and a receiver on newer tables would refuse
+a manifest that a sender on older ones built. A change of version is a change of this document, with
+new vectors.
+
+**Entries.**
+
+- Entries MUST be sorted by `path`, byte by byte and strictly, so a manifest is deterministic and
+  dedupable.
+- Every folder under the one that was sent has a `Dir` entry, empty or not, so its `mode` and
+  `mtime_ms` are kept. An entry comes after the `Dir` entry of its parent. The folder that was sent
+  is not an entry.
 - `mtime_ms` is restored by default. Implementations MUST offer a way to skip it.
-- `mode` is applied on Unix. On Windows only the read-only bit is honored.
-- **Symlinks are recorded and never followed during send.** A receiver MUST NOT create a symlink unless
-  explicitly enabled.
-- `link_target` is present exactly when `kind` is Symlink. A receiver MUST reject an entry where it is
-  missing on a Symlink or present on anything else.
-- A receiver MUST reject a `link_target` when:
-
-  1. it is empty, or longer than 4096 bytes in UTF-8
-  2. it begins with `/`, or ends with `/`, so an absolute target is never accepted
-  3. a component is empty or `.`. A `..` component is allowed, within rule 5
-  4. it breaks path rule 2, 5, 6, 7 or 8 below, applied the same way. Rule 6 rejects `\` and `:`, so
-     `C:\x` and `\\server\share` are rejected too
-  5. resolved from the folder that holds the link, one component at a time, a `..` would step above
-     the output root. So `a/link -> ../b` is accepted and `link -> ../x` is rejected
-
-  These rules look at the text only. A target that passes them can still reach another symlink on
-  disk, which is the writer's concern, as for paths.
+- `mode` holds permission bits only, at most `0o7777`: the nine bits of owner, group and others, and
+  the setuid, setgid and sticky bits. It is applied on Unix. A receiver MUST NOT apply the setuid or
+  setgid bit (`0o6000`) to anything it writes, whatever `mode` says, because a hostile sender could
+  otherwise plant a setuid binary. On Windows only the read-only bit is honored, and a file is
+  read-only when `0o200` is clear.
+- **Symlinks are recorded and never followed during send.** A receiver MUST NOT create a symlink
+  unless explicitly enabled.
+- `link_target` is present exactly when `kind` is Symlink, which is rule 10.
 - Hard links are not preserved. Implementations MUST document this.
-- A receiver MUST reject a manifest path, on every platform, when:
 
-  1. it is empty, or longer than 4096 bytes in UTF-8
-  2. it is not in Unicode NFC. A receiver does not normalize it, because then two spellings would name
-     one file
-  3. it begins with `/`, or ends with `/`
-  4. a component is empty (`a//b`), `.` or `..`
-  5. a component is longer than 255 bytes in UTF-8
-  6. it contains `\`, `:`, a control character (U+0000 to U+001F, or U+007F to U+009F), a
-     bidirectional control (U+061C, U+200E, U+200F, U+202A to U+202E, or U+2066 to U+2069), or any of
-     `< > " | ? *`
-  7. a component ends with `.` or a space
-  8. a component is a Windows reserved device name, compared case-insensitively, with or without an
-     extension: `CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, and `COM` or `LPT` followed by one of
-     `0` to `9`, `¹`, `²` or `³`. The name is the text before the first `.`, spaces before that `.`
-     are ignored, and U+0131 is compared as `I`. So `con`, `Nul.txt` and `LPT¹.log` are rejected, and
-     `CONSOLE` is not
+**Sender.** A sender builds the entries from the folder it is given. It MUST:
 
-  With these rules no accepted path can leave the output root by its text alone, and a symlink already
-  on disk is the writer's concern, not these rules'.
+- write each path as the NFC form of the name on disk, with `/` between components
+- refuse the whole folder, and send nothing, when any name on disk is one a receiver would reject: a
+  name that breaks a path rule, a case collision, a name that is not valid UTF-8, or two names that
+  are the same path after NFC. It SHOULD list every such name with the rule it breaks, so that one
+  run tells the user everything to fix, and it SHOULD do this before it hashes any file
+- never follow a symlink, except the folder it was given when that is itself a link
+- skip a symlink whose target breaks a link target rule, because the target means nothing on another
+  machine, and a socket, a FIFO or a device. It SHOULD list what it skipped
+- refuse the folder when a file cannot be read, and SHOULD list it as it lists a bad name
+- include hidden files, and have no ignore rules of its own
+- treat hard links as separate files
+- write the BLAKE3 hash of the content as the `root` of a file, read the size and the modification
+  time of the file before it hashes it and again after, and fail when either changed, because the
+  hash then names no version of the file
+- write `0` as the `mode` of a symlink on every platform, and the permission bits of the file as
+  they are on Unix. On Windows write `0o444` for a read-only file, `0o644` for another file and
+  `0o755` for a folder
+- write the modification time as UTC milliseconds, and `0` for a time before 1970
 
 ---
 
