@@ -3644,6 +3644,8 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "clap",
+ "sluice-core",
+ "tempfile",
 ]
 
 [[package]]
