@@ -10,13 +10,13 @@ pages, progress display, `sluice doctor`, and `sluice mcp` (an MCP server over s
 - print a ticket to a log
 - use colour when `NO_COLOR` is set
 
-**Notes:** the cold start budget is 30 ms. A command does no config parsing, store opening or network
-probing unless it needs them. Every transfer line shows whether it is direct or relayed.
+**Notes:** the cold start budget is 30 ms. A command does no config parsing, store opening or
+network probing unless it needs them. Every transfer line shows whether it is direct or relayed.
 
-**Tests:** `insta` snapshots of the help text, exit-code tests for scripts, and `cargo xtask cold-start` for
-the cold start budget. That command builds `sluice` in release, then times `sluice id` and
-`sluice --version`, 30 runs each after 3 warm-ups, and fails if a median is over 30 ms. CI runs it on
-Linux and Windows.
+**Tests:** `insta` snapshots of the help text, exit-code tests for scripts, and `cargo xtask
+cold-start` for the cold start budget. That command builds `sluice` in release, then times `sluice
+id` and `sluice --version`, 30 runs each after 3 warm-ups, and fails if a median is over 30 ms. CI
+runs it on Linux and Windows.
 
 ## What scripts can rely on
 
@@ -27,8 +27,8 @@ it and can change in any release.
 **Rules**
 
 1. The output format never depends on whether stdout is a terminal. It is text unless `--json` is
-   given, so `sluice id | clip` gets the bare id. A terminal decides only colour, progress and whether
-   a prompt may be shown.
+   given, so `sluice id | clip` gets the bare id. A terminal decides only colour, progress and
+   whether a prompt may be shown.
 2. `--json` is global and works before or after the subcommand. With it, stdout holds only JSON, one
    object per line, with keys in `snake_case`. A failure then writes one JSON line to stderr and
    leaves stdout empty. The exit code is the same with or without `--json`. Without it, a failure is
