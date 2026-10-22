@@ -148,7 +148,8 @@ impl Receiver {
     /// # Errors
     ///
     /// [`Error::Verify`] when `open` breaks rule 1, 2, 3 or 4. Another provider can give the
-    /// right one.
+    /// right one, unless the fault is that `sender_key` is not a valid key, which rule 3 also
+    /// refuses.
     ///
     /// # Examples
     ///
@@ -158,9 +159,9 @@ impl Receiver {
         if record.stream_id != stream_id || record.sender_key != sender_key {
             return Err(Error::Verify(Fault::Ticket));
         }
-        // A key that is not a point verifies nothing, which is rule 3.
-        let key =
-            VerifyingKey::from_bytes(&sender_key).map_err(|_| Error::Verify(Fault::Signature))?;
+        // No signature verifies under a key that is no point, is not in its one encoding, or is of
+        // small order, so such a key is refused the way a bad signature is, under rule 3.
+        let key = sig::sender_key(&sender_key).ok_or(Error::Verify(Fault::Signature))?;
         if !sig::verifies(&key, Label::Open, &stream_id, &record.signed(), &record.sig) {
             return Err(Error::Verify(Fault::Signature));
         }

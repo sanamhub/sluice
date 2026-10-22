@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 
+use ed25519_dalek::SigningKey;
 use proptest::prelude::*;
 
 use super::super::{Body, Format, Ticket};
@@ -10,6 +11,12 @@ fn socket_addr() -> impl Strategy<Value = SocketAddr> {
         (any::<[u8; 4]>(), any::<u16>()).prop_map(|(ip, port)| SocketAddr::from((ip, port))),
         (any::<[u8; 16]>(), any::<u16>()).prop_map(|(ip, port)| SocketAddr::from((ip, port))),
     ]
+}
+
+/// A public key from a random secret. Random bytes would be no key about half the time, and rule 8
+/// refuses those.
+fn key() -> impl Strategy<Value = [u8; 32]> {
+    any::<[u8; 32]>().prop_map(|secret| SigningKey::from_bytes(&secret).verifying_key().to_bytes())
 }
 
 fn body() -> impl Strategy<Value = Body> {
@@ -25,7 +32,7 @@ fn body() -> impl Strategy<Value = Body> {
                 },
             }
         }),
-        (any::<[u8; 16]>(), any::<[u8; 32]>()).prop_map(|(stream_id, sender_key)| Body::Live {
+        (any::<[u8; 16]>(), key()).prop_map(|(stream_id, sender_key)| Body::Live {
             stream_id,
             sender_key
         }),
@@ -56,7 +63,7 @@ fn relay_url() -> impl Strategy<Value = String> {
 
 fn ticket() -> impl Strategy<Value = Ticket> {
     (
-        any::<[u8; 32]>(),
+        key(),
         prop::collection::vec(socket_addr(), 0..8),
         prop::option::of(relay_url()),
         prop::option::of(any::<u64>()),

@@ -119,6 +119,19 @@ fn rule_3_a_key_of_small_order_verifies_nothing() {
 }
 
 #[test]
+fn rule_3_a_ticket_key_out_of_its_one_encoding_is_refused() {
+    // y = 2^255 - 1, which ed25519-dalek reads as the point whose y is 18. Nobody knows its
+    // secret, so the unit tests of `sig` show that the encoding check is what refuses it.
+    let mut spelled = [0xff; 32];
+    spelled[31] = 0x7f;
+    let open = LogOpen {
+        sender_key: spelled,
+        ..open()
+    };
+    assert_eq!(start(spelled, &open), refused(Fault::Signature));
+}
+
+#[test]
 fn rule_4_segment_bytes_is_a_multiple_of_16_kib_from_1_to_64_mib() {
     let block = 16 << 10;
     for good in [

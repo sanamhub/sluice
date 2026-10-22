@@ -20,8 +20,9 @@ pub enum Fault {
     /// The `LogOpen` names another `stream_id` or `sender_key` than the ticket.
     #[error("the opening record names another stream or sender than the ticket (live rule 2)")]
     Ticket,
-    /// The signature does not verify under the ticket's key, strictly, with its label and stream.
-    #[error("the signature does not verify (live rule 3)")]
+    /// The signature does not verify under the ticket's key, strictly, with its label and stream,
+    /// or that key is not in its one encoding or is of small order.
+    #[error("the signature does not verify, or the ticket's key is not a valid one (live rule 3)")]
     Signature,
     /// `segment_bytes` is not a multiple of 16,384 from 1 MiB to 64 MiB.
     #[error("segment_bytes is outside its bounds (live rule 4)")]

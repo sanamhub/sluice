@@ -6,6 +6,8 @@ use super::super::{Body, Format, Ticket, base32};
 
 pub(super) const ID: [u8; 32] = [0x11; 32];
 pub(super) const ROOT: [u8; 32] = [0x22; 32];
+/// A sender key that rule 8 accepts. `[0x44; 32]` is not a point.
+pub(super) const KEY: [u8; 32] = [0x55; 32];
 
 pub(super) fn static_body(size: u64) -> Body {
     Body::Static {
@@ -18,7 +20,7 @@ pub(super) fn static_body(size: u64) -> Body {
 pub(super) fn live_body() -> Body {
     Body::Live {
         stream_id: [0x33; 16],
-        sender_key: [0x44; 32],
+        sender_key: KEY,
     }
 }
 

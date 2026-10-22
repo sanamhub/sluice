@@ -139,12 +139,21 @@ fails. The files split them by where the fault is:
 - `invalid-bytes.json`: the bytes under well formed base32. An unknown version, kind or format, bytes
   after the body or missing from it, an empty `relay_url`, a tag that is neither value, text that is not
   UTF-8, and a varint with a zero byte too many.
+- `invalid-keys.json`: an `endpoint_id` or a `sender_key` that breaks rule 8, each in a Live ticket.
+  A second spelling of a point (`y` of `p + 3`, `2^255 - 1` and `p + 1`, and the sign bit set on
+  the neutral point, whose `x` is 0), a point of order 1, 4 and 8, and 32 bytes that are no point.
+  A ZIP-215 decoder, such as `ed25519-dalek`'s, reads the second spellings as points, and the first
+  two are of large order, so rule 8 is the only reason they fail.
 - `invalid-relay.json`: a `relay_url` that breaks rule 7. A scheme that is not `https` or `http`, a
   relative URL, no scheme, a user name, a password, a query, a fragment, an upper-case scheme or
   host, no `/` as the path, a default port, a host that is not in punycode, an upper-case IPv6 host,
   a space, no host, and 2049 bytes. Rule 7 asks that the text equal its own serialization by the
   WHATWG URL standard, so a case can be refused by that comparison alone. `https:///x` is one: the
   standard skips the extra slash and reads `x` as the host.
+
+Rule 8 is why the keys are only some patterns: `44` repeated is no point, so the sender key of the
+Live cases is `55` repeated. A `root` is no key, and one case in `valid-static.json` has `44`
+repeated as its `root`.
 
 `valid-relay.json` is the other side of rule 7: an `https` URL with a port, an `http` URL, an IPv6
 and an IPv4 host, a path, a percent-encoded path and a URL of 2048 bytes. Its `canonical` is its
@@ -328,6 +337,11 @@ Some points a reader cannot see from the rules alone:
   verification refuses: one with `s + L` in place of `s`, and one under the neutral point with `R`
   the neutral point and `s` 0, which holds for every message.
 - A close before the entries it counts is refused by rule 12, and accepted once they have arrived.
+- One case has a `sender_key` out of its one encoding, `y = 2^255 - 1`, which a ZIP-215 decoder
+  reads as the point whose `y` is 18. The TEST 1 key has no second spelling: its `y` is far above 18, so
+  `y + p` does not fit in 255 bits, and its `x` is not 0. Nobody knows the secret of this point, so
+  the open's signature cannot verify either, and the case cannot show which check refused it. The
+  unit tests of both crates and `tickets/invalid-keys.json` do.
 - The fork cases are in `aborted.json`, at `seq` 0 and at a later `seq`.
 
 The files are `clean.json` (whole chains), `open.json` (the opening record and every bound of

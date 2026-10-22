@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 
 use serde::{Serialize, de::DeserializeOwned};
 
-use super::{Body, Format, Ticket, VERSION, refuse, relay};
+use super::{Body, Format, Ticket, VERSION, key, refuse, relay};
 use crate::Error;
 
 /// The shortest address: a tag byte, 4 address bytes and a one-byte port.
@@ -103,6 +103,7 @@ pub(super) fn read(bytes: &[u8]) -> Result<Ticket, Error> {
         // be two capabilities to anyone who keeps a list of the ones it has refused.
         return Err(refuse("is not in its shortest byte form"));
     }
+    key::check(&ticket.endpoint_id, &ticket.body)?;
     Ok(ticket)
 }
 

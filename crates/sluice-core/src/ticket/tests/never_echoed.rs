@@ -22,7 +22,8 @@ fn shared_run(message: &str, source: &str) -> Option<String> {
 }
 
 /// Bytes of a ticket with a key that is not one repeated byte, so a leaked piece of it could not
-/// pass for the pattern.
+/// pass for the pattern. These 32 bytes are no point, so a ticket that breaks no other rule
+/// breaks rule 8, and rule 8 is checked last.
 fn varied(mut bytes: Vec<u8>) -> Vec<u8> {
     for (i, byte) in bytes.iter_mut().enumerate().skip(2).take(32) {
         *byte = (i as u8).wrapping_mul(37).wrapping_add(11);
@@ -131,6 +132,8 @@ fn cases() -> Vec<Case> {
             ..Parts::valid()
         },
     ));
+    // Rule 8: the key `varied` writes.
+    cases.push(case(8, good.clone()));
     cases
 }
 
@@ -166,8 +169,9 @@ fn no_rule_of_the_decoder_puts_the_input_in_its_error() {
     let mut cases = cases();
     cases.extend(relay_cases());
     let mut rules: Vec<u8> = cases.iter().map(|c| c.rule).collect();
+    rules.sort_unstable();
     rules.dedup();
-    assert_eq!(rules, [1, 2, 3, 4, 5, 6, 7], "every rule has a case");
+    assert_eq!(rules, [1, 2, 3, 4, 5, 6, 7, 8], "every rule has a case");
 
     for Case {
         rule,

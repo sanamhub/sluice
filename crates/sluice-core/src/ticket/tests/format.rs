@@ -41,7 +41,7 @@ fn a_live_ticket_has_no_tag_for_its_body() {
     assert_eq!(&bytes[..2], [1, 1]);
     assert_eq!(&bytes[34..37], [0, 0, 0]);
     assert_eq!(&bytes[37..53], [0x33; 16]);
-    assert_eq!(&bytes[53..], [0x44; 32]);
+    assert_eq!(&bytes[53..], KEY);
 }
 
 #[test]

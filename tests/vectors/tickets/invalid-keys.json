@@ -1,0 +1,21 @@
+{
+  "description": "Tickets whose bytes break rule 8: the endpoint_id, or a Live ticket's sender_key, is not an Ed25519 public key in its one encoding, or is a point of small order. A decoder by ZIP-215, such as ed25519-dalek's, reads the second spellings as points, and rule 8 still refuses them. Each is a valid ticket with one fault.",
+  "cases": [
+    { "ticket": "sluice1040z1zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzyzr000036csk6csk6csk6csk6csk6csk6nananananananananananananananananananananananananan", "valid": false, "reason": "endpoint_id: y = p + 3, a second spelling of the point whose y is 3" },
+    { "ticket": "sluice1040zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzyzr000036csk6csk6csk6csk6csk6csk6nananananananananananananananananananananananananan", "valid": false, "reason": "endpoint_id: y = 2^255 - 1, a second spelling of the point whose y is 18" },
+    { "ticket": "sluice1040yxzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzyzr000036csk6csk6csk6csk6csk6csk6nananananananananananananananananananananananananan", "valid": false, "reason": "endpoint_id: y = p + 1, a second spelling of the neutral point" },
+    { "ticket": "sluice1040g200000000000000000000000000000000000000000000000100000036csk6csk6csk6csk6csk6csk6nananananananananananananananananananananananananan", "valid": false, "reason": "endpoint_id: the sign bit set on the neutral point, whose x is 0" },
+    { "ticket": "sluice1040g200000000000000000000000000000000000000000000000000000036csk6csk6csk6csk6csk6csk6nananananananananananananananananananananananananan", "valid": false, "reason": "endpoint_id: the neutral point, of order 1" },
+    { "ticket": "sluice1040g000000000000000000000000000000000000000000000000000000036csk6csk6csk6csk6csk6csk6nananananananananananananananananananananananananan", "valid": false, "reason": "endpoint_id: y = 0, a point of order 4" },
+    { "ticket": "sluice1040jdt4nhz1b49xg8q1z92fjxycf1nezng2x7hhk76rkg0m8dn9zr18000036csk6csk6csk6csk6csk6csk6nananananananananananananananananananananananananan", "valid": false, "reason": "endpoint_id: a point of order 8" },
+    { "ticket": "sluice1040m8h248h248h248h248h248h248h248h248h248h248h248h248h0000036csk6csk6csk6csk6csk6csk6nananananananananananananananananananananananananan", "valid": false, "reason": "endpoint_id: bytes that are no point" },
+    { "ticket": "sluice1040h248h248h248h248h248h248h248h248h248h248h248h248h248000036csk6csk6csk6csk6csk6csk7w7zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzvz", "valid": false, "reason": "sender_key: y = p + 3, a second spelling of the point whose y is 3" },
+    { "ticket": "sluice1040h248h248h248h248h248h248h248h248h248h248h248h248h248000036csk6csk6csk6csk6csk6csk7zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzvz", "valid": false, "reason": "sender_key: y = 2^255 - 1, a second spelling of the point whose y is 18" },
+    { "ticket": "sluice1040h248h248h248h248h248h248h248h248h248h248h248h248h248000036csk6csk6csk6csk6csk6csk7vqzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzvz", "valid": false, "reason": "sender_key: y = p + 1, a second spelling of the neutral point" },
+    { "ticket": "sluice1040h248h248h248h248h248h248h248h248h248h248h248h248h248000036csk6csk6csk6csk6csk6csk6080000000000000000000000000000000000000000000000040", "valid": false, "reason": "sender_key: the sign bit set on the neutral point, whose x is 0" },
+    { "ticket": "sluice1040h248h248h248h248h248h248h248h248h248h248h248h248h248000036csk6csk6csk6csk6csk6csk6080000000000000000000000000000000000000000000000000", "valid": false, "reason": "sender_key: the neutral point, of order 1" },
+    { "ticket": "sluice1040h248h248h248h248h248h248h248h248h248h248h248h248h248000036csk6csk6csk6csk6csk6csk6000000000000000000000000000000000000000000000000000", "valid": false, "reason": "sender_key: y = 0, a point of order 4" },
+    { "ticket": "sluice1040h248h248h248h248h248h248h248h248h248h248h248h248h248000036csk6csk6csk6csk6csk6csk69q8jp7w5ch7p12w7x49ybqshw6nvyp0bmy66cwv2e02h1pn7z05", "valid": false, "reason": "sender_key: a point of order 8" },
+    { "ticket": "sluice1040h248h248h248h248h248h248h248h248h248h248h248h248h248000036csk6csk6csk6csk6csk6csk6h248h248h248h248h248h248h248h248h248h248h248h248h24", "valid": false, "reason": "sender_key: bytes that are no point" }
+  ]
+}

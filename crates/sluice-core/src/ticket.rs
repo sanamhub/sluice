@@ -5,6 +5,7 @@
 //! [`Ticket::decode`] never quote the text they refused.
 
 mod base32;
+mod key;
 mod relay;
 #[cfg(test)]
 mod tests;
@@ -127,7 +128,8 @@ impl Ticket {
     /// is rule 7 of `SPEC.md` section 4: at most 2048 bytes, a host, no user name, password, query
     /// or fragment, and equal to its serialization by the WHATWG URL standard. So it is
     /// `https://relay.example/` and not `https://relay.example`. It also fails if the ticket would
-    /// be longer than 4096 bytes as text.
+    /// be longer than 4096 bytes as text, or if `endpoint_id` or a Live body's `sender_key` is not
+    /// an Ed25519 public key in its one encoding, or is one of small order (rule 8).
     ///
     /// The message of a refused relay URL names the form it expected. That is safe here because
     /// the text came from the caller and not from a ticket.
@@ -137,7 +139,7 @@ impl Ticket {
     /// ```
     /// use sluice_core::ticket::{Body, Ticket};
     ///
-    /// let live = Body::Live { stream_id: [3; 16], sender_key: [4; 32] };
+    /// let live = Body::Live { stream_id: [3; 16], sender_key: [3; 32] };
     /// let with = |relay: Option<&str>| {
     ///     Ticket::new([1; 32], vec![], relay.map(String::from), None, live.clone())
     /// };
@@ -163,6 +165,7 @@ impl Ticket {
                 fault.describe()
             )));
         }
+        key::check(&endpoint_id, &body)?;
         let ticket = Self {
             endpoint_id,
             addrs,
@@ -184,8 +187,8 @@ impl Ticket {
     /// ```
     /// use sluice_core::ticket::{Body, Ticket};
     ///
-    /// let body = Body::Live { stream_id: [0; 16], sender_key: [0; 32] };
-    /// let ticket = Ticket::new([0; 32], vec![], None, None, body)?;
+    /// let body = Body::Live { stream_id: [0; 16], sender_key: [1; 32] };
+    /// let ticket = Ticket::new([1; 32], vec![], None, None, body)?;
     /// // 85 bytes: version, kind, the key, an empty address list, two absent options and the
     /// // 48 bytes of the body. That is 136 characters of base32.
     /// assert_eq!(ticket.encode().len(), "sluice1".len() + 136);
@@ -202,8 +205,9 @@ impl Ticket {
     /// character outside the base32 alphabet (so no hyphen and no `I`, `L`, `O` or `U`), unused
     /// bits that are not zero, an unknown version, kind or format, bytes after the body, a varint
     /// longer than it needs to be, an empty `relay_url` or one that is not an absolute `https` or
-    /// `http` URL in its one spelling, or text over 4096 bytes all fail with [`Error::Policy`].
-    /// The message names the rule and never quotes the text, or any part of it.
+    /// `http` URL in its one spelling, a key that is not an Ed25519 public key in its one encoding
+    /// or is of small order, or text over 4096 bytes all fail with [`Error::Policy`]. The message
+    /// names the rule and never quotes the text, or any part of it.
     ///
     /// # Examples
     ///
@@ -240,8 +244,8 @@ impl Ticket {
     /// ```
     /// use sluice_core::ticket::{Body, Ticket};
     ///
-    /// let body = Body::Live { stream_id: [0; 16], sender_key: [0; 32] };
-    /// let ticket = Ticket::new([0; 32], vec![], None, Some(1000), body)?;
+    /// let body = Body::Live { stream_id: [0; 16], sender_key: [1; 32] };
+    /// let ticket = Ticket::new([1; 32], vec![], None, Some(1000), body)?;
     /// assert!(!ticket.is_expired(999));
     /// assert!(ticket.is_expired(1000));
     /// assert!(ticket.is_expired(1001));

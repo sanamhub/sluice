@@ -132,13 +132,14 @@ fn an_empty_paths_directory_is_a_failure() {
 
 const TICKET: &str = "sluice1040";
 
-/// A valid case for a Live ticket whose fields are all zero, with one field changed by the test.
+/// A valid case for a Live ticket whose keys are 0x11 bytes and whose other fields are zero, with
+/// one field changed by the test. Rule 8 refuses a key of zeros, which is of small order.
 fn ticket_case(text: &str, canonical: &str, relay: &str) -> String {
-    let zeros = "00".repeat(32);
+    let key = "11".repeat(32);
     format!(
         r#"{{ "description": "tickets", "cases": [ {{ "ticket": "{text}", "valid": true, "canonical": "{canonical}",
-        "fields": {{ "version": 1, "kind": "live", "endpoint_id": "{zeros}", "addrs": [], "relay_url": {relay},
-        "expiry_ms": null, "stream_id": "{}", "sender_key": "{zeros}" }} }} ] }}"#,
+        "fields": {{ "version": 1, "kind": "live", "endpoint_id": "{key}",
+        "addrs": [], "relay_url": {relay}, "expiry_ms": null, "stream_id": "{}", "sender_key": "{key}" }} }} ] }}"#,
         "00".repeat(16)
     )
 }
@@ -147,9 +148,9 @@ fn live_text() -> String {
     use sluice_core::ticket::{Body, Ticket};
     let body = Body::Live {
         stream_id: [0; 16],
-        sender_key: [0; 32],
+        sender_key: [0x11; 32],
     };
-    Ticket::new([0; 32], vec![], None, None, body)
+    Ticket::new([0x11; 32], vec![], None, None, body)
         .expect("a ticket")
         .encode()
 }

@@ -142,6 +142,14 @@ skip `-`.
    no default port, and a host in punycode. A decoder parses it with an implementation of that
    standard and compares the result with the text. The `url` crate is one, and the one iroh's
    `RelayUrl` parses with, so a ticket that decodes is one iroh accepts later
+8. `endpoint_id`, or the `sender_key` of a Live body, is not an Ed25519 public key in its one
+   encoding, or is a point of small order. It is checked last. The one encoding is the one that
+   RFC 8032 section 5.1.3 decodes: `y` below `p` (2^255 - 19), and the sign bit not set when `x`
+   is 0. A decoder that follows ZIP-215, as `ed25519-dalek` does, also takes the other spellings,
+   so it decodes the point, encodes it again and compares the result with the 32 bytes. Without
+   this, two decoders could disagree on whether one ticket is valid. No signature from a key of
+   small order verifies strictly (section 6), so a ticket that names one could only lead to a
+   provider or a stream that nothing can trust
 
 **Rejected tickets.** A decoder MUST NOT write a rejected ticket, or any part of it, to a log, an
 error message or a crash report. The error says which rule failed and nothing of the text. A
@@ -241,7 +249,7 @@ A receiver verifies strictly, as `verify_strict` of `ed25519-dalek` does: `s` MU
 group order, neither `R` nor the key may be a point of small order, and the encoding of
 `[s]B - [k]A` MUST equal the 32 bytes of `R`, with `k` as in RFC 8032 section 5.1.7. So a signature
 has one spelling. A key of small order has signatures that hold for many messages, so under strict
-verification it has none, and a ticket that names one gives a stream that nothing can join.
+verification it has none, and rule 3 refuses it before any signature is checked.
 
 **The chain.** The hash of the `LogOpen` is the BLAKE3 hash of its first 60 bytes, without `sig`.
 The hash of an entry is the BLAKE3 hash of its 76 bytes. The `seq` of the first entry is 0, and each
@@ -264,7 +272,10 @@ The `LogOpen` comes first. A receiver MUST refuse it, and start no stream, when:
    refuses it
 2. the `LogOpen`'s `stream_id` or `sender_key` is not the ticket's
 3. a signature does not verify, as **Signatures** says, under the ticket's `sender_key`. This rule
-   is for every record, and the receiver refuses it
+   is for every record, and the receiver refuses it. Under this rule the receiver also refuses the
+   `LogOpen` when the ticket's `sender_key` is not in its one encoding or is of small order, as
+   rule 8 of section 4 says, and checks it itself rather than trust that a decoder did. No
+   signature verifies under such a key
 4. `segment_bytes` is outside its bounds. It is checked after the signature
 
 A frame is checked in this order:

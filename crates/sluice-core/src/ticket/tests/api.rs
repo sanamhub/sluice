@@ -25,7 +25,7 @@ fn the_largest_ticket_that_fits_is_built_and_one_more_address_is_not() {
 #[test]
 fn debug_shows_the_kind_and_the_endpoint_id_and_nothing_else() {
     let ticket = Ticket::new(
-        [0xab; 32],
+        [0xaa; 32],
         vec![addr("192.0.2.77:51515")],
         Some("https://relay.secret.example/".into()),
         Some(1_234_567_890_123),
@@ -41,7 +41,7 @@ fn debug_shows_the_kind_and_the_endpoint_id_and_nothing_else() {
         shown,
         format!(
             "Ticket {{ kind: \"static\", endpoint_id: \"{}\", rest: <redacted> }}",
-            "ab".repeat(32)
+            "aa".repeat(32)
         )
     );
     for secret in [
@@ -55,19 +55,19 @@ fn debug_shows_the_kind_and_the_endpoint_id_and_nothing_else() {
         assert!(!shown.contains(secret), "{shown}");
     }
     let live = Ticket::new(
-        [0xab; 32],
+        [0xaa; 32],
         vec![],
         None,
         None,
         Body::Live {
             stream_id: [0xef; 16],
-            sender_key: [0x12; 32],
+            sender_key: [0x13; 32],
         },
     )
     .unwrap();
     let shown = format!("{live:?} {:?}", live.body());
     assert!(shown.contains("kind: \"live\""), "{shown}");
-    for secret in ["efef", "1212"] {
+    for secret in ["efef", "1313"] {
         assert!(!shown.contains(secret), "{shown}");
     }
     assert!(!format!("{:#?}", ticket).contains("cdcd"));
