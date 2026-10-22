@@ -81,7 +81,7 @@ fn a_ready_home_in_json() {
     let assert = sluice(&home).args(["doctor", "--json"]).assert().code(0);
     let stdout = stdout_text(&assert);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).expect("one JSON object");
-    assert_eq!(parsed["checks"].as_array().expect("a list").len(), 7);
+    assert_eq!(parsed["checks"].as_array().expect("a list").len(), 8);
     assert_eq!(stdout.matches('\n').count(), 1, "one line");
     insta::assert_snapshot!(redact(&stdout, &home));
 }

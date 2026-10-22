@@ -220,15 +220,24 @@ fn the_free_space_of_a_volume_is_a_number_and_a_missing_path_is_an_error() {
     assert!(super::free_bytes(&dir.path().join("missing")).is_err());
 }
 
-/// What the key check of `sluice doctor` finds in `home`. The home's list is checked there.
-fn key_check(home: &Path) -> crate::doctor::Finding {
-    use crate::doctor::{Name, examine_at};
-    examine_at(home, false)
+/// What check `name` of `sluice doctor` finds in `home`.
+fn check_of(home: &Path, name: crate::doctor::Name) -> crate::doctor::Finding {
+    crate::doctor::examine_at(home, false)
         .into_iter()
-        .find(|check| check.name() == Name::Key)
+        .find(|check| check.name() == name)
         .unwrap()
         .finding()
         .clone()
+}
+
+/// What the key check finds: the key's own list, and not the home's.
+fn key_check(home: &Path) -> crate::doctor::Finding {
+    check_of(home, crate::doctor::Name::Key)
+}
+
+/// What the access check finds: the home folder's list.
+fn access_check(home: &Path) -> crate::doctor::Finding {
+    check_of(home, crate::doctor::Name::Access)
 }
 
 #[test]
@@ -254,7 +263,7 @@ fn doctor_fails_a_home_whose_list_has_an_extra_entry() {
     );
     set_dacl(&open_dir(&path).unwrap(), &wider).unwrap();
     assert!(!super::is_private_dir(&path).unwrap());
-    let finding = key_check(&path);
+    let finding = access_check(&path);
     assert_eq!(finding, Finding::HomeAclNotPrivate);
     let check = Check::new(finding);
     assert_eq!(check.status(), Status::Failed);
@@ -283,5 +292,29 @@ fn doctor_fails_a_folder_made_by_hand_with_a_file_in_it_then_opened() {
     // from the folder above.
     drop(Home::open(&path).unwrap().identity().unwrap());
     assert!(!super::is_private_dir(&path).unwrap());
-    assert_eq!(key_check(&path), Finding::HomeAclNotPrivate);
+    assert_eq!(access_check(&path), Finding::HomeAclNotPrivate);
+    assert_eq!(key_check(&path), Finding::KeyPrivate);
+}
+
+#[test]
+fn doctor_reports_a_home_and_a_key_that_are_both_open_as_two_failures() {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{READ_CONTROL, WRITE_DAC};
+
+    use crate::doctor::Finding;
+
+    let parent = tempfile::tempdir().unwrap();
+    let path = parent.path().join("home");
+    drop(Home::open(&path).unwrap().identity().unwrap());
+    let user = user_sid().unwrap();
+    let home = format!("{}(A;{INHERIT};FR;;;WD)", private_sddl(&user, INHERIT));
+    set_dacl(&open_dir(&path).unwrap(), &home).unwrap();
+    let key = fs::OpenOptions::new()
+        .access_mode(READ_CONTROL | WRITE_DAC)
+        .open(path.join("identity.key"))
+        .unwrap();
+    set_dacl(&key, &format!("{}(A;;FR;;;WD)", private_sddl(&user, ""))).unwrap();
+    drop(key);
+    assert_eq!(access_check(&path), Finding::HomeAclNotPrivate);
+    assert_eq!(key_check(&path), Finding::KeyAclNotPrivate);
 }

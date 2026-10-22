@@ -75,12 +75,20 @@ fn a_ready_home_is_ok_from_end_to_end_and_says_where_it_came_from() {
     let names: Vec<Name> = checks.iter().map(Check::name).collect();
     assert_eq!(
         names,
-        [Name::Home, Name::Layout, Name::Lock, Name::Key, Name::Space]
+        [
+            Name::Home,
+            Name::Access,
+            Name::Layout,
+            Name::Lock,
+            Name::Key,
+            Name::Space
+        ]
     );
-    for check in &checks[..4] {
+    assert_eq!(checks[1].finding(), &Finding::AccessPrivate);
+    for check in &checks[..5] {
         assert_eq!(check.status(), Status::Ok, "{check:?}");
     }
-    assert!(matches!(checks[4].finding(), Finding::SpaceFree(_)));
+    assert!(matches!(checks[5].finding(), Finding::SpaceFree(_)));
 }
 
 #[test]
@@ -90,10 +98,13 @@ fn a_missing_home_fails_skips_the_rest_and_is_not_created() {
     let checks = examine_at(&path, false);
     assert!(matches!(checks[0].finding(), Finding::HomeMissing(_)));
     assert_eq!(checks[0].failure(), Some(ErrorKind::Storage));
-    for (check, name) in checks[1..]
-        .iter()
-        .zip([Name::Layout, Name::Lock, Name::Key, Name::Space])
-    {
+    for (check, name) in checks[1..].iter().zip([
+        Name::Access,
+        Name::Layout,
+        Name::Lock,
+        Name::Key,
+        Name::Space,
+    ]) {
         assert_eq!(check.finding(), &Finding::NeedsHome(name));
         assert_eq!(check.status(), Status::Skipped);
     }
@@ -121,7 +132,7 @@ fn a_folder_missing_from_the_layout_fails_and_is_named_and_the_rest_still_run() 
     };
     assert_eq!(missing, &["logs"]);
     assert_eq!(checks[0].failure(), Some(ErrorKind::Storage));
-    assert_eq!(checks[3].finding(), &Finding::KeyPrivate);
+    assert_eq!(checks[4].finding(), &Finding::KeyPrivate);
 }
 
 #[test]
@@ -207,19 +218,24 @@ fn the_key_missing_short_and_private() {
 
 #[cfg(unix)]
 #[test]
-fn a_key_or_a_home_that_others_can_reach_fails_as_policy() {
+fn a_key_and_a_home_that_others_can_reach_are_two_policy_failures_at_once() {
     use std::os::unix::fs::PermissionsExt;
     let dir = ready_home();
     let key = dir.path().join("identity.key");
     fs::set_permissions(&key, fs::Permissions::from_mode(0o640)).expect("chmod");
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).expect("chmod");
     let loose = finding(dir.path(), Name::Key);
     assert_eq!(loose, Finding::KeyOpenToOthers(0o640));
     assert_eq!(Check::new(loose).failure(), Some(ErrorKind::Policy));
-    fs::set_permissions(&key, fs::Permissions::from_mode(0o600)).expect("chmod");
-    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).expect("chmod");
-    let open_home = finding(dir.path(), Name::Key);
+    let open_home = finding(dir.path(), Name::Access);
     assert_eq!(open_home, Finding::HomeOpenToOthers(0o755));
     assert_eq!(Check::new(open_home).failure(), Some(ErrorKind::Policy));
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).expect("chmod");
+    assert_eq!(finding(dir.path(), Name::Access), Finding::AccessPrivate);
+    assert_eq!(
+        finding(dir.path(), Name::Key),
+        Finding::KeyOpenToOthers(0o640)
+    );
 }
 
 #[test]
@@ -266,6 +282,7 @@ fn every_failure_has_a_kind_and_nothing_else_has_one() {
         Finding::HomeNowhere,
         Finding::LayoutUnreadable("x".into()),
         Finding::LockUnreadable("x".into()),
+        Finding::AccessUnreadable("x".into()),
         Finding::KeyWrongSize(31),
         Finding::KeyUnreadable("x".into()),
     ];
@@ -291,6 +308,7 @@ fn every_failure_has_a_kind_and_nothing_else_has_one() {
     }
     for finding in [
         Finding::HomeReady(location),
+        Finding::AccessPrivate,
         Finding::LayoutCurrent(1),
         Finding::LockFree,
         Finding::LockHeld(None),

@@ -4,6 +4,7 @@ expression: "redact(&stdout_text(&assert), &home)"
 ---
 ok       version    sluice <version> for <target>, running on <os>
 ok       home       <home>, from SLUICE_HOME
+ok       access     only this user can reach the home
 ok       layout     version 1
 ok       lock       free
 ok       key        32 bytes, readable only by this user

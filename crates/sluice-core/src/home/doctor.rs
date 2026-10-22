@@ -1,5 +1,5 @@
-//! The local checks of `sluice doctor`: the home, its layout, its lock, the identity key and the
-//! free space on its volume.
+//! The local checks of `sluice doctor`: the home, who can reach it, its layout, its lock, the
+//! identity key and the free space on its volume.
 //!
 //! Every check only reads. None creates, locks for longer than a try, repairs or deletes anything,
 //! so it can be run on a home that is in trouble without adding to the trouble. The checks return
@@ -61,6 +61,8 @@ pub enum Status {
 pub enum Name {
     /// The home folder.
     Home,
+    /// Who other than this user can reach the home folder.
+    Access,
     /// The layout version in `VERSION`.
     Layout,
     /// The one-writer lock.
@@ -133,6 +135,9 @@ pub enum Finding {
     KeyWrongSize(u64),
     /// On Unix, group or other has access to the key. Carries its mode.
     KeyOpenToOthers(u32),
+    /// Only this user can reach the home folder: mode 0700 on Unix, and on Windows the private
+    /// access list the store gives a new home.
+    AccessPrivate,
     /// On Unix, group or other has access to the home folder. Carries its mode.
     HomeOpenToOthers(u32),
     /// On Windows, the key's access list is not the private one the store sets: the user,
@@ -142,6 +147,8 @@ pub enum Finding {
     /// home: the same three entries, inherited by what is made inside, with inheritance from the
     /// folder above stopped.
     HomeAclNotPrivate,
+    /// The home folder's mode or access list cannot be read. Carries why.
+    AccessUnreadable(String),
     /// The key or its access cannot be read. Carries why.
     KeyUnreadable(String),
     /// Bytes free to this user on the home's volume.
@@ -231,6 +238,10 @@ impl Check {
             | F::HomeFoldersMissing(..)
             | F::HomeUnreadable(..)
             | F::HomeNowhere => Name::Home,
+            F::AccessPrivate
+            | F::HomeOpenToOthers(_)
+            | F::HomeAclNotPrivate
+            | F::AccessUnreadable(_) => Name::Access,
             F::LayoutCurrent(_)
             | F::LayoutOlder { .. }
             | F::LayoutNoFile(_)
@@ -241,9 +252,7 @@ impl Check {
             | F::KeyMissing
             | F::KeyWrongSize(_)
             | F::KeyOpenToOthers(_)
-            | F::HomeOpenToOthers(_)
             | F::KeyAclNotPrivate
-            | F::HomeAclNotPrivate
             | F::KeyUnreadable(_) => Name::Key,
             F::SpaceFree(_) | F::SpaceUnreadable(_) => Name::Space,
             F::NeedsHome(name) => *name,
@@ -300,6 +309,7 @@ impl Check {
             | F::HomeNowhere
             | F::LayoutUnreadable(_)
             | F::LockUnreadable(_)
+            | F::AccessUnreadable(_)
             | F::KeyWrongSize(_)
             | F::KeyUnreadable(_) => Some(ErrorKind::Storage),
             F::LayoutNewer { .. }
@@ -321,7 +331,8 @@ impl Check {
 /// use sluice_core::doctor::{Name, examine};
 ///
 /// let names: Vec<Name> = examine().iter().map(|check| check.name()).collect();
-/// assert_eq!(names, [Name::Home, Name::Layout, Name::Lock, Name::Key, Name::Space]);
+/// let all = [Name::Home, Name::Access, Name::Layout, Name::Lock, Name::Key, Name::Space];
+/// assert_eq!(names, all);
 /// ```
 pub fn examine() -> Vec<Check> {
     let from_env = env::var_os("SLUICE_HOME").is_some_and(|value| !value.is_empty());
@@ -349,7 +360,7 @@ pub fn examine() -> Vec<Check> {
 /// let home = dir.path().join("home");
 /// Home::open(&home)?.identity()?;
 /// let checks = examine_at(&home, true);
-/// assert!(checks[..4].iter().all(|check| check.status() == Status::Ok), "{checks:?}");
+/// assert!(checks[..5].iter().all(|check| check.status() == Status::Ok), "{checks:?}");
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn examine_at(path: &Path, from_env: bool) -> Vec<Check> {
@@ -366,6 +377,7 @@ pub fn examine_at(path: &Path, from_env: bool) -> Vec<Check> {
     }
     vec![
         Check::new(home),
+        Check::new(checks::access(path)),
         Check::new(checks::layout(path)),
         Check::new(checks::lock(path)),
         Check::new(checks::key(path)),

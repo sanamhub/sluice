@@ -10,7 +10,13 @@ use super::{Check, Finding, Location, Name};
 /// The report when the home is not there: its finding, and every other check skipped.
 pub(super) fn without_home(home: Finding) -> Vec<Check> {
     let mut checks = vec![Check::new(home)];
-    for name in [Name::Layout, Name::Lock, Name::Key, Name::Space] {
+    for name in [
+        Name::Access,
+        Name::Layout,
+        Name::Lock,
+        Name::Key,
+        Name::Space,
+    ] {
         checks.push(Check::new(Finding::NeedsHome(name)));
     }
     checks
@@ -90,11 +96,14 @@ fn read_pid(home: &Path) -> Option<u32> {
         .and_then(|text| text.trim().parse().ok())
 }
 
+/// Who can reach the home folder. A check of its own, and not part of the key's, so a home and a
+/// key that are both open show as two failures at once, and not one after the other is fixed.
+pub(super) fn access(home: &Path) -> Finding {
+    home_open_to_others(home).unwrap_or(Finding::AccessPrivate)
+}
+
 /// The key's length and access, from its metadata and access list. Its bytes are never read.
 pub(super) fn key(home: &Path) -> Finding {
-    if let Some(open) = home_open_to_others(home) {
-        return open;
-    }
     let path = home.join("identity.key");
     let meta = match fs::metadata(&path) {
         Ok(meta) => meta,
@@ -120,8 +129,13 @@ fn home_open_to_others(home: &Path) -> Option<Finding> {
             meta.permissions().mode() & 0o7777,
         )),
         Ok(_) => None,
-        Err(e) => Some(Finding::KeyUnreadable(e.to_string())),
+        Err(e) => Some(unreadable(home, e)),
     }
+}
+
+/// The error names the home folder, so the user looks there and not at `identity.key`.
+fn unreadable(home: &Path, error: io::Error) -> Finding {
+    Finding::AccessUnreadable(format!("{}: {error}", home.display()))
 }
 
 /// On Windows, the private access list the store gives a new home, read back and compared. The
@@ -132,7 +146,7 @@ fn home_open_to_others(home: &Path) -> Option<Finding> {
     match super::super::private_windows::is_private_dir(home) {
         Ok(true) => None,
         Ok(false) => Some(Finding::HomeAclNotPrivate),
-        Err(e) => Some(Finding::KeyUnreadable(e.to_string())),
+        Err(e) => Some(unreadable(home, e)),
     }
 }
 

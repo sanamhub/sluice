@@ -64,6 +64,7 @@ fn exit_code(checks: &[Check]) -> u8 {
 fn name(check: &Check) -> &'static str {
     match check.name() {
         Name::Home => "home",
+        Name::Access => "access",
         Name::Layout => "layout",
         Name::Lock => "lock",
         Name::Key => "key",
@@ -180,6 +181,11 @@ fn pid_text(pid: Option<u32>) -> String {
 fn key_or_space(finding: &Finding) -> (String, Option<String>) {
     use Finding as F;
     match finding {
+        F::AccessPrivate => ("only this user can reach the home".to_string(), None),
+        F::AccessUnreadable(why) => (
+            format!("the home folder's access cannot be read: {why}"),
+            Some("check the permissions of the home folder and the folders above it".to_string()),
+        ),
         F::KeyPrivate => ("32 bytes, readable only by this user".to_string(), None),
         F::KeyMissing => (
             "no identity key yet".to_string(),

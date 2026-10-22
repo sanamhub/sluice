@@ -75,8 +75,8 @@ or with `--json`, it refuses with code 6 unless `--yes` is given.
 
 **`sluice doctor`**
 
-`sluice doctor` checks the home, its layout version, its lock, the identity key and the free space
-on the home's volume, and changes nothing. It prints one line per check with its status, `ok`,
+`sluice doctor` checks the home, who other than the user can reach it, its layout version, its
+lock, the identity key and the free space on the home's volume, and changes nothing. It prints one line per check with its status, `ok`,
 `warning`, `failed` or `skipped`, and under a warning or a failure the step that fixes it. With
 `--json` it prints one object:
 
@@ -84,7 +84,9 @@ on the home's volume, and changes nothing. It prints one line per check with its
 {"checks":[{"name":"home","status":"ok","detail":"<path>, from SLUICE_HOME","fix":null},...]}
 ```
 
-`name` is `version`, `home`, `layout`, `lock`, `key`, `space` or `transport`, in that order.
+`name` is `version`, `home`, `access`, `layout`, `lock`, `key`, `space` or `transport`, in that
+order. `access` reports the home folder and `key` the key alone, so a home and a key that are both
+open to others are two failures.
 `detail` and `fix` are for people, and `fix` is `null` when there is nothing to do.
 
 The report is the command's result, so it goes to stdout whatever it finds, with or without

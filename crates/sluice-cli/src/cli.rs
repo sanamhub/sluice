@@ -42,7 +42,7 @@ pub enum Command {
     Id(id::Args),
     /// Print the completion script for a shell
     Completions(completions::Args),
-    /// Check the home, its lock and the identity key, and say how to fix a problem
+    /// Check the home, who can reach it, its lock and identity key, and say how to fix a problem
     ///
     /// It only reads: it never creates, locks, repairs or deletes anything. The exit code is 0
     /// unless a check failed, and then that of the most serious failure: 6 for policy, 5 for
