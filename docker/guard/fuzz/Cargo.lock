@@ -451,7 +451,9 @@ name = "sluice-relay-guard-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
+ "serde",
  "sluice-relay-guard",
+ "toml",
 ]
 
 [[package]]

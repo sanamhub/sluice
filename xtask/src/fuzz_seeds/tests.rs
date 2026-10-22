@@ -211,6 +211,9 @@ fn the_relay_config_seeds_are_the_shipped_configs_and_every_iroh_example() {
     );
     let relay = fs::read(vectors_dir().join("../../docker/relay/relay.toml")).unwrap();
     assert_eq!(seeds[0].bytes, relay);
+    let differential = super::seeds(Target::RelayDifferential, &vectors_dir()).unwrap();
+    let bytes = |seeds: &[super::Seed]| seeds.iter().map(|s| s.bytes.clone()).collect::<Vec<_>>();
+    assert_eq!(bytes(&differential), bytes(&seeds));
 }
 
 #[test]

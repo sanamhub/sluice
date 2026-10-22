@@ -36,6 +36,10 @@ pub enum Target {
     /// `sluice-relay-guard`: the text of an iroh-relay config.
     #[value(name = "relay_config")]
     RelayConfig,
+    /// `sluice-relay-guard`: the text of an iroh-relay config, through the guard and a loose
+    /// mirror of iroh-relay's own reading. The same seeds as `relay_config`.
+    #[value(name = "relay_differential")]
+    RelayDifferential,
 }
 
 impl Target {
@@ -46,7 +50,7 @@ impl Target {
             Target::Manifest => Some("manifests"),
             Target::ManifestPath => Some("paths"),
             Target::Log => Some("live"),
-            Target::Range | Target::RelayConfig => None,
+            Target::Range | Target::RelayConfig | Target::RelayDifferential => None,
         }
     }
 }
@@ -101,7 +105,7 @@ pub fn run(target: Target, dir: &Path) -> anyhow::Result<()> {
 
 /// Every seed of `target`, from the vector files under `vectors`.
 pub fn seeds(target: Target, vectors: &Path) -> anyhow::Result<Vec<Seed>> {
-    if target == Target::RelayConfig {
+    if matches!(target, Target::RelayConfig | Target::RelayDifferential) {
         // The vectors are in tests/vectors, two folders below the repository root.
         return relay_configs(&vectors.join("..").join(".."));
     }
@@ -211,7 +215,7 @@ fn from_case(target: Target, case: &Value) -> anyhow::Result<Vec<Vec<u8>>> {
         Target::ManifestPath => vec![text(case, "path")?.into_bytes()],
         Target::Manifest => manifest(case)?,
         Target::Log => log(case)?.into_iter().collect(),
-        Target::Range | Target::RelayConfig => Vec::new(),
+        Target::Range | Target::RelayConfig | Target::RelayDifferential => Vec::new(),
     })
 }
 
