@@ -18,6 +18,7 @@
 
 mod commands;
 mod job;
+mod save;
 #[cfg(test)]
 mod tests;
 
@@ -25,7 +26,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 pub use job::{Action, Job, JobId, Priority, State, Work};
 
-use crate::Error;
+use crate::{Error, Home};
 
 /// How many jobs run at once unless the user says otherwise.
 const DEFAULT_SLOTS: u8 = 3;
@@ -169,6 +170,61 @@ impl Queue {
     /// ```
     pub fn history(&self) -> Vec<&Job> {
         self.history.iter().collect()
+    }
+
+    /// Writes the queue to `db/queue` in `home`, through a temporary file and a rename, so a crash
+    /// leaves the old queue or the new one and never half of either. The file is private to the
+    /// user, because a ticket in a job is a read capability. A driver calls this whenever a command
+    /// returns [`Action::Save`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sluice_core::Home;
+    /// use sluice_core::queue::{Priority, Queue, Work};
+    ///
+    /// let dir = tempfile::tempdir()?;
+    /// let home = Home::open(dir.path())?;
+    /// let mut queue = Queue::new();
+    /// queue.add(Work::Send { path: "a.iso".into() }, Priority::Normal)?;
+    /// queue.save(&home)?;
+    /// assert!(dir.path().join("db").join("queue").is_file());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn save(&self, home: &Home) -> Result<(), Error> {
+        save::write(self, home.path())
+    }
+
+    /// Reads the queue that [`Queue::save`] wrote in `home`, and returns it with the actions it
+    /// starts with. A restart changes three things, because a transfer resumes from what is
+    /// verified and loses nothing: a job that was running is in line again in its old place, a job
+    /// that waited to retry is in line again with its count of failures, and the timers are gone.
+    /// A paused job stays paused. No file is an empty queue.
+    ///
+    /// A file over 16 MiB, of another format version, or whose bytes do not decode to a queue that
+    /// this one could have saved fails with [`Error::Storage`] naming the file, which is left as it
+    /// is for the user to decide on.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sluice_core::Home;
+    /// use sluice_core::queue::{Action, Priority, Queue, State, Work};
+    ///
+    /// let dir = tempfile::tempdir()?;
+    /// let home = Home::open(dir.path())?;
+    /// let mut queue = Queue::new();
+    /// let (id, _) = queue.add(Work::Send { path: "a.iso".into() }, Priority::Normal)?;
+    /// queue.save(&home)?;
+    /// let (loaded, actions) = Queue::load(&home)?;
+    /// assert_eq!(actions, [Action::Start(id), Action::Save]);
+    /// assert_eq!(loaded.job(id).unwrap().state(), State::Active);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn load(home: &Home) -> Result<(Queue, Vec<Action>), Error> {
+        let mut queue = save::read(home.path())?;
+        let actions = queue.settle(Vec::new(), false);
+        Ok((queue, actions))
     }
 }
 

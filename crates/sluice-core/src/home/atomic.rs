@@ -23,7 +23,7 @@ pub(super) fn write_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), E
 /// Like [`write_atomic`], for a secret. On Windows the file gets an access list of its own before
 /// the bytes are written, whatever the folder allows. On Unix the mode 0600 that every file here
 /// is created with already does it.
-pub(super) fn write_atomic_secret(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), Error> {
+pub(crate) fn write_atomic_secret(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), Error> {
     write_with(dir, name, bytes, keep_private)
 }
 

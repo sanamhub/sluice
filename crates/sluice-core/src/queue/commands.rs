@@ -316,7 +316,7 @@ impl Queue {
 
     /// Fills the free slots and finishes the list of actions: `actions` are the stops, then the
     /// starts follow, then a save if `changed` or anything started.
-    fn settle(&mut self, mut actions: Vec<Action>, changed: bool) -> Vec<Action> {
+    pub(super) fn settle(&mut self, mut actions: Vec<Action>, changed: bool) -> Vec<Action> {
         let mut started = false;
         while self.running() < usize::from(self.slots) {
             let Some(id) = self.next_in_line() else { break };

@@ -1,15 +1,18 @@
 //! Random command sequences, checked against what the queue promises after every command.
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 use proptest::prelude::*;
 
 use super::super::{Action, JobId, Priority, Queue, State, Work};
+use crate::ticket::{Body, Format, Ticket};
 use crate::{Error, ErrorKind};
 
+/// One command, with ids that may name no job. The save tests build queues from these too.
 #[derive(Clone, Debug)]
-enum Op {
-    Add(Priority),
+pub(super) enum Op {
+    Add(Priority, Work),
     Pause(u64),
     Resume(u64),
     Cancel(u64),
@@ -41,11 +44,45 @@ fn kind() -> impl Strategy<Value = ErrorKind> {
     ]
 }
 
+/// A path with letters outside ASCII, and on Unix bytes that are not UTF-8 at all.
+fn path() -> BoxedStrategy<PathBuf> {
+    let text = "[a-z0-9 ._\u{e9}\u{4e2d}\u{1f600}-]{1,16}".prop_map(PathBuf::from);
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let raw = prop::collection::vec(1u8.., 1..16)
+            .prop_map(|bytes| PathBuf::from(std::ffi::OsString::from_vec(bytes)));
+        prop_oneof![3 => text, 1 => raw].boxed()
+    }
+    #[cfg(not(unix))]
+    text.boxed()
+}
+
+fn work() -> impl Strategy<Value = Work> {
+    let ticket = (
+        any::<[u8; 32]>(),
+        any::<u64>(),
+        prop::option::of(any::<u64>()),
+    )
+        .prop_map(|(root, size, expiry)| {
+            let body = Body::Static {
+                root,
+                size,
+                format: Format::Raw,
+            };
+            Ticket::new([1; 32], vec![], None, expiry, body).expect("a valid ticket")
+        });
+    prop_oneof![
+        path().prop_map(|path| Work::Send { path }),
+        (ticket, path()).prop_map(|(ticket, path)| Work::Receive { ticket, path }),
+    ]
+}
+
 /// Ids from 0, which is never a job, to well past the jobs a run adds.
-fn op() -> impl Strategy<Value = Op> {
+pub(super) fn op() -> impl Strategy<Value = Op> {
     let id = 0u64..40;
     prop_oneof![
-        6 => priority().prop_map(Op::Add),
+        6 => (priority(), work()).prop_map(|(p, w)| Op::Add(p, w)),
         2 => id.clone().prop_map(Op::Pause),
         2 => id.clone().prop_map(Op::Resume),
         1 => id.clone().prop_map(Op::Cancel),
@@ -71,9 +108,8 @@ struct Model {
 
 fn apply(queue: &mut Queue, model: &mut Model, op: &Op) -> Result<Vec<Action>, Error> {
     match *op {
-        Op::Add(priority) => {
-            let path = format!("file-{}", model.added.len()).into();
-            let (id, actions) = queue.add(Work::Send { path }, priority)?;
+        Op::Add(priority, ref work) => {
+            let (id, actions) = queue.add(work.clone(), priority)?;
             assert!(model.added.iter().all(|old| *old < id), "{id} reused");
             model.added.push(id);
             Ok(actions)
@@ -106,6 +142,29 @@ fn over(
         );
     }
     result
+}
+
+/// The queue that `ops` leave, with the commands that fail skipped.
+pub(super) fn run(ops: &[Op]) -> Queue {
+    let mut queue = Queue::new();
+    let mut model = Model::default();
+    for op in ops {
+        let Ok(actions) = apply(&mut queue, &mut model, op) else {
+            continue;
+        };
+        for action in actions {
+            match action {
+                Action::Start(id) => {
+                    model.running.insert(id);
+                }
+                Action::Stop(id) => {
+                    model.running.remove(&id);
+                }
+                _ => {}
+            }
+        }
+    }
+    queue
 }
 
 fn active(queue: &Queue) -> BTreeSet<JobId> {
