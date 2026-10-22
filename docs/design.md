@@ -48,9 +48,9 @@ Four rules hold everywhere:
 2. **The browser is a peer.** No HTTP endpoint accepts file bytes.
 3. **One control contract.** `proto/sluice/v1` is the only API definition, linted and checked for
    breaking changes with `buf`.
-4. **No daemon for one-shot transfers.** `sluice send` is a process that exits. A daemon runs only for
-   receive-while-idle, paired devices and mount, and socket activation keeps it at zero cost until
-   used.
+4. **No daemon for one-shot transfers.** `sluice send` is a process that exits. A daemon runs only
+   for receive-while-idle, paired devices and mount, and socket activation keeps it at zero cost
+   until used.
 
 ## Reuse and build
 
@@ -87,21 +87,22 @@ ordinary static root. ADR 0004 covers the differences.
 | `rmcp` | 3.5 | Official MCP SDK. Releases about every two weeks, so pinned exactly |
 | `turmoil` | 0.7 | Test only. The filesystem simulation sits behind `unstable-fs` |
 
-Six of these come from one company, n0. The exits stay cheap: everything is Apache-2.0 or MIT, iroh's
-wire is stable, the small crates can be vendored in days, and `iroh-blobs` is the one fork that would
-take about a month. iroh's custom transport hook is where a second transport plugs in without forking
-anything.
+Six of these come from one company, n0. The exits stay cheap: everything is Apache-2.0 or MIT,
+iroh's wire is stable, the small crates can be vendored in days, and `iroh-blobs` is the one fork
+that would take about a month. iroh's custom transport hook is where a second transport plugs in
+without forking anything.
 
 ## Data model
 
 ### Static content
 
-The `iroh-blobs` protocol, unchanged: BLAKE3 addressing, 16 KiB chunk groups, verified range requests,
-hash sequences for collections. `sendme` and DashBeam can fetch our static tickets.
+The `iroh-blobs` protocol, unchanged: BLAKE3 addressing, 16 KiB chunk groups, verified range
+requests, hash sequences for collections. `sendme` and DashBeam can fetch our static tickets.
 
 The 16 KiB block size is a constant in `iroh-blobs`. Verified ranges are quantized to it, and live
-segment sizes must be multiples of it. Pack sizes need not be: a pack holds its files end to end with
-no padding, a receiver fetches a pack whole, and its last group is verified like the end of any blob.
+segment sizes must be multiples of it. Pack sizes need not be: a pack holds its files end to end
+with no padding, a receiver fetches a pack whole, and its last group is verified like the end of any
+blob.
 
 ### Live content
 
@@ -116,14 +117,14 @@ Close    = { final_root, total_len, sig }
 ```
 
 Each segment verifies on its own and is readable the moment it lands. The unsealed tail is served at
-its current length and re-verified when its entry arrives. After `Close`, the file is ordinary static
-content. ADR 0004, and `SPEC.md` section 6 for the exact rules.
+its current length and re-verified when its entry arrives. After `Close`, the file is ordinary
+static content. ADR 0004, and `SPEC.md` section 6 for the exact rules.
 
 ### Delta
 
-A FastCDC index used only as a hint. The provider sends chunk signatures for content the requester may
-already read; the requester matches locally and fetches the rest. The result is verified against the
-real root, so a wrong match costs a refetch, never a corrupt file. Signatures flow provider to
+A FastCDC index used only as a hint. The provider sends chunk signatures for content the requester
+may already read; the requester matches locally and fetches the rest. The result is verified against
+the real root, so a wrong match costs a refetch, never a corrupt file. Signatures flow provider to
 requester only, so the requester discloses nothing about its disk. ADR 0005.
 
 ### Directory manifest
@@ -133,18 +134,17 @@ Entry = { path, kind, size, mtime_utc, mode_bits, [symlink_target] }
   kind = File | Dir | Symlink
 ```
 
-Paths are relative, NFC-normalized and forward-slashed. Empty directories are kept. mtime is restored
-unless `--no-times`. Unix mode bits apply on Unix; Windows honors only the read-only bit. Symlinks are
-recorded, never followed, and recreated only with `--links`, never outside the output root. Hard links
-are not preserved.
+Paths are relative, NFC-normalized and forward-slashed. Empty directories are kept. mtime is
+restored unless `--no-times`. Unix mode bits apply on Unix; Windows honors only the read-only bit.
+Symlinks are recorded, never followed, and recreated only with `--links`, never outside the output
+root. Hard links are not preserved.
 
 ### Small-file packing
 
 Files under 1 MiB are concatenated into pack blobs of at most 64 MiB, in path order, so identical
-trees produce identical packs. The sizes are fixed constants, not settings, and empty files are never
-packed. Large files stay standalone so ranges and mount work on them. The receiver
-unpacks while streaming. Without this, 100k small files spend more time on per-file overhead than on
-data.
+trees produce identical packs. The sizes are fixed constants, not settings, and empty files are
+never packed. Large files stay standalone so ranges and mount work on them. The receiver unpacks
+while streaming. Without this, 100k small files spend more time on per-file overhead than on data.
 
 ### Tickets
 
@@ -165,14 +165,14 @@ cancel survive a daemon restart, since resume is content-addressed.
 
 ## Storage
 
-**Reference in place.** Sending hashes the file where it lives. The store keeps only the outboard tree
-and metadata, about 0.4% of file size, so a 100 GB send costs about 400 MB. `--copy` imports into the
-store for volatile or removable sources. Receiving writes straight to the destination as a sparse
-`.part` with an outboard sidecar, then `fsync` and rename. ADR 0006.
+**Reference in place.** Sending hashes the file where it lives. The store keeps only the outboard
+tree and metadata, about 0.4% of file size, so a 100 GB send costs about 400 MB. `--copy` imports
+into the store for volatile or removable sources. Receiving writes straight to the destination as a
+sparse `.part` with an outboard sidecar, then `fsync` and rename. ADR 0006.
 
 **The source can change underneath us.** Size, mtime and inode (file id on Windows) are recorded at
-import and checked before each range read. A mismatch fails the transfer with a `Verify` error naming
-the file. `--rehash-on-change` restarts instead.
+import and checked before each range read. A mismatch fails the transfer with a `Verify` error
+naming the file. `--rehash-on-change` restarts instead.
 
 **Layout.**
 
@@ -189,15 +189,15 @@ Reclaimable content is capped at 10 GB by default, evicted least recently used u
 `sluice gc --dry-run` shows what would go. Completed destination files are never store-managed.
 
 **Identity.** One Ed25519 key per user, created on first run. `sluice id` prints the endpoint id.
-`sluice id --rotate` changes it, which breaks every pairing and every unexpired ticket naming the old
-id, and the confirmation prompt says so.
+`sluice id --rotate` changes it, which breaks every pairing and every unexpired ticket naming the
+old id, and the confirmation prompt says so.
 
 **One writer per store.** On startup the process takes an exclusive lock holding its pid. If a live
-process holds it, the CLI talks to that process over the control socket instead of opening the store.
-A stale lock is reclaimed.
+process holds it, the CLI talks to that process over the control socket instead of opening the
+store. A stale lock is reclaimed.
 
-**Migration.** `VERSION` records the layout. Startup runs forward-only migrations and logs each one. An
-older binary refuses a newer layout rather than writing to it.
+**Migration.** `VERSION` records the layout. Startup runs forward-only migrations and logs each one.
+An older binary refuses a newer layout rather than writing to it.
 
 ## Connectivity
 
@@ -217,31 +217,36 @@ reachable has to tell them. That is the rendezvous role, and it is separate from
 | Internet, rendezvous you run | one small VPS | about 90%, iroh's published figure, not yet measured by us |
 | Internet, rendezvous and relay | a VPS with bandwidth | all transfers complete |
 
-**Defaults.** Ticket addresses, mDNS and port mapping are on. n0's public relays, n0 DNS discovery and
-the mainline DHT are off. In iroh terms that is `RelayMode::Disabled` until an operator names a relay,
-then `RelayMode::Custom`. `RelayMode::Default` needs a flag and prints a warning. ADR 0011.
+**Defaults.** Ticket addresses, mDNS and port mapping are on. n0's public relays, n0 DNS discovery
+and the mainline DHT are off. In iroh terms that is `RelayMode::Disabled` until an operator names a
+relay, then `RelayMode::Custom`. `RelayMode::Default` needs a flag and prints a warning. ADR 0011.
 
-With no relay configured, LAN and port-mapped transfers work. A pair of symmetric NATs fails instead of
-falling back, and the browser cannot connect at all. `sluice doctor` and the web UI's first screen
-name the relay in use, or say there is none and what that rules out.
+With no relay configured, LAN and port-mapped transfers work. A pair of symmetric NATs fails instead
+of falling back, and the browser cannot connect at all. `sluice doctor` and the web UI's first
+screen name the relay in use, or say there is none and what that rules out.
 
 **Two containers.** `iroh-relay`'s server config has independent halves for address discovery and
 relaying. The `rendezvous` image runs only the first and moves no transfer bytes. The `relay` image
 runs both and carries the bandwidth bill. ADR 0013.
 
-**Relays run closed.** A relay URL that leaks is free bandwidth for anyone. Our relay image ships with
-authorization on. `open` mode needs a flag and gets a per-client byte rate limit. `iroh-relay` has no
-working connection-accept limit (`accept_conn_limit` is documented upstream as not implemented), so we
-document byte limits only until we build one in front of it.
+**Relays run closed.** A relay URL that leaks is free bandwidth for anyone. Our relay image ships
+with authorization on. `open` mode needs a flag and gets a per-client byte rate limit. `iroh-relay`
+has no working connection-accept limit (`accept_conn_limit` is documented upstream as not
+implemented), so we document byte limits only until we build one in front of it. Both images start
+through [`sluice-relay-guard`](../docker/guard/README.md), which refuses a config that would open
+more than it says, and starts an open relay only with `--open` and a byte limit set. ADR 0019, ADR
+0020.
 
 **Every transfer says how it is connected.** The progress line and `--json` output show direct or
-relayed, and through which relay. `sluice doctor` reports NAT type, port mapping result, MTU, UDP
-egress, the chosen path, and the relay's reachability and authorization mode, in one block that can be
-pasted into an issue.
+relayed, and through which relay. `sluice doctor` is to report NAT type, port mapping result, MTU,
+UDP egress, the chosen path, and the relay's reachability and authorization mode, in one block that
+can be pasted into an issue. Today it checks the local home only, and reports its `transport` check
+as skipped until the M0 measurements; the [CLI README](../crates/sluice-cli/README.md) lists what
+it checks.
 
 **The browser is always relayed.** iroh in a tab has no UDP socket and no WebRTC transport, so it
-reaches peers over a WebSocket relay for the whole session. Browser throughput is relay throughput. The
-traffic stays end-to-end encrypted. ADR 0011 and ADR 0014.
+reaches peers over a WebSocket relay for the whole session. Browser throughput is relay throughput.
+The traffic stays end-to-end encrypted. ADR 0011 and ADR 0014.
 
 ## Data path
 
@@ -260,9 +265,9 @@ that matter for throughput:
   streams with TLS (kTLS on Linux), plugged in through iroh's custom transport hook. QUIC keeps
   traversal and control. Whether this ships in 1.0 depends on the M0 measurements. ADR 0016.
 
-The disk side uses positioned reads and writes on a blocking pool, sparse files and `fallocate`. NVMe
-outruns the packet path at 10 Gbit/s, so io_uring waits until a profile says otherwise (ADR 0007).
-`sendfile` does not apply, because QUIC encrypts in userspace.
+The disk side uses positioned reads and writes on a blocking pool, sparse files and `fallocate`.
+NVMe outruns the packet path at 10 Gbit/s, so io_uring waits until a profile says otherwise (ADR
+0007). `sendfile` does not apply, because QUIC encrypts in userspace.
 
 BLAKE3 hashes at several GB/s per core with SIMD, and the outboard is cached so a repeat send never
 rehashes. zstd (levels 1 to 3) runs only when a 64 KB sample compresses below 0.9, and never above
@@ -272,13 +277,14 @@ rehashes. zstd (levels 1 to 3) runs only when a 64 KB sample compresses below 0.
 
 A partial download is a sparse `.part` file plus a sidecar holding the verified range bitmap. Every
 64 MB, and on clean shutdown, both are `fsync`ed. After a crash, ranges up to the last barrier are
-trusted and anything after it is re-verified, so at most 64 MB is checked again. Completion is `fsync`
-then rename. A full disk, a permission error or a quota error leaves a resumable transfer, not a panic.
+trusted and anything after it is re-verified, so at most 64 MB is checked again. Completion is
+`fsync` then rename. A full disk, a permission error or a quota error leaves a resumable transfer,
+not a panic.
 
 ## Errors
 
-Every failure is one of six variants of `sluice_core::Error`. Callers decide on retries and exit codes
-from the variant alone. The message is for people and can change in any release.
+Every failure is one of six variants of `sluice_core::Error`. Callers decide on retries and exit
+codes from the variant alone. The message is for people and can change in any release.
 
 | Variant | Meaning | CLI exit code |
 |---|---|---|
@@ -301,8 +307,8 @@ same six variants to their own error types, one to one.
 | Browser | Svelte 5 PWA with the WASM build loaded when a transfer starts. Writes through the File System Access API on Chromium, OPFS elsewhere |
 | MCP | `sluice mcp` over stdio, in the same binary |
 
-The UI is one Svelte 5 codebase for both the browser and Tauri (ADR 0009). It has keyboard navigation
-and WCAG 2.2 AA contrast from the first screen, and every string is externalized.
+The UI is one Svelte 5 codebase for both the browser and Tauri (ADR 0009). It has keyboard
+navigation and WCAG 2.2 AA contrast from the first screen, and every string is externalized.
 
 **Bindings live in `sdk/`, in this repository.** There are two surfaces. ADR 0017.
 
@@ -310,8 +316,8 @@ and WCAG 2.2 AA contrast from the first screen, and every string is externalized
    UniFFI facade crate over it generates Python, Kotlin, Swift and Ruby, and Go and C# through
    NordSecurity's generators. Node uses napi-rs, the browser wasm-bindgen. Async calls and progress
    callbacks are part of every binding.
-2. **Out of process.** Clients generated from `proto/sluice/v1` for every other language, talking to a
-   running daemon over a local socket. MCP sits on this surface.
+2. **Out of process.** Clients generated from `proto/sluice/v1` for every other language, talking to
+   a running daemon over a local socket. MCP sits on this surface.
 
 ```
 sdk/c/  sdk/python/  sdk/node/  sdk/kotlin/  sdk/swift/  sdk/go/  sdk/csharp/  sdk/java/
@@ -331,9 +337,9 @@ crates/
   sluice-cli/     the `sluice` binary, including `sluice mcp`.
 ```
 
-Later phases add `sluice-delta` (sans-IO), `sluice-api` (the control service), `sluice-mount` (fuse3,
-WinFsp, FSKit), `sluice-ffi`, `sluice-uniffi`, `sluice-node` and `sluice-wasm`. Each crate arrives
-with the phase that needs it, along with its README.
+Later phases add `sluice-delta` (sans-IO), `sluice-api` (the control service), `sluice-mount`
+(fuse3, WinFsp, FSKit), `sluice-ffi`, `sluice-uniffi`, `sluice-node` and `sluice-wasm`. Each crate
+arrives with the phase that needs it, along with its README.
 
 The protocol crates take bytes and timer ticks in and return actions, with no IO of their own. That
 makes them testable as plain functions, fuzzable from a byte slice, and reusable in the WASM build
@@ -362,12 +368,12 @@ The QUIC stack is tested by its own project, so we don't simulate QUIC.
 | Tests and snapshots | `cargo nextest`, `insta` |
 | Benchmarks | `divan` with CodSpeed for CPU work per pull request; a self-hosted pair for throughput |
 | Fuzzing | `cargo-fuzz`, then OSS-Fuzz |
-| Lint | `clippy`, `rustfmt`, `taplo`, `biome` |
+| Lint | `clippy`, `rustfmt`, `taplo`, `biome`; `actionlint` and `shellcheck` on the workflows and their scripts |
 | Proto | `buf lint`, `buf breaking` |
 | Dependencies | `cargo-deny`, `cargo-udeps`, Renovate |
 | API compatibility | `cargo-semver-checks` on published crates and `sluice-ffi` |
-| Releases | `release-plz` for versions and changelog, `dist` 0.33 for installers |
-| Signing | GitHub artifact attestations (SLSA provenance, SBOM), Azure Artifact Signing on Windows, notarization on macOS |
-| Containers | `cargo-chef`, distroless, multi-arch |
+| Releases | `release-plz` for the version and the changelog pull request, `dist` 0.33.1 for the six archives and the two installers, from one tag through `release.yml`. The steps, the approvals and how to verify a release are in [RELEASING.md](../RELEASING.md) |
+| Signing | GitHub artifact attestations: build provenance for every release file and image, and SBOMs. Azure Artifact Signing on Windows and notarization on macOS are planned and not done ([RELEASING.md](../RELEASING.md#not-done-yet)) |
+| Containers | distroless, amd64 and arm64 built on native runners, each image starting through [`sluice-relay-guard`](../docker/guard/README.md) |
 | Observability | `tracing`, optional OTLP export and Prometheus endpoint, both off by default |
 | CLI | `clap` with completions and man pages, `indicatif`, `NO_COLOR`, `--json` on every command |
