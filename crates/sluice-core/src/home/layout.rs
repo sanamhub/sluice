@@ -1,15 +1,12 @@
-//! The folders of a home and the `VERSION` file that says how they are laid out.
+//! The `VERSION` file that says how a home is laid out, and the steps that move it on.
 
-use std::fs::{self, DirBuilder};
+use std::fs;
 use std::io;
 use std::path::Path;
 
 use super::atomic::write_atomic;
 use super::storage;
 use crate::Error;
-
-/// The folders `open` creates under the home, besides the home itself.
-pub(super) const FOLDERS: [&str; 3] = ["blobs", "db", "logs"];
 
 /// A step that takes a home from one layout version to the next.
 type Step = fn(&Path) -> Result<(), Error>;
@@ -26,90 +23,6 @@ fn latest(steps: &[Step]) -> u32 {
 /// The layout version this build writes.
 pub(super) fn current() -> u32 {
     latest(MIGRATIONS)
-}
-
-/// Creates the home and its folders if they are missing. On Unix they get mode 0700, so the
-/// identity key is not readable through the folder even if its own mode were loosened by hand. On
-/// Windows a home that is new gets a private access list before anything is made inside it, so the
-/// folders inside inherit it.
-///
-/// A home folder that is already there and empty is new too: a `$SLUICE_HOME` the user made first
-/// would otherwise keep the access it inherited, and doctor would fail it forever. It is made
-/// private before anything is written in it. A folder that holds anything is left as it is, since
-/// what it holds may be the user's, and doctor reports its access.
-pub(super) fn create_folders(home: &Path) -> Result<(), Error> {
-    if create_home(home)? || is_empty(home)? {
-        keep_home_private(home)?;
-    }
-    let builder = folder_builder(false);
-    for name in FOLDERS {
-        let folder = home.join(name);
-        builder
-            .create(&folder)
-            .or_else(|e| exists_as_folder(e, &folder))
-            .map_err(|e| storage("create the folder", &folder, e))?;
-    }
-    Ok(())
-}
-
-/// Makes the parents of the home, then the home, and says whether the home was new. The home is
-/// made on its own because only a call that creates one folder can tell.
-fn create_home(home: &Path) -> Result<bool, Error> {
-    if let Some(parent) = home.parent().filter(|p| !p.as_os_str().is_empty()) {
-        folder_builder(true)
-            .create(parent)
-            .map_err(|e| storage("create the folder", parent, e))?;
-    }
-    match folder_builder(false).create(home) {
-        Ok(()) => Ok(true),
-        Err(e) => exists_as_folder(e, home)
-            .map(|()| false)
-            .map_err(|e| storage("create the folder", home, e)),
-    }
-}
-
-/// Whether the folder holds nothing at all, so no `VERSION` either.
-fn is_empty(home: &Path) -> Result<bool, Error> {
-    let mut entries = fs::read_dir(home).map_err(|e| storage("list", home, e))?;
-    Ok(entries.next().is_none())
-}
-
-/// An error from creating a folder that is not an error if the folder is already there.
-fn exists_as_folder(error: io::Error, path: &Path) -> io::Result<()> {
-    if error.kind() == io::ErrorKind::AlreadyExists && path.is_dir() {
-        Ok(())
-    } else {
-        Err(error)
-    }
-}
-
-fn folder_builder(recursive: bool) -> DirBuilder {
-    let mut builder = DirBuilder::new();
-    builder.recursive(recursive);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    builder
-}
-
-#[cfg(windows)]
-fn keep_home_private(home: &Path) -> Result<(), Error> {
-    super::private_windows::restrict_dir(home).map_err(|e| storage("restrict access to", home, e))
-}
-
-/// Mode 0700. A folder this call made has it already, and one the user made first may not.
-#[cfg(unix)]
-fn keep_home_private(home: &Path) -> Result<(), Error> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(home, fs::Permissions::from_mode(0o700))
-        .map_err(|e| storage("restrict access to", home, e))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn keep_home_private(_home: &Path) -> Result<(), Error> {
-    Ok(())
 }
 
 /// The version in `VERSION`, or `None` if there is no such file. Reads only.

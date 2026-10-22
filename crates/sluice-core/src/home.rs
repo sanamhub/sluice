@@ -11,6 +11,7 @@ mod lock;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod private_windows;
+mod setup;
 
 use std::env;
 use std::ffi::OsString;
@@ -54,7 +55,10 @@ use crate::Error;
 /// ```
 #[derive(Debug)]
 pub struct Home {
+    /// The path the caller gave, which [`Home::path`] returns and messages name.
     path: PathBuf,
+    /// `path` with every link followed: where every file of the home is read and written.
+    root: PathBuf,
     // Never read: it is held so the lock stays.
     _lock: File,
 }
@@ -84,9 +88,15 @@ impl Home {
 
     /// Opens the home at `path`, creating it and its `blobs`, `db` and `logs` folders if they are
     /// missing, with mode 0700 on Unix, and takes the exclusive lock on it. A home folder that is
-    /// already there and empty is made private first, as a new one is: mode 0700 on Unix, and the
-    /// private access list on Windows. One that holds anything keeps its access.
+    /// already there and holds nothing at all is made private first, as a new one is: mode 0700 on
+    /// Unix, and the private access list on Windows. One that holds anything keeps its access.
     ///
+    /// `path` may be a link, a Windows junction or a Unix symlink, to the folder to use. It is
+    /// followed once, here, and the folder it leads to is the one made private and the one every
+    /// file goes in. Messages name `path` as given.
+    ///
+    /// - Something that appears in an empty home while it is made private fails with
+    ///   [`Error::Policy`] naming the home, and so does a `blobs`, `db` or `logs` that is a link.
     /// - A home with a newer layout version than this build reads fails with [`Error::Policy`]
     ///   naming both versions, before anything is created or written.
     /// - A `VERSION` file that does not hold a version fails with [`Error::Storage`].
@@ -111,13 +121,15 @@ impl Home {
         if let Some(found) = layout::read_version(path)? {
             layout::refuse_newer(found)?;
         }
-        layout::create_folders(path)?;
-        let lock = lock::take(path)?;
+        let root = setup::create_folders(path)?;
+        let given = |e| as_given(e, &root, path);
+        let lock = lock::take(&root).map_err(given)?;
         // Again under the lock, which is the look that counts: the first one was only to refuse
         // early, and another process can have migrated the home in between.
-        layout::settle(path)?;
+        layout::settle(&root).map_err(given)?;
         Ok(Self {
             path: path.to_path_buf(),
+            root,
             _lock: lock,
         })
     }
@@ -161,7 +173,7 @@ impl Home {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn identity(&self) -> Result<Identity, Error> {
-        identity::load_or_create(&self.path)
+        identity::load_or_create(&self.root).map_err(|e| as_given(e, &self.root, &self.path))
     }
 
     /// Replaces the identity with a new one and returns it. Every pairing and every unexpired
@@ -181,7 +193,7 @@ impl Home {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn rotate_identity(&self) -> Result<Identity, Error> {
-        identity::rotate(&self.path)
+        identity::rotate(&self.root).map_err(|e| as_given(e, &self.root, &self.path))
     }
 }
 
@@ -192,7 +204,7 @@ impl Home {
 impl Drop for Home {
     fn drop(&mut self) {
         // Best effort: a pid file that cannot be removed only makes the next doctor warn.
-        let _ = std::fs::remove_file(self.path.join("lock.pid"));
+        let _ = std::fs::remove_file(self.root.join("lock.pid"));
     }
 }
 
@@ -216,6 +228,21 @@ fn locate_from(
 /// `Error::Storage` for a failed filesystem call, with what was being done and where.
 fn storage(doing: &str, path: &Path, source: io::Error) -> Error {
     Error::Storage(format!("cannot {doing} {}: {source}", path.display()))
+}
+
+/// An error about the home or a file in it, told with the path the caller gave rather than the
+/// one its links lead to. Every message here names a path with `display`, so the resolved path is
+/// found as text and put back the way the caller wrote it.
+fn as_given(err: Error, root: &Path, given: &Path) -> Error {
+    if root == given {
+        return err;
+    }
+    let (root, given) = (root.display().to_string(), given.display().to_string());
+    match err {
+        Error::Storage(message) => Error::Storage(message.replace(&root, &given)),
+        Error::Policy(message) => Error::Policy(message.replace(&root, &given)),
+        other => other,
+    }
 }
 
 #[cfg(test)]

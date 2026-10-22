@@ -375,12 +375,16 @@ pub fn examine_at(path: &Path, from_env: bool) -> Vec<Check> {
     ) {
         return checks::without_home(home);
     }
+    // The checks read the folder the files really land in, as `Home::open` writes them: a junction
+    // or a symlink given as the home has an access list or a mode of its own, which says nothing
+    // about its target's. The report names the path as given.
+    let real = super::setup::resolve(path).unwrap_or_else(|_| path.to_path_buf());
     vec![
         Check::new(home),
-        Check::new(checks::access(path)),
-        Check::new(checks::layout(path)),
-        Check::new(checks::lock(path)),
-        Check::new(checks::key(path)),
-        Check::new(checks::space(path)),
+        Check::new(checks::access(&real, path)),
+        Check::new(checks::layout(&real)),
+        Check::new(checks::lock(&real)),
+        Check::new(checks::key(&real)),
+        Check::new(checks::space(&real)),
     ]
 }

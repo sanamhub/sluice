@@ -4,7 +4,7 @@ use std::fs::{self, File, TryLockError};
 use std::io;
 use std::path::Path;
 
-use super::super::layout;
+use super::super::{layout, setup};
 use super::{Check, Finding, Location, Name};
 
 /// The report when the home is not there: its finding, and every other check skipped.
@@ -29,7 +29,7 @@ pub(super) fn home(location: Location) -> Finding {
         Err(e) => Finding::HomeUnreadable(location, e.to_string()),
         Ok(meta) if !meta.is_dir() => Finding::HomeNotAFolder(location),
         Ok(_) => {
-            let missing: Vec<&'static str> = layout::FOLDERS
+            let missing: Vec<&'static str> = setup::FOLDERS
                 .into_iter()
                 .filter(|name| !location.path.join(name).is_dir())
                 .collect();
@@ -98,8 +98,11 @@ fn read_pid(home: &Path) -> Option<u32> {
 
 /// Who can reach the home folder. A check of its own, and not part of the key's, so a home and a
 /// key that are both open show as two failures at once, and not one after the other is fixed.
-pub(super) fn access(home: &Path) -> Finding {
-    home_open_to_others(home).unwrap_or(Finding::AccessPrivate)
+///
+/// `home` is the folder with its links followed, which is read, and `given` the path the user
+/// gave, which an error names.
+pub(super) fn access(home: &Path, given: &Path) -> Finding {
+    home_open_to_others(home, given).unwrap_or(Finding::AccessPrivate)
 }
 
 /// The key's length and access, from its metadata and access list. Its bytes are never read.
@@ -122,14 +125,14 @@ pub(super) fn key(home: &Path) -> Finding {
 /// On Unix, no access for group or other to the home folder, which the store creates with mode
 /// 0700, so that the key is not reachable through it even if its own mode were loosened.
 #[cfg(unix)]
-fn home_open_to_others(home: &Path) -> Option<Finding> {
+fn home_open_to_others(home: &Path, given: &Path) -> Option<Finding> {
     use std::os::unix::fs::PermissionsExt;
     match fs::metadata(home) {
         Ok(meta) if meta.permissions().mode() & 0o077 != 0 => Some(Finding::HomeOpenToOthers(
             meta.permissions().mode() & 0o7777,
         )),
         Ok(_) => None,
-        Err(e) => Some(unreadable(home, e)),
+        Err(e) => Some(unreadable(given, e)),
     }
 }
 
@@ -142,16 +145,16 @@ fn unreadable(home: &Path, error: io::Error) -> Finding {
 /// key has a list of its own, and the folder's list still decides who can add, swap or delete
 /// files beside it.
 #[cfg(windows)]
-fn home_open_to_others(home: &Path) -> Option<Finding> {
+fn home_open_to_others(home: &Path, given: &Path) -> Option<Finding> {
     match super::super::private_windows::is_private_dir(home) {
         Ok(true) => None,
         Ok(false) => Some(Finding::HomeAclNotPrivate),
-        Err(e) => Some(unreadable(home, e)),
+        Err(e) => Some(unreadable(given, e)),
     }
 }
 
 #[cfg(not(any(unix, windows)))]
-fn home_open_to_others(_home: &Path) -> Option<Finding> {
+fn home_open_to_others(_home: &Path, _given: &Path) -> Option<Finding> {
     None
 }
 

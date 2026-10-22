@@ -3,6 +3,8 @@ use std::path::Path;
 
 use tempfile::TempDir;
 
+mod junction;
+
 use super::{INHERIT, dacl_sddl, open_dir, private_sddl, set_dacl, user_sid};
 use crate::Home;
 
