@@ -3705,6 +3705,7 @@ dependencies = [
  "libc",
  "postcard",
  "proptest",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

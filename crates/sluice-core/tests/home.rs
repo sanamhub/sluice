@@ -156,9 +156,12 @@ fn a_lock_file_that_nobody_holds_is_taken_whatever_it_says() {
     drop(Home::open(dir.path()).unwrap());
     fs::write(dir.path().join("lock"), "not a lock, and not a process\n").unwrap();
     fs::write(dir.path().join("lock.pid"), "99999999\n").unwrap();
-    assert!(Home::open(dir.path()).is_ok());
+    let home = Home::open(dir.path()).unwrap();
     let pid = fs::read_to_string(dir.path().join("lock.pid")).unwrap();
     assert_eq!(pid.trim(), std::process::id().to_string());
+    // A clean drop takes the pid away, so one left behind means the holder did not exit cleanly.
+    drop(home);
+    assert!(!dir.path().join("lock.pid").exists());
 }
 
 /// The child of the lock tests. It is this same test binary, started again with `HOLD_ENV` set:

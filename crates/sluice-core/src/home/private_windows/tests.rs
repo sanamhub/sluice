@@ -148,3 +148,44 @@ fn the_list_reaches_children_that_were_made_before_it_was_set() {
     // On a file the inherit flags are dropped and only `ID` is left.
     assert_private(&file, "ID", false);
 }
+
+#[test]
+fn doctor_reads_the_key_list_back_and_fails_on_an_extra_entry() {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{READ_CONTROL, WRITE_DAC};
+
+    use crate::doctor::{Finding, Name, examine_at};
+
+    let parent = parent_that_lets_everyone_read();
+    let path = parent.path().join("home");
+    drop(Home::open(&path).unwrap().identity().unwrap());
+    let key = path.join("identity.key");
+    assert!(super::is_private_file(&key).unwrap());
+    let key_check = |home: &Path| {
+        examine_at(home, false)
+            .into_iter()
+            .find(|check| check.name() == Name::Key)
+            .unwrap()
+            .finding()
+            .clone()
+    };
+    assert_eq!(key_check(&path), Finding::KeyPrivate);
+
+    // The private list with one more entry: Everyone may read.
+    let file = fs::OpenOptions::new()
+        .access_mode(READ_CONTROL | WRITE_DAC)
+        .open(&key)
+        .unwrap();
+    let wider = format!("{}(A;;FR;;;WD)", private_sddl(&user_sid().unwrap(), ""));
+    set_dacl(&file, &wider).unwrap();
+    drop(file);
+    assert!(!super::is_private_file(&key).unwrap());
+    assert_eq!(key_check(&path), Finding::KeyAclNotPrivate);
+}
+
+#[test]
+fn the_free_space_of_a_volume_is_a_number_and_a_missing_path_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(super::free_bytes(dir.path()).unwrap() > 0);
+    assert!(super::free_bytes(&dir.path().join("missing")).is_err());
+}

@@ -9,7 +9,7 @@ use super::storage;
 use crate::Error;
 
 /// The folders `open` creates under the home, besides the home itself.
-const FOLDERS: [&str; 3] = ["blobs", "db", "logs"];
+pub(super) const FOLDERS: [&str; 3] = ["blobs", "db", "logs"];
 
 /// A step that takes a home from one layout version to the next.
 type Step = fn(&Path) -> Result<(), Error>;
@@ -21,6 +21,11 @@ const MIGRATIONS: &[Step] = &[];
 /// The layout version that `steps` lead to. A new home is written at this version.
 fn latest(steps: &[Step]) -> u32 {
     u32::try_from(steps.len() + 1).unwrap_or(u32::MAX)
+}
+
+/// The layout version this build writes.
+pub(super) fn current() -> u32 {
+    latest(MIGRATIONS)
 }
 
 /// Creates the home and its folders if they are missing. On Unix they get mode 0700, so the

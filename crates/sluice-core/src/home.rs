@@ -2,6 +2,7 @@
 //! key. Nothing here reads a config or touches the network, so opening a home is cheap.
 
 mod atomic;
+pub mod doctor;
 mod folder;
 mod identity;
 mod layout;
@@ -28,7 +29,8 @@ use crate::Error;
 /// identity.key   Ed25519 secret, mode 0600 on Unix
 /// VERSION        layout version, as decimal text and a newline
 /// lock           locked while a process uses the home
-/// lock.pid       the pid of that process, for the message of a refused open
+/// lock.pid       the pid of that process, for the message of a refused open. Removed when the
+///                process lets go cleanly, so one left behind marks a process that did not
 /// blobs/  db/  logs/
 /// ```
 ///
@@ -178,6 +180,17 @@ impl Home {
     /// ```
     pub fn rotate_identity(&self) -> Result<Identity, Error> {
         identity::rotate(&self.path)
+    }
+}
+
+/// Removes `lock.pid` while the lock is still held, before the file that holds it closes. A
+/// `lock.pid` that is left with nobody holding the lock is then the mark of a process that ended
+/// without letting go, which `sluice doctor` reports as stale. A process that dies leaves it, and
+/// the next open writes its own pid over it.
+impl Drop for Home {
+    fn drop(&mut self) {
+        // Best effort: a pid file that cannot be removed only makes the next doctor warn.
+        let _ = std::fs::remove_file(self.path.join("lock.pid"));
     }
 }
 

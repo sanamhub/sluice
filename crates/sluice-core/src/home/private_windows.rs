@@ -242,9 +242,8 @@ unsafe fn wide_to_string(text: *const u16) -> io::Result<String> {
     String::from_utf16(units).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-/// The access list of `path` as SDDL, so the tests can check what was set. Reads by path, which
-/// is a different route from the one that set it.
-#[cfg(test)]
+/// The access list of `path` as SDDL, for `sluice doctor` and the tests to check what was set.
+/// Reads by path, which is a different route from the one that set it.
 fn dacl_sddl(path: &Path) -> io::Result<String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Security::Authorization::{
@@ -293,6 +292,54 @@ fn dacl_sddl(path: &Path) -> io::Result<String> {
     // SAFETY: on success `text` is a NUL terminated UTF-16 string in a LocalAlloc block that the
     // guard keeps alive for the call.
     unsafe { wide_to_string(text.0.cast()) }
+}
+
+/// Whether the file at `path` has the private access list [`restrict_file`] sets: inheritance
+/// stopped, and full control for the user, `SYSTEM` and `Administrators`, with nothing else. The
+/// list is read back by path and compared with the SDDL the store writes, entry by entry, because
+/// Windows may give the entries back in another order.
+pub(super) fn is_private_file(path: &Path) -> io::Result<bool> {
+    let found = dacl_sddl(path)?;
+    let wanted = private_sddl(&user_sid()?, "");
+    let (found_protected, found_entries) = split_sddl(&found);
+    let (_, wanted_entries) = split_sddl(&wanted);
+    Ok(found_protected && found_entries == wanted_entries)
+}
+
+/// Whether an SDDL access list is protected from inheritance, and its entries, sorted.
+fn split_sddl(sddl: &str) -> (bool, Vec<&str>) {
+    let (header, entries) = sddl.split_once('(').unwrap_or((sddl, ""));
+    let mut entries: Vec<&str> = entries
+        .trim_end_matches(')')
+        .split(")(")
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    entries.sort_unstable();
+    (header.starts_with("D:") && header.contains('P'), entries)
+}
+
+/// Bytes free to this user on the volume of `path`. That is less than free on the volume when a
+/// quota applies.
+pub(super) fn free_bytes(path: &Path) -> io::Result<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut available = 0u64;
+    // SAFETY: `wide` is NUL terminated and outlives the call. `available` is a valid place for the
+    // u64 the call writes. The total and total-free out parameters are optional and null.
+    let done = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut available,
+            ptr::null_mut(),
+            ptr::null_mut(),
+        )
+    };
+    if done == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(available)
 }
 
 #[cfg(test)]

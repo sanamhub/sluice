@@ -9,4 +9,4 @@ pub mod reclaim;
 pub mod ticket;
 
 pub use error::{Error, ErrorKind};
-pub use home::{Home, Identity};
+pub use home::{Home, Identity, doctor};
