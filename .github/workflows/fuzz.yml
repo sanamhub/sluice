@@ -1,0 +1,88 @@
+name: fuzz
+
+# Every pull request and every push to main runs each fuzz target for 60 seconds, seeded from the
+# test vectors, so a parser change that panics on a near-valid input fails before it merges. The
+# nightly run gives each target 10 minutes and keeps the corpus it grows in the Actions cache, so
+# each night starts where the last one stopped.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # cargo-fuzz needs nightly for the sanitizer flags. Pinned, so that a broken nightly does not fail
+  # every pull request on the day it ships. Move it on by hand, with the cargo-fuzz release.
+  NIGHTLY: nightly-2026-10-20
+  CARGO_FUZZ: 0.13.2
+
+jobs:
+  fuzz:
+    # A scheduled run starts only while the repository is public, where Actions minutes are free,
+    # so a private repository spends nothing on it. If the event has no visibility to read, the
+    # condition is false and the run is skipped. A manual run always starts.
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && github.event.repository.visibility == 'public')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { crate: sluice-core, target: ticket }
+          - { crate: sluice-core, target: manifest }
+          - { crate: sluice-core, target: manifest_path }
+          - { crate: sluice-core, target: range }
+          - { crate: sluice-live, target: log }
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CRATE: ${{ matrix.crate }}
+      TARGET: ${{ matrix.target }}
+      NIGHTLY_RUN: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The pinned stable runs `cargo xtask`, which writes the seeds. Nightly builds the target.
+      - run: rustup toolchain install --profile minimal
+      - run: rustup toolchain install "$NIGHTLY" --profile minimal
+      - run: cargo install cargo-fuzz --version "$CARGO_FUZZ" --locked
+      # Only the nightly run keeps a corpus. The smoke run starts from the vectors alone, so its
+      # result depends on the pull request and nothing else.
+      - if: env.NIGHTLY_RUN == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Fuzz
+        shell: bash
+        run: |
+          seconds=60
+          if [ "$NIGHTLY_RUN" = true ]; then seconds=600; fi
+          corpus="$RUNNER_TEMP/corpus/$TARGET"
+          cargo xtask fuzz-seeds "$TARGET" "$corpus"
+          cd "crates/$CRATE"
+          cargo "+$NIGHTLY" fuzz run "$TARGET" "$corpus" -- \
+            -max_total_time="$seconds" -print_final_stats=1 \
+            2> >(tee "$RUNNER_TEMP/fuzz-$TARGET.stderr" >&2)
+      # libFuzzer writes the input that crashed into the target's artifacts folder.
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: crash-${{ matrix.target }}
+          path: |
+            crates/${{ matrix.crate }}/fuzz/artifacts/${{ matrix.target }}
+            ${{ runner.temp }}/fuzz-${{ matrix.target }}.stderr
+          if-no-files-found: ignore

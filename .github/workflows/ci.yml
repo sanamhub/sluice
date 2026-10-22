@@ -70,6 +70,19 @@ jobs:
       # iroh 1.4.0 and iroh-blobs 0.103.1 need Rust 1.91, and the probe is not a product crate.
       - run: cargo +1.90 check --all-targets --workspace --exclude sluice-probe
 
+  # The browser build of the live log (ADR 0014). Nothing else builds sluice-live for wasm32, so
+  # without this job a change that breaks the browser would pass every other check.
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install --profile minimal
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo check -p sluice-live --target wasm32-unknown-unknown
+
   deny:
     runs-on: ubuntu-latest
     steps:
