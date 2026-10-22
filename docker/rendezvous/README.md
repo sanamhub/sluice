@@ -27,6 +27,23 @@ refuses `--dev` given on its command line.
 **Overriding the entry point skips the guard.** `docker run --entrypoint /usr/local/bin/iroh-relay`
 runs the server with whatever it is given.
 
+## Environment variables
+
+`iroh-relay` 1.4.0 reads four variables that change what the config says (`src/main.rs`, lines
+41-47). With the relay half off, none of them changes what this server does:
+
+| Variable | What it changes | Here |
+|---|---|---|
+| `IROH_RELAY_ACCESS_TOKEN` | replaces the `access.shared_token` list of a relay with one token | no relay and no `access`; the guard still refuses it set but empty |
+| `IROH_RELAY_HTTP_BEARER_TOKEN` | replaces the bearer token of a relay's HTTP access check | no relay and no `access` |
+| `IROH_RELAY_ACME_URL` | replaces the LetsEncrypt directory, for `cert_mode = "LetsEncrypt"` | `Manual` only: iroh-relay refuses LetsEncrypt with `--dev` (main.rs:714-716) |
+| `IROH_RELAY_ACME_CA` | adds a CA the ACME server's certificate may chain to, for LetsEncrypt | as above |
+
+**`RUST_LOG` at `debug` or `trace` prints the config.** iroh-relay logs the whole server config at
+`debug` at start (main.rs:606). This config holds no token, but a relay's does, so the
+[relay README](../relay/README.md#environment-variables) says to keep `RUST_LOG` at `info` or
+above there. The image sets `RUST_LOG=info`.
+
 ## Build and run
 
 ```

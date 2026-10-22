@@ -54,6 +54,27 @@ value from the config, since a token may be one.
 runs the server with whatever it is given, open default included. Name `sluice-relay-guard` instead,
 or leave the entry point alone.
 
+## Environment variables
+
+`iroh-relay` 1.4.0 reads four variables that change what the config says (`src/main.rs`, lines
+41-47 and where each is read). A `docker run -e` sets them past the file the guard checked.
+
+| Variable | What it changes |
+|---|---|
+| `IROH_RELAY_ACCESS_TOKEN` | replaces the whole `access.shared_token` list with this one token, when `access` is shared tokens (main.rs:238). The guard reads it as iroh-relay does: set, it passes an empty list; set but empty, it is refused |
+| `IROH_RELAY_HTTP_BEARER_TOKEN` | replaces `access.http.bearer_token`, the token sent to the HTTP access check (main.rs:230) |
+| `IROH_RELAY_ACME_URL` | replaces the LetsEncrypt directory with another ACME server, for `cert_mode = "LetsEncrypt"` (main.rs:653) |
+| `IROH_RELAY_ACME_CA` | adds a CA that the ACME server's own TLS certificate may chain to, for `cert_mode = "LetsEncrypt"` (main.rs:665) |
+
+A token belongs in one of the first two rather than in the file, so that a copy of the config
+holds no secret.
+
+**`RUST_LOG` at `debug` or `trace` prints the config, tokens included.** At start iroh-relay logs
+the whole server config at `debug` (main.rs:606). Its `RelayConfig` derives `Debug` with the access
+check in it (`src/server.rs:126` and `147`), and that check derives `Debug` over every shared
+token and the HTTP check's bearer token. This was read from the source and not run. The image sets
+`RUST_LOG=info`. Keep it at `info` or above on a relay with tokens, or treat its log as a secret.
+
 ## Ports
 
 | Port | What |

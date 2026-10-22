@@ -38,6 +38,15 @@ pub const IROH_RELAY_VERSION: &str = "1.4.0";
 /// ```
 pub const IROH_RELAY: &str = "/usr/local/bin/iroh-relay";
 
+/// The environment variable iroh-relay 1.4.0 replaces the whole `access.shared_token` list with,
+/// if it is set and is UTF-8 (main.rs:43 and 236-241). The guard reads it the same way, and passes
+/// it to [`check_config`].
+///
+/// ```
+/// assert_eq!(sluice_relay_guard::ACCESS_TOKEN_VAR, "IROH_RELAY_ACCESS_TOKEN");
+/// ```
+pub const ACCESS_TOKEN_VAR: &str = "IROH_RELAY_ACCESS_TOKEN";
+
 /// The exit code of every refusal: `EX_USAGE` of BSD's sysexits.h, a usage error.
 ///
 /// ```
@@ -63,9 +72,24 @@ pub enum Mode {
 pub struct Refusal(String);
 
 impl Refusal {
+    /// Every control character is escaped, so a refusal is one line in any log, whatever it
+    /// quotes: a path, or a key name from the config.
     fn new(message: impl Into<String>) -> Refusal {
-        Refusal(message.into())
+        Refusal(escape_controls(&message.into()))
     }
+}
+
+/// `text` with each control character, a newline or an escape code among them, written as a Rust
+/// escape such as `\n` or `\u{1b}`.
+fn escape_controls(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c.is_control() {
+            true => out.extend(c.escape_default()),
+            false => out.push(c),
+        }
+    }
+    out
 }
 
 impl fmt::Display for Refusal {
@@ -77,32 +101,43 @@ impl fmt::Display for Refusal {
 impl std::error::Error for Refusal {}
 
 /// Checks a config's text for the mode asked for. In every mode: every key is one iroh-relay 1.4.0
-/// knows, every allowlist id is 64 hex digits, `enable_metrics` is written out, HTTPS is not
-/// turned off, and an HTTP access URL holds no secret. Closed needs a closed `access`, open needs
-/// an open one and a per-client byte limit, and rendezvous needs `enable_relay = false` and no
-/// `access` or `[limits]`. Each flag is refused with a config of another mode, so it always means
-/// what it says.
+/// knows, every allowlist id is one iroh-relay accepts, `enable_metrics` is written out, HTTPS is
+/// not turned off, an HTTP access URL holds no secret, and shared tokens are not empty. Closed
+/// needs a closed `access`, open needs an open one and a per-client byte limit, and rendezvous
+/// needs `enable_relay = false` and no `access` or `[limits]`. Each flag is refused with a config
+/// of another mode, so it always means what it says.
+///
+/// `access_token` is the value of [`ACCESS_TOKEN_VAR`], or `None` if it is unset or not UTF-8, as
+/// iroh-relay reads it. A value that is set replaces the config's `shared_token` list, and an
+/// empty one is refused.
 ///
 /// ```
 /// use sluice_relay_guard::{check_config, Mode};
 ///
 /// let closed = "enable_metrics = false\n[access]\nallowlist = []\n";
-/// assert_eq!(check_config(closed, Mode::Closed), Ok(()));
-/// assert!(check_config(closed, Mode::Open).is_err());
-/// assert!(check_config("enable_metrics = false\n[acess]\nallowlist = []\n", Mode::Closed).is_err());
-/// assert!(check_config("[access]\nallowlist = []\n", Mode::Closed).is_err());
+/// assert_eq!(check_config(closed, Mode::Closed, None), Ok(()));
+/// assert!(check_config(closed, Mode::Open, None).is_err());
+/// let typo = "enable_metrics = false\n[acess]\nallowlist = []\n";
+/// assert!(check_config(typo, Mode::Closed, None).is_err());
+/// assert!(check_config("[access]\nallowlist = []\n", Mode::Closed, None).is_err());
 ///
 /// let open = "enable_metrics = false\naccess = \"everyone\"\n\
 ///             [limits.client.rx]\nbytes_per_second = 2097152\n";
-/// assert_eq!(check_config(open, Mode::Open), Ok(()));
-/// assert!(check_config(open, Mode::Closed).is_err());
+/// assert_eq!(check_config(open, Mode::Open, None), Ok(()));
+/// assert!(check_config(open, Mode::Closed, None).is_err());
 ///
 /// let rendezvous = "enable_relay = false\nenable_metrics = false\n";
-/// assert_eq!(check_config(rendezvous, Mode::Rendezvous), Ok(()));
-/// assert!(check_config("enable_metrics = false\n", Mode::Rendezvous).is_err());
+/// assert_eq!(check_config(rendezvous, Mode::Rendezvous, None), Ok(()));
+/// assert!(check_config("enable_metrics = false\n", Mode::Rendezvous, None).is_err());
+///
+/// // The variable replaces an empty list, and is refused when it is empty itself.
+/// let tokens = "enable_metrics = false\n[access]\nshared_token = []\n";
+/// assert!(check_config(tokens, Mode::Closed, None).is_err());
+/// assert_eq!(check_config(tokens, Mode::Closed, Some("t")), Ok(()));
+/// assert!(check_config(closed, Mode::Closed, Some("")).is_err());
 /// ```
-pub fn check_config(text: &str, mode: Mode) -> Result<(), Refusal> {
-    rules::check(text, mode)
+pub fn check_config(text: &str, mode: Mode, access_token: Option<&str>) -> Result<(), Refusal> {
+    rules::check(text, mode, access_token)
 }
 
 #[cfg(test)]

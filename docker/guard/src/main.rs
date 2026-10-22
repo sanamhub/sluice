@@ -6,7 +6,9 @@ use std::ffi::OsString;
 use std::fs::File;
 use std::process::ExitCode;
 
-use sluice_relay_guard::{Args, EXIT_REFUSED, Mode, Refusal, check_config, open_config};
+use sluice_relay_guard::{
+    ACCESS_TOKEN_VAR, Args, EXIT_REFUSED, Mode, Refusal, check_config, open_config,
+};
 
 /// `EX_UNAVAILABLE` of sysexits.h: the checks passed, but iroh-relay could not be started.
 const EXIT_NO_RELAY: u8 = 69;
@@ -26,7 +28,9 @@ fn main() -> ExitCode {
 fn checked(args: &[OsString]) -> Result<(Mode, File), Refusal> {
     let args = Args::parse(args)?;
     let (file, text) = open_config(&args.config_path)?;
-    check_config(&text, args.mode)?;
+    // As iroh-relay reads it: a value that is not UTF-8 counts as unset there too.
+    let access_token = std::env::var(ACCESS_TOKEN_VAR).ok();
+    check_config(&text, args.mode, access_token.as_deref())?;
     Ok((args.mode, file))
 }
 

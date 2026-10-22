@@ -41,18 +41,23 @@ fn each_example_is_closed_open_or_refused_for_its_ids() {
             true => text,
             false => super::m(&text),
         };
-        let closed = check_config(&text, Mode::Closed).is_ok();
+        let closed = check_config(&text, Mode::Closed, None).is_ok();
         let rated = match text.contains("[limits.client.rx]") {
             true => text.clone(),
             false => format!("{text}\n[limits.client.rx]\nbytes_per_second = 1\n"),
         };
-        let open = check_config(&rated, Mode::Open).is_ok();
-        let rendezvous = check_config(&text, Mode::Rendezvous).is_ok();
+        let open = check_config(&rated, Mode::Open, None).is_ok();
+        let rendezvous = check_config(&text, Mode::Rendezvous, None).is_ok();
         let want = match name.as_str() {
-            // The README's placeholder is not an id.
-            "readme-allowlist" => (false, false, false),
+            // The README's placeholder is not an id, in either list.
+            "readme-allowlist" | "readme-denylist" => (false, false, false),
             // Their URL has a query, `?boo=baz`, which iroh-relay would log (ADR 0020).
             "access-http-bearer" | "access-http-url" => (false, false, false),
+            // iroh-relay refuses these two at start, as its own test_access_token_empty_is_rejected
+            // shows (main.rs:920-939), and the guard now refuses them first.
+            "access-shared-token-empty" | "access-shared-token-empty-string" => {
+                (false, false, false)
+            }
             // The relay half off, and nothing else set: a rendezvous config.
             "enable-relay-false" => (false, false, true),
             n if n.contains("http") || n.contains("token") || n == "access-allowlist" => {

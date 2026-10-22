@@ -74,7 +74,9 @@ fn no_refusal_prints_a_token_a_bearer_token_or_a_query() {
     for (text, mode) in refused_with_secret() {
         // Every other rule passes, so each is refused where the secret is.
         let text = super::m(&text);
-        let message = check_config(&text, mode).expect_err(&text).to_string();
+        let message = check_config(&text, mode, None)
+            .expect_err(&text)
+            .to_string();
         assert!(
             !message.contains(SECRET),
             "{text:?} printed the secret: {message}"

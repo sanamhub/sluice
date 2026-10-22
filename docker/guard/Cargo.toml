@@ -29,6 +29,9 @@ serde = { version = "1", features = ["derive"] }
 toml = { version = "1.1", default-features = false, features = ["std", "serde", "parse"] }
 # The parser iroh-relay reads `access.http.url` with, so the guard sees the URL as it does.
 url = "2.5.8"
+# What iroh-base 1.4.0 decodes an allowlist id with (`PublicKey::from_bytes`), so the guard refuses
+# the ids iroh-relay would refuse. Without default features: the guard verifies no signature.
+ed25519-dalek = { version = "3.0.0", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

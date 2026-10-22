@@ -34,7 +34,12 @@ login on the metrics port.
 
 Every refusal is one line on stderr, starting `sluice-relay-guard:`, and exits with 64, `EX_USAGE`.
 No message prints a value from the config: a `shared_token` entry, `access.http.bearer_token` and
-the query of `access.http.url` can be secrets.
+the query of `access.http.url` can be secrets. A key the guard does not know is named only when it
+is 1 to 64 ASCII letters, digits, `_` or `-`, as every iroh-relay setting is; any other is "a key",
+with its line, since it may be a token pasted in the wrong place. A key of that alphabet is printed,
+so a token made only of letters and digits, of 64 characters or fewer, pasted as a key, would be.
+Every control character in a message, from a path or an argument, is escaped, so a refusal is one
+line.
 
 | Refused | Why |
 |---|---|
@@ -46,7 +51,9 @@ the query of `access.http.url` can be secrets.
 | `access` missing, `"everyone"` or a denylist, without `--open` | it lets in ids nobody listed |
 | `--open` without `limits.client.rx.bytes_per_second` | ADR 0011: open needs a per-client byte limit |
 | `--open` with an allowlist, an HTTP check or shared tokens | the flag must mean what it says |
-| an allowlist entry that is not 64 hex digits | the README says to paste what `sluice id` prints |
+| an allowlist or denylist entry that is not 64 lower-case hex digits of an ed25519 public key | iroh-relay refuses to start on an id it cannot read, and the README says to paste what `sluice id` prints |
+| an empty `access.shared_token` list, or an empty token in it, unless `IROH_RELAY_ACCESS_TOKEN` is set | iroh-relay refuses both at start, and the variable replaces the list |
+| `IROH_RELAY_ACCESS_TOKEN` set but empty, in every mode | iroh-relay would take the empty value as the only token |
 | `[tls] dangerous_http_only = true` (ADR 0020) | it turns HTTPS off, as `--dev` does; no `[tls]` at all still starts |
 | no `enable_metrics` line (ADR 0020) | iroh-relay then serves metrics on port 9090 with no login; `true` and `false` both start |
 | an `access.http.url` that is not an absolute http or https URL, or holds a user name, password, query or fragment (ADR 0020) | iroh-relay logs the URL when a check fails; a secret goes in `bearer_token`, a header |

@@ -6,7 +6,9 @@ const ID: &str = "68852edc24884118b7c22e87f75094674a9b3268ba83b3005e4da869de4ed9
 const RATE: &str = "\n[limits.client.rx]\nbytes_per_second = 2097152\n";
 
 fn refused(text: &str, mode: Mode, says: &str) -> String {
-    let message = check_config(text, mode).expect_err("refused").to_string();
+    let message = check_config(text, mode, None)
+        .expect_err("refused")
+        .to_string();
     assert!(message.contains(says), "{text:?} {mode:?}: {message}");
     assert!(!message.contains('\n'), "one line: {message}");
     message
@@ -85,7 +87,11 @@ fn each_closed_mode_starts_without_open_and_is_refused_with_it() {
         "[access]\nshared_token = [\"a\"]\n".to_string(),
     ];
     for text in closed {
-        assert_eq!(check_config(&m(&text), Mode::Closed), Ok(()), "{text}");
+        assert_eq!(
+            check_config(&m(&text), Mode::Closed, None),
+            Ok(()),
+            "{text}"
+        );
         let message = refused(
             &m(&format!("{text}{RATE}")),
             Mode::Open,
@@ -128,39 +134,44 @@ fn each_open_mode_needs_open_and_a_rate() {
             "--open needs `limits.client.rx.bytes_per_second`",
         );
         assert_eq!(
-            check_config(&m(&format!("{text}{RATE}")), Mode::Open),
+            check_config(&m(&format!("{text}{RATE}")), Mode::Open, None),
             Ok(()),
             "{text}"
         );
     }
 }
 
+/// 64 lower-case hex digits that are not an ed25519 point: y = 2, little-endian, and
+/// (y² - 1) / (dy² + 1) has no square root mod 2^255 - 19, worked out with Python's
+/// exact integers.
+const NOT_A_KEY: &str = "0200000000000000000000000000000000000000000000000000000000000000";
+
 #[test]
-fn an_allowlist_id_must_be_64_hex_digits() {
-    let list = |ids: &[&str]| m(&format!("[access]\nallowlist = {ids:?}\n"));
-    assert_eq!(check_config(&list(&[]), Mode::Closed), Ok(()));
-    assert_eq!(check_config(&list(&[ID]), Mode::Closed), Ok(()));
-    refused(
-        &list(&[&ID[..63]]),
-        Mode::Closed,
-        "entry 1 of `access.allowlist` is not 64 hex digits",
-    );
-    refused(
-        &list(&[ID, &format!("{ID}0")]),
-        Mode::Closed,
-        "entry 2 of `access.allowlist`",
-    );
-    let not_hex = format!("{}g", &ID[..63]);
-    refused(
-        &list(&[&not_hex]),
-        Mode::Closed,
-        "entry 1 of `access.allowlist`",
-    );
-    refused(
-        &list(&["<endpoint-id>"]),
-        Mode::Closed,
-        "paste the id that `sluice id` prints",
-    );
+fn an_id_must_be_64_lower_case_hex_digits_of_a_key_in_either_list() {
+    for (list, mode, rate) in [
+        ("allowlist", Mode::Closed, ""),
+        ("denylist", Mode::Open, RATE),
+    ] {
+        let ids = |ids: &[&str]| m(&format!("[access]\n{list} = {ids:?}\n{rate}"));
+        assert_eq!(check_config(&ids(&[]), mode, None), Ok(()));
+        assert_eq!(check_config(&ids(&[ID]), mode, None), Ok(()));
+        let entry = |n: usize| format!("entry {n} of `access.{list}`");
+        let short = format!("{} is not 64 lower-case hex digits", entry(1));
+        refused(&ids(&[&ID[..63]]), mode, &short);
+        refused(&ids(&[ID, &format!("{ID}0")]), mode, &entry(2));
+        refused(&ids(&[&format!("{}g", &ID[..63])]), mode, &entry(1));
+        let upper = format!("{} has upper-case hex digits", entry(1));
+        refused(&ids(&[&ID.to_uppercase()]), mode, &upper);
+        refused(&ids(&[ID, &ID.to_uppercase()]), mode, &entry(2));
+        let not_a_key = format!(
+            "{} is 64 hex digits but not an ed25519 public key",
+            entry(1)
+        );
+        refused(&ids(&[NOT_A_KEY]), mode, &not_a_key);
+        for id in ["<endpoint-id>", NOT_A_KEY, &ID.to_uppercase()] {
+            refused(&ids(&[id]), mode, "paste the id that `sluice id` prints");
+        }
+    }
 }
 
 #[test]
@@ -210,14 +221,14 @@ fn a_required_key_left_out_is_named() {
 fn the_shipped_configs_start_only_as_the_readme_says() {
     let relay = super::read(&super::relay_dir().join("relay.toml"));
     let open = super::read(&super::relay_dir().join("open.toml"));
-    assert_eq!(check_config(&relay, Mode::Closed), Ok(()));
+    assert_eq!(check_config(&relay, Mode::Closed, None), Ok(()));
     refused(
         &relay,
         Mode::Open,
         "--open was given, but `access` is an allowlist",
     );
     refused(&open, Mode::Closed, "`access` is \"everyone\"");
-    assert_eq!(check_config(&open, Mode::Open), Ok(()));
+    assert_eq!(check_config(&open, Mode::Open, None), Ok(()));
 }
 
 #[test]

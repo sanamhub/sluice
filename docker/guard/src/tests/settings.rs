@@ -9,7 +9,9 @@ const ALLOW: &str = "[access]\nallowlist = []\n";
 const TLS: &str = "[tls]\ncert_mode = \"Manual\"\n";
 
 fn refused(text: &str, mode: Mode, says: &str) {
-    let message = check_config(text, mode).expect_err("refused").to_string();
+    let message = check_config(text, mode, None)
+        .expect_err("refused")
+        .to_string();
     assert!(message.contains(says), "{text:?} {mode:?}: {message}");
 }
 
@@ -25,12 +27,12 @@ fn dangerous_http_only_is_refused_closed_or_open() {
     refused(&open, Mode::Open, "`dangerous_http_only` is true");
     // Written out as false it is the default, and passes.
     let on = m(&format!("{ALLOW}{TLS}dangerous_http_only = false\n"));
-    assert_eq!(check_config(&on, Mode::Closed), Ok(()));
+    assert_eq!(check_config(&on, Mode::Closed, None), Ok(()));
 }
 
 #[test]
 fn no_tls_at_all_stays_allowed_for_a_relay_behind_a_proxy() {
-    assert_eq!(check_config(&m(ALLOW), Mode::Closed), Ok(()));
+    assert_eq!(check_config(&m(ALLOW), Mode::Closed, None), Ok(()));
 }
 
 #[test]
@@ -43,9 +45,9 @@ fn enable_metrics_must_be_written_and_either_value_passes() {
     );
     for value in ["true", "false"] {
         let text = format!("enable_metrics = {value}\n{ALLOW}");
-        assert_eq!(check_config(&text, Mode::Closed), Ok(()), "{value}");
+        assert_eq!(check_config(&text, Mode::Closed, None), Ok(()), "{value}");
         let open = format!("enable_metrics = {value}\naccess = \"everyone\"\n{RATE}");
-        assert_eq!(check_config(&open, Mode::Open), Ok(()), "{value}");
+        assert_eq!(check_config(&open, Mode::Open, None), Ok(()), "{value}");
     }
 }
 
@@ -62,7 +64,11 @@ fn an_http_url_without_a_secret_in_it_passes() {
         "http://10.0.0.1:8080/check",
         "https://auth.example",
     ] {
-        assert_eq!(check_config(&http(url), Mode::Closed), Ok(()), "{url}");
+        assert_eq!(
+            check_config(&http(url), Mode::Closed, None),
+            Ok(()),
+            "{url}"
+        );
     }
 }
 
@@ -90,7 +96,7 @@ fn an_http_url_with_a_secret_in_it_is_refused_and_points_at_bearer_token() {
         ("file:///etc/passwd", "is not an http or https URL"),
     ];
     for (url, why) in cases {
-        let message = check_config(&http(url), Mode::Closed)
+        let message = check_config(&http(url), Mode::Closed, None)
             .expect_err(url)
             .to_string();
         assert!(

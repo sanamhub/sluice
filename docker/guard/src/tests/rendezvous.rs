@@ -6,7 +6,9 @@ const OFF: &str = "enable_relay = false\nenable_metrics = false\n";
 const TLS: &str = "[tls]\nquic_bind_addr = \"0.0.0.0:7842\"\ncert_mode = \"Manual\"\n";
 
 fn refused(text: &str, mode: Mode, says: &str) {
-    let message = check_config(text, mode).expect_err("refused").to_string();
+    let message = check_config(text, mode, None)
+        .expect_err("refused")
+        .to_string();
     assert!(message.contains(says), "{text:?} {mode:?}: {message}");
     assert!(!message.contains('\n'), "one line: {message}");
 }
@@ -14,7 +16,7 @@ fn refused(text: &str, mode: Mode, says: &str) {
 #[test]
 fn the_shipped_rendezvous_config_starts_only_as_rendezvous() {
     let manual = super::read(&super::rendezvous_dir().join("manual.toml"));
-    assert_eq!(check_config(&manual, Mode::Rendezvous), Ok(()));
+    assert_eq!(check_config(&manual, Mode::Rendezvous, None), Ok(()));
     refused(&manual, Mode::Closed, "start it with --rendezvous");
     refused(&manual, Mode::Open, "start it with --rendezvous");
 }
@@ -26,7 +28,7 @@ fn enable_relay_must_be_written_false() {
     let on = format!("enable_relay = true\n{quic}");
     refused(&on, Mode::Rendezvous, "needs `enable_relay = false`");
     let off = format!("enable_relay = false\n{quic}");
-    assert_eq!(check_config(&off, Mode::Rendezvous), Ok(()));
+    assert_eq!(check_config(&off, Mode::Rendezvous, None), Ok(()));
 }
 
 #[test]

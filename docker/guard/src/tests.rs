@@ -1,10 +1,12 @@
 mod args;
 mod examples;
 mod files;
+mod keys;
 mod rendezvous;
 mod rules;
 mod secrets;
 mod settings;
+mod tokens;
 mod versions;
 
 use std::path::{Path, PathBuf};

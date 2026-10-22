@@ -15,8 +15,16 @@ use crate::schema::{AccessConfig, Config};
 use crate::{Mode, Refusal};
 
 /// The whole check of a config's text.
-pub(crate) fn check(text: &str, mode: Mode) -> Result<(), Refusal> {
+pub(crate) fn check(text: &str, mode: Mode, access_token: Option<&str>) -> Result<(), Refusal> {
     let readme = readme(mode);
+    // Before the file: it is wrong whatever the file says, since iroh-relay would take the empty
+    // value as the only token of a `shared_token` list.
+    if access_token == Some("") {
+        return Err(Refusal::new(
+            "IROH_RELAY_ACCESS_TOKEN is set but empty: unset it, or set it to the token clients \
+             present",
+        ));
+    }
     // A syntax error first, so the message can say the file is not TOML at all.
     if let Err(err) = text.parse::<toml::Table>() {
         return Err(Refusal::new(format!(
@@ -31,7 +39,7 @@ pub(crate) fn check(text: &str, mode: Mode) -> Result<(), Refusal> {
         Mode::Closed | Mode::Open => check_relay_half_on(&config)?,
     }
     if let Some(access) = &config.access {
-        access::check(access)?;
+        access::check(access, access_token)?;
     }
     check_tls(&config)?;
     check_metrics(&config)?;
