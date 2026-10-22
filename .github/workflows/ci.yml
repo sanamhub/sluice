@@ -6,6 +6,9 @@ on:
   pull_request:
   # release.yml runs every check here on a tag before it builds anything.
   workflow_call:
+  # The release pull request is opened with GITHUB_TOKEN, which starts no workflows, so the
+  # maintainer runs this on its branch by hand (RELEASING.md).
+  workflow_dispatch:
 
 permissions:
   contents: read

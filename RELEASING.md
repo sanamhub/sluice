@@ -19,9 +19,9 @@ release can be published.
 
 ## What the maintainer approves, and where
 
-1. **The release pull request.** Review the version and the changelog section, and edit the
-   changelog until each entry says what a user notices (the writing-style skill). Merging it is
-   the first approval.
+1. **The release pull request.** Run its checks, review the version and the changelog section,
+   and edit the changelog until each entry says what a user notices (the writing-style skill).
+   Merging it is the first approval.
 2. **The tag.** You push it by hand, and it is the one event that starts a release.
 3. **The `release` environment, for the binaries.** The `host` job waits in it for a required
    reviewer: Actions > the run > **Review deployments** > tick `release` > **Approve and deploy**.
@@ -34,9 +34,35 @@ So one release asks for four approvals: the merge, the tag, and two reviews of t
 the second person. The two reviews were read from GitHub's documentation, which says each job that
 names an environment with required reviewers waits for one, and have not been seen on a run yet.
 
-The release pull request shows no checks. GitHub runs no workflows for a pull request that
-`GITHUB_TOKEN` opens, so that a workflow cannot start itself in a loop. The checks run instead on
-the tag: `release.yml` calls all of `ci.yml` first and builds nothing until it passes.
+## The release pull request's checks
+
+The release pull request starts with no checks. GitHub's documentation says why, on the three
+pages in the table below. If `main` requires status checks, the pull request cannot merge until
+they run. Run them on its branch by hand:
+
+```
+gh workflow run ci.yml --repo sanamhub/sluice \
+  --ref "$(gh pr view <number> --repo sanamhub/sluice --json headRefName --jq .headRefName)"
+```
+
+| Page | What it says, quoted |
+|---|---|
+| [GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token) | "events triggered by the `GITHUB_TOKEN` will not create a new workflow run", and "`workflow_dispatch` and `repository_dispatch` events always create workflow runs" |
+| [Events that trigger workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows) | for `workflow_dispatch`, `GITHUB_SHA` is the "Last commit on the `GITHUB_REF` branch or tag", and the event "will only trigger a workflow run if the workflow file exists on the default branch"; for `pull_request`, "By default, a workflow only runs when a `pull_request` event's activity type is `opened`, `synchronize`, or `reopened`" |
+| [Troubleshooting required status checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks) | "Required checks must pass on the latest commit SHA" |
+
+So a dispatched run starts despite the token, and runs on the pull request's head commit, which is
+the commit the required checks are read from. No page says in one sentence that such a run
+satisfies a required check: that is inferred from the three, and has not been seen on a run. It
+also needs `ci.yml` with `workflow_dispatch` on `main` first.
+
+If the merge box still shows the checks as expected after the run, close the pull request and
+reopen it. A reopen by a person is a `pull_request` event with their token, which runs the checks
+by the second quote on the events page. Pushing a changelog edit to the branch runs them the same
+way.
+
+`release.yml` runs all of `ci.yml` again on the tag and builds nothing until it passes, so a
+release never skips the checks, even if the pull request merged without them.
 
 ## Cut a release
 
@@ -44,7 +70,21 @@ the tag: `release.yml` calls all of `ci.yml` first and builds nothing until it p
    expect. release-plz works it out from the Conventional Commits since the last tag. Before 1.0 a
    breaking change bumps the minor version and anything else the patch. From 1.0 on, a breaking
    change bumps the major, `feat` the minor, and anything else the patch.
-2. Edit its `CHANGELOG.md` section on the pull request branch if needed, then merge it.
+2. Run its checks ([above](#the-release-pull-requests-checks)). Edit its `CHANGELOG.md` section
+   on the pull request branch if needed, and merge it right after, with nothing merged to `main`
+   in between. When `main` moves, release-plz 0.3.174 closes a release pull request that holds a
+   commit of anyone but itself, and opens a new one from `main` without that commit. Its source
+   says so (`crates/release_plz_core/src/command/release_pr/mod.rs:303-307`):
+
+   ```
+   // There's a contributor, so we don't want to force-push in this PR.
+   // We close it because we want to save the contributor's work.
+   ...
+   info!("closing pr {} to preserve git history", opened_pr.html_url);
+   ```
+
+   The closed pull request keeps the edit, so it can be copied over, but the new one starts
+   without it.
 3. Tag the merge commit and push the tag:
 
    ```
