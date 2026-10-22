@@ -20,22 +20,22 @@ repository = "https://github.com/sanamhub/sluice"
 
 [workspace.dependencies]
 anyhow = "1"
-# Writes help and errors with colour on or off, and turns the escape codes on in a Windows console that
-# has them off. The release clap already resolves, so the tree gets no second copy.
+# Writes help and errors with colour on or off, and turns the escape codes on in a Windows console
+# that has them off. The release clap already resolves, so the tree gets no second copy.
 anstream = "1"
 assert_cmd = "2"
 blake3 = "1"
 # Only xtask uses it, to report the brotli size of the .wasm files.
 brotli = "9"
 clap = { version = "4", features = ["derive"] }
-# The completion scripts of `sluice completions`. Same release train as clap, and it adds no runtime work
-# to any other command: the scripts are written only when asked for.
+# The completion scripts of `sluice completions`. Same release train as clap, and it adds no runtime
+# work to any other command: the scripts are written only when asked for.
 clap_complete = "4"
 # The man pages, written by `cargo xtask man`. Only xtask uses it, so the binary does not carry it.
 clap_mangen = "0.3"
-# The identity key. The same crate and release that iroh resolves, so the tree holds one copy. Without the
-# default features it drops the precomputed tables, which a key made once per process does not need.
-# `zeroize` wipes the secret when the key drops.
+# The identity key. The same crate and release that iroh resolves, so the tree holds one copy.
+# Without the default features it drops the precomputed tables, which a key made once per process
+# does not need. `zeroize` wipes the secret when the key drops.
 ed25519-dalek = { version = "3", default-features = false, features = ["zeroize"] }
 # The seed of a new identity key, from the operating system. Already in the tree through iroh.
 getrandom = "0.4"
@@ -45,35 +45,41 @@ insta = { version = "1", default-features = false }
 # tls-aws-lc-rs and not the default tls-ring: ADR 0012. metrics turns on the socket counters,
 # which are no-ops without it.
 iroh = { version = "1.4", default-features = false, features = ["metrics", "tls-aws-lc-rs"] }
-# iroh does not re-export RelayQuicConfig, which names the UDP port of address discovery. Same release
-# as iroh, so the probe and the server in the rendezvous image come from one version. The probe tests
-# add its server feature.
+# iroh does not re-export RelayQuicConfig, which names the UDP port of address discovery. Same
+# release as iroh, so the probe and the server in the rendezvous image come from one version. The
+# probe tests add its server feature.
 iroh-relay = { version = "1.4", default-features = false }
 # 0.94.0 to 0.103.0 accept unauthenticated push and are yanked.
 iroh-blobs = "0.103.1"
 # iroh re-exports neither the congestion controllers nor the rustls handshake data.
 noq = { version = "1.4", default-features = false, features = ["rustls"] }
-# Only for StreamExt on iroh-blobs' GetProgress stream. The version Cargo.lock already resolves through iroh.
+# Only for StreamExt on iroh-blobs' GetProgress stream. The version Cargo.lock already resolves
+# through iroh.
 n0-future = "0.3.2"
 # Earlier releases leak session secrets through Debug. prefer-post-quantum ranks X25519MLKEM768
 # first. Without it the group is offered but X25519 wins, and the handshake silently downgrades.
-rustls = { version = "0.23.46", default-features = false, features = ["std", "aws-lc-rs", "prefer-post-quantum"] }
-# `O_NOFOLLOW` and `O_NONBLOCK` for the open of a file the manifest builder hashes, which std does not
-# name. Unix only. The release Cargo.lock already resolves through getrandom and mio, so the tree gets no
-# second copy.
+rustls = { version = "0.23.46", default-features = false, features = [
+  "std",
+  "aws-lc-rs",
+  "prefer-post-quantum",
+] }
+# `O_NOFOLLOW` and `O_NONBLOCK` for the open of a file the manifest builder hashes, which std does
+# not name. Unix only. The release Cargo.lock already resolves through getrandom and mio, so the
+# tree gets no second copy.
 libc = "0.2.191"
 # The free space on the home's volume for `sluice doctor`, through a safe statvfs. Unix only. The
 # release Cargo.lock already resolves through tempfile, so the tree gets no second copy.
 rustix = { version = "1.1.5", default-features = false, features = ["fs", "std"] }
 # Safe getrusage for the CPU time fields. Unix only; rustix has no getrusage.
 nix = { version = "0.31", default-features = false, features = ["resource"] }
-# Self-signed certificate for the rendezvous test. Already resolved through iroh-relay's server feature.
+# Self-signed certificate for the rendezvous test. Already resolved through iroh-relay's server
+# feature.
 rcgen = "0.14"
-# The ticket envelope. SPEC.md section 4 states its bytes, which are postcard 1.x's. Only `alloc`, for
-# `to_allocvec`: the defaults add nothing this crate uses.
+# The ticket envelope. SPEC.md section 4 states its bytes, which are postcard 1.x's. Only `alloc`,
+# for `to_allocvec`: the defaults add nothing this crate uses.
 postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
-# Property tests for parsers. Without default features it skips fork and timeout, which add rusty-fork
-# and tempfile to run each case in a child process. No test here needs that.
+# Property tests for parsers. Without default features it skips fork and timeout, which add
+# rusty-fork and tempfile to run each case in a child process. No test here needs that.
 proptest = { version = "1.12", default-features = false, features = ["std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -90,10 +96,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # that unicode-normalization implements, and it has no dependency. Pinned exactly: a release with
 # newer tables would change which manifests a receiver accepts, so it has to be a decision.
 unicase = "=2.10.0"
-# The NFC check on manifest paths (SPEC.md section 8, rule 2) and the NFC after case folding. Its only
-# dependency is tinyvec. 0.1.26 has the tables of Unicode 18.0.0, which section 8 names. Pinned exactly,
-# as unicase is: a release with newer tables would change which paths a receiver accepts, so it has to
-# be a decision and a change of SPEC.md.
+# The NFC check on manifest paths (SPEC.md section 8, rule 2) and the NFC after case folding. Its
+# only dependency is tinyvec. 0.1.26 has the tables of Unicode 18.0.0, which section 8 names. Pinned
+# exactly, as unicase is: a release with newer tables would change which paths a receiver accepts,
+# so it has to be a decision and a change of SPEC.md.
 unicode-normalization = "=0.1.26"
 # Rule 7 of the ticket decoder: a relay URL is checked against the WHATWG URL standard, which iroh's
 # RelayUrl parses with, so a ticket that decodes is one iroh accepts. The release Cargo.lock already
@@ -104,12 +110,24 @@ zeroize = { version = "1", default-features = false }
 # Pinned exactly: the version has to equal the wasm-bindgen CLI that the wasm-hash workflow installs
 # and `cargo xtask wasm-hash` runs, and a lockfile update must not move it on its own.
 wasm-bindgen = "=0.2.129"
-# Only xtask uses it, to check which features each wasm-hash build needs. Without its `simd` feature it
-# cannot read SIMD instructions, and the defaults add a component-model parser and serde that xtask never uses.
-wasmparser = { version = "=0.262.0", default-features = false, features = ["std", "validate", "features", "simd"] }
+# Only xtask uses it, to check which features each wasm-hash build needs. Without its `simd` feature
+# it cannot read SIMD instructions, and the defaults add a component-model parser and serde that
+# xtask never uses.
+wasmparser = { version = "=0.262.0", default-features = false, features = [
+  "std",
+  "validate",
+  "features",
+  "simd",
+] }
 # The private access list of the identity key and of a new home on Windows. The release Cargo.lock
 # already resolves, so the tree gets no second copy. Only the modules the calls live in.
-windows-sys = { version = "0.61", default-features = false, features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", default-features = false, features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Threading",
+] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
