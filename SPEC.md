@@ -687,7 +687,7 @@ lock is held by a live process it MUST connect to that process instead of openin
 | `tickets/` | Encoded tickets with expected decoded fields, including malformed ones that MUST be rejected |
 | `manifests/` | Encoded manifests with expected fields and root, including ones that MUST be rejected |
 | `packs/` | Files in manifest order with their sizes, and the `loc` of each and the size of each pack that section 9 gives. Some also give the contents, the pack roots and the manifest root |
-| `live/` | Segment chains with expected entry hashes and signatures, plus chains that MUST fail |
+| `live/` | A ticket's `stream_id` and `sender_key`, the records of section 6 in the order a receiver gets them, the receiver's answer to each, and the state of the stream at the end, including streams that MUST be refused or aborted |
 | `delta/` | File pairs with expected chunk boundaries and resulting need-ranges |
 | `paths/` | Hostile paths that MUST be rejected by a receiver |
 
