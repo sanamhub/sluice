@@ -1,8 +1,10 @@
 use std::collections::BTreeSet;
 use std::fs;
 
-use super::{Target, run, seeds, vector_files};
-use crate::conformance::vectors_dir;
+use serde_json::{Value, json};
+
+use super::{Target, framing, log, run, seeds, vector_files};
+use crate::conformance::{hex_bytes, vectors_dir};
 
 const WITH_VECTORS: [(Target, &str); 4] = [
     (Target::Ticket, "tickets"),
@@ -47,30 +49,102 @@ fn every_case_of_a_file_gives_its_seed() {
 }
 
 #[test]
-fn a_valid_manifest_also_comes_with_piece_sizes_for_the_unpacker() {
+fn each_valid_manifest_also_comes_at_least_four_times_with_piece_sizes_after_it() {
     let seeds = seeds(Target::Manifest, &vectors_dir()).unwrap();
-    let valid: usize = vector_files(&vectors_dir().join("manifests"))
+    let valid: Vec<Vec<u8>> = vector_files(&vectors_dir().join("manifests"))
         .unwrap()
         .iter()
         .flat_map(|(_, cases)| cases.iter())
         .filter(|case| case["valid"].as_bool() == Some(true))
-        .count();
-    assert!(valid > 0);
-    let with_cuts = seeds
+        .map(|case| hex_bytes(case["bytes"].as_str().unwrap()).unwrap())
+        .collect();
+    assert!(!valid.is_empty());
+    for manifest in &valid {
+        let with_cuts = seeds
+            .iter()
+            .filter(|seed| seed.bytes.len() > manifest.len() && seed.bytes.starts_with(manifest))
+            .count();
+        assert!(
+            with_cuts >= 4,
+            "{with_cuts} seeds with cuts after a valid manifest"
+        );
+    }
+}
+
+/// The records of a `live/` case after its open and up to a second one, read from the vector.
+fn records_of(case: &Value) -> Vec<(bool, Vec<u8>)> {
+    case["steps"].as_array().unwrap()[1..]
         .iter()
-        .filter(|seed| sluice_core::manifest::Manifest::decode(&seed.bytes, limits()).is_err())
-        .count();
-    assert!(
-        with_cuts >= 4 * valid,
-        "{with_cuts} inputs that do not decode whole"
+        .take_while(|step| step["record"] != "open")
+        .map(|step| {
+            let bytes = hex_bytes(step["bytes"].as_str().unwrap()).unwrap();
+            (step["record"] == "close", bytes)
+        })
+        .collect()
+}
+
+#[test]
+fn every_log_seed_reads_back_through_the_targets_framing_as_the_records_it_came_from() {
+    let mut cases = 0;
+    for (name, file_cases) in vector_files(&vectors_dir().join("live")).unwrap() {
+        for case in &file_cases {
+            let seed = log(case).unwrap();
+            let read: Vec<(bool, Vec<u8>)> = framing::records(&seed)
+                .map(|(is_close, bytes)| (is_close, bytes.to_vec()))
+                .collect();
+            assert_eq!(read, records_of(case), "{name}: {}", case["name"]);
+            cases += 1;
+        }
+    }
+    assert!(cases > 0);
+}
+
+/// A `live/` case named `name` with these steps, each a record and its bytes.
+fn live_case(name: &str, steps: &[(&str, usize)]) -> Value {
+    let steps: Vec<Value> = steps
+        .iter()
+        .map(|(record, len)| json!({"record": record, "bytes": "ab".repeat(*len)}))
+        .collect();
+    json!({"name": name, "steps": steps})
+}
+
+#[test]
+fn a_log_case_that_does_not_start_with_an_open_is_an_error_that_names_it() {
+    let error = log(&live_case("starts late", &[("frame", 4), ("open", 4)])).unwrap_err();
+    assert!(error.to_string().contains("\"starts late\""), "{error}");
+}
+
+#[test]
+fn a_log_record_over_255_bytes_is_an_error_that_names_the_case_and_not_a_cut() {
+    let fits = log(&live_case("fits", &[("open", 4), ("frame", 255)])).unwrap();
+    assert_eq!(fits.len(), 2 + 255);
+    let error = log(&live_case("too long", &[("open", 4), ("close", 256)])).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "case \"too long\" has a close of 256 bytes, and the log target's records are at most \
+         255 bytes"
     );
 }
 
-fn limits() -> sluice_core::manifest::Limits {
-    sluice_core::manifest::Limits {
-        max_bytes: 1 << 16,
-        max_entries: 1000,
-    }
+#[test]
+fn a_vector_file_whose_name_is_not_utf8_is_an_error_and_not_a_skip() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("good.json"), r#"{"cases": []}"#).unwrap();
+    #[cfg(unix)]
+    let name = {
+        use std::os::unix::ffi::OsStringExt;
+        std::ffi::OsString::from_vec(b"bad\xff.json".to_vec())
+    };
+    #[cfg(windows)]
+    let name = {
+        use std::os::windows::ffi::OsStringExt;
+        // A lone surrogate: a name NTFS keeps and UTF-8 cannot hold.
+        let units: Vec<u16> = [0xd800].into_iter().chain(".json".encode_utf16()).collect();
+        std::ffi::OsString::from_wide(&units)
+    };
+    fs::write(dir.path().join(name), r#"{"cases": []}"#).unwrap();
+    let error = vector_files(dir.path()).unwrap_err();
+    assert!(error.to_string().contains("not UTF-8"), "{error}");
 }
 
 #[test]

@@ -13,6 +13,12 @@ use serde_json::Value;
 
 use crate::conformance::{hex_bytes, vectors_dir};
 
+// The `log` target's own framing, included and not copied, so a seed is always read back as it
+// was written. `records` is what the tests read the seeds back with.
+#[cfg_attr(not(test), allow(dead_code))]
+#[path = "../../crates/sluice-live/fuzz/framing.rs"]
+mod framing;
+
 /// A fuzz target, by its name in its `fuzz/Cargo.toml`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum Target {
@@ -115,13 +121,22 @@ pub fn seeds(target: Target, vectors: &Path) -> anyhow::Result<Vec<Seed>> {
     Ok(seeds)
 }
 
-/// The `cases` of every `.json` file in `dir`, by file name, in name order.
+/// The `cases` of every `.json` file in `dir`, by file name, in name order. A name that is not
+/// UTF-8 is an error and not a skip, because a vector file left out would quietly seed less.
 pub fn vector_files(dir: &Path) -> anyhow::Result<Vec<(String, Vec<Value>)>> {
-    let mut names: Vec<String> = fs::read_dir(dir)
-        .with_context(|| format!("cannot list {}", dir.display()))?
-        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-        .filter(|name| name.ends_with(".json"))
-        .collect();
+    let mut names = Vec::new();
+    for entry in fs::read_dir(dir).with_context(|| format!("cannot list {}", dir.display()))? {
+        let entry = entry.with_context(|| format!("cannot list {}", dir.display()))?;
+        let name = entry.file_name().into_string().map_err(|name| {
+            anyhow::anyhow!(
+                "{} holds a file whose name is not UTF-8: {name:?}",
+                dir.display()
+            )
+        })?;
+        if name.ends_with(".json") {
+            names.push(name);
+        }
+    }
     names.sort();
     let mut files = Vec::new();
     for name in names {
@@ -172,22 +187,32 @@ fn manifest(case: &Value) -> anyhow::Result<Vec<Vec<u8>>> {
     Ok(inputs)
 }
 
-/// The records after the case's first open, in the target's framing: a tag byte (0 frame,
-/// 1 close), a length byte, and up to 255 bytes. The target opens its stream itself, with the key
-/// and stream of the vectors, so the records of a case that starts on that open are accepted.
+/// The records after the case's open, in the target's framing, up to a second open, which the
+/// framing has no tag for. The target opens its stream itself, with the key and stream of the
+/// vectors, so the records of a case that starts on that open are accepted. A case that does not
+/// start on an open, or a record longer than the framing takes, is an error naming the case, and
+/// never a seed that says something else.
 fn log(case: &Value) -> anyhow::Result<Vec<u8>> {
+    let name = text(case, "name")?;
     let steps = case["steps"].as_array().context("no steps")?;
+    let first = steps.first().map(|step| text(step, "record")).transpose()?;
+    if first.as_deref() != Some("open") {
+        bail!("case {name:?} does not start with an open, which the log target takes as given");
+    }
     let mut input = Vec::new();
-    for step in steps.iter().skip(1) {
+    for step in &steps[1..] {
         let record = text(step, "record")?;
         if record == "open" {
             break;
         }
         let bytes = hex_bytes(&text(step, "bytes")?).map_err(anyhow::Error::msg)?;
-        let len = bytes.len().min(255);
-        input.push(u8::from(record == "close"));
-        input.push(len as u8);
-        input.extend_from_slice(&bytes[..len]);
+        framing::push(&mut input, record == "close", &bytes).map_err(|len| {
+            anyhow::anyhow!(
+                "case {name:?} has a {record} of {len} bytes, and the log target's records are \
+                 at most {} bytes",
+                framing::MAX_RECORD_BYTES
+            )
+        })?;
     }
     Ok(input)
 }

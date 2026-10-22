@@ -1,10 +1,18 @@
 #![no_main]
 
+// The seeds of `cargo xtask fuzz-seeds` are written with this same file. `push` is the half
+// that only the seeds use.
+#[allow(dead_code)]
+#[path = "../framing.rs"]
+mod framing;
+
 use std::sync::OnceLock;
 
 use ed25519_dalek::SigningKey;
 use libfuzzer_sys::fuzz_target;
 use sluice_live::{Frame, LogOpen, Outcome, Receiver, Sender, Status};
+
+use framing::records;
 
 /// The stream and key of the `live/` vectors, so their frames and closes seed this target as they
 /// are: the stream `5a` repeated, the published secret key of RFC 8032 section 7.1 TEST 1, and
@@ -24,18 +32,6 @@ fn open() -> &'static (LogOpen, [u8; 32]) {
         let public = key.verifying_key().to_bytes();
         let sender = Sender::new(key, STREAM, SEGMENT_BYTES, STARTED).expect("valid");
         (sender.log_open(), public)
-    })
-}
-
-/// The records of an input: each is a tag byte, whose low bit says frame (0) or close (1), a
-/// length byte, and that many bytes, or what is left.
-fn records(mut data: &[u8]) -> impl Iterator<Item = (bool, &[u8])> {
-    std::iter::from_fn(move || {
-        let (&tag, rest) = data.split_first()?;
-        let (&len, rest) = rest.split_first().unwrap_or((&0, &[]));
-        let (record, rest) = rest.split_at(usize::from(len).min(rest.len()));
-        data = rest;
-        Some((tag & 1 == 1, record))
     })
 }
 
