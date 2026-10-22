@@ -33,18 +33,21 @@ fn every_target_that_reads_vectors_gets_a_seed_from_each_file_it_reads() {
 }
 
 #[test]
-fn every_case_of_a_file_gives_its_seed() {
-    for (target, folder) in [(Target::Ticket, "tickets"), (Target::ManifestPath, "paths")] {
-        let cases: usize = vector_files(&vectors_dir().join(folder))
+fn every_distinct_case_of_a_file_gives_one_seed() {
+    for (target, folder, key) in [
+        (Target::Ticket, "tickets", "ticket"),
+        (Target::ManifestPath, "paths", "path"),
+    ] {
+        let inputs: BTreeSet<String> = vector_files(&vectors_dir().join(folder))
             .unwrap()
             .iter()
-            .map(|(_, cases)| cases.len())
-            .sum();
-        assert_eq!(
-            seeds(target, &vectors_dir()).unwrap().len(),
-            cases,
-            "{target:?}"
-        );
+            .flat_map(|(_, cases)| cases.iter())
+            .map(|case| case[key].as_str().unwrap().to_string())
+            .collect();
+        let seeds = seeds(target, &vectors_dir()).unwrap();
+        let distinct: BTreeSet<&[u8]> = seeds.iter().map(|seed| seed.bytes.as_slice()).collect();
+        assert_eq!(seeds.len(), inputs.len(), "{target:?}");
+        assert_eq!(distinct.len(), seeds.len(), "{target:?} gave a seed twice");
     }
 }
 
@@ -118,8 +121,14 @@ fn a_live_case_that_opens_on_another_stream_key_or_segment_size_is_skipped() {
         skipped.contains(&"clean.json: segments of 64 MiB, the largest segment_bytes".to_string()),
         "{skipped:#?}"
     );
+    // Of the 45 cases that give a seed, two give the records of another case, so the target is
+    // seeded with 43 files, each written once.
     let seeds = seeds(Target::Log, &vectors_dir()).unwrap();
-    assert_eq!(seeds.len(), 45);
+    let distinct: BTreeSet<&[u8]> = seeds.iter().map(|seed| seed.bytes.as_slice()).collect();
+    assert_eq!((seeds.len(), distinct.len()), (43, 43));
+    let dir = tempfile::tempdir().unwrap();
+    run(Target::Log, dir.path()).unwrap();
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 43);
 }
 
 /// The bytes of a `live/` case's step: the target's own open for an open, and `ab` repeated for

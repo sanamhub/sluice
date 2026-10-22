@@ -50,7 +50,7 @@ fn a_folder_that_holds_an_unrelated_file_is_not_touched() {
     );
     assert_eq!(fs::read_to_string(path.join("notes.txt")).unwrap(), "mine");
     let failed = failed(&path);
-    assert_eq!(failed, ["HomeOpenToOthers(493)"], "0o755 is 493");
+    assert_eq!(failed, ["AccessOpenToOthers(493)"], "0o755 is 493");
 }
 
 #[test]

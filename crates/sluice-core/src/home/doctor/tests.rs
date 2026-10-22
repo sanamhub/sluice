@@ -228,7 +228,7 @@ fn a_key_and_a_home_that_others_can_reach_are_two_policy_failures_at_once() {
     assert_eq!(loose, Finding::KeyOpenToOthers(0o640));
     assert_eq!(Check::new(loose).failure(), Some(ErrorKind::Policy));
     let open_home = finding(dir.path(), Name::Access);
-    assert_eq!(open_home, Finding::HomeOpenToOthers(0o755));
+    assert_eq!(open_home, Finding::AccessOpenToOthers(0o755));
     assert_eq!(Check::new(open_home).failure(), Some(ErrorKind::Policy));
     fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).expect("chmod");
     assert_eq!(finding(dir.path(), Name::Access), Finding::AccessPrivate);
@@ -289,9 +289,9 @@ fn every_failure_has_a_kind_and_nothing_else_has_one() {
     let policy = [
         Finding::LayoutNewer { found: 2, known: 1 },
         Finding::KeyOpenToOthers(0o644),
-        Finding::HomeOpenToOthers(0o755),
+        Finding::AccessOpenToOthers(0o755),
         Finding::KeyAclNotPrivate,
-        Finding::HomeAclNotPrivate,
+        Finding::AccessAclNotPrivate,
     ];
     for (findings, kind) in [
         (&storage[..], ErrorKind::Storage),

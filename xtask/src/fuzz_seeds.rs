@@ -82,7 +82,8 @@ pub fn run(target: Target, dir: &Path) -> anyhow::Result<()> {
     fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
     let mut written = 0;
     for seed in &seeds {
-        // Named by content, so a seed that two vectors share is one file.
+        // Named by content, so a second run, or another target's seed with the same bytes, adds
+        // no file.
         let path = dir.join(blake3::hash(&seed.bytes).to_hex().as_str());
         if !path.exists() {
             fs::write(&path, &seed.bytes)
@@ -103,7 +104,7 @@ pub fn run(target: Target, dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Every seed of `target`, from the vector files under `vectors`.
+/// Every distinct seed of `target`, from the vector files under `vectors`, each once.
 pub fn seeds(target: Target, vectors: &Path) -> anyhow::Result<Vec<Seed>> {
     if matches!(target, Target::RelayConfig | Target::RelayDifferential) {
         // The vectors are in tests/vectors, two folders below the repository root.
@@ -119,13 +120,18 @@ pub fn seeds(target: Target, vectors: &Path) -> anyhow::Result<Vec<Seed>> {
             .collect());
     };
     let mut seeds = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for (name, cases) in vector_files(&vectors.join(folder))? {
         for case in &cases {
             for bytes in from_case(target, case).with_context(|| format!("a case of {name}"))? {
-                seeds.push(Seed {
-                    file: Some(name.clone()),
-                    bytes,
-                });
+                // Once each, from the first file that gives it: two cases with the same input are
+                // one seed, and the count `run` prints is of the files it writes.
+                if seen.insert(bytes.clone()) {
+                    seeds.push(Seed {
+                        file: Some(name.clone()),
+                        bytes,
+                    });
+                }
             }
         }
     }

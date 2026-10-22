@@ -139,14 +139,14 @@ pub enum Finding {
     /// access list the store gives a new home.
     AccessPrivate,
     /// On Unix, group or other has access to the home folder. Carries its mode.
-    HomeOpenToOthers(u32),
+    AccessOpenToOthers(u32),
     /// On Windows, the key's access list is not the private one the store sets: the user,
     /// `SYSTEM` and `Administrators`, with inheritance stopped.
     KeyAclNotPrivate,
     /// On Windows, the home folder's access list is not the private one the store sets on a new
     /// home: the same three entries, inherited by what is made inside, with inheritance from the
     /// folder above stopped.
-    HomeAclNotPrivate,
+    AccessAclNotPrivate,
     /// The home folder's mode or access list cannot be read. Carries why.
     AccessUnreadable(String),
     /// The key or its access cannot be read. Carries why.
@@ -239,8 +239,8 @@ impl Check {
             | F::HomeUnreadable(..)
             | F::HomeNowhere => Name::Home,
             F::AccessPrivate
-            | F::HomeOpenToOthers(_)
-            | F::HomeAclNotPrivate
+            | F::AccessOpenToOthers(_)
+            | F::AccessAclNotPrivate
             | F::AccessUnreadable(_) => Name::Access,
             F::LayoutCurrent(_)
             | F::LayoutOlder { .. }
@@ -314,9 +314,9 @@ impl Check {
             | F::KeyUnreadable(_) => Some(ErrorKind::Storage),
             F::LayoutNewer { .. }
             | F::KeyOpenToOthers(_)
-            | F::HomeOpenToOthers(_)
+            | F::AccessOpenToOthers(_)
             | F::KeyAclNotPrivate
-            | F::HomeAclNotPrivate => Some(ErrorKind::Policy),
+            | F::AccessAclNotPrivate => Some(ErrorKind::Policy),
             _ => None,
         }
     }

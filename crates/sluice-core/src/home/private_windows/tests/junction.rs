@@ -36,7 +36,7 @@ fn a_junction_has_a_list_of_its_own_and_doctor_reads_its_targets() {
     fs::create_dir(target.join("blobs")).unwrap();
     fs::create_dir(target.join("db")).unwrap();
     fs::create_dir(target.join("logs")).unwrap();
-    assert_eq!(access_check(&link), Finding::HomeAclNotPrivate);
+    assert_eq!(access_check(&link), Finding::AccessAclNotPrivate);
     restrict_dir(&target).unwrap();
     assert_eq!(access_check(&link), Finding::AccessPrivate);
 }

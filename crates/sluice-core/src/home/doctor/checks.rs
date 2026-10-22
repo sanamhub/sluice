@@ -128,7 +128,7 @@ pub(super) fn key(home: &Path) -> Finding {
 fn home_open_to_others(home: &Path, given: &Path) -> Option<Finding> {
     use std::os::unix::fs::PermissionsExt;
     match fs::metadata(home) {
-        Ok(meta) if meta.permissions().mode() & 0o077 != 0 => Some(Finding::HomeOpenToOthers(
+        Ok(meta) if meta.permissions().mode() & 0o077 != 0 => Some(Finding::AccessOpenToOthers(
             meta.permissions().mode() & 0o7777,
         )),
         Ok(_) => None,
@@ -148,7 +148,7 @@ fn unreadable(home: &Path, error: io::Error) -> Finding {
 fn home_open_to_others(home: &Path, given: &Path) -> Option<Finding> {
     match super::super::private_windows::is_private_dir(home) {
         Ok(true) => None,
-        Ok(false) => Some(Finding::HomeAclNotPrivate),
+        Ok(false) => Some(Finding::AccessAclNotPrivate),
         Err(e) => Some(unreadable(given, e)),
     }
 }

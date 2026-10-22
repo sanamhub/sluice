@@ -95,6 +95,23 @@ fn forty_threes_of_a_p_are_a_third_of_it_rounded_down() {
     );
 }
 
+// Two sizes on either side of one byte of a P. A byte is 1/2^50 of it, which is
+// 0.00000000000000088817841970012523233890533447265625, so the first fraction below is just over
+// it and the second just under. Only the 40th digit tells them apart: a parser that cuts the
+// fraction at 39 digits or fewer gives 0 for both. Each answer is floor(fraction * 2^50 / 10^40)
+// with Python's exact integers, `int("0000000000000008881784197001252323389054") * 2**50 //
+// 10**40`, and the same with `fractions.Fraction`.
+
+#[test]
+fn a_fraction_just_over_one_byte_of_a_p_is_one_byte() {
+    assert_eq!(size("0.0000000000000008881784197001252323389054P"), 1);
+}
+
+#[test]
+fn a_fraction_just_under_one_byte_of_a_p_is_nothing() {
+    assert_eq!(size("0.0000000000000008881784197001252323389053P"), 0);
+}
+
 #[test]
 fn u64_max_is_the_largest_size_and_one_more_is_refused() {
     assert_eq!(size("18446744073709551615"), u64::MAX);

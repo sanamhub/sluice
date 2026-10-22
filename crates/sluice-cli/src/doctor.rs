@@ -116,7 +116,7 @@ fn words(finding: &Finding) -> (String, Option<String>) {
             "not checked, because the home is not there".to_string(),
             None,
         ),
-        other => layout_or_lock(other).unwrap_or_else(|| key_or_space(other)),
+        other => layout_or_lock(other).unwrap_or_else(|| access_key_or_space(other)),
     }
 }
 
@@ -178,7 +178,7 @@ fn pid_text(pid: Option<u32>) -> String {
     pid.map(|pid| format!(" (pid {pid})")).unwrap_or_default()
 }
 
-fn key_or_space(finding: &Finding) -> (String, Option<String>) {
+fn access_key_or_space(finding: &Finding) -> (String, Option<String>) {
     use Finding as F;
     match finding {
         F::AccessPrivate => ("only this user can reach the home".to_string(), None),
@@ -203,7 +203,7 @@ fn key_or_space(finding: &Finding) -> (String, Option<String>) {
             format!("mode {mode:04o}, so other users may be able to read it"),
             Some("run `chmod 600` on identity.key in the home".to_string()),
         ),
-        F::HomeOpenToOthers(mode) => (
+        F::AccessOpenToOthers(mode) => (
             format!("the home has mode {mode:04o}, so other users can reach the key"),
             Some("run `chmod 700` on the home".to_string()),
         ),
@@ -215,7 +215,7 @@ fn key_or_space(finding: &Finding) -> (String, Option<String>) {
                     .to_string(),
             ),
         ),
-        F::HomeAclNotPrivate => (
+        F::AccessAclNotPrivate => (
             "the home's access list lets in more than this user, SYSTEM and Administrators"
                 .to_string(),
             Some(

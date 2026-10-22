@@ -139,6 +139,7 @@ fn a_fresh_home_whose_list_cannot_be_changed_is_a_storage_error() {
     // full control otherwise, so the folder can still be deleted.
     let sddl = format!("D:P(D;;WD;;;OW)(A;OICI;FA;;;{})", user_sid().unwrap());
     set_dacl(&open_dir(&path).unwrap(), &sddl).unwrap();
+    let before = dacl_sddl(&path).unwrap();
     let Err(crate::Error::Storage(message)) = Home::open(&path) else {
         panic!("expected a storage error");
     };
@@ -148,6 +149,7 @@ fn a_fresh_home_whose_list_cannot_be_changed_is_a_storage_error() {
         0,
         "nothing was written"
     );
+    assert_eq!(dacl_sddl(&path).unwrap(), before, "the list is as it was");
 }
 
 #[test]
@@ -249,6 +251,7 @@ fn doctor_passes_a_home_the_store_made() {
     let path = parent.path().join("home");
     drop(Home::open(&path).unwrap().identity().unwrap());
     assert!(super::is_private_dir(&path).unwrap());
+    assert_eq!(access_check(&path), Finding::AccessPrivate);
     assert_eq!(key_check(&path), Finding::KeyPrivate);
 }
 
@@ -266,7 +269,7 @@ fn doctor_fails_a_home_whose_list_has_an_extra_entry() {
     set_dacl(&open_dir(&path).unwrap(), &wider).unwrap();
     assert!(!super::is_private_dir(&path).unwrap());
     let finding = access_check(&path);
-    assert_eq!(finding, Finding::HomeAclNotPrivate);
+    assert_eq!(finding, Finding::AccessAclNotPrivate);
     let check = Check::new(finding);
     assert_eq!(check.status(), Status::Failed);
     assert_eq!(check.failure(), Some(crate::ErrorKind::Policy));
@@ -280,6 +283,8 @@ fn doctor_passes_an_empty_folder_made_by_hand_then_opened() {
     fs::create_dir(&path).unwrap();
     drop(Home::open(&path).unwrap().identity().unwrap());
     assert!(super::is_private_dir(&path).unwrap());
+    // The access check, which reads the home's list, and not only the key's.
+    assert_eq!(access_check(&path), Finding::AccessPrivate);
     assert_eq!(key_check(&path), Finding::KeyPrivate);
 }
 
@@ -294,7 +299,7 @@ fn doctor_fails_a_folder_made_by_hand_with_a_file_in_it_then_opened() {
     // from the folder above.
     drop(Home::open(&path).unwrap().identity().unwrap());
     assert!(!super::is_private_dir(&path).unwrap());
-    assert_eq!(access_check(&path), Finding::HomeAclNotPrivate);
+    assert_eq!(access_check(&path), Finding::AccessAclNotPrivate);
     assert_eq!(key_check(&path), Finding::KeyPrivate);
 }
 
@@ -317,6 +322,6 @@ fn doctor_reports_a_home_and_a_key_that_are_both_open_as_two_failures() {
         .unwrap();
     set_dacl(&key, &format!("{}(A;;FR;;;WD)", private_sddl(&user, ""))).unwrap();
     drop(key);
-    assert_eq!(access_check(&path), Finding::HomeAclNotPrivate);
+    assert_eq!(access_check(&path), Finding::AccessAclNotPrivate);
     assert_eq!(key_check(&path), Finding::KeyAclNotPrivate);
 }
