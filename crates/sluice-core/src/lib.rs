@@ -3,7 +3,8 @@
 mod error;
 mod home;
 pub mod manifest;
+pub mod queue;
 pub mod ticket;
 
-pub use error::Error;
+pub use error::{Error, ErrorKind};
 pub use home::{Home, Identity};

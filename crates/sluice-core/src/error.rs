@@ -41,9 +41,60 @@ pub enum Error {
     Bug(String),
 }
 
+impl Error {
+    /// Which of the six variants this is, without its message. A caller that keeps or compares
+    /// failures, such as the transfer queue's history, keeps this and not the message, which can
+    /// name a file.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sluice_core::{Error, ErrorKind};
+    ///
+    /// assert_eq!(Error::Network("reset".into()).kind(), ErrorKind::Network);
+    /// assert_eq!(Error::Cancelled.kind(), ErrorKind::Cancelled);
+    /// ```
+    pub fn kind(&self) -> ErrorKind {
+        match self {
+            Error::Network(_) => ErrorKind::Network,
+            Error::Verify(_) => ErrorKind::Verify,
+            Error::Storage(_) => ErrorKind::Storage,
+            Error::Policy(_) => ErrorKind::Policy,
+            Error::Cancelled => ErrorKind::Cancelled,
+            Error::Bug(_) => ErrorKind::Bug,
+        }
+    }
+}
+
+/// The variant of an [`Error`] on its own: the six kinds, with no message.
+///
+/// # Examples
+///
+/// ```
+/// use sluice_core::ErrorKind;
+///
+/// let kind = ErrorKind::Storage;
+/// assert_ne!(kind, ErrorKind::Policy);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ErrorKind {
+    /// [`Error::Network`].
+    Network,
+    /// [`Error::Verify`].
+    Verify,
+    /// [`Error::Storage`].
+    Storage,
+    /// [`Error::Policy`].
+    Policy,
+    /// [`Error::Cancelled`].
+    Cancelled,
+    /// [`Error::Bug`].
+    Bug,
+}
+
 #[cfg(test)]
 mod tests {
-    use super::Error;
+    use super::{Error, ErrorKind};
 
     #[test]
     fn display_is_stable() {
@@ -58,5 +109,26 @@ mod tests {
         for (err, expected) in cases {
             assert_eq!(err.to_string(), expected);
         }
+    }
+
+    #[test]
+    fn each_variant_has_its_own_kind() {
+        let kinds = [
+            Error::Network(String::new()).kind(),
+            Error::Verify(String::new()).kind(),
+            Error::Storage(String::new()).kind(),
+            Error::Policy(String::new()).kind(),
+            Error::Cancelled.kind(),
+            Error::Bug(String::new()).kind(),
+        ];
+        let want = [
+            ErrorKind::Network,
+            ErrorKind::Verify,
+            ErrorKind::Storage,
+            ErrorKind::Policy,
+            ErrorKind::Cancelled,
+            ErrorKind::Bug,
+        ];
+        assert_eq!(kinds, want);
     }
 }
