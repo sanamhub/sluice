@@ -40,3 +40,7 @@ jobs:
       - run: docker build --tag "sluice-$IMAGE:ci" "docker/$IMAGE"
       # The distroless image has no shell, so the binary is run directly.
       - run: docker run --rm --entrypoint /usr/local/bin/iroh-relay "sluice-$IMAGE:ci" --version
+      # The relay starts, and its guard refuses each config that would open it by mistake, so a
+      # guard that lets a typo through fails here (ADR 0019).
+      - if: matrix.image == 'relay'
+        run: bash docker/relay/smoke-test.sh "sluice-$IMAGE:ci"

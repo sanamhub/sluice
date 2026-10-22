@@ -1,0 +1,8 @@
+# The build context is this folder, and only what the image needs goes in. Anything not named below
+# stays out, so a target/ folder, a local config, a certificate or a key never reaches the build.
+*
+!relay.toml
+!open.toml
+!guard/Cargo.toml
+!guard/Cargo.lock
+!guard/src

@@ -6,14 +6,41 @@ relay over HTTPS that carries the traffic of two peers that cannot reach each ot
 host that runs it, in and out again (ADR 0013). For address discovery alone, run
 [`rendezvous`](../rendezvous/README.md), which carries no transfer bytes.
 
-It is the upstream binary, built the way `rendezvous` builds it: from crates.io with `--locked`,
-at the version `Cargo.lock` resolves for `iroh`, on the same two base images pinned by the same
-digests. It runs as uid 65532 on `gcr.io/distroless/cc-debian13:nonroot`, which has no shell, and
-the metrics server is off.
+`iroh-relay` is the upstream binary, built the way `rendezvous` builds it: from crates.io with
+`--locked`, at the version `Cargo.lock` resolves for `iroh`, on the same two base images pinned by
+the same digests. It runs as uid 65532 on `gcr.io/distroless/cc-debian13:nonroot`, which has no
+shell, and the metrics server is off. It starts through [the guard](#the-guard), the one program of
+ours in the image, which refuses a config that would open the relay by mistake.
 
 The relay runs closed (`docs/design.md`, **Relays run closed**). Only the endpoint ids on its
 allowlist may relay through it, and the image ships with that list empty, so it lets nobody in until
 the operator adds an id.
+
+## The guard
+
+The entry point is [`sluice-relay-guard`](guard/README.md) (ADR 0019), and the default command is
+`--config-path /etc/relay/relay.toml`. It reads the config, checks it, and then replaces itself
+with `iroh-relay --config-path=<file>`, so the relay is PID 1 and gets the container's signals.
+
+`iroh-relay` 1.4.0 runs open, with no byte limit and nothing in its log, when `access` is left out,
+when a key is misspelled (it ignores keys it does not know), and when the config file is missing.
+The guard refuses each of these, and any config that lets in ids nobody listed, unless the
+operator passes `--open` and the config sets a per-client byte limit. A refusal is one line on
+stderr that names the key or the rule, and the container exits with 64. Two of them, as the image
+prints them:
+
+| Started with | stderr |
+|---|---|
+| a mounted `relay.toml` that says `[acess]` | ``sluice-relay-guard: line 1: unknown key `acess`: iroh-relay 1.4.0 has no such setting, and would ignore it; check the spelling against docker/relay/README.md`` |
+| `--config-path /etc/relay/open.toml` | ``sluice-relay-guard: `access` is "everyone", which lets anyone relay: list the ids that may relay in `[access] allowlist`, or start with --open to run it open on purpose`` |
+
+It also refuses `--dev`, every argument but `--open` and `--config-path`, `--open` with a closed
+config, and an allowlist entry that is not 64 hex digits. The [guard's README](guard/README.md)
+lists every rule. No message prints a value from the config, since a token may be one.
+
+**Overriding the entry point skips the guard.** `docker run --entrypoint /usr/local/bin/iroh-relay`
+runs the server with whatever it is given, open default included. Name `sluice-relay-guard` instead,
+or leave the entry point alone.
 
 ## Ports
 
@@ -54,9 +81,10 @@ reads the certificate once at start, so restart the container after a renewal.
 ## Let an endpoint in
 
 The allowlist holds endpoint ids, the 64 hex characters that `sluice id` prints on each machine that
-should use the relay. The two below are examples, the public halves of keys made for the check and
-thrown away. Copy [relay.toml](relay.toml) next to the certificates, add the ids, mount it
-over the one in the image, and restart:
+should use the relay, and the guard refuses an entry that is not 64 hex digits. The two below are
+examples, the public halves of keys made for the check and thrown away. Copy
+[relay.toml](relay.toml) next to the certificates, add the ids, mount it over the one in the image,
+and restart:
 
 ```toml
 [access]
@@ -82,17 +110,26 @@ Address discovery on UDP 7842 answers anyone.
 - with the image as shipped, the first key was refused with the line above;
 - with the first two keys on the list, the first sent a datagram to the second through the relay
   and the second received it, and the third key was refused;
-- with `open.toml`, the third key connected and relayed a datagram.
+- with `--open --config-path /etc/relay/open.toml`, the third key connected and relayed a datagram.
+
+It was run again through the guard, with new keys, and came out the same, with `iroh-relay` as the
+container's PID 1. [smoke-test.sh](smoke-test.sh) checks the guard's refusals and that the image
+starts, and CI runs it on every build of the image.
 
 ## Open mode
 
 [open.toml](open.toml) lets anyone relay, and each client may send at most 2 MiB/s into the relay,
-with bursts of up to 8 MiB. It is used only when the operator names it on the command line:
+with bursts of up to 8 MiB. It is used only when the operator names it on the command line, with
+`--open` to say it is meant:
 
 ```
 docker run -d --name relay -p 443:443 -p 80:80 -p 7842:7842/udp \
-  -v "$PWD/certs:/etc/relay/certs:ro" sluice-relay --config-path /etc/relay/open.toml
+  -v "$PWD/certs:/etc/relay/certs:ro" sluice-relay --open --config-path /etc/relay/open.toml
 ```
+
+Without `--open` the guard refuses `open.toml`, and with `--open` it refuses `relay.toml`, so the
+flag and the config always agree. An open config of the operator's own must set
+`[limits.client.rx] bytes_per_second`, or the guard refuses it.
 
 What it costs: anyone who finds the URL, in a ticket, a log or a screenshot, can use the operator's
 bandwidth up to that rate, as many clients at once as care to. `iroh-relay` 1.4.0 has no working
