@@ -23,6 +23,7 @@ vulnerability, see [`SECURITY.md`](../SECURITY.md).
 | A malicious manifest makes two entries one file on a case-insensitive disk | Paths that are equal after full Unicode case folding and NFC are rejected on every platform, so `README.md` and `Readme.md` never both arrive. Fuzzed |
 | A malicious manifest exhausts the receiver's memory | The byte length and the entry count are checked against limits (256 MiB and 1,000,000 by default) before anything is read or reserved. Fuzzed |
 | A malicious manifest plants a setuid binary | `mode` holds permission bits only, and a receiver never applies the setuid or setgid bit, whatever the manifest says |
+| A provider serves a forged or reordered live stream | Every live record is signed under the ticket's key, with a label and the stream id in the signed message, and verified strictly. A record that does not verify, or comes too early, is refused and another provider can give it. Only two validly signed histories, or a signed record that breaks the chain, abort the stream. Fuzzed |
 | A ticket holder fills the sender's disk | `iroh-blobs` push is disabled, and the `get`, `get_many` and `observe` modes are set together to the ticket's allowlist. Restricting `get` alone would leave the other two open. Tested |
 | A leaked relay URL is used as free bandwidth | Relays run with authorization on. `open` mode needs a flag and has a per-client byte rate limit. ADR 0011 |
 | Short-code guessing | Short codes use SPAKE2 and are rate-limited per code at the rendezvous |
