@@ -26,6 +26,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "range"
+path = "fuzz_targets/range.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "ticket"
 path = "fuzz_targets/ticket.rs"
 test = false

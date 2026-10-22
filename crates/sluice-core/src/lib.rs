@@ -4,6 +4,7 @@ mod error;
 mod home;
 pub mod manifest;
 pub mod queue;
+pub mod range;
 pub mod ticket;
 
 pub use error::{Error, ErrorKind};
