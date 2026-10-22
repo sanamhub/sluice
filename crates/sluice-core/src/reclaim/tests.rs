@@ -2,9 +2,17 @@ use proptest::prelude::*;
 
 use super::{DEFAULT_CAP_BYTES, Item, plan};
 
-fn item(root: u8, size: u64, last_used_ms: u64) -> Item {
+/// A root that differs from the others only in its last byte, so an order that looks at less than
+/// the whole root cannot tell them apart.
+fn root(last: u8) -> [u8; 32] {
+    let mut root = [0xa5; 32];
+    root[31] = last;
+    root
+}
+
+fn item(last: u8, size: u64, last_used_ms: u64) -> Item {
     Item {
-        root: [root; 32],
+        root: root(last),
         size,
         last_used_ms,
         tagged: false,
@@ -13,7 +21,7 @@ fn item(root: u8, size: u64, last_used_ms: u64) -> Item {
 }
 
 fn roots(items: &[Item]) -> Vec<u8> {
-    items.iter().map(|item| item.root[0]).collect()
+    items.iter().map(|item| item.root[31]).collect()
 }
 
 #[test]
@@ -56,11 +64,19 @@ fn the_least_recently_used_go_first_and_eviction_stops_as_soon_as_the_cap_is_met
 }
 
 #[test]
-fn the_same_time_is_broken_by_root_so_the_plan_never_depends_on_input_order() {
-    let items = [item(9, 10, 5), item(3, 10, 5), item(6, 10, 5)];
-    assert_eq!(roots(plan(&items, 10).evict()), [3, 6]);
-    let reversed: Vec<Item> = items.iter().rev().copied().collect();
-    assert_eq!(plan(&reversed, 10), plan(&items, 10));
+fn the_same_time_is_broken_by_the_whole_root_so_the_plan_never_depends_on_input_order() {
+    let items = [
+        item(9, 10, 5),
+        item(3, 10, 5),
+        item(6, 10, 5),
+        item(1, 10, 5),
+    ];
+    assert_eq!(roots(plan(&items, 10).evict()), [1, 3, 6]);
+    for at in 0..items.len() {
+        let mut turned = items.to_vec();
+        turned.rotate_left(at);
+        assert_eq!(plan(&turned, 10), plan(&items, 10), "rotated by {at}");
+    }
 }
 
 #[test]
@@ -111,17 +127,23 @@ fn sizes_near_u64_max_do_not_overflow() {
     assert_eq!(none.kept(), 0);
 }
 
+/// Any root, or one of four that share all but their last byte, so that ties on time often reach
+/// past the first byte of the root.
+fn any_root() -> impl Strategy<Value = [u8; 32]> {
+    prop_oneof![any::<[u8; 32]>(), (0u8..4).prop_map(root)]
+}
+
 fn any_item() -> impl Strategy<Value = Item> {
     (
-        0u8..16,
+        any_root(),
         0u64..1000,
-        0u64..50,
+        0u64..10,
         any::<bool>(),
         any::<bool>(),
         0u8..4,
     )
         .prop_map(|(root, size, last_used_ms, tagged, in_use, protect)| Item {
-            root: [root; 32],
+            root,
             size,
             last_used_ms,
             // Mostly items that may go, so most plans have something to do.
@@ -162,6 +184,11 @@ proptest! {
         }
         for gone in plan.evict() {
             prop_assert!(left.iter().all(|kept| gone.last_used_ms <= kept.last_used_ms));
+            // And for the same time, nothing evicted while a smaller root, or the same root and
+            // a smaller size, is kept.
+            for kept in left.iter().filter(|kept| kept.last_used_ms == gone.last_used_ms) {
+                prop_assert!((gone.root, gone.size) <= (kept.root, kept.size), "{gone:?} {kept:?}");
+            }
         }
         // The same plan for the same items in another order.
         let mut shuffled = items.clone();

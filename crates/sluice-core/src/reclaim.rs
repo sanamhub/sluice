@@ -1,6 +1,6 @@
-//! What `sluice gc` would remove from the store, as `docs/design.md` (**Storage**) sets it: the
-//! store keeps at most a cap of bytes, 10 GB by default, and goes over it by evicting what was
-//! used least recently, never what is tagged or in use.
+//! What `sluice gc` would remove from the store, as `docs/design.md` (**Storage**) sets it. A
+//! store that holds more than its cap, 10 GB by default, evicts what was used least recently until
+//! it holds at most the cap, and never evicts what is tagged or in use.
 //!
 //! This is the decision only. It is a pure function of the items and the cap, so
 //! `sluice gc --dry-run` and the real run plan the same thing, and nothing here touches a file.
@@ -67,7 +67,7 @@ impl Item {
     }
 }
 
-/// What to evict to bring the store under its cap, and what that leaves.
+/// What to evict to bring the store to at most its cap, and what that leaves.
 ///
 /// # Examples
 ///
@@ -111,7 +111,7 @@ impl Plan {
         &self.evict
     }
 
-    /// The bytes the evicted items take.
+    /// The bytes the evicted items take, or `u64::MAX` if they take more.
     ///
     /// # Examples
     ///
@@ -125,7 +125,8 @@ impl Plan {
         self.freed
     }
 
-    /// The bytes the store holds after the plan, tagged and in-use items included.
+    /// The bytes the store holds after the plan, tagged and in-use items included, or `u64::MAX`
+    /// if it holds more.
     ///
     /// # Examples
     ///
