@@ -9,8 +9,9 @@ const SIZES: [u64; 4] = [1, BLOCK_BYTES, 40_000, u64::MAX];
 
 // The input is the text of a range, and after a zero byte, if there is one, up to 8 bytes of a
 // file size, little-endian. Without the zero byte it is resolved against each of `SIZES`, so a
-// range as a person writes it is a seed as it is. Whatever parses and resolves must give a plan
-// that fetches the whole range, no block outside it, and skips and keeps only fetched bytes.
+// range as a person writes it is a seed as it is. Whatever parses and resolves must keep the
+// parsed start, cut the parsed end to the size and say so, and give a plan that fetches the whole
+// range, no block outside it, and skips and keeps only fetched bytes.
 fuzz_target!(|data: &[u8]| {
     let (text, sizes) = match data.iter().position(|&b| b == 0) {
         Some(at) => {
@@ -46,6 +47,15 @@ fuzz_target!(|data: &[u8]| {
         assert!(
             bytes.start < bytes.end && bytes.end <= size,
             "out of the file"
+        );
+        assert_eq!(bytes.start, range.start(), "the start moved");
+        // `a:` runs to the end of the file, and any other end is cut to the size.
+        let end = range.end().map_or(size, |end| end.min(size));
+        assert_eq!(bytes.end, end, "the end is not the parsed end cut to the size");
+        assert_eq!(
+            resolved.cut_from(),
+            range.end().filter(|&end| end > size),
+            "cut_from does not say whether the end was cut"
         );
         let plan = resolved.plan();
         let fetched = plan.fetched();

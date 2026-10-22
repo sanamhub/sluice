@@ -11,8 +11,9 @@ const PREFIXES: [char; 5] = ['k', 'm', 'g', 't', 'p'];
 
 /// A number of bytes.
 ///
-/// It parses from the forms dd and truncate take, and displays in the shortest form that parses
-/// back to the same number: the largest binary unit that divides it, or plain bytes.
+/// It parses from the forms dd and truncate take. It displays in the largest binary unit that
+/// divides it exactly, as `4G` for 4 × 1024³, or else in plain bytes, so `1000000` stays as it is
+/// although `1MB` is shorter. Either way the text parses back to the same number.
 ///
 /// # Examples
 ///
