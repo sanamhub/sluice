@@ -304,10 +304,10 @@ jobs:
       # The distroless image has no shell, so the binary is run directly.
       - name: Smoke test
         run: docker run --rm --entrypoint /usr/local/bin/iroh-relay "sluice-$IMAGE:$ARCH" --version
-      # The relay starts, and its guard refuses each config that would open it by mistake.
+      # The image starts with a read-only root, and its guard refuses each config that would open
+      # more than it says (ADR 0019, ADR 0020).
       - name: Guard smoke test
-        if: matrix.image == 'relay'
-        run: bash docker/relay/smoke-test.sh "sluice-$IMAGE:$ARCH"
+        run: bash docker/smoke-test.sh "$IMAGE" "sluice-$IMAGE:$ARCH"
       # From this architecture's own image, on its own runner, so each SBOM lists what that image
       # holds. The publishing job attests it on the digest the registry gives the image.
       - name: SBOM

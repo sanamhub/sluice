@@ -146,8 +146,11 @@ Address discovery on UDP 7842 answers anyone.
 - with `--open --config-path /etc/relay/open.toml`, the third key connected and relayed a datagram.
 
 It was run again through the guard, with new keys, and came out the same, with `iroh-relay` as the
-container's PID 1. [smoke-test.sh](smoke-test.sh) checks the guard's refusals and that the image
-starts, and CI runs it on every build of the image.
+container's PID 1. On 2026-10-23 it was run a third time, with the config handed over as standard
+input and the container's root read-only, and came out the same again: PID 1 was
+`iroh-relay --config-path=/dev/stdin`, and its descriptor 0 was the `relay.toml` with the two keys
+mounted over the shipped one. [smoke-test.sh](../smoke-test.sh) checks the guard's refusals and
+that both images start with a read-only root, and CI runs it on every build of either image.
 
 ## Open mode
 

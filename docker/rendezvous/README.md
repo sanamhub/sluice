@@ -54,8 +54,11 @@ The build context is `docker/`, for the guard's sources, and
 [Dockerfile.dockerignore](Dockerfile.dockerignore) lets in only `manual.toml` and the guard's
 manifest, lock file and sources.
 
-The image is 61.2 MB. It runs as uid 65532 on `gcr.io/distroless/cc-debian13:nonroot`, which has no
-shell. Both base images are pinned by digest in the [Dockerfile](Dockerfile).
+The image is 63.1 MB, as `docker image ls` showed it on 2026-10-23, with the guard in it. It runs
+as uid 65532 on `gcr.io/distroless/cc-debian13:nonroot`, which has no shell, and starts with a
+read-only root. Both base images are pinned by digest in the [Dockerfile](Dockerfile).
+[smoke-test.sh](../smoke-test.sh) checks that it starts and that the guard refuses a config
+without `enable_relay = false`, and CI runs it on every build.
 
 The default command runs [manual.toml](manual.toml), which reads `default.crt` and `default.key`
 from `/etc/rendezvous/certs`. For a test, make a self-signed certificate. It has to say `CA:FALSE`:
