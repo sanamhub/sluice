@@ -29,6 +29,9 @@ jobs:
       matrix:
         image: [rendezvous, relay]
     runs-on: ubuntu-latest
+    # Compiling iroh-relay is most of it. As in release.yml's image-build, 60 minutes leaves room
+    # without letting a hung build run for GitHub's default of 6 hours.
+    timeout-minutes: 60
     env:
       IMAGE: ${{ matrix.image }}
     steps:
@@ -36,8 +39,10 @@ jobs:
         with:
           persist-credentials: false
       # Nothing is pushed or loaded anywhere else. The build compiles iroh-relay from crates.io,
-      # which is the step a yanked release or a moved base image breaks.
-      - run: docker build --tag "sluice-$IMAGE:ci" "docker/$IMAGE"
+      # which is the step a yanked release or a moved base image breaks. The flags are those
+      # of release.yml.
+      - run: |
+          docker build --provenance=false --sbom=false --tag "sluice-$IMAGE:ci" "docker/$IMAGE"
       # The distroless image has no shell, so the binary is run directly.
       - run: docker run --rm --entrypoint /usr/local/bin/iroh-relay "sluice-$IMAGE:ci" --version
       # The relay starts, and its guard refuses each config that would open it by mistake, so a

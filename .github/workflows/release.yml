@@ -12,8 +12,9 @@
 # * the workflow reads only, and the publishing jobs alone write, in the `release` environment;
 # * only sluice-cli's SBOM is released, for all targets, and it is uploaded: dist's template read
 #   `steps.cargo-cyclonedx.output.paths`, which is always empty, so the SBOM was left behind;
-# * the `rendezvous` and `relay` images are built here and pushed only after the GitHub release is
-#   made, so an image never goes out for a release whose binaries failed or were refused;
+# * the `rendezvous` and `relay` images are built here, the GitHub release waits for both, and they
+#   are pushed only after it is made: a release goes out whole, or nothing of it is public;
+# * every artifact a publishing job reads is kept 30 days, so it outlives the approval;
 # * the steps dist writes for system packages, containers and announcements are gone, because
 #   no target uses them.
 #
@@ -34,8 +35,8 @@ on:
 permissions:
   contents: read
 
-# One release at a time, and a second push of the same tag waits for the first run instead of
-# cancelling it halfway through an upload.
+# The group is the ref, so a second run for the same tag waits for the first instead of cancelling
+# it halfway through an upload. Two different tags, such as v0.2.0 and v0.2.1, run side by side.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -100,6 +101,8 @@ jobs:
         with:
           name: cargo-dist-cache
           path: ${{ runner.temp }}/dist-install/bin/dist
+          # `host` reads it after the approval, which an environment waits up to 30 days for.
+          retention-days: 30
       # A tag computes the release it will host, offline. A pull request only plans.
       - id: plan
         env:
@@ -118,6 +121,7 @@ jobs:
         with:
           name: artifacts-plan-dist-manifest
           path: plan-dist-manifest.json
+          retention-days: 30
 
   # Builds and packages the binary of each target, on its own native runner. A release build with
   # thin LTO took 7 minutes on 2 cores in WSL, and cargo-auditable compiles first. The ARM and
@@ -191,6 +195,7 @@ jobs:
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
+          retention-days: 30
 
   # The installers, checksums, source archive and SBOM. Compiling cargo-cyclonedx is most of it, and
   # takes a few minutes, so 45 is several times that.
@@ -258,6 +263,7 @@ jobs:
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ steps.cargo-cyclonedx.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
+          retention-days: 30
 
   # Both images of ADR 0013 on native amd64 and arm64 runners, beside the binary builds. Builds and
   # saves, and pushes nothing: only the publishing jobs may write to the registry. Compiling
@@ -271,7 +277,8 @@ jobs:
       matrix:
         image: [rendezvous, relay]
         platform:
-          - { arch: amd64, runner: ubuntu-latest }
+          # Pinned, so a new `ubuntu-latest` cannot change the Docker that builds a release.
+          - { arch: amd64, runner: ubuntu-24.04 }
           - { arch: arm64, runner: ubuntu-24.04-arm }
     runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 60
@@ -284,11 +291,13 @@ jobs:
         with:
           persist-credentials: false
       # The source label links the package on ghcr.io to this repository, which is what lets
-      # GITHUB_TOKEN push to it again next time.
+      # GITHUB_TOKEN push to it again next time. Without --provenance=false and --sbom=false, a
+      # builder that stores images in containerd adds an attestation manifest, the push is then an
+      # index and not one image, and push-image.sh refuses it. The SBOM comes from syft below.
       - name: Build
         run: |
           mkdir -p "$RUNNER_TEMP/image"
-          docker build --tag "sluice-$IMAGE:$ARCH" \
+          docker build --provenance=false --sbom=false --tag "sluice-$IMAGE:$ARCH" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.version=${TAG#v}" \
             "docker/$IMAGE"
@@ -317,8 +326,9 @@ jobs:
           name: image-${{ matrix.image }}-${{ matrix.platform.arch }}
           path: ${{ runner.temp }}/image/
           if-no-files-found: error
-          # The publishing job of this run reads it, and nothing after it.
-          retention-days: 1
+          # The publishing job reads it after two approvals, and an environment waits up to 30
+          # days for each. With 1 day, an approval given the next day found the images gone.
+          retention-days: 30
 
   # Publishes the GitHub release. It waits in the `release` environment for a reviewer before it
   # starts (RELEASING.md). Uploads a few MB and signs one attestation: 30 minutes is plenty.
@@ -327,20 +337,22 @@ jobs:
       - plan
       - build-local-artifacts
       - build-global-artifacts
-    # Only when publishing, and only if plan, local and global did not fail (skipped is fine).
+      - image-build
+    # Only when publishing, and only if plan, local and global did not fail (skipped is fine) and
+    # every image built. A failed image build so stops the release before anything is public.
+    # `!cancelled()` and not `always()`, so a cancelled run publishes nothing.
     if: >-
-      always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' &&
+      !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' &&
       (needs.build-global-artifacts.result == 'skipped' ||
        needs.build-global-artifacts.result == 'success') &&
       (needs.build-local-artifacts.result == 'skipped' ||
-       needs.build-local-artifacts.result == 'success')
+       needs.build-local-artifacts.result == 'success') &&
+      needs.image-build.result == 'success'
     environment: release
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    outputs:
-      val: ${{ steps.host.outputs.manifest }}
     permissions:
       # The GitHub release and its files.
       contents: write
@@ -407,8 +419,9 @@ jobs:
           RELEASE_COMMIT: "${{ github.sha }}"
           TAG: ${{ needs.plan.outputs.tag }}
         run: |
-          # Write and read notes from a file to avoid quoting breaking things
-          echo "$ANNOUNCEMENT_BODY" > "$RUNNER_TEMP/notes.txt"
+          # Write and read notes from a file to avoid quoting breaking things. printf, because echo
+          # reads a body that starts with -n or -e as a flag.
+          printf '%s\n' "$ANNOUNCEMENT_BODY" > "$RUNNER_TEMP/notes.txt"
 
           # PRERELEASE_FLAG is empty or one word, and must vanish when empty.
           # shellcheck disable=SC2086
@@ -428,10 +441,12 @@ jobs:
       fail-fast: false
       matrix:
         image: [rendezvous, relay]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: release
+    # A job's permissions replace the workflow's, so `contents: read` is named again for checkout.
     permissions:
+      contents: read
       # The image and its attestations, on ghcr.io.
       packages: write
       # The OIDC token and the attestation store, for actions/attest.
@@ -490,5 +505,6 @@ jobs:
           subject-digest: ${{ steps.push.outputs.arm64 }}
           sbom-path: ${{ runner.temp }}/image/arm64.spdx.json
           push-to-registry: true
+      # A step and not a job condition: it removes the registry login, so it runs on a cancel too.
       - if: always()
         run: docker logout ghcr.io

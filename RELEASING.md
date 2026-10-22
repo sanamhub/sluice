@@ -10,7 +10,7 @@ Two workflows do it:
 | Workflow | Runs on | Does |
 |---|---|---|
 | `release-plz.yml` | every push to `main` | opens or updates the release pull request: the version bump and the new `CHANGELOG.md` section |
-| `release.yml` | a tag `v<version>` | runs all of `ci.yml`, checks the tag, builds the binaries with `dist` and both images for amd64 and arm64, waits for approval, publishes the GitHub release, then waits again and pushes and attests the images |
+| `release.yml` | a tag `v<version>` | runs all of `ci.yml`, checks the tag, builds the binaries with `dist` and both images for amd64 and arm64, waits for every build and then for approval, publishes the GitHub release, then waits again and pushes and attests the images |
 
 **A release needs a second person.** The required reviewer of the `release` environment approves
 the publishing jobs, and "Prevent self-review" stops whoever pushed the tag from doing it. Until the
@@ -57,8 +57,15 @@ the tag: `release.yml` calls all of `ci.yml` first and builds nothing until it p
    package version.
 4. Watch the `release` run. The `ci` jobs come first, then `plan`, which refuses a tag with
    anything but letters, digits, `.` and `-` after the `v`. Then the six binary builds, the four
-   image builds and the installers. The reviewer approves `host` when the builds are green, and
-   the two `image-publish` jobs once the GitHub release is up.
+   image builds and the installers. `host` waits for all of them, and the reviewer approves it
+   when they are green, then the two `image-publish` jobs once the GitHub release is up.
+
+   **A release goes out whole or not at all.** If the build of either image fails on either
+   architecture, `host` does not start, so no GitHub release, file or image is made public. The
+   fix is to open the run and choose **Re-run failed jobs**: the builds that passed keep their
+   artifacts for 30 days, and `host` then waits for the reviewer again. If the re-run fails the
+   same way, the cause is in the tagged commit: delete the tag, fix it on `main`, and tag the next
+   patch version.
 5. Check the release page. It holds:
 
    | Files | How many |

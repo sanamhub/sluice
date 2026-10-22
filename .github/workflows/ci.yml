@@ -16,8 +16,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Each job stops well before GitHub's default of 6 hours, so a hung test cannot hold release.yml,
-# which runs these jobs and lets one release run at a time. Each limit allows for a build with no
-# cache on the slowest runner of its matrix.
+# which runs these jobs, and a second run for the same tag queues behind it. Each limit allows for
+# a build with no cache on the slowest runner of its matrix.
 jobs:
   fmt:
     runs-on: ubuntu-latest
