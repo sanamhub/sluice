@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+env:
+  RELEASE_PLZ_VERSION: 0.3.174
+
 jobs:
   release-pr:
     runs-on: ubuntu-latest
@@ -31,9 +34,17 @@ jobs:
           # release-plz pushes through the GitHub API with the token below, not with git.
           persist-credentials: false
       - run: rustup toolchain install --profile minimal
-      - uses: release-plz/action@8b5bf233ecb5779f63508db7cd050e948ee77cc2 # v0.5.144
-        with:
-          command: release-pr
-          version: 0.3.174
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # At the version above, checked against a hash written in the script.
+      - run: bash .github/release/install-release-plz.sh
+      # The identity GITHUB_TOKEN acts as. release-plz/action asks the API for it, and it is the
+      # same for every repository.
+      - run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      # The token goes in through GIT_TOKEN, which release-plz reads, so it is not on a command
+      # line that any process on the runner can list.
+      - env:
+          GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release-plz release-pr --forge github \
+            --repo-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --output json

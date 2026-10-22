@@ -15,13 +15,15 @@ semver_check = false
 dependencies_update = false
 # One changelog, written under sluice-cli, which ships the binary. Every other package is off.
 changelog_update = false
-changelog_path = "./CHANGELOG.md"
 
 # The three crates share the workspace version, so they move together.
 [[package]]
 name = "sluice-cli"
 version_group = "sluice"
 changelog_update = true
+# The root CHANGELOG.md, not crates/sluice-cli/CHANGELOG.md. release-plz reads this key only per
+# package.
+changelog_path = "./CHANGELOG.md"
 changelog_include = ["sluice-core", "sluice-live"]
 
 [[package]]
