@@ -36,6 +36,11 @@ fn every_example_of_iroh_relay_parses_through_the_schema() {
 #[test]
 fn each_example_is_closed_open_or_refused_for_its_ids() {
     for (name, text) in examples() {
+        // Only the pebble example writes `enable_metrics`, which the guard requires.
+        let text = match text.contains("enable_metrics") {
+            true => text,
+            false => super::m(&text),
+        };
         let closed = check_config(&text, false);
         let rated = match text.contains("[limits.client.rx]") {
             true => text.clone(),
@@ -45,6 +50,8 @@ fn each_example_is_closed_open_or_refused_for_its_ids() {
         let want = match name.as_str() {
             // The README's placeholder is not an id.
             "readme-allowlist" => (false, false),
+            // Their URL has a query, `?boo=baz`, which iroh-relay would log (ADR 0020).
+            "access-http-bearer" | "access-http-url" => (false, false),
             n if n.contains("http") || n.contains("token") || n == "access-allowlist" => {
                 (true, false)
             }

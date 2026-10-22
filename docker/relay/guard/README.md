@@ -35,6 +35,9 @@ the query of `access.http.url` can be secrets.
 | `--open` without `limits.client.rx.bytes_per_second` | ADR 0011: open needs a per-client byte limit |
 | `--open` with an allowlist, an HTTP check or shared tokens | the flag must mean what it says |
 | an allowlist entry that is not 64 hex digits | the README says to paste what `sluice id` prints |
+| `[tls] dangerous_http_only = true` (ADR 0020) | it turns HTTPS off, as `--dev` does; no `[tls]` at all still starts |
+| no `enable_metrics` line (ADR 0020) | iroh-relay then serves metrics on port 9090 with no login; `true` and `false` both start |
+| an `access.http.url` that is not an absolute http or https URL, or holds a user name, password, query or fragment (ADR 0020) | iroh-relay logs the URL when a check fails; a secret goes in `bearer_token`, a header |
 
 An empty allowlist starts: it is what the image ships, and it lets nobody in. If iroh-relay itself
 cannot be started, the guard exits with 69, `EX_UNAVAILABLE`.

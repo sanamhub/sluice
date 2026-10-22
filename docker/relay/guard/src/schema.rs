@@ -4,12 +4,14 @@
 //!
 //! Each type names the lines of `iroh-relay-1.4.0/src/main.rs` it mirrors. The field names, the
 //! types, which fields may be left out and the serde shape of the enums are copied from there. Two
-//! types differ, and parse the same TOML: `EndpointId` and `Url` are read as strings, since the
-//! guard checks ids itself and never reads a URL.
+//! types differ, and parse the same TOML: `EndpointId` and `Url` are read as strings, so that the
+//! guard checks them itself, with messages that never print them. Each field with a default that
+//! opens something, such as `enable_metrics`, is an `Option` here, so that a missing one can be
+//! named.
 //!
-//! The guard reads `access` and `limits` and nothing else. The other fields are here so that a
-//! misspelling of them is refused, and their defaults do not matter, only whether one may be left
-//! out, which `#[serde(default)]` says as iroh-relay does.
+//! The guard reads `access`, `limits`, `enable_metrics` and `tls.dangerous_http_only`. The other
+//! fields are here so that a misspelling of them is refused, and their defaults do not matter, only
+//! whether one may be left out, which `#[serde(default)]` says as iroh-relay does.
 
 // Most fields are never read: they exist to be parsed, and refused if misspelled.
 #![allow(dead_code)]
@@ -30,8 +32,9 @@ pub(crate) struct Config {
     #[serde(default)]
     pub enable_quic_addr_discovery: bool,
     pub limits: Option<Limits>,
-    #[serde(default)]
-    pub enable_metrics: bool,
+    /// `true` by default there (main.rs:145, 384-386). Here a missing one stays `None`, so the
+    /// guard can say that it was left out (ADR 0020).
+    pub enable_metrics: Option<bool>,
     pub metrics_bind_addr: Option<SocketAddr>,
     pub key_cache_capacity: Option<usize>,
     /// `#[serde(default)]` there, with `Everyone` as the default. Here a missing `access` stays

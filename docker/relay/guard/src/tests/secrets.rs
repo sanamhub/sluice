@@ -19,6 +19,19 @@ fn refused_with_secret() -> Vec<(String, bool)> {
             format!("[access.http]\nurl = \"https://a.example\"\nbearer_token = \"{s}\"\n"),
             true,
         ),
+        // An HTTP URL with the secret in it, refused without printing the URL.
+        (
+            format!("[access.http]\nurl = \"https://u:{s}@a.example/\"\n"),
+            false,
+        ),
+        (
+            format!("[access.http]\nurl = \"https://{s}@a.example/\"\n"),
+            false,
+        ),
+        (
+            format!("[access.http]\nurl = \"https://a.example/#{s}\"\n"),
+            false,
+        ),
         // The wrong type, so toml's message holds the value.
         (format!("[access]\nshared_token = \"{s}\"\n"), false),
         (
@@ -59,6 +72,8 @@ fn refused_with_secret() -> Vec<(String, bool)> {
 #[test]
 fn no_refusal_prints_a_token_a_bearer_token_or_a_query() {
     for (text, open) in refused_with_secret() {
+        // Every other rule passes, so each is refused where the secret is.
+        let text = super::m(&text);
         let message = check_config(&text, open).expect_err(&text).to_string();
         assert!(
             !message.contains(SECRET),

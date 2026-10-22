@@ -3,6 +3,7 @@ mod examples;
 mod files;
 mod rules;
 mod secrets;
+mod settings;
 mod versions;
 
 use std::path::{Path, PathBuf};
@@ -17,6 +18,12 @@ fn relay_dir() -> &'static Path {
 /// The repository root, which holds the Cargo.lock of the probe and the workspace.
 fn repo_root() -> PathBuf {
     relay_dir().join("../..")
+}
+
+/// `body` after `enable_metrics = false`, which every config must write out (ADR 0020), so that a
+/// test of another rule is not refused for that one first. Line numbers in it move down by one.
+fn m(body: &str) -> String {
+    format!("enable_metrics = false\n{body}")
 }
 
 fn read(path: &Path) -> String {

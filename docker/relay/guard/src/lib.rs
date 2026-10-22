@@ -71,17 +71,21 @@ impl fmt::Display for Refusal {
 impl std::error::Error for Refusal {}
 
 /// Checks a config's text: every key is one iroh-relay 1.4.0 knows, every allowlist id is 64 hex
-/// digits, and the relay is closed, or `open` is set and so is a per-client byte limit. `--open`
+/// digits, `enable_metrics` is written out, HTTPS is not turned off, an HTTP access URL holds no
+/// secret, and the relay is closed, or `open` is set and so is a per-client byte limit. `--open`
 /// with a closed config is refused too, so the flag always means what it says.
 ///
 /// ```
 /// use sluice_relay_guard::{check_config, Mode};
 ///
-/// assert_eq!(check_config("[access]\nallowlist = []\n", false), Ok(Mode::Closed));
-/// assert!(check_config("[acess]\nallowlist = []\n", false).is_err());
-/// assert!(check_config("access = \"everyone\"\n", false).is_err());
+/// let closed = "enable_metrics = false\n[access]\nallowlist = []\n";
+/// assert_eq!(check_config(closed, false), Ok(Mode::Closed));
+/// assert!(check_config("enable_metrics = false\n[acess]\nallowlist = []\n", false).is_err());
+/// assert!(check_config("[access]\nallowlist = []\n", false).is_err());
+/// assert!(check_config("enable_metrics = false\naccess = \"everyone\"\n", false).is_err());
 ///
-/// let open = "access = \"everyone\"\n[limits.client.rx]\nbytes_per_second = 2097152\n";
+/// let open = "enable_metrics = false\naccess = \"everyone\"\n\
+///             [limits.client.rx]\nbytes_per_second = 2097152\n";
 /// assert_eq!(check_config(open, true), Ok(Mode::Open));
 /// ```
 pub fn check_config(text: &str, open: bool) -> Result<Mode, Refusal> {

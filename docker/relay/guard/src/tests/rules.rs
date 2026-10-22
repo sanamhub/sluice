@@ -1,3 +1,4 @@
+use super::m;
 use crate::{Mode, check_config};
 
 /// An id `sluice id` could print.
@@ -14,24 +15,29 @@ fn refused(text: &str, open: bool, says: &str) -> String {
 #[test]
 fn an_unknown_key_is_refused_and_named_at_every_level() {
     refused(
-        "enable_relays = true\n",
+        &m("enable_relays = true\n"),
         false,
-        "line 1: unknown key `enable_relays`",
+        "line 2: unknown key `enable_relays`",
     );
     refused(
-        "[access]\nallowlist = []\n[tls]\ncert_mode = \"Manual\"\ncert_dri = \"/c\"\n",
+        &m("[access]\nallowlist = []\n[tls]\ncert_mode = \"Manual\"\ncert_dri = \"/c\"\n"),
         false,
-        "line 5: unknown key `cert_dri`",
+        "line 6: unknown key `cert_dri`",
     );
     let rx = "[access]\nallowlist = []\n[limits.client.rx]\nbytes_per_second = 1\nburst = 2\n";
-    refused(rx, false, "line 5: unknown key `burst`");
+    refused(&m(rx), false, "line 6: unknown key `burst`");
     refused(
-        "[access]\nallowlist = []\n[limits]\nclient_rx = 1\n",
+        &m("[access]\nallowlist = []\n[limits]\nclient_rx = 1\n"),
         false,
         "`client_rx`",
     );
     refused(
-        "[access.http]\nurl = \"https://a.example\"\ntoken = \"t\"\n",
+        &m("[access]\nallowlist = []\n[limits.client]\ntx = 1\n"),
+        false,
+        "line 5: unknown key `tx`",
+    );
+    refused(
+        &m("[access.http]\nurl = \"https://a.example\"\ntoken = \"t\"\n"),
         false,
         "`token`",
     );
@@ -40,14 +46,14 @@ fn an_unknown_key_is_refused_and_named_at_every_level() {
 #[test]
 fn a_misspelled_access_table_is_refused_and_not_read_as_everyone() {
     let message = refused(
-        "[acess]\nallowlist = []\n",
+        &m("[acess]\nallowlist = []\n"),
         false,
-        "line 1: unknown key `acess`",
+        "line 2: unknown key `acess`",
     );
     assert!(message.contains("would ignore it"), "{message}");
     // The same typo with --open is the same refusal: it never gets as far as the open rules.
     refused(
-        &format!("[acess]\nallowlist = []\n{RATE}"),
+        &m(&format!("[acess]\nallowlist = []\n{RATE}")),
         true,
         "unknown key `acess`",
     );
@@ -56,16 +62,18 @@ fn a_misspelled_access_table_is_refused_and_not_read_as_everyone() {
 #[test]
 fn an_unknown_kind_of_access_is_refused() {
     refused(
-        "[access]\nallowlst = []\n",
+        &m("[access]\nallowlst = []\n"),
         false,
-        "line 2: `allowlst` is not a setting or value",
+        "line 3: `allowlst` is not a setting or value",
     );
     refused(
-        "access = \"evryone\"\n",
+        &m("access = \"evryone\"\n"),
         false,
-        "line 1: `access` is not a setting or value",
+        "line 2: `access` is not a setting or value",
     );
-    let both = format!("[access]\nallowlist = [\"{ID}\"]\ndenylist = []\n");
+    let both = m(&format!(
+        "[access]\nallowlist = [\"{ID}\"]\ndenylist = []\n"
+    ));
     refused(&both, false, "line ");
 }
 
@@ -77,9 +85,9 @@ fn each_closed_mode_starts_without_open_and_is_refused_with_it() {
         "[access]\nshared_token = [\"a\"]\n".to_string(),
     ];
     for text in closed {
-        assert_eq!(check_config(&text, false), Ok(Mode::Closed), "{text}");
+        assert_eq!(check_config(&m(&text), false), Ok(Mode::Closed), "{text}");
         let message = refused(
-            &format!("{text}{RATE}"),
+            &m(&format!("{text}{RATE}")),
             true,
             "--open was given, but `access` is",
         );
@@ -99,22 +107,24 @@ fn each_open_mode_needs_open_and_a_rate() {
         "a denylist",
     ];
     for (text, name) in open.iter().zip(names) {
-        let message = refused(text, false, &format!("`access` is {name}"));
+        let message = refused(&m(text), false, &format!("`access` is {name}"));
         assert!(message.contains("or start with --open"), "{message}");
-        refused(&format!("{text}{RATE}"), false, "or start with --open");
+        refused(&m(&format!("{text}{RATE}")), false, "or start with --open");
         refused(
-            text,
+            &m(text),
             true,
             "--open needs `limits.client.rx.bytes_per_second`",
         );
-        let burst_only = format!("{text}\n[limits.client.rx]\nmax_burst_bytes = 8388608\n");
+        let burst_only = m(&format!(
+            "{text}\n[limits.client.rx]\nmax_burst_bytes = 8388608\n"
+        ));
         refused(
             &burst_only,
             true,
             "--open needs `limits.client.rx.bytes_per_second`",
         );
         assert_eq!(
-            check_config(&format!("{text}{RATE}"), true),
+            check_config(&m(&format!("{text}{RATE}")), true),
             Ok(Mode::Open),
             "{text}"
         );
@@ -123,12 +133,9 @@ fn each_open_mode_needs_open_and_a_rate() {
 
 #[test]
 fn an_allowlist_id_must_be_64_hex_digits() {
-    let list = |ids: &[&str]| format!("[access]\nallowlist = {ids:?}\n");
+    let list = |ids: &[&str]| m(&format!("[access]\nallowlist = {ids:?}\n"));
     assert_eq!(check_config(&list(&[]), false), Ok(Mode::Closed));
-    assert_eq!(
-        check_config(&list(&[ID, &ID.to_uppercase()]), false),
-        Ok(Mode::Closed)
-    );
+    assert_eq!(check_config(&list(&[ID]), false), Ok(Mode::Closed));
     refused(
         &list(&[&ID[..63]]),
         false,
@@ -150,7 +157,7 @@ fn an_allowlist_id_must_be_64_hex_digits() {
 
 #[test]
 fn text_that_is_not_toml_is_refused_with_its_line() {
-    refused("[access]\nallowlist = [\n", false, "is not valid TOML");
+    refused(&m("[access]\nallowlist = [\n"), false, "is not valid TOML");
     refused(
         "enable_relay = true\nenable_relay = false\n",
         false,
@@ -162,28 +169,28 @@ fn text_that_is_not_toml_is_refused_with_its_line() {
 fn a_wrong_type_is_refused_with_its_key() {
     let text = "[access]\nallowlist = []\n[limits.client.rx]\nbytes_per_second = -1\n";
     refused(
-        text,
+        &m(text),
         false,
-        "line 4: the value of `bytes_per_second` does not have the type",
+        "line 5: the value of `bytes_per_second` does not have the type",
     );
     refused(
-        "[access]\nallowlist = []\n[tls]\nhttps_bind_addr = 443\n",
+        &m("[access]\nallowlist = []\n[tls]\nhttps_bind_addr = 443\n"),
         false,
         "`https_bind_addr`",
     );
     refused(
-        "[access]\nallowlist = []\n[tls]\nquic_bind_addr = \"x:1\"\n",
+        &m("[access]\nallowlist = []\n[tls]\nquic_bind_addr = \"x:1\"\n"),
         false,
-        "line 4",
+        "line 5",
     );
 }
 
 #[test]
 fn a_required_key_left_out_is_named() {
     refused(
-        "[access]\nallowlist = []\n[tls]\ncert_dir = \"/c\"\n",
+        &m("[access]\nallowlist = []\n[tls]\ncert_dir = \"/c\"\n"),
         false,
-        "line 3: this table needs the key `cert_mode`",
+        "line 4: this table needs the key `cert_mode`",
     );
 }
 

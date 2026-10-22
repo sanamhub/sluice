@@ -26,6 +26,8 @@ serde = { version = "1", features = ["derive"] }
 # Without `display`, which writes TOML, and `preserve_order`. The default recursion limit stays,
 # so a deeply nested config is an error and not a stack overflow.
 toml = { version = "1.1", default-features = false, features = ["std", "serde", "parse"] }
+# The parser iroh-relay reads `access.http.url` with, so the guard sees the URL as it does.
+url = "2.5.8"
 
 [lints.rust]
 unsafe_code = "forbid"
