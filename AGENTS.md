@@ -20,7 +20,9 @@ Read this before changing anything. It applies to people and to coding agents al
 - Six error variants, no more: `Network`, `Verify`, `Storage`, `Policy`, `Cancelled`, `Bug`.
 - No async traits, no generic public APIs, no macro tricks. Concrete types and enum dispatch.
 - One actor per transfer: owned state and message passing, no shared `Mutex<State>`.
-- Functions under 60 lines in the sans-IO crates. Files under 400 lines everywhere.
+- Functions under 60 lines in the sans-IO crates. Source files under 400 lines everywhere.
+  Workflows and other config files are exempt: splitting `release.yml` would move it further from
+  what dist generates.
 - Every public item in a library crate has a doc comment with an example. Binaries are exempt.
 - `tracing` spans carry the transfer id. Filenames and tickets are never logged at the default level.
 - Prose follows [`.claude/skills/writing-style/SKILL.md`](.claude/skills/writing-style/SKILL.md).
