@@ -242,8 +242,8 @@ in segments of 1 MiB.
 
 The label and `stream_id` make a signature good for one kind of record in one stream. A frame
 signed for another stream, or the bytes of one kind of record signed as another, do not verify.
-The same key signs receipts (section 10), which carry neither, and the message lengths differ: 95,
-112 and 116 bytes here, against 80 for a receipt.
+The same key signs receipts (section 10) under a label of their own, so no signature is good both
+for a record here and for a receipt.
 
 A receiver verifies strictly, as `verify_strict` of `ed25519-dalek` does: `s` MUST be below the
 group order, neither `R` nor the key may be a point of small order, and the encoding of
@@ -646,8 +646,21 @@ Capability `RECEIPTS`. A sender-signed statement that specific content was offer
 Receipt = { root: [u8;32], total_len: u64, sender_key: [u8;32], utc_ms: u64, sig: [u8;64] }
 ```
 
-`sig` covers the first four fields. A receipt proves the sender offered that content at that time. It
-does not prove delivery, and implementations MUST NOT describe it as proof of delivery.
+The fields come in this order with no padding, and the little-endian rule of section 2 applies, so
+the four fields before `sig` are the first 80 bytes. `sig` is an Ed25519 signature under
+`sender_key` of this message:
+
+1. the label `sluice/receipt/1`, in ASCII
+2. one byte `0x00`
+3. the first 80 bytes of the receipt
+
+This is the scheme of **Signatures** in section 6 without a `stream_id`, because a receipt names no
+stream. A verifier verifies strictly, as section 6 says after **Signatures**. The label keeps a
+receipt's signature from being good for a record of the live log, and a record's signature from
+being good for a receipt.
+
+A receipt proves the sender offered that content at that time. It does not prove delivery, and
+implementations MUST NOT describe it as proof of delivery.
 
 ---
 
