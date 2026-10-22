@@ -659,6 +659,10 @@ stream. A verifier verifies strictly, as section 6 says after **Signatures**. Th
 receipt's signature from being good for a record of the live log, and a record's signature from
 being good for a receipt.
 
+A verifier refuses a receipt whose `sender_key` breaks rule 8 of section 4: it is not in its one
+encoding, or it is a point of small order. Every key Sluice reads follows that one rule, so a key
+that one part of an implementation refuses is never accepted by another.
+
 A receipt proves the sender offered that content at that time. It does not prove delivery, and
 implementations MUST NOT describe it as proof of delivery.
 
