@@ -1,0 +1,51 @@
+[workspace]
+members = ["cargo:."]
+
+# How a tag `v<version>` becomes a GitHub release with installers (RELEASING.md). Only the `sluice`
+# binary of sluice-cli is released: every other package sets `dist = false` in its manifest.
+[dist]
+cargo-dist-version = "0.33.1"
+ci = "github"
+installers = ["shell", "powershell"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+# Each binary carries its dependency tree, which `cargo audit bin` reads, and the release carries a
+# CycloneDX SBOM of sluice-cli, sluice-cli.cdx.xml.
+cargo-auditable = true
+cargo-cyclonedx = true
+# Attest in the publishing job, which runs in the `release` environment and alone holds
+# `id-token: write` and `attestations: write`. The builds before it read only.
+github-attestations = true
+github-attestations-phase = "host"
+github-release = "host"
+# No updater: a binary that rewrites itself would skip the attestation a user checked.
+install-updater = false
+# A pull request runs `dist plan` only, which checks this file and the targets without building.
+pr-run-mode = "plan"
+# release.yml is pinned by hand: every action at a commit SHA, dist and the tools it runs at exact
+# versions, and the ci.yml checks before any build. `dist generate` would undo that, so it is told
+# to leave the file alone. RELEASING.md says how to regenerate it and what to put back.
+allow-dirty = ["ci"]
+
+# The commits a regenerated release.yml pins its actions to, the same as the rest of the workflows.
+[dist.github-action-commits]
+"actions/checkout" = "3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+"actions/upload-artifact" = "cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+"actions/download-artifact" = "9000827ccba6bdab643e8b6fd33ac0654aef8333" # v8.0.2
+"actions/attest" = "1e69f48acb82d1966a394da916b4c1698aa569d6" # v4.2.2
+
+# Runners for the targets that GitHub hosts natively, so no target is cross-compiled.
+[dist.github-custom-runners]
+aarch64-unknown-linux-gnu = "ubuntu-24.04-arm"
+x86_64-unknown-linux-gnu = "ubuntu-24.04"
+aarch64-apple-darwin = "macos-15"
+x86_64-apple-darwin = "macos-15-intel"
+x86_64-pc-windows-msvc = "windows-2025"
+aarch64-pc-windows-msvc = "windows-11-arm"
+global = "ubuntu-24.04"

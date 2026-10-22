@@ -38,3 +38,7 @@ missing_docs = "deny"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Not released: dist builds only the `sluice` binary of sluice-cli (dist-workspace.toml).
+[package.metadata.dist]
+dist = false

@@ -17,3 +17,7 @@ proptest.workspace = true
 
 [lints]
 workspace = true
+
+# Not released: dist builds only the `sluice` binary of sluice-cli (dist-workspace.toml).
+[package.metadata.dist]
+dist = false
