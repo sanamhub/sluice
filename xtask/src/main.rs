@@ -3,6 +3,7 @@
 
 mod cold_start;
 mod conformance;
+mod fuzz_seeds;
 mod man;
 mod wasm_features;
 mod wasm_hash;
@@ -26,6 +27,14 @@ enum Command {
     Conformance,
     /// Build `sluice` in release and fail if a median start takes over 30 ms
     ColdStart,
+    /// Write the seed inputs of one fuzz target into a folder, from the test vectors
+    FuzzSeeds {
+        /// The fuzz target, by its name in its crate's `fuzz/Cargo.toml`
+        #[arg(value_enum)]
+        target: fuzz_seeds::Target,
+        /// The corpus folder to write the seeds into, which is created if it is missing
+        dir: PathBuf,
+    },
     /// Write the man pages of `sluice` into a folder
     Man {
         /// The folder to write `sluice.1` and one page per subcommand into
@@ -38,6 +47,7 @@ fn main() -> anyhow::Result<()> {
         Command::WasmHash => wasm_hash::run(),
         Command::Conformance => conformance::run(),
         Command::ColdStart => cold_start::run(),
+        Command::FuzzSeeds { target, dir } => fuzz_seeds::run(target, &dir),
         Command::Man { dir } => man::run(&dir),
     }
 }

@@ -11,6 +11,8 @@ mod paths;
 mod tests;
 mod tickets;
 
+pub(crate) use manifests::hex_bytes;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

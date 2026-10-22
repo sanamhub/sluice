@@ -187,7 +187,7 @@ pub(super) fn number(text: &str) -> Result<u64, String> {
     text.parse().map_err(|e| format!("number {text}: {e}"))
 }
 
-pub(super) fn hex_bytes(text: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn hex_bytes(text: &str) -> Result<Vec<u8>, String> {
     if !text.len().is_multiple_of(2) || !text.is_ascii() {
         return Err("an odd length or a character that is not hex".to_string());
     }
