@@ -131,6 +131,23 @@ jobs:
       - run: cargo test --manifest-path "$GUARD" --locked
       - run: cargo deny --manifest-path "$GUARD" check
 
+  # The workflows and the shell scripts they run. A mistake in release.yml or push-image.sh shows
+  # only on a tag otherwise, which is the worst time to find it. Both tools come from their
+  # releases at exact versions, checked against hashes in the script.
+  workflows:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: bash .github/ci/install-lint-tools.sh
+      # actionlint also runs shellcheck on every `run:` block; this names the one installed above.
+      - run: actionlint -shellcheck "$(command -v shellcheck)"
+      - run: |
+          find .github -name '*.sh' -print0 | xargs -0 shellcheck
+          find docker -name smoke-test.sh -print0 | xargs -0 shellcheck
+
   # AGENTS.md sets 30 ms from a cold start to a printed result. The command builds sluice in release
   # and fails if the median of `sluice id` or `sluice --version` is over it. Linux and Windows are
   # the two systems it is measured on.

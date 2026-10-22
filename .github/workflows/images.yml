@@ -1,6 +1,7 @@
 name: images
 
-# Only the Dockerfiles, their configs and this file can break an image build, so only a change to
+# Only the Dockerfiles, their configs, the guard's sources (all under docker/) and the release
+# scripts and workflow that build and push the images can break an image build, so only a change to
 # them runs it. A workflow of its own because `paths` filters a whole workflow and not a job, and
 # ci.yml has to run on every change.
 on:
@@ -8,11 +9,15 @@ on:
     branches: [main]
     paths:
       - docker/**
+      - .github/release/**
       - .github/workflows/images.yml
+      - .github/workflows/release.yml
   pull_request:
     paths:
       - docker/**
+      - .github/release/**
       - .github/workflows/images.yml
+      - .github/workflows/release.yml
 
 permissions:
   contents: read
