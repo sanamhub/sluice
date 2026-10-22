@@ -1,15 +1,17 @@
 # Releasing Sluice
 
 A release is the `sluice` binary of `sluice-cli` for six targets, a shell and a PowerShell
-installer, checksums, a CycloneDX SBOM and GitHub artifact attestations, on a GitHub release.
-Nothing goes to crates.io.
+installer, checksums, a CycloneDX SBOM and GitHub artifact attestations, on a GitHub release. The
+`rendezvous` and `relay` images go to ghcr.io on the same tag, each with its provenance and SBOM
+attested. Nothing goes to crates.io.
 
-Two workflows do it:
+Three workflows do it:
 
 | Workflow | Runs on | Does |
 |---|---|---|
 | `release-plz.yml` | every push to `main` | opens or updates the release pull request: the version bump and the new `CHANGELOG.md` section |
 | `release.yml` | a tag `v<version>` | runs all of `ci.yml`, builds with `dist`, waits for approval, publishes the GitHub release |
+| `images-release.yml` | a tag `v<version>` | builds both images for amd64 and arm64, waits for approval, pushes and attests them |
 
 ## What the maintainer approves, and where
 
@@ -17,8 +19,9 @@ Two workflows do it:
    changelog until each entry says what a user notices (the writing-style skill). Merging it is
    the first approval.
 2. **The tag.** You push it by hand, and it is the one event that starts a release.
-3. **The `release` environment.** The publishing job waits in it for a required reviewer: Actions
-   > the run > **Review deployments** > `release` > **Approve and deploy**. This is the second
+3. **The `release` environment.** The publishing jobs wait in it for a required reviewer: Actions
+   > the run > **Review deployments** > `release` > **Approve and deploy**, once in each of the two
+   runs. This is the second
    approval the deployment rule asks for, and it should come from someone other than whoever
    pushed the tag.
 
@@ -44,7 +47,8 @@ the tag: `release.yml` calls all of `ci.yml` first and builds nothing until it p
    The version in the tag must be the one in `Cargo.toml`: `dist` refuses a tag that names no
    package version.
 4. Watch the `release` run. The `ci` jobs come first, then `plan`, the six builds and the
-   installers. Approve the `release` environment when the builds are green.
+   installers. Approve the `release` environment when the builds are green. Do the same in the
+   `images-release` run once its four builds are green.
 5. Check the release page: six archives, two installers, `sha256.sum`, `source.tar.gz` and
    `sluice-cli.cdx.xml`. Then verify one archive as below.
 
@@ -60,8 +64,18 @@ gh attestation verify sluice-cli-x86_64-unknown-linux-gnu.tar.xz --repo sanamhub
 ```
 
 `Verification succeeded!` means the file was built by `release.yml` in that repository, from the
-tagged commit. Each binary also carries its dependency tree from `cargo auditable`, which
-`cargo audit bin sluice` checks against the RustSec database.
+tagged commit. An image is checked the same way, by its name in the registry:
+
+```
+gh attestation verify oci://ghcr.io/sanamhub/sluice-relay:0.2.0 --repo sanamhub/sluice
+gh attestation verify oci://ghcr.io/sanamhub/sluice-relay:0.2.0 --repo sanamhub/sluice \
+  --predicate-type https://spdx.dev/Document/v2.3
+```
+
+The first checks the provenance and the second the SBOM.
+
+Each binary also carries its dependency tree from `cargo auditable`, which `cargo audit bin sluice`
+checks against the RustSec database.
 
 ## Roll back
 
@@ -93,6 +107,10 @@ A release cannot be edited into a good one. Take it down and go back to the one 
 - **Actions may open pull requests**: Settings > Actions > General > Workflow permissions > tick
   **Allow GitHub Actions to create and approve pull requests**. Without it release-plz cannot open
   the pull request, and its job fails.
+- **The image packages are public**: after the first `images-release` run, open each of
+  `sluice-rendezvous` and `sluice-relay` under the owner's **Packages**, then Package settings >
+  **Change visibility** > Public. A new package on ghcr.io starts private. Its source label links
+  it to this repository, which is what lets the next run's `GITHUB_TOKEN` push to it.
 - Attestations need a public repository, or a private one on GitHub Enterprise Cloud.
 
 No secret is needed. Every workflow uses `GITHUB_TOKEN`, with the narrowest permissions each job

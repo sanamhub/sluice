@@ -1,0 +1,42 @@
+name: images
+
+# Only the Dockerfiles, their configs and this file can break an image build, so only a change to
+# them runs it. A workflow of its own because `paths` filters a whole workflow and not a job, and
+# ci.yml has to run on every change.
+on:
+  push:
+    branches: [main]
+    paths:
+      - docker/**
+      - .github/workflows/images.yml
+  pull_request:
+    paths:
+      - docker/**
+      - .github/workflows/images.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # One row per image of ADR 0013. They share the build, so a change to one can break the other.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [rendezvous, relay]
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Nothing is pushed or loaded anywhere else. The build compiles iroh-relay from crates.io,
+      # which is the step a yanked release or a moved base image breaks.
+      - run: docker build --tag "sluice-$IMAGE:ci" "docker/$IMAGE"
+      # The distroless image has no shell, so the binary is run directly.
+      - run: docker run --rm --entrypoint /usr/local/bin/iroh-relay "sluice-$IMAGE:ci" --version
