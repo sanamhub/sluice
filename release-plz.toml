@@ -1,0 +1,51 @@
+# release-plz opens the release pull request and does nothing more (RELEASING.md). The crates are
+# not on crates.io, so versions come from the `v<version>` tags the maintainer pushes, and nothing
+# needs a registry token.
+[workspace]
+git_only = true
+git_tag_name = "v{{ version }}"
+# The maintainer tags by hand after merging the pull request, and the tag starts release.yml, which
+# makes the GitHub release. release-plz must do neither.
+git_tag_enable = false
+git_release_enable = false
+publish = false
+# No crate is published, so there is no released API for cargo-semver-checks to compare with.
+semver_check = false
+# A release pull request changes versions and the changelog, not the lock file.
+dependencies_update = false
+# One changelog, written under sluice-cli, which ships the binary. Every other package is off.
+changelog_update = false
+changelog_path = "./CHANGELOG.md"
+
+# The three crates share the workspace version, so they move together.
+[[package]]
+name = "sluice-cli"
+version_group = "sluice"
+changelog_update = true
+changelog_include = ["sluice-core", "sluice-live"]
+
+[[package]]
+name = "sluice-core"
+version_group = "sluice"
+
+[[package]]
+name = "sluice-live"
+version_group = "sluice"
+
+# `publish = false` in their manifests: tools and benchmarks, never released and never in the
+# changelog.
+[[package]]
+name = "xtask"
+release = false
+
+[[package]]
+name = "sluice-probe"
+release = false
+
+[[package]]
+name = "sluice-bench"
+release = false
+
+[[package]]
+name = "sluice-wasm-hash"
+release = false

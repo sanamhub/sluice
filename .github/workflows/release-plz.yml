@@ -1,0 +1,39 @@
+name: release-plz
+
+# On every push to main, opens or updates one pull request that bumps the workspace version from the
+# Conventional Commits since the last tag and adds the new section to CHANGELOG.md. It publishes
+# nothing, tags nothing and makes no GitHub release: the maintainer tags the merge by hand, and that
+# tag starts release.yml (RELEASING.md).
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Only this job writes: the branch of the pull request, and the pull request itself.
+    permissions:
+      contents: write
+      pull-requests: write
+    # Two pushes close together must not race on the same branch.
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history, so the commits since the last tag can be read.
+          fetch-depth: 0
+          # release-plz pushes through the GitHub API with the token below, not with git.
+          persist-credentials: false
+      - run: rustup toolchain install --profile minimal
+      - uses: release-plz/action@8b5bf233ecb5779f63508db7cd050e948ee77cc2 # v0.5.144
+        with:
+          command: release-pr
+          version: 0.3.174
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
