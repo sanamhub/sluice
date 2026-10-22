@@ -19,8 +19,17 @@ the operator adds an id.
 ## The guard
 
 The entry point is [`sluice-relay-guard`](guard/README.md) (ADR 0019), and the default command is
-`--config-path /etc/relay/relay.toml`. It reads the config, checks it, and then replaces itself
-with `iroh-relay --config-path=<file>`, so the relay is PID 1 and gets the container's signals.
+`--config-path /etc/relay/relay.toml`. It opens the config, checks it, and then replaces itself
+with `iroh-relay --config-path=/dev/stdin`, with the file it checked as the relay's standard input
+(ADR 0020). The relay so reads the bytes that were checked, even if the file is replaced after,
+and it is PID 1 and gets the container's signals.
+
+Checked on 2026-10-23 in WSL with Docker 29.1.3, from a second container in the relay's PID
+namespace: PID 1 is `/usr/local/bin/iroh-relay --config-path=/dev/stdin`, its descriptor 0 is
+`/etc/relay/relay.toml`, a regular file, and `/dev/stdin` in the image links to
+`/proc/self/fd/0`. The relay bound HTTPS on 443 and QUIC on 7842, which only that config asks for:
+with no config, iroh-relay 1.4.0 serves plain HTTP on 80 and metrics on 9090, and no HTTPS or
+QUIC.
 
 `iroh-relay` 1.4.0 runs open, with no byte limit and nothing in its log, when `access` is left out,
 when a key is misspelled (it ignores keys it does not know), and when the config file is missing.

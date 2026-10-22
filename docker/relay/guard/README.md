@@ -2,8 +2,24 @@
 
 The entry point of the [`relay` image](../README.md) (ADR 0019). It checks the config that
 `iroh-relay` 1.4.0 is about to start with, refuses one that would open the relay by mistake, and
-then replaces itself with `/usr/local/bin/iroh-relay --config-path=<file>`, so the relay runs as
-PID 1 and gets the container's signals.
+then replaces itself with `/usr/local/bin/iroh-relay --config-path=/dev/stdin`, so the relay runs
+as PID 1 and gets the container's signals.
+
+## The relay reads the file the guard checked
+
+The guard opens the config once, checks that the open file is a regular file, reads it, and hands
+that same open file to iroh-relay as its standard input (ADR 0020). iroh-relay is told to read
+`/dev/stdin`, which on Linux opens that file again from its start. A rename over the path between
+the two reads, such as a Kubernetes ConfigMap update, so cannot start a file nobody checked. An
+edit in place, in the instant between them, still could: standard input pins the file, not its
+bytes.
+
+iroh-relay 1.4.0 reads nothing else from standard input: no line of its `src/` reads `stdin`. In
+the image, `/dev/stdin` is the runtime's link to `/proc/self/fd/0`, and for the relay that is the
+config file (checked in WSL with Docker 29.1.3, see [the relay README](../README.md)).
+
+The guard starts the relay only on Unix. Elsewhere `/dev/stdin` does not exist, iroh-relay would
+find no config there and run its open default, so the guard stops after the check with exit 69.
 
 ```
 sluice-relay-guard [--open] --config-path <file>
@@ -44,7 +60,7 @@ cannot be started, the guard exits with 69, `EX_UNAVAILABLE`.
 
 ## What it must never do
 
-- Change the config, or start iroh-relay with anything but the file it checked.
+- Change the config, or start iroh-relay with anything but the open file it checked.
 - Print a value from the config.
 - Accept a key because a newer iroh-relay might have it. The schema is 1.4.0's and no other.
 

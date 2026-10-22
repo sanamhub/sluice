@@ -10,14 +10,14 @@
 //! since a token may be one, and it never changes the config it was given.
 
 use std::fmt;
-use std::fs;
-use std::path::Path;
 
 mod args;
+mod file;
 mod rules;
 mod schema;
 
 pub use args::Args;
+pub use file::{CONFIG_ON_STDIN, open_config, relay_args};
 
 /// The iroh-relay release whose config `schema.rs` mirrors. `docker/relay/Dockerfile` must build
 /// this one, and the root `Cargo.lock` must resolve it, or a test fails: a new release may add a
@@ -90,37 +90,6 @@ impl std::error::Error for Refusal {}
 /// ```
 pub fn check_config(text: &str, open: bool) -> Result<Mode, Refusal> {
     rules::check(text, open)
-}
-
-/// Reads the config file. It must exist and be a regular file: iroh-relay runs its open default
-/// when the path does not exist.
-///
-/// ```
-/// use sluice_relay_guard::read_config;
-///
-/// assert!(read_config(std::path::Path::new("/no/such/relay.toml")).is_err());
-/// assert!(read_config(&std::env::temp_dir()).is_err());
-/// ```
-pub fn read_config(path: &Path) -> Result<String, Refusal> {
-    let shown = path.display();
-    let metadata = fs::metadata(path).map_err(|err| {
-        Refusal::new(match err.kind() {
-            std::io::ErrorKind::NotFound => format!(
-                "the config file {shown} does not exist, and iroh-relay would run open with no \
-                 limit: mount the file there, or fix --config-path"
-            ),
-            _ => format!("cannot read the config file {shown}: {err}"),
-        })
-    })?;
-    if !metadata.is_file() {
-        return Err(Refusal::new(format!(
-            "{shown} is not a regular file: point --config-path at the config file itself"
-        )));
-    }
-    let bytes =
-        fs::read(path).map_err(|err| Refusal::new(format!("cannot read {shown}: {err}")))?;
-    String::from_utf8(bytes)
-        .map_err(|_| Refusal::new(format!("{shown} is not UTF-8 text, which TOML must be")))
 }
 
 #[cfg(test)]
