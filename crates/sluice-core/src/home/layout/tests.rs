@@ -135,3 +135,6 @@ fn a_missing_version_file_reads_as_none() {
     fs::write(dir.path().join("VERSION"), "1\n").unwrap();
     assert_eq!(read_version(dir.path()).unwrap(), Some(1));
 }
+
+#[cfg(unix)]
+mod fresh;

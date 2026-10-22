@@ -31,9 +31,14 @@ pub(super) fn current() -> u32 {
 /// Creates the home and its folders if they are missing. On Unix they get mode 0700, so the
 /// identity key is not readable through the folder even if its own mode were loosened by hand. On
 /// Windows a home that is new gets a private access list before anything is made inside it, so the
-/// folders inside inherit it. A folder that already exists is left as it is.
+/// folders inside inherit it.
+///
+/// A home folder that is already there and empty is new too: a `$SLUICE_HOME` the user made first
+/// would otherwise keep the access it inherited, and doctor would fail it forever. It is made
+/// private before anything is written in it. A folder that holds anything is left as it is, since
+/// what it holds may be the user's, and doctor reports its access.
 pub(super) fn create_folders(home: &Path) -> Result<(), Error> {
-    if create_home(home)? {
+    if create_home(home)? || is_empty(home)? {
         keep_home_private(home)?;
     }
     let builder = folder_builder(false);
@@ -63,6 +68,12 @@ fn create_home(home: &Path) -> Result<bool, Error> {
     }
 }
 
+/// Whether the folder holds nothing at all, so no `VERSION` either.
+fn is_empty(home: &Path) -> Result<bool, Error> {
+    let mut entries = fs::read_dir(home).map_err(|e| storage("list", home, e))?;
+    Ok(entries.next().is_none())
+}
+
 /// An error from creating a folder that is not an error if the folder is already there.
 fn exists_as_folder(error: io::Error, path: &Path) -> io::Result<()> {
     if error.kind() == io::ErrorKind::AlreadyExists && path.is_dir() {
@@ -88,8 +99,15 @@ fn keep_home_private(home: &Path) -> Result<(), Error> {
     super::private_windows::restrict_dir(home).map_err(|e| storage("restrict access to", home, e))
 }
 
-/// The mode 0700 was set by the call that made the folder.
-#[cfg(not(windows))]
+/// Mode 0700. A folder this call made has it already, and one the user made first may not.
+#[cfg(unix)]
+fn keep_home_private(home: &Path) -> Result<(), Error> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(home, fs::Permissions::from_mode(0o700))
+        .map_err(|e| storage("restrict access to", home, e))
+}
+
+#[cfg(not(any(unix, windows)))]
 fn keep_home_private(_home: &Path) -> Result<(), Error> {
     Ok(())
 }

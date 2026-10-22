@@ -83,7 +83,9 @@ impl Home {
     }
 
     /// Opens the home at `path`, creating it and its `blobs`, `db` and `logs` folders if they are
-    /// missing, with mode 0700 on Unix, and takes the exclusive lock on it.
+    /// missing, with mode 0700 on Unix, and takes the exclusive lock on it. A home folder that is
+    /// already there and empty is made private first, as a new one is: mode 0700 on Unix, and the
+    /// private access list on Windows. One that holds anything keeps its access.
     ///
     /// - A home with a newer layout version than this build reads fails with [`Error::Policy`]
     ///   naming both versions, before anything is created or written.
