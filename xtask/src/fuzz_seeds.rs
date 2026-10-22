@@ -13,8 +13,8 @@ use serde_json::Value;
 
 use crate::conformance::{hex_bytes, vectors_dir};
 
-// The `log` target's own framing, included and not copied, so a seed is always read back as it
-// was written. `records` is what the tests read the seeds back with.
+// The `log` target's own framing and open, included and not copied, so a seed is always read back
+// as it was written. `records` is what the tests read the seeds back with.
 #[cfg_attr(not(test), allow(dead_code))]
 #[path = "../../crates/sluice-live/fuzz/framing.rs"]
 mod framing;
@@ -206,7 +206,7 @@ fn from_case(target: Target, case: &Value) -> anyhow::Result<Vec<Vec<u8>>> {
         Target::Ticket => vec![text(case, "ticket")?.into_bytes()],
         Target::ManifestPath => vec![text(case, "path")?.into_bytes()],
         Target::Manifest => manifest(case)?,
-        Target::Log => vec![log(case)?],
+        Target::Log => log(case)?.into_iter().collect(),
         Target::Range | Target::RelayConfig => Vec::new(),
     })
 }
@@ -235,16 +235,20 @@ fn manifest(case: &Value) -> anyhow::Result<Vec<Vec<u8>>> {
 }
 
 /// The records after the case's open, in the target's framing, up to a second open, which the
-/// framing has no tag for. The target opens its stream itself, with the key and stream of the
-/// vectors, so the records of a case that starts on that open are accepted. A case that does not
-/// start on an open, or a record longer than the framing takes, is an error naming the case, and
-/// never a seed that says something else.
-fn log(case: &Value) -> anyhow::Result<Vec<u8>> {
+/// framing has no tag for. The target opens its stream itself, with `framing::OPEN`, so only a
+/// case that starts on those bytes gives a seed. Any other open has another stream, key or segment
+/// size, and the target would read its records against the wrong one, so the case is skipped and
+/// gives `None`. A case that does not start on an open, or a record longer than the framing takes,
+/// is an error naming the case, and never a seed that says something else.
+fn log(case: &Value) -> anyhow::Result<Option<Vec<u8>>> {
     let name = text(case, "name")?;
     let steps = case["steps"].as_array().context("no steps")?;
     let first = steps.first().map(|step| text(step, "record")).transpose()?;
     if first.as_deref() != Some("open") {
         bail!("case {name:?} does not start with an open, which the log target takes as given");
+    }
+    if hex_bytes(&text(&steps[0], "bytes")?).map_err(anyhow::Error::msg)? != framing::OPEN {
+        return Ok(None);
     }
     let mut input = Vec::new();
     for step in &steps[1..] {
@@ -261,7 +265,7 @@ fn log(case: &Value) -> anyhow::Result<Vec<u8>> {
             )
         })?;
     }
-    Ok(input)
+    Ok(Some(input))
 }
 
 #[cfg(test)]

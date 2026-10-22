@@ -256,3 +256,54 @@ fn a_ticket_that_does_not_decode_is_refused_without_quoting_it() {
     let message = Queue::load(&home_with(&bytes).1).unwrap_err().to_string();
     assert!(!message.contains(&text[10..30]), "{message}");
 }
+
+/// Fails the active job `id` on the network `times` times from `now`, ticking to the end of each
+/// wait, which starts it again. Returns the time after the last tick.
+fn fail_on_the_network(queue: &mut Queue, id: JobId, times: u32, mut now: u64) -> u64 {
+    for _ in 0..times {
+        let actions = queue.failed(id, ErrorKind::Network, now).expect("failed");
+        let Some(&Action::Wake { at_ms: Some(at_ms) }) = actions.last() else {
+            panic!("no timer in {actions:?}");
+        };
+        assert_eq!(
+            queue.tick(at_ms).expect("tick"),
+            [Action::Start(id), Action::Save]
+        );
+        now = at_ms;
+    }
+    now
+}
+
+#[test]
+fn the_failure_counts_commands_leave_load_back_as_they_were() {
+    let (_dir, home) = home();
+    let mut queue = Queue::new();
+    let failed = add(&mut queue, "failed", Priority::Normal);
+    let done = add(&mut queue, "done", Priority::Normal);
+    let cancelled = add(&mut queue, "cancelled", Priority::Normal);
+
+    let now = fail_on_the_network(&mut queue, failed, 14, 0);
+    queue.failed(failed, ErrorKind::Network, now).expect("15th");
+    let now = fail_on_the_network(&mut queue, done, 14, now);
+    queue.finished(done).expect("finished");
+    fail_on_the_network(&mut queue, cancelled, 14, now);
+    queue.cancel(cancelled).expect("cancel");
+
+    let want = [
+        (failed, State::Failed(ErrorKind::Network), 15),
+        (done, State::Done, 14),
+        (cancelled, State::Cancelled, 14),
+    ];
+    let seen = |queue: &Queue| {
+        want.map(|(id, _, _)| {
+            let job = queue.job(id).expect("job");
+            (id, job.state(), job.network_failures())
+        })
+    };
+    assert_eq!(seen(&queue), want, "what the commands left");
+    queue.save(&home).expect("save");
+    let (loaded, actions) = Queue::load(&home).expect("load");
+    assert_eq!(seen(&loaded), want, "what the load gave back");
+    assert_eq!(loaded, queue);
+    assert!(actions.is_empty(), "{actions:?}");
+}

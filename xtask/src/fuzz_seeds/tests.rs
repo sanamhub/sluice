@@ -88,7 +88,9 @@ fn every_log_seed_reads_back_through_the_targets_framing_as_the_records_it_came_
     let mut cases = 0;
     for (name, file_cases) in vector_files(&vectors_dir().join("live")).unwrap() {
         for case in &file_cases {
-            let seed = log(case).unwrap();
+            let Some(seed) = log(case).unwrap() else {
+                continue;
+            };
             let read: Vec<(bool, Vec<u8>)> = framing::records(&seed)
                 .map(|(is_close, bytes)| (is_close, bytes.to_vec()))
                 .collect();
@@ -96,14 +98,44 @@ fn every_log_seed_reads_back_through_the_targets_framing_as_the_records_it_came_
             cases += 1;
         }
     }
-    assert!(cases > 0);
+    assert_eq!(cases, 45);
 }
 
-/// A `live/` case named `name` with these steps, each a record and its bytes.
+#[test]
+fn a_live_case_that_opens_on_another_stream_key_or_segment_size_is_skipped() {
+    let mut skipped = Vec::new();
+    let mut total = 0;
+    for (name, file_cases) in vector_files(&vectors_dir().join("live")).unwrap() {
+        for case in &file_cases {
+            total += 1;
+            if log(case).unwrap().is_none() {
+                skipped.push(format!("{name}: {}", case["name"].as_str().unwrap()));
+            }
+        }
+    }
+    assert_eq!((total, skipped.len()), (65, 20), "{skipped:#?}");
+    assert!(
+        skipped.contains(&"clean.json: segments of 64 MiB, the largest segment_bytes".to_string()),
+        "{skipped:#?}"
+    );
+    let seeds = seeds(Target::Log, &vectors_dir()).unwrap();
+    assert_eq!(seeds.len(), 45);
+}
+
+/// The bytes of a `live/` case's step: the target's own open for an open, and `ab` repeated for
+/// any other record.
+fn step_bytes(record: &str, len: usize) -> String {
+    match record {
+        "open" => framing::OPEN.iter().map(|b| format!("{b:02x}")).collect(),
+        _ => "ab".repeat(len),
+    }
+}
+
+/// A `live/` case named `name` with these steps, each a record and its length.
 fn live_case(name: &str, steps: &[(&str, usize)]) -> Value {
     let steps: Vec<Value> = steps
         .iter()
-        .map(|(record, len)| json!({"record": record, "bytes": "ab".repeat(*len)}))
+        .map(|(record, len)| json!({"record": record, "bytes": step_bytes(record, *len)}))
         .collect();
     json!({"name": name, "steps": steps})
 }
@@ -116,9 +148,9 @@ fn a_log_case_that_does_not_start_with_an_open_is_an_error_that_names_it() {
 
 #[test]
 fn a_log_record_over_255_bytes_is_an_error_that_names_the_case_and_not_a_cut() {
-    let fits = log(&live_case("fits", &[("open", 4), ("frame", 255)])).unwrap();
-    assert_eq!(fits.len(), 2 + 255);
-    let error = log(&live_case("too long", &[("open", 4), ("close", 256)])).unwrap_err();
+    let fits = log(&live_case("fits", &[("open", 124), ("frame", 255)])).unwrap();
+    assert_eq!(fits.map(|seed| seed.len()), Some(2 + 255));
+    let error = log(&live_case("too long", &[("open", 124), ("close", 256)])).unwrap_err();
     assert_eq!(
         error.to_string(),
         "case \"too long\" has a close of 256 bytes, and the log target's records are at most \

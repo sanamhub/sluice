@@ -72,6 +72,29 @@ fn a_decimal_is_its_exact_value_rounded_down() {
     }
 }
 
+// Three sizes with no integer part and 40 fraction digits. 10^40 is over u128::MAX, so the u128
+// oracle of the proptests stops at 18 digits and cannot check these. Each answer is
+// floor(fraction * unit / 10^40), worked out with Python's exact integers:
+// `int("9" * 40) * 1024 // 10**40` and the like.
+
+#[test]
+fn forty_nines_of_a_k_are_one_byte_short_of_it() {
+    assert_eq!(size("0.9999999999999999999999999999999999999999K"), 1023);
+}
+
+#[test]
+fn a_one_in_the_40th_place_of_an_m_is_nothing() {
+    assert_eq!(size("0.0000000000000000000000000000000000000001M"), 0);
+}
+
+#[test]
+fn forty_threes_of_a_p_are_a_third_of_it_rounded_down() {
+    assert_eq!(
+        size("0.3333333333333333333333333333333333333333P"),
+        375_299_968_947_541
+    );
+}
+
 #[test]
 fn u64_max_is_the_largest_size_and_one_more_is_refused() {
     assert_eq!(size("18446744073709551615"), u64::MAX);
