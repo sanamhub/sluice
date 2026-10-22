@@ -1,0 +1,22 @@
+# The relay, open: anyone who knows the URL may relay through it, each up to the rate below. Run it
+# only by naming this file on the command line (README.md), because the operator pays for every
+# byte. ADR 0011 allows open mode only with a flag and a per-client byte limit.
+enable_relay = true
+enable_quic_addr_discovery = true
+enable_metrics = false
+http_bind_addr = "0.0.0.0:80"
+
+access = "everyone"
+
+# What each client may send into the relay: 2 MiB/s, with bursts of up to 8 MiB. iroh-relay has no
+# working limit on connections (`accept_conn_limit` is not implemented upstream, ADR 0013), so this
+# byte limit is the only one there is.
+[limits.client.rx]
+bytes_per_second = 2097152
+max_burst_bytes = 8388608
+
+[tls]
+https_bind_addr = "0.0.0.0:443"
+quic_bind_addr = "0.0.0.0:7842"
+cert_mode = "Manual"
+cert_dir = "/etc/relay/certs"

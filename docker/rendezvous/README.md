@@ -6,8 +6,7 @@ smallest VPS runs it (ADR 0013). It is the upstream binary, built from crates.io
 and nothing of ours. The version is the one `Cargo.lock` resolves for `iroh`, so the probe and the
 server come from one release.
 
-The `relay` image, which carries traffic, is not here. It needs the authorization design of ADR
-0011.
+The `relay` image, which carries traffic and runs closed, is in [docker/relay](../relay/README.md).
 
 ## Build and run
 

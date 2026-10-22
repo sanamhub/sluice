@@ -1,0 +1,23 @@
+# The relay, closed (ADR 0011, docs/design.md "Relays run closed"). Address discovery and the relay
+# both run, and only the endpoint ids in `access.allowlist` may relay. The list ships empty, which
+# lets nobody in: an operator adds the id that `sluice id` prints on each machine, then restarts the
+# container.
+enable_relay = true
+enable_quic_addr_discovery = true
+
+# The metrics server defaults to on and listens on [::]:9090 with no authentication.
+enable_metrics = false
+
+# Plain HTTP. With TLS on it serves only the captive portal check, `/generate_204`.
+http_bind_addr = "0.0.0.0:80"
+
+[access]
+allowlist = []
+
+[tls]
+https_bind_addr = "0.0.0.0:443"
+quic_bind_addr = "0.0.0.0:7842"
+cert_mode = "Manual"
+# Mount a directory holding default.crt and default.key here. The certificate has to name the host
+# the clients dial, and it is read once at start, so restart the container after a renewal.
+cert_dir = "/etc/relay/certs"
