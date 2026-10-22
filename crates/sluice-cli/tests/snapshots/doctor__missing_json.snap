@@ -1,0 +1,5 @@
+---
+source: crates/sluice-cli/tests/doctor.rs
+expression: "redact(&stdout_text(&json), &home)"
+---
+{"checks":[{"name":"version","status":"ok","detail":"sluice <version> for <target>, running on <os>","fix":null},{"name":"home","status":"failed","detail":"<home> does not exist","fix":"run `sluice id`, which creates it"},{"name":"layout","status":"skipped","detail":"not checked, because the home is not there","fix":null},{"name":"lock","status":"skipped","detail":"not checked, because the home is not there","fix":null},{"name":"key","status":"skipped","detail":"not checked, because the home is not there","fix":null},{"name":"space","status":"skipped","detail":"not checked, because the home is not there","fix":null},{"name":"transport","status":"skipped","detail":"the transport checks come after the M0 measurements","fix":null}]}

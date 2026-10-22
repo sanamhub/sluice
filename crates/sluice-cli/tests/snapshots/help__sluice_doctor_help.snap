@@ -1,0 +1,26 @@
+---
+source: crates/sluice-cli/tests/help.rs
+expression: "help(&[\"doctor\", \"--help\"])"
+---
+Check the home, its lock and the identity key, and say how to fix a problem
+
+It only reads: it never creates, locks, repairs or deletes anything. The exit code is 0 unless a check failed, and then that of the most serious failure: 6 for policy, 5 for storage. Warnings do not fail.
+
+Usage: sluice doctor [OPTIONS]
+
+Options:
+      --json
+          Print JSON, one object per line, instead of text. A failure is then a JSON line on stderr
+
+      --color <WHEN>
+          When to colour help, errors and other output. NO_COLOR set to anything turns it off
+
+          Possible values:
+          - auto:   Colour a stream only when it is a terminal
+          - always: Colour always, unless `NO_COLOR` is set
+          - never:  Never colour
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')

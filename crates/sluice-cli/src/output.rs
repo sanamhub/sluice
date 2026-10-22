@@ -10,6 +10,7 @@ use serde_json::json;
 use sluice_core::Error;
 
 use crate::colour::Colour;
+use crate::doctor::{self, Line};
 use crate::exit::{Failure, exit_code, kind, message, text};
 
 /// How results and failures are written. It follows `--json` and nothing else.
@@ -26,6 +27,19 @@ pub enum Outcome {
     /// Text that is the whole output, such as a completion script. It is printed as it is with or
     /// without `--json`, because a script is not a JSON value.
     Text(String),
+    /// The report of `sluice doctor`, and the exit code it ends with.
+    Doctor { lines: Vec<Line>, code: u8 },
+}
+
+impl Outcome {
+    /// The exit code once the outcome is printed: 0, except for a doctor report with a failed
+    /// check.
+    pub fn code(&self) -> u8 {
+        match self {
+            Outcome::Doctor { code, .. } => *code,
+            _ => 0,
+        }
+    }
 }
 
 pub struct Output {
@@ -45,19 +59,33 @@ impl Output {
     /// Writes a result to stdout: in text, the line a person reads, and in JSON one object and a
     /// newline.
     pub fn print(&self, outcome: &Outcome) -> Result<(), Error> {
-        let text = match (outcome, self.format) {
-            (Outcome::Id { endpoint_id }, Format::Human) => format!("{endpoint_id}\n"),
-            (Outcome::Id { endpoint_id }, Format::Json) => {
-                format!("{}\n", json!({ "endpoint_id": endpoint_id }))
+        let (text, coloured) = match (outcome, self.format) {
+            (Outcome::Id { endpoint_id }, Format::Human) => (format!("{endpoint_id}\n"), false),
+            (Outcome::Id { endpoint_id }, Format::Json) => (
+                format!("{}\n", json!({ "endpoint_id": endpoint_id })),
+                false,
+            ),
+            (Outcome::Text(text), _) => (text.clone(), false),
+            (Outcome::Doctor { lines, .. }, Format::Human) => {
+                (doctor::human(lines, self.colour.stdout), self.colour.stdout)
             }
-            (Outcome::Text(text), _) => text.clone(),
+            (Outcome::Doctor { lines, .. }, Format::Json) => (doctor::json(lines), false),
         };
-        let mut stdout = io::stdout().lock();
-        // Not `println!`, which panics when it cannot write.
-        match stdout
-            .write_all(text.as_bytes())
-            .and_then(|()| stdout.flush())
-        {
+        // Through `AutoStream` only when there are escape codes, which it turns on in a Windows
+        // console that has them off. Everything else goes out as it is.
+        let written = if coloured {
+            let mut stdout = AutoStream::new(io::stdout().lock(), ColorChoice::Always);
+            stdout
+                .write_all(text.as_bytes())
+                .and_then(|()| stdout.flush())
+        } else {
+            let mut stdout = io::stdout().lock();
+            // Not `println!`, which panics when it cannot write.
+            stdout
+                .write_all(text.as_bytes())
+                .and_then(|()| stdout.flush())
+        };
+        match written {
             Ok(()) => Ok(()),
             // `sluice id | head -c 0`: the reader has gone and wants nothing more, which is not a
             // failure of ours. Stop quietly. Any other write error is a failure of storage.

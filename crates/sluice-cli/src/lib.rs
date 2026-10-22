@@ -5,6 +5,7 @@ mod bug;
 mod cli;
 mod colour;
 mod completions;
+mod doctor;
 mod exit;
 mod id;
 mod output;
@@ -60,18 +61,21 @@ pub fn run(args: Vec<OsString>) -> ExitCode {
     let output = Output::new(cli.format(), environment.colour(cli.color));
     // A panic is caught here, so that it ends as a `Bug` and not as Rust's 101.
     match bug::catch(|| execute(cli.command, &output)) {
-        Ok(Ok(())) => ExitCode::SUCCESS,
+        Ok(Ok(code)) => ExitCode::from(code),
         Ok(Err(error)) => output.print_failure(&Failure::Error(error)),
         Err(message) => output.print_failure(&Failure::Panic(message)),
     }
 }
 
-fn execute(command: Command, output: &Output) -> Result<(), sluice_core::Error> {
+/// Runs the command and prints what it produced, and returns the exit code that goes with it.
+fn execute(command: Command, output: &Output) -> Result<u8, sluice_core::Error> {
     #[cfg(debug_assertions)]
     bug::panic_if_asked();
     let outcome = match command {
         Command::Id(args) => id::run(&args, output.format())?,
         Command::Completions(args) => completions::run(&args)?,
+        Command::Doctor(args) => doctor::run(&args)?,
     };
-    output.print(&outcome)
+    output.print(&outcome)?;
+    Ok(outcome.code())
 }

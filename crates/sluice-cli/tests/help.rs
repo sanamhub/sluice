@@ -24,3 +24,8 @@ fn sluice_help() {
 fn sluice_id_help() {
     insta::assert_snapshot!(help(&["id", "--help"]));
 }
+
+#[test]
+fn sluice_doctor_help() {
+    insta::assert_snapshot!(help(&["doctor", "--help"]));
+}

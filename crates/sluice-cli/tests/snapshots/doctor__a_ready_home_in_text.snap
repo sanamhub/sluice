@@ -1,0 +1,11 @@
+---
+source: crates/sluice-cli/tests/doctor.rs
+expression: "redact(&stdout_text(&assert), &home)"
+---
+ok       version    sluice <version> for <target>, running on <os>
+ok       home       <home>, from SLUICE_HOME
+ok       layout     version 1
+ok       lock       free
+ok       key        32 bytes, readable only by this user
+<status> space      <free>
+skipped  transport  the transport checks come after the M0 measurements

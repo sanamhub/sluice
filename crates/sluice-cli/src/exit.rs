@@ -1,6 +1,6 @@
 //! What a failure is called, and the exit code it gives.
 
-use sluice_core::Error;
+use sluice_core::{Error, ErrorKind};
 
 /// Why a command did not finish.
 pub enum Failure {
@@ -17,12 +17,20 @@ pub enum Failure {
 /// line.
 pub fn exit_code(failure: &Failure) -> u8 {
     match failure {
-        Failure::Error(Error::Network(_)) => 3,
-        Failure::Error(Error::Verify(_)) => 4,
-        Failure::Error(Error::Storage(_)) => 5,
-        Failure::Error(Error::Policy(_)) => 6,
-        Failure::Error(Error::Cancelled) => 130,
-        Failure::Error(Error::Bug(_)) | Failure::Panic(_) => 70,
+        Failure::Error(error) => code_of(error.kind()),
+        Failure::Panic(_) => code_of(ErrorKind::Bug),
+    }
+}
+
+/// The exit code of a kind of error. `sluice doctor` uses it for the kind of a failed check.
+pub fn code_of(kind: ErrorKind) -> u8 {
+    match kind {
+        ErrorKind::Network => 3,
+        ErrorKind::Verify => 4,
+        ErrorKind::Storage => 5,
+        ErrorKind::Policy => 6,
+        ErrorKind::Cancelled => 130,
+        ErrorKind::Bug => 70,
     }
 }
 

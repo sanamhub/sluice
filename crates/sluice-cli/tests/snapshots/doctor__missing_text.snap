@@ -1,0 +1,12 @@
+---
+source: crates/sluice-cli/tests/doctor.rs
+expression: "redact(&stdout_text(&text), &home)"
+---
+ok       version    sluice <version> for <target>, running on <os>
+failed   home       <home> does not exist
+                    fix: run `sluice id`, which creates it
+skipped  layout     not checked, because the home is not there
+skipped  lock       not checked, because the home is not there
+skipped  key        not checked, because the home is not there
+skipped  space      not checked, because the home is not there
+skipped  transport  the transport checks come after the M0 measurements

@@ -31,7 +31,15 @@ mod tests {
             .map(|entry| entry.unwrap().file_name().into_string().unwrap())
             .collect();
         names.sort();
-        assert_eq!(names, ["sluice-completions.1", "sluice-id.1", "sluice.1"]);
+        assert_eq!(
+            names,
+            [
+                "sluice-completions.1",
+                "sluice-doctor.1",
+                "sluice-id.1",
+                "sluice.1"
+            ]
+        );
         for name in &names {
             let page = fs::read_to_string(target.join(name)).unwrap();
             assert!(page.contains(".TH"), "{name} is not a man page");

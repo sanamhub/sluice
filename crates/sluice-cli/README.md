@@ -73,6 +73,25 @@ A failure with `--json` is one line on stderr. `kind` is the variant in lower ca
 `sluice id --rotate` asks before it replaces the identity, and only on a terminal. With no terminal,
 or with `--json`, it refuses with code 6 unless `--yes` is given.
 
+**`sluice doctor`**
+
+`sluice doctor` checks the home, its layout version, its lock, the identity key and the free space
+on the home's volume, and changes nothing. It prints one line per check with its status, `ok`,
+`warning`, `failed` or `skipped`, and under a warning or a failure the step that fixes it. With
+`--json` it prints one object:
+
+```
+{"checks":[{"name":"home","status":"ok","detail":"<path>, from SLUICE_HOME","fix":null},...]}
+```
+
+`name` is `version`, `home`, `layout`, `lock`, `key`, `space` or `transport`, in that order.
+`detail` and `fix` are for people, and `fix` is `null` when there is nothing to do.
+
+The report is the command's result, so it goes to stdout whatever it finds, with or without
+`--json`, and nothing goes to stderr. The exit code is 0 when no check failed: warnings do not fail.
+Otherwise it is the code of the most serious kind that failed, which is the highest number: 6 for
+policy, such as a key other users can read or a layout newer than this sluice, and 5 for storage.
+
 **Other commands**
 
 `sluice completions <shell>` prints the completion script for `bash`, `zsh`, `fish`, `powershell` or
