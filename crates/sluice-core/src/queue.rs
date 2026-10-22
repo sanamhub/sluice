@@ -8,9 +8,12 @@
 //! - Three jobs run at once by default, from 1 to 64.
 //! - High always starts before normal, and normal before low. Within a line, first in, first out.
 //!   Nothing that runs is stopped to make room.
-//! - Only a network failure is retried, after 1 s, 2 s, 4 s and so on up to 5 minutes. The 10th
-//!   network failure in a row fails the job, and progress starts the count again. Every other kind
-//!   of failure fails the job at once, because a retry cannot fix it.
+//! - Only a network failure is retried, after 1 s, 2 s, 4 s and so on up to 5 minutes. The 15th
+//!   network failure in a row fails the job, about 34 minutes after the first, and progress starts
+//!   the count again. Every other kind of failure fails the job at once, because a retry cannot
+//!   fix it.
+//! - The queue asks for a timer only while a job waits to retry, and clears it when none does, so
+//!   an idle driver has nothing to wake it.
 //! - Done, failed and cancelled jobs stay in the history, newest first, up to the last 100.
 //!
 //! A command on an id the queue does not have, or one that makes no sense in the job's state, is
@@ -39,8 +42,9 @@ const HISTORY: usize = 100;
 const MAX_JOBS: usize = 1000;
 /// The longest path a job takes: bytes on Unix, UTF-16 units on Windows.
 const MAX_PATH_UNITS: usize = 4096;
-/// The network failure in a row that fails a job.
-const MAX_NETWORK_FAILURES: u32 = 10;
+/// The network failure in a row that fails a job. With the waits below, a job retries for about 34
+/// minutes before it fails, which outlasts a laptop moving between networks or a router restart.
+const MAX_NETWORK_FAILURES: u32 = 15;
 /// The wait after the first network failure, doubled after each one that follows.
 const FIRST_WAIT_MS: u64 = 1000;
 /// The longest wait before a retry.
@@ -217,20 +221,23 @@ impl Queue {
     /// let (id, _) = queue.add(Work::Send { path: "a.iso".into() }, Priority::Normal)?;
     /// queue.save(&home)?;
     /// let (loaded, actions) = Queue::load(&home)?;
+    /// // No timer: a restart leaves no job waiting to retry.
     /// assert_eq!(actions, [Action::Start(id), Action::Save]);
     /// assert_eq!(loaded.job(id).unwrap().state(), State::Active);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn load(home: &Home) -> Result<(Queue, Vec<Action>), Error> {
         let mut queue = save::read(home.path())?;
-        let actions = queue.settle(Vec::new(), false);
+        // A new process has no timer, and a load leaves no job waiting to retry, so this asks for
+        // none.
+        let actions = queue.settle(Vec::new(), false, None);
         Ok((queue, actions))
     }
 }
 
 /// The wait before the retry that follows network failure number `failures` in a row: 1 s, then
-/// twice as long each time, up to 5 minutes. With 10 tries the longest wait is the 9th, 256 s, so
-/// the cap only matters if that number grows.
+/// twice as long each time, up to 5 minutes. The 9th wait is 256 s, and the 10th to the 14th are
+/// at the cap.
 fn backoff_ms(failures: u32) -> u64 {
     // 2^20 seconds is far past the cap, and small enough that the shift cannot overflow.
     let doublings = failures.saturating_sub(1).min(20);

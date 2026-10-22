@@ -1,4 +1,5 @@
-//! Random command sequences, checked against what the queue promises after every command.
+//! Random command sequences, run on the queue and on a model of it, which must agree after every
+//! command.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -6,6 +7,7 @@ use std::path::PathBuf;
 use proptest::prelude::*;
 
 use super::super::{Action, JobId, Priority, Queue, State, Work};
+use super::model::Model;
 use crate::ticket::{Body, Format, Ticket};
 use crate::{Error, ErrorKind};
 
@@ -95,88 +97,69 @@ pub(super) fn op() -> impl Strategy<Value = Op> {
     ]
 }
 
-/// What a driver of the queue would know, kept apart from the queue.
-#[derive(Default)]
-struct Model {
-    now: u64,
-    added: Vec<JobId>,
-    /// Ids in the order they went to the history.
-    retired: Vec<JobId>,
-    /// The jobs the driver was told to start and not since told to stop, and not reported over.
-    running: BTreeSet<JobId>,
-}
-
-fn apply(queue: &mut Queue, model: &mut Model, op: &Op) -> Result<Vec<Action>, Error> {
+/// Applies `op` to the queue at `now`, the clock before the command.
+fn apply(queue: &mut Queue, now: u64, op: &Op) -> Result<Vec<Action>, Error> {
     match *op {
-        Op::Add(priority, ref work) => {
-            let (id, actions) = queue.add(work.clone(), priority)?;
-            assert!(model.added.iter().all(|old| *old < id), "{id} reused");
-            model.added.push(id);
-            Ok(actions)
-        }
+        Op::Add(priority, ref work) => queue.add(work.clone(), priority).map(|(_, a)| a),
         Op::Pause(id) => queue.pause(JobId(id)),
         Op::Resume(id) => queue.resume(JobId(id)),
         Op::Cancel(id) => queue.cancel(JobId(id)),
         Op::SetPriority(id, priority) => queue.set_priority(JobId(id), priority),
         Op::Slots(slots) => queue.set_slots(slots),
         Op::Progress(id) => queue.progress(JobId(id)),
-        Op::Finished(id) => over(model, JobId(id), queue.finished(JobId(id))),
-        Op::Failed(id, kind) => over(model, JobId(id), queue.failed(JobId(id), kind, model.now)),
-        Op::Tick(by) => {
-            model.now += by;
-            queue.tick(model.now)
-        }
+        Op::Finished(id) => queue.finished(JobId(id)),
+        Op::Failed(id, kind) => queue.failed(JobId(id), kind, now),
+        Op::Tick(by) => queue.tick(now + by),
     }
-}
-
-/// A report that a job is over takes it off the driver's list of what runs.
-fn over(
-    model: &mut Model,
-    id: JobId,
-    result: Result<Vec<Action>, Error>,
-) -> Result<Vec<Action>, Error> {
-    if result.is_ok() {
-        assert!(
-            model.running.remove(&id),
-            "{id} was reported over but never started"
-        );
-    }
-    result
 }
 
 /// The queue that `ops` leave, with the commands that fail skipped.
 pub(super) fn run(ops: &[Op]) -> Queue {
     let mut queue = Queue::new();
-    let mut model = Model::default();
+    let mut now = 0;
     for op in ops {
-        let Ok(actions) = apply(&mut queue, &mut model, op) else {
-            continue;
-        };
-        for action in actions {
-            match action {
-                Action::Start(id) => {
-                    model.running.insert(id);
-                }
-                Action::Stop(id) => {
-                    model.running.remove(&id);
-                }
-                _ => {}
-            }
+        let _ = apply(&mut queue, now, op);
+        if let Op::Tick(by) = op {
+            now += by;
         }
     }
     queue
 }
 
-fn active(queue: &Queue) -> BTreeSet<JobId> {
-    queue
-        .jobs()
-        .iter()
-        .filter(|job| job.state() == State::Active)
-        .map(|job| job.id())
-        .collect()
+/// What a driver of the queue knows from the actions alone.
+#[derive(Default)]
+struct Driver {
+    /// The jobs it was told to start and not since told to stop or reported over.
+    running: BTreeSet<JobId>,
+    /// Its one timer.
+    timer: Option<u64>,
 }
 
-/// The stops come before the starts, the starts before the save, and the timer last.
+impl Driver {
+    fn follow(&mut self, op: &Op, actions: &[Action]) {
+        match *op {
+            Op::Finished(id) | Op::Failed(id, _) => {
+                assert!(
+                    self.running.remove(&JobId(id)),
+                    "{id} over but never started"
+                );
+            }
+            Op::Tick(_) => self.timer = None,
+            _ => {}
+        }
+        for action in actions {
+            match *action {
+                Action::Stop(id) => assert!(self.running.remove(&id), "stopped {id}, not running"),
+                Action::Start(id) => assert!(self.running.insert(id), "started {id} twice"),
+                Action::Save => {}
+                Action::Wake { at_ms } => self.timer = at_ms,
+            }
+        }
+    }
+}
+
+/// The stops come before the starts, the starts before the save, and the timer last. There is at
+/// most one save and one timer.
 fn check_order(actions: &[Action]) {
     let rank = |action: &Action| match action {
         Action::Stop(_) => 0,
@@ -188,113 +171,72 @@ fn check_order(actions: &[Action]) {
         actions.windows(2).all(|w| rank(&w[0]) <= rank(&w[1])),
         "{actions:?}"
     );
+    for last in [2, 3] {
+        assert!(
+            actions.iter().filter(|a| rank(a) == last).count() <= 1,
+            "{actions:?}"
+        );
+    }
 }
 
-fn check_starts(queue: &Queue, model: &mut Model, actions: &[Action], before: usize) {
-    for action in actions {
-        match action {
-            Action::Stop(id) => assert!(model.running.remove(id), "stopped {id}, not running"),
-            Action::Start(id) => assert!(model.running.insert(*id), "started {id} twice"),
-            _ => {}
-        }
-    }
-    let slots = usize::from(queue.slots());
-    let now = active(queue);
+/// What the driver sees agrees with the queue: the same jobs run, no start goes past the slots,
+/// a free slot never sits beside a waiting job, and the timer is set for the earliest retry.
+fn check_driver(queue: &Queue, model: &Model, driver: &Driver, actions: &[Action]) {
+    let active: BTreeSet<JobId> = queue
+        .jobs()
+        .iter()
+        .filter(|job| job.state() == State::Active)
+        .map(|job| job.id())
+        .collect();
     assert_eq!(
-        now, model.running,
+        active, driver.running,
         "the queue and the driver disagree on what runs"
     );
-    // Lowering the slots stops nothing, so more can run than there are slots, but no start
-    // ever adds to that.
-    assert!(
-        now.len() <= before.max(slots),
-        "{} run with {slots} slots",
-        now.len()
-    );
-    let started: Vec<&crate::queue::Job> = actions
-        .iter()
-        .filter_map(|a| match a {
-            Action::Start(id) => queue.job(*id),
-            _ => None,
-        })
-        .collect();
-    if !started.is_empty() {
-        assert!(now.len() <= slots, "a start past the slots");
+    let slots = usize::from(queue.slots());
+    if actions.iter().any(|a| matches!(a, Action::Start(_))) {
+        assert!(active.len() <= slots, "a start past the slots");
     }
-    let waiting: Vec<_> = queue
-        .jobs()
-        .into_iter()
-        .filter(|job| job.state() == State::Waiting)
-        .collect();
-    if now.len() < slots {
-        assert!(waiting.is_empty(), "a free slot and a job waiting for it");
+    if active.len() < slots {
+        assert!(
+            queue.jobs().iter().all(|job| job.state() != State::Waiting),
+            "a free slot and a job waiting for it"
+        );
     }
-    assert!(
-        started.windows(2).all(|w| w[0].place() < w[1].place()),
-        "starts out of order"
-    );
-    for job in &started {
-        for left in &waiting {
-            assert!(
-                job.place() < left.place(),
-                "{} started ahead of {}",
-                job.id(),
-                left.id()
-            );
-        }
-    }
-}
-
-/// Every job is in exactly one place, and every job ever added is still there unless it was
-/// one of the oldest in a full history.
-fn check_jobs(queue: &Queue, model: &mut Model, history_before: &[JobId]) {
-    let live: Vec<JobId> = queue.jobs().iter().map(|job| job.id()).collect();
-    let history: Vec<JobId> = queue.history().iter().map(|job| job.id()).collect();
-    assert!(queue.jobs().iter().all(|job| !job.state().is_history()));
-    assert!(queue.history().iter().all(|job| job.state().is_history()));
-    assert!(history.len() <= 100);
-    for id in history.iter().filter(|id| !history_before.contains(id)) {
-        model.retired.push(*id);
-    }
-    let kept: Vec<JobId> = model.retired.iter().rev().take(100).copied().collect();
     assert_eq!(
-        history.iter().copied().collect::<BTreeSet<_>>(),
-        kept.iter().copied().collect()
+        driver.timer,
+        model.earliest_retry(),
+        "the timer is not the earliest retry"
     );
-    let retired: BTreeSet<JobId> = model.retired.iter().copied().collect();
-    let expected: Vec<JobId> = model
-        .added
-        .iter()
-        .filter(|id| !retired.contains(id))
-        .copied()
-        .collect();
-    assert_eq!(live, expected, "a job was lost or appeared");
-    let all: BTreeSet<JobId> = live.iter().chain(&history).copied().collect();
-    assert_eq!(all.len(), live.len() + history.len(), "a job in two places");
 }
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
     #[test]
-    fn every_command_sequence_keeps_the_promises(ops in prop::collection::vec(op(), 1..300)) {
+    fn every_command_sequence_does_what_the_model_does(ops in prop::collection::vec(op(), 1..300)) {
         let mut queue = Queue::new();
-        let mut model = Model::default();
+        let mut model = Model::new();
+        let mut driver = Driver::default();
         for op in &ops {
             let before = queue.clone();
-            let running_before = active(&queue).len();
-            let history_before: Vec<JobId> = queue.history().iter().map(|job| job.id()).collect();
-            match apply(&mut queue, &mut model, op) {
-                Ok(actions) => {
+            let got = apply(&mut queue, model.now, op);
+            let expected = model.apply(op);
+            match (got, expected) {
+                (Ok(actions), Some(expected)) => {
+                    prop_assert_eq!(&actions, &expected, "{:?}", op);
                     check_order(&actions);
-                    check_starts(&queue, &mut model, &actions, running_before);
-                    check_jobs(&queue, &mut model, &history_before);
+                    driver.follow(op, &actions);
+                    check_driver(&queue, &model, &driver, &actions);
                 }
-                Err(error) => {
+                (Err(error), None) => {
                     prop_assert!(matches!(error, Error::Policy(_)), "{op:?}: {error}");
                     prop_assert_eq!(&queue, &before, "{:?} failed and changed the queue", op);
                 }
+                (got, expected) => {
+                    prop_assert!(false, "{op:?}: the queue gave {got:?}, the model {expected:?}");
+                }
             }
+            model.check(&queue);
         }
     }
 }

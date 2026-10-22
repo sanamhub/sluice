@@ -291,11 +291,13 @@ pub enum Action {
     Start(JobId),
     /// Write the queue to its file, because something that a restart keeps has changed.
     Save,
-    /// Call [`Queue::tick`](super::Queue::tick) at this time on the caller's monotonic clock,
-    /// which is when the next retry is due. It replaces any time asked for before, so the driver
-    /// keeps one timer. A timer that fires early does no harm: the tick asks for the next time.
+    /// Set the driver's one timer. `Some(at)` replaces any time asked for before: call
+    /// [`Queue::tick`](super::Queue::tick) at `at` on the caller's monotonic clock, which is when
+    /// the next retry is due. `None` clears the timer, because no job waits to retry. It comes only
+    /// when the time of the earliest retry has changed, and a tick counts as the timer going off,
+    /// so a tick that leaves a job waiting always sets the timer again.
     Wake {
-        /// When to tick, in milliseconds.
-        at_ms: u64,
+        /// When to tick, in milliseconds, or `None` for no timer.
+        at_ms: Option<u64>,
     },
 }

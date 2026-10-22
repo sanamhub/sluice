@@ -1,5 +1,6 @@
 //! The commands of the queue. Each checks its arguments first and changes nothing when it fails,
-//! then returns the actions its change asks for.
+//! then returns the actions its change asks for. Each notes the earliest retry before it changes
+//! anything, so that it asks for a timer only when that time has moved.
 
 use super::{
     Action, HISTORY, Job, JobId, MAX_JOBS, MAX_NETWORK_FAILURES, MAX_SLOTS, Priority, Queue, State,
@@ -37,6 +38,7 @@ impl Queue {
             .next_id
             .checked_add(1)
             .ok_or_else(|| Error::Policy("the queue has used every job id there is".to_string()))?;
+        let before = self.earliest_retry();
         self.next_id = next;
         let job = Job {
             id,
@@ -46,11 +48,12 @@ impl Queue {
             failures: 0,
         };
         self.jobs.insert(id, job);
-        Ok((id, self.settle(Vec::new(), true)))
+        Ok((id, self.settle(Vec::new(), true, before)))
     }
 
     /// Keeps a job from running. An active job is stopped and its slot goes to the next in line.
-    /// A job that waits, or waits to retry, keeps its place and does not start.
+    /// A job that waits, or waits to retry, keeps its place and does not start. A job that waited
+    /// to retry no longer has a deadline, so the timer moves to the next retry, or is cleared.
     ///
     /// # Examples
     ///
@@ -64,6 +67,7 @@ impl Queue {
     /// # Ok::<(), sluice_core::Error>(())
     /// ```
     pub fn pause(&mut self, id: JobId) -> Result<Vec<Action>, Error> {
+        let before = self.earliest_retry();
         let job = self.live(id)?;
         let stop = match job.state {
             State::Active => true,
@@ -72,10 +76,14 @@ impl Queue {
         };
         job.state = State::Paused;
         let actions = if stop { vec![Action::Stop(id)] } else { vec![] };
-        Ok(self.settle(actions, true))
+        Ok(self.settle(actions, true, before))
     }
 
     /// Puts a paused job back in its place in line: by the order it was added in, not at the end.
+    ///
+    /// A job that was paused while it waited to retry starts without the rest of its wait, and
+    /// keeps its count of network failures. A resume is the user asking to try now, and the count
+    /// still fails the job if the network stays down.
     ///
     /// # Examples
     ///
@@ -90,15 +98,17 @@ impl Queue {
     /// # Ok::<(), sluice_core::Error>(())
     /// ```
     pub fn resume(&mut self, id: JobId) -> Result<Vec<Action>, Error> {
+        let before = self.earliest_retry();
         let job = self.live(id)?;
         if job.state != State::Paused {
             return Err(refuse(id, "is not paused, so it cannot be resumed"));
         }
         job.state = State::Waiting;
-        Ok(self.settle(Vec::new(), true))
+        Ok(self.settle(Vec::new(), true, before))
     }
 
-    /// Cancels a job that is not history, stopping it if it runs. It goes to the history.
+    /// Cancels a job that is not history, stopping it if it runs. It goes to the history. If it
+    /// waited for the earliest retry, the timer moves to the next retry, or is cleared.
     ///
     /// # Examples
     ///
@@ -112,10 +122,11 @@ impl Queue {
     /// # Ok::<(), sluice_core::Error>(())
     /// ```
     pub fn cancel(&mut self, id: JobId) -> Result<Vec<Action>, Error> {
+        let before = self.earliest_retry();
         let stop = self.live(id)?.state == State::Active;
         self.retire(id, State::Cancelled);
         let actions = if stop { vec![Action::Stop(id)] } else { vec![] };
-        Ok(self.settle(actions, true))
+        Ok(self.settle(actions, true, before))
     }
 
     /// Moves a job that is not history to another line. It keeps its order, so among the jobs of
@@ -134,10 +145,11 @@ impl Queue {
     /// # Ok::<(), sluice_core::Error>(())
     /// ```
     pub fn set_priority(&mut self, id: JobId, priority: Priority) -> Result<Vec<Action>, Error> {
+        let before = self.earliest_retry();
         let job = self.live(id)?;
         let changed = job.priority != priority;
         job.priority = priority;
-        Ok(self.settle(Vec::new(), changed))
+        Ok(self.settle(Vec::new(), changed, before))
     }
 
     /// Sets how many jobs run at once, from 1 to 64. Raising it starts the next jobs in line.
@@ -158,9 +170,10 @@ impl Queue {
                 "{slots} transfers at once is out of range: it is from 1 to {MAX_SLOTS}"
             )));
         }
+        let before = self.earliest_retry();
         let changed = self.slots != slots;
         self.slots = slots;
-        Ok(self.settle(Vec::new(), changed))
+        Ok(self.settle(Vec::new(), changed, before))
     }
 
     /// Says an active job moved verified bytes. Its count of network failures in a row starts
@@ -181,10 +194,11 @@ impl Queue {
     /// # Ok::<(), sluice_core::Error>(())
     /// ```
     pub fn progress(&mut self, id: JobId) -> Result<Vec<Action>, Error> {
+        let before = self.earliest_retry();
         let job = self.active(id, "made progress")?;
         let changed = job.failures != 0;
         job.failures = 0;
-        Ok(self.settle(Vec::new(), changed))
+        Ok(self.settle(Vec::new(), changed, before))
     }
 
     /// Says an active job finished. It goes to the history and its slot to the next in line.
@@ -202,13 +216,14 @@ impl Queue {
     /// # Ok::<(), sluice_core::Error>(())
     /// ```
     pub fn finished(&mut self, id: JobId) -> Result<Vec<Action>, Error> {
+        let before = self.earliest_retry();
         self.active(id, "finished")?;
         self.retire(id, State::Done);
-        Ok(self.settle(Vec::new(), true))
+        Ok(self.settle(Vec::new(), true, before))
     }
 
     /// Says an active job failed with an error of `kind`, at `now_ms` on the caller's monotonic
-    /// clock. A network failure waits to retry, unless it is the 10th in a row, which fails the
+    /// clock. A network failure waits to retry, unless it is the 15th in a row, which fails the
     /// job. Any other kind fails it at once.
     ///
     /// # Examples
@@ -220,7 +235,7 @@ impl Queue {
     /// let mut queue = Queue::new();
     /// let (id, _) = queue.add(Work::Send { path: "a".into() }, Priority::Normal)?;
     /// let actions = queue.failed(id, ErrorKind::Network, 5000)?;
-    /// assert_eq!(actions, [Action::Save, Action::Wake { at_ms: 6000 }]);
+    /// assert_eq!(actions, [Action::Save, Action::Wake { at_ms: Some(6000) }]);
     /// assert_eq!(queue.job(id).unwrap().state(), State::Retrying { at_ms: 6000 });
     /// # Ok::<(), sluice_core::Error>(())
     /// ```
@@ -230,6 +245,7 @@ impl Queue {
         kind: ErrorKind,
         now_ms: u64,
     ) -> Result<Vec<Action>, Error> {
+        let before = self.earliest_retry();
         let job = self.active(id, "failed")?;
         if kind != ErrorKind::Network {
             self.retire(id, State::Failed(kind));
@@ -241,13 +257,14 @@ impl Queue {
             let at_ms = now_ms.saturating_add(backoff_ms(job.failures));
             job.state = State::Retrying { at_ms };
         }
-        let mut actions = self.settle(Vec::new(), true);
-        actions.extend(self.wake());
-        Ok(actions)
+        Ok(self.settle(Vec::new(), true, before))
     }
 
     /// The timer the queue asked for has fired, or any other time has come. Every job whose wait
     /// to retry is over at `now_ms` is in line again, in its old place.
+    ///
+    /// A tick counts as the timer going off, which leaves the driver with none. So a tick that
+    /// leaves a job waiting to retry always ends with the timer for it, even one that came early.
     ///
     /// # Examples
     ///
@@ -258,7 +275,7 @@ impl Queue {
     /// let mut queue = Queue::new();
     /// let (id, _) = queue.add(Work::Send { path: "a".into() }, Priority::Normal)?;
     /// queue.failed(id, ErrorKind::Network, 0)?;
-    /// assert_eq!(queue.tick(999)?, [Action::Wake { at_ms: 1000 }]);
+    /// assert_eq!(queue.tick(999)?, [Action::Wake { at_ms: Some(1000) }]);
     /// assert_eq!(queue.tick(1000)?, [Action::Start(id), Action::Save]);
     /// # Ok::<(), sluice_core::Error>(())
     /// ```
@@ -272,9 +289,7 @@ impl Queue {
                 changed = true;
             }
         }
-        let mut actions = self.settle(Vec::new(), changed);
-        actions.extend(self.wake());
-        Ok(actions)
+        Ok(self.settle(Vec::new(), changed, None))
     }
 
     /// A job that is not history, or the error for an id that is not one.
@@ -315,8 +330,14 @@ impl Queue {
     }
 
     /// Fills the free slots and finishes the list of actions: `actions` are the stops, then the
-    /// starts follow, then a save if `changed` or anything started.
-    pub(super) fn settle(&mut self, mut actions: Vec<Action>, changed: bool) -> Vec<Action> {
+    /// starts follow, then a save if `changed` or anything started, then the timer if the earliest
+    /// retry is no longer `before`, the one the driver's timer is set to.
+    pub(super) fn settle(
+        &mut self,
+        mut actions: Vec<Action>,
+        changed: bool,
+        before: Option<u64>,
+    ) -> Vec<Action> {
         let mut started = false;
         while self.running() < usize::from(self.slots) {
             let Some(id) = self.next_in_line() else { break };
@@ -328,6 +349,10 @@ impl Queue {
         }
         if changed || started {
             actions.push(Action::Save);
+        }
+        let after = self.earliest_retry();
+        if after != before {
+            actions.push(Action::Wake { at_ms: after });
         }
         actions
     }
@@ -348,8 +373,8 @@ impl Queue {
             .map(|job| job.id)
     }
 
-    /// The timer for the earliest retry, if a job waits for one.
-    fn wake(&self) -> Option<Action> {
+    /// When the earliest retry is due, if a job waits for one.
+    fn earliest_retry(&self) -> Option<u64> {
         self.jobs
             .values()
             .filter_map(|job| match job.state {
@@ -357,6 +382,5 @@ impl Queue {
                 _ => None,
             })
             .min()
-            .map(|at_ms| Action::Wake { at_ms })
     }
 }

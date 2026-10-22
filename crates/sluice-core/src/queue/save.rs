@@ -7,6 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::File;
 use std::io::{self, Read};
+use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -230,15 +231,18 @@ fn load_job(
             "job {id} has an id that is out of order or used twice"
         ));
     }
+    let failures_ok = possible_failures(&saved.state).contains(&saved.failures);
     let state = load_state(saved.state);
-    let failures_ok = if in_history {
-        saved.failures <= MAX_NETWORK_FAILURES
-    } else {
-        saved.failures < MAX_NETWORK_FAILURES
-    };
-    if state.is_history() != in_history || !failures_ok {
+    if state.is_history() != in_history {
         return Err(format!(
             "job {id} is in a state the queue never leaves it in"
+        ));
+    }
+    if !failures_ok {
+        return Err(format!(
+            "job {id} has {} network failures in a row, which the queue never leaves a job in \
+             its state with",
+            saved.failures
         ));
     }
     let work = match saved.work {
@@ -262,6 +266,18 @@ fn load_job(
         state,
         failures: saved.failures,
     })
+}
+
+/// The counts of network failures in a row that the queue can leave a job with in `state`. A count
+/// grows only on a failure, which leaves a job waiting to retry or, at the 15th, failed on the
+/// network. Every other state keeps the count the job had when it got there.
+fn possible_failures(state: &SavedState) -> RangeInclusive<u32> {
+    let below_max = MAX_NETWORK_FAILURES - 1;
+    match state {
+        SavedState::Retrying => 1..=below_max,
+        SavedState::Failed(SavedKind::Network) => MAX_NETWORK_FAILURES..=MAX_NETWORK_FAILURES,
+        _ => 0..=below_max,
+    }
 }
 
 /// The state a restart leaves a job in.
