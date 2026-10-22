@@ -1,0 +1,12 @@
+# iroh-relay 1.4.0, tests/multiple-hostnames-pebble.sh:114-126, with its shell variables filled in.
+enable_relay = true
+enable_quic_addr_discovery = false
+enable_metrics = false
+http_bind_addr = "0.0.0.0:8080"
+
+[tls]
+https_bind_addr = "0.0.0.0:8443"
+hostname = [ "relay-a.iroh.test", "relay-b.iroh.test" ]
+cert_mode = "LetsEncrypt"
+contact = "test@iroh.test"
+cert_dir = "/tmp/work/certs"

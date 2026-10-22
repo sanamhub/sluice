@@ -1,0 +1,23 @@
+[package]
+name = "sluice-relay-guard-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+sluice-relay-guard = { path = ".." }
+
+[[bin]]
+name = "relay_config"
+path = "fuzz_targets/relay_config.rs"
+test = false
+doc = false
+bench = false
+
+# Its own workspace, as the guard's is. It needs a nightly compiler and the sanitizer flags that
+# `cargo fuzz` sets, which the guard's own build does not want.
+[workspace]

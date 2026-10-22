@@ -1,0 +1,2 @@
+# iroh-relay 1.4.0, src/main.rs:921-923, test_access_token_empty_is_rejected.
+access.shared_token = []

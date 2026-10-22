@@ -1,0 +1,7 @@
+# iroh-relay 1.4.0, README.md:149-156.
+enable_quic_addr_discovery = true
+
+[tls]
+cert_mode = "Manual"
+manual_cert_path = "/path/to/certs/cert.pem"
+manual_key_path = "/path/to/certs/cert.key.pem"

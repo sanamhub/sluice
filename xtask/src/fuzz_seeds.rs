@@ -33,6 +33,9 @@ pub enum Target {
     Log,
     /// `sluice-core`: byte ranges as a person writes them.
     Range,
+    /// `sluice-relay-guard`: the text of an iroh-relay config.
+    #[value(name = "relay_config")]
+    RelayConfig,
 }
 
 impl Target {
@@ -43,7 +46,7 @@ impl Target {
             Target::Manifest => Some("manifests"),
             Target::ManifestPath => Some("paths"),
             Target::Log => Some("live"),
-            Target::Range => None,
+            Target::Range | Target::RelayConfig => None,
         }
     }
 }
@@ -98,6 +101,10 @@ pub fn run(target: Target, dir: &Path) -> anyhow::Result<()> {
 
 /// Every seed of `target`, from the vector files under `vectors`.
 pub fn seeds(target: Target, vectors: &Path) -> anyhow::Result<Vec<Seed>> {
+    if target == Target::RelayConfig {
+        // The vectors are in tests/vectors, two folders below the repository root.
+        return relay_configs(&vectors.join("..").join(".."));
+    }
     let Some(folder) = target.folder() else {
         return Ok(RANGES
             .iter()
@@ -119,6 +126,46 @@ pub fn seeds(target: Target, vectors: &Path) -> anyhow::Result<Vec<Seed>> {
         }
     }
     Ok(seeds)
+}
+
+/// The relay image's two shipped configs, and iroh-relay 1.4.0's own examples that the guard's
+/// tests parse. No vector holds a relay config: it is iroh-relay's format, and not the wire's.
+fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
+    let relay = root.join("docker").join("relay");
+    let examples = relay
+        .join("guard")
+        .join("testdata")
+        .join("iroh-relay-1.4.0");
+    let mut paths = vec![relay.join("relay.toml"), relay.join("open.toml")];
+    let mut found = Vec::new();
+    for entry in
+        fs::read_dir(&examples).with_context(|| format!("cannot list {}", examples.display()))?
+    {
+        let path = entry
+            .with_context(|| format!("cannot list {}", examples.display()))?
+            .path();
+        if path.extension().is_some_and(|ext| ext == "toml") {
+            found.push(path);
+        }
+    }
+    found.sort();
+    paths.extend(found);
+    paths
+        .into_iter()
+        .map(|path| {
+            let bytes =
+                fs::read(&path).with_context(|| format!("cannot read {}", path.display()))?;
+            let file = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            Ok(Seed {
+                file: Some(file.replace('\\', "/")),
+                bytes,
+            })
+        })
+        .collect()
 }
 
 /// The `cases` of every `.json` file in `dir`, by file name, in name order. A name that is not
@@ -160,7 +207,7 @@ fn from_case(target: Target, case: &Value) -> anyhow::Result<Vec<Vec<u8>>> {
         Target::ManifestPath => vec![text(case, "path")?.into_bytes()],
         Target::Manifest => manifest(case)?,
         Target::Log => vec![log(case)?],
-        Target::Range => Vec::new(),
+        Target::Range | Target::RelayConfig => Vec::new(),
     })
 }
 

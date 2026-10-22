@@ -26,7 +26,7 @@ env:
   CARGO_FUZZ: 0.13.2
 
 jobs:
-  # Builds xtask once and writes the seeds of every target, so the five fuzz jobs build only the
+  # Builds xtask once and writes the seeds of every target, so the six fuzz jobs build only the
   # target they run. Every fuzz job needs this one, so the gate here decides for all of them.
   seeds:
     # A scheduled run starts only while the repository is public, where Actions minutes are free,
@@ -48,7 +48,7 @@ jobs:
       - name: Seeds
         shell: bash
         run: |
-          for target in ticket manifest manifest_path range log; do
+          for target in ticket manifest manifest_path range log relay_config; do
             cargo xtask fuzz-seeds "$target" "$RUNNER_TEMP/seeds/$target"
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -64,16 +64,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # `dir` is the folder that holds the target's fuzz/ crate.
         include:
-          - { crate: sluice-core, target: ticket }
-          - { crate: sluice-core, target: manifest }
-          - { crate: sluice-core, target: manifest_path }
-          - { crate: sluice-core, target: range }
-          - { crate: sluice-live, target: log }
+          - { dir: crates/sluice-core, target: ticket }
+          - { dir: crates/sluice-core, target: manifest }
+          - { dir: crates/sluice-core, target: manifest_path }
+          - { dir: crates/sluice-core, target: range }
+          - { dir: crates/sluice-live, target: log }
+          - { dir: docker/relay/guard, target: relay_config }
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      CRATE: ${{ matrix.crate }}
+      DIR: ${{ matrix.dir }}
       TARGET: ${{ matrix.target }}
       NIGHTLY_RUN: >-
         ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
@@ -98,7 +100,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ${{ matrix.target }}-${{ env.NIGHTLY }}
-          workspaces: crates/${{ matrix.crate }}/fuzz -> target
+          workspaces: ${{ matrix.dir }}/fuzz -> target
           cache-bin: "false"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -111,7 +113,7 @@ jobs:
       - if: env.NIGHTLY_RUN == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: crates/${{ matrix.crate }}/fuzz/corpus/${{ matrix.target }}
+          path: ${{ matrix.dir }}/fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: fuzz-corpus-${{ matrix.target }}-
       - name: Fuzz
@@ -119,7 +121,7 @@ jobs:
         run: |
           seconds=60
           if [ "$NIGHTLY_RUN" = true ]; then seconds=600; fi
-          cd "crates/$CRATE"
+          cd "$DIR"
           corpus="fuzz/corpus/$TARGET"
           mkdir -p "$corpus"
           cp "$RUNNER_TEMP/seeds/$TARGET"/* "$corpus"/
@@ -134,12 +136,12 @@ jobs:
         name: Minimize the corpus
         shell: bash
         run: |
-          cd "crates/$CRATE"
+          cd "$DIR"
           cargo "+$NIGHTLY" fuzz cmin "$TARGET" "fuzz/corpus/$TARGET"
       - if: always() && env.NIGHTLY_RUN == 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: crates/${{ matrix.crate }}/fuzz/corpus/${{ matrix.target }}
+          path: ${{ matrix.dir }}/fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
       # libFuzzer writes the input that crashed into the target's artifacts folder.
       - if: failure()
@@ -147,6 +149,6 @@ jobs:
         with:
           name: crash-${{ matrix.target }}
           path: |
-            crates/${{ matrix.crate }}/fuzz/artifacts/${{ matrix.target }}
+            ${{ matrix.dir }}/fuzz/artifacts/${{ matrix.target }}
             ${{ runner.temp }}/fuzz-${{ matrix.target }}.log
           if-no-files-found: ignore

@@ -106,6 +106,31 @@ jobs:
           tool: cargo-deny
       - run: cargo deny check
 
+  # The relay image's entry point (ADR 0019) is a project of its own, outside the workspace, so the
+  # jobs above never build it. It gets the same gates here. cargo-deny reads deny.toml from the
+  # folder it runs in, which is the root, so the guard is held to the same advisories and licenses.
+  relay-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GUARD: docker/relay/guard/Cargo.toml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: docker/relay/guard -> target
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-deny
+      - run: cargo fmt --manifest-path "$GUARD" --check
+      - run: cargo clippy --manifest-path "$GUARD" --locked --all-targets -- -D warnings
+      # Runs the doctests too, which nextest would not.
+      - run: cargo test --manifest-path "$GUARD" --locked
+      - run: cargo deny --manifest-path "$GUARD" check
+
   # AGENTS.md sets 30 ms from a cold start to a printed result. The command builds sluice in release
   # and fails if the median of `sluice id` or `sluice --version` is over it. Linux and Windows are
   # the two systems it is measured on.

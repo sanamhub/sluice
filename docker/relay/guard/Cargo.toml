@@ -1,0 +1,40 @@
+[package]
+name = "sluice-relay-guard"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+publish = false
+description = "Checks an iroh-relay config, and refuses one that would open the relay by mistake"
+
+# The relay image's entry point (ADR 0019). It has its own workspace and lock file, so the image
+# builds from docker/relay alone: a member of the root workspace would need every other member's
+# manifest and sources in the Docker build context. ci.yml runs its fmt, clippy, tests and deny.
+[workspace]
+
+[lib]
+name = "sluice_relay_guard"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sluice-relay-guard"
+path = "src/main.rs"
+
+# Only crates the root Cargo.lock already resolves, at its versions, and a test checks that. No
+# clap: the guard takes two arguments, and parsing them by hand keeps exactly the ones it allows.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+# Without `display`, which writes TOML, and `preserve_order`. The default recursion limit stays,
+# so a deeply nested config is an error and not a stack overflow.
+toml = { version = "1.1", default-features = false, features = ["std", "serde", "parse"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# Outside the root workspace, so neither dist nor release-plz sees it. This says so for dist in
+# case it is ever made a member.
+[package.metadata.dist]
+dist = false

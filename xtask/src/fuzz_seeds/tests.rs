@@ -159,6 +159,25 @@ fn the_range_seeds_are_written_here_and_every_one_parses() {
 }
 
 #[test]
+fn the_relay_config_seeds_are_both_shipped_configs_and_every_iroh_example() {
+    let seeds = seeds(Target::RelayConfig, &vectors_dir()).unwrap();
+    let files: Vec<String> = seeds.iter().filter_map(|seed| seed.file.clone()).collect();
+    assert_eq!(files.len(), 22, "{files:?}");
+    assert_eq!(
+        files[..2],
+        ["docker/relay/relay.toml", "docker/relay/open.toml"]
+    );
+    assert!(
+        files[2..]
+            .iter()
+            .all(|f| f.starts_with("docker/relay/guard/testdata/iroh-relay-1.4.0/")),
+        "{files:?}"
+    );
+    let relay = fs::read(vectors_dir().join("../../docker/relay/relay.toml")).unwrap();
+    assert_eq!(seeds[0].bytes, relay);
+}
+
+#[test]
 fn a_seed_file_is_named_by_its_content_and_a_second_run_adds_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let corpus = dir.path().join("corpus");
