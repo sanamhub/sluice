@@ -10,7 +10,7 @@ use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use crate::Refusal;
+use crate::{Mode, Refusal};
 
 /// The path iroh-relay is told to read: its own standard input, which is the file the guard
 /// checked. Linux opens `/dev/stdin` as that file again, from its start, so a rename of the path
@@ -67,14 +67,29 @@ pub fn open_config(path: &Path) -> Result<(File, String), Refusal> {
 }
 
 /// The arguments iroh-relay is started with, after the guard has checked the file it hands over
-/// as standard input. One argument, `--config-path=/dev/stdin`, and nothing from the command line
-/// the guard was given.
+/// as standard input: `--config-path=/dev/stdin`, and nothing from the command line the guard was
+/// given.
+///
+/// In rendezvous mode `--dev` comes first. iroh-relay 1.4.0 gives the QUIC server of address
+/// discovery a certificate only on the path `--dev` takes when the relay half is off
+/// (main.rs:593-600 and 703-721), and without it refuses the config with `TLS not configured`.
+/// Its other effects, plain HTTP for the relay and a default HTTP port, have nothing to act on
+/// with no relay half, which the guard has checked is off. The guard refuses `--dev` from the
+/// command line, in every mode.
 ///
 /// ```
-/// assert_eq!(sluice_relay_guard::relay_args(), ["--config-path=/dev/stdin"]);
+/// use sluice_relay_guard::{Mode, relay_args};
+///
+/// assert_eq!(relay_args(Mode::Closed), ["--config-path=/dev/stdin"]);
+/// assert_eq!(relay_args(Mode::Open), ["--config-path=/dev/stdin"]);
+/// assert_eq!(relay_args(Mode::Rendezvous), ["--dev", "--config-path=/dev/stdin"]);
 /// ```
-pub fn relay_args() -> Vec<OsString> {
-    vec![OsString::from(format!("--config-path={CONFIG_ON_STDIN}"))]
+pub fn relay_args(mode: Mode) -> Vec<OsString> {
+    let config = OsString::from(format!("--config-path={CONFIG_ON_STDIN}"));
+    match mode {
+        Mode::Rendezvous => vec![OsString::from("--dev"), config],
+        Mode::Closed | Mode::Open => vec![config],
+    }
 }
 
 fn cannot_open(path: &Path, err: &io::Error) -> Refusal {

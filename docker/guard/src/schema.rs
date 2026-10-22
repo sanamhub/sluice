@@ -6,12 +6,13 @@
 //! types, which fields may be left out and the serde shape of the enums are copied from there. Two
 //! types differ, and parse the same TOML: `EndpointId` and `Url` are read as strings, so that the
 //! guard checks them itself, with messages that never print them. Each field with a default that
-//! opens something, such as `enable_metrics`, is an `Option` here, so that a missing one can be
-//! named.
+//! opens something, `enable_relay` and `enable_metrics`, is an `Option` here, so that a missing one
+//! can be named.
 //!
-//! The guard reads `access`, `limits`, `enable_metrics` and `tls.dangerous_http_only`. The other
-//! fields are here so that a misspelling of them is refused, and their defaults do not matter, only
-//! whether one may be left out, which `#[serde(default)]` says as iroh-relay does.
+//! The guard reads `access`, `limits`, `enable_relay`, `enable_metrics` and
+//! `tls.dangerous_http_only`. The other fields are here so that a misspelling of them is refused,
+//! and their defaults do not matter, only whether one may be left out, which `#[serde(default)]`
+//! says as iroh-relay does.
 
 // Most fields are never read: they exist to be parsed, and refused if misspelled.
 #![allow(dead_code)]
@@ -25,8 +26,9 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
-    #[serde(default)]
-    pub enable_relay: bool,
+    /// `true` by default there (main.rs:107, 376-378). Here a missing one stays `None`, so that
+    /// rendezvous mode can require it written out (ADR 0020).
+    pub enable_relay: Option<bool>,
     pub http_bind_addr: Option<SocketAddr>,
     pub tls: Option<TlsConfig>,
     #[serde(default)]

@@ -1,33 +1,32 @@
 //! The refusal for text that is TOML but not iroh-relay 1.4.0's config. It names the line, and the
 //! key on it when the line has one, but never what toml quoted from the value.
 
-use super::README;
 use crate::Refusal;
 
-pub(super) fn schema_error(text: &str, err: &toml::de::Error) -> Refusal {
+pub(super) fn schema_error(text: &str, err: &toml::de::Error, readme: &str) -> Refusal {
     let at = at(text, err);
     let message = err.message();
     if let Some(name) = quoted_after(message, "unknown field `") {
         return Refusal::new(format!(
             "{at}unknown key `{name}`: iroh-relay 1.4.0 has no such setting, and would ignore \
-             it; check the spelling against {README}"
+             it; check the spelling against {readme}"
         ));
     }
     if let Some(name) = quoted_after(message, "missing field `") {
         return Refusal::new(format!(
-            "{at}this table needs the key `{name}`: see {README}"
+            "{at}this table needs the key `{name}`: see {readme}"
         ));
     }
     let key = key_on_line(text, err).map_or(String::new(), |key| format!("`{key}` "));
     if message.starts_with("unknown variant `") {
         return Refusal::new(format!(
             "{at}{key}is not a setting or value iroh-relay 1.4.0 knows here; check the \
-             spelling against {README} (the value is not printed, since it may be a token)"
+             spelling against {readme} (the value is not printed, since it may be a token)"
         ));
     }
     Refusal::new(format!(
         "{at}the value of {key}does not have the type iroh-relay 1.4.0 reads; check it against \
-         {README} (the value is not printed, since it may be a token)"
+         {readme} (the value is not printed, since it may be a token)"
     ))
 }
 

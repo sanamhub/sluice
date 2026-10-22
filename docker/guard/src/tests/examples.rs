@@ -41,26 +41,25 @@ fn each_example_is_closed_open_or_refused_for_its_ids() {
             true => text,
             false => super::m(&text),
         };
-        let closed = check_config(&text, false);
+        let closed = check_config(&text, Mode::Closed).is_ok();
         let rated = match text.contains("[limits.client.rx]") {
             true => text.clone(),
             false => format!("{text}\n[limits.client.rx]\nbytes_per_second = 1\n"),
         };
-        let open = check_config(&rated, true);
+        let open = check_config(&rated, Mode::Open).is_ok();
+        let rendezvous = check_config(&text, Mode::Rendezvous).is_ok();
         let want = match name.as_str() {
             // The README's placeholder is not an id.
-            "readme-allowlist" => (false, false),
+            "readme-allowlist" => (false, false, false),
             // Their URL has a query, `?boo=baz`, which iroh-relay would log (ADR 0020).
-            "access-http-bearer" | "access-http-url" => (false, false),
+            "access-http-bearer" | "access-http-url" => (false, false, false),
+            // The relay half off, and nothing else set: a rendezvous config.
+            "enable-relay-false" => (false, false, true),
             n if n.contains("http") || n.contains("token") || n == "access-allowlist" => {
-                (true, false)
+                (true, false, false)
             }
-            _ => (false, true),
+            _ => (false, true, false),
         };
-        assert_eq!(
-            (closed == Ok(Mode::Closed), open == Ok(Mode::Open)),
-            want,
-            "{name}"
-        );
+        assert_eq!((closed, open, rendezvous), want, "{name}");
     }
 }

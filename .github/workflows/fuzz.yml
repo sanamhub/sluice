@@ -71,7 +71,7 @@ jobs:
           - { dir: crates/sluice-core, target: manifest_path }
           - { dir: crates/sluice-core, target: range }
           - { dir: crates/sluice-live, target: log }
-          - { dir: docker/relay/guard, target: relay_config }
+          - { dir: docker/guard, target: relay_config }
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

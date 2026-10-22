@@ -2,10 +2,12 @@
 # traffic when two peers cannot reach each other (ADR 0013). iroh-relay is the upstream binary,
 # built the way docker/rendezvous builds it, from the same base images and version. It starts
 # through sluice-relay-guard, which refuses a config that would open the relay by mistake
-# (ADR 0019, guard/README.md).
+# (ADR 0019, ADR 0020, ../guard/README.md).
 #
-# Build from this directory: docker build -t sluice-relay docker/relay
-# .dockerignore lets in only the two configs and the guard's manifest, lock file and sources.
+# Build from docker/, which both images share for the guard's sources:
+#   docker build -f docker/relay/Dockerfile -t sluice-relay docker
+# Dockerfile.dockerignore, beside this file, lets in only the two configs and the guard's
+# manifest, lock file and sources.
 
 FROM rust:1.99.1-slim-trixie@sha256:4df2ae8cfdfebdfc13a65da7f253b73d68983dc0339f2719bc17a279c913b13d AS build
 
@@ -28,7 +30,7 @@ FROM gcr.io/distroless/cc-debian13:nonroot@sha256:e792ab3d241a468a4fd7519ddbbebe
 
 COPY --from=build /out/bin/iroh-relay /usr/local/bin/iroh-relay
 COPY --from=build /out/bin/sluice-relay-guard /usr/local/bin/sluice-relay-guard
-COPY relay.toml open.toml /etc/relay/
+COPY relay/relay.toml relay/open.toml /etc/relay/
 
 USER 65532:65532
 

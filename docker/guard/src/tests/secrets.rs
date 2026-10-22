@@ -1,69 +1,69 @@
 //! A token, a bearer token or a URL's query never turns up in a message, wherever it is put.
 
-use crate::check_config;
+use crate::{Mode, check_config};
 
 const SECRET: &str = "s3cr3t-T0KEN";
 
 /// Configs that are refused, each with the secret in a place where toml's own message would
 /// quote it.
-fn refused_with_secret() -> Vec<(String, bool)> {
+fn refused_with_secret() -> Vec<(String, Mode)> {
     let s = SECRET;
     [
         // Closed, so --open is refused after the parse.
-        (format!("[access]\nshared_token = [\"{s}\"]\n"), true),
+        (format!("[access]\nshared_token = [\"{s}\"]\n"), Mode::Open),
         (
             format!("[access.http]\nurl = \"https://a.example/?key={s}\"\n"),
-            true,
+            Mode::Open,
         ),
         (
             format!("[access.http]\nurl = \"https://a.example\"\nbearer_token = \"{s}\"\n"),
-            true,
+            Mode::Open,
         ),
         // An HTTP URL with the secret in it, refused without printing the URL.
         (
             format!("[access.http]\nurl = \"https://u:{s}@a.example/\"\n"),
-            false,
+            Mode::Closed,
         ),
         (
             format!("[access.http]\nurl = \"https://{s}@a.example/\"\n"),
-            false,
+            Mode::Closed,
         ),
         (
             format!("[access.http]\nurl = \"https://a.example/#{s}\"\n"),
-            false,
+            Mode::Closed,
         ),
         // The wrong type, so toml's message holds the value.
-        (format!("[access]\nshared_token = \"{s}\"\n"), false),
+        (format!("[access]\nshared_token = \"{s}\"\n"), Mode::Closed),
         (
             format!("[access.http]\nurl = \"https://a.example\"\nbearer_token = [\"{s}\"]\n"),
-            false,
+            Mode::Closed,
         ),
         (
             format!("[access.http]\nurl = [\"https://a.example/?key={s}\"]\n"),
-            false,
+            Mode::Closed,
         ),
-        (format!("[access]\nallowlist = [\"{s}\"]\n"), false),
-        (format!("[access]\nallowlist = \"{s}\"\n"), false),
-        (format!("access = \"{s}\"\n"), false),
+        (format!("[access]\nallowlist = [\"{s}\"]\n"), Mode::Closed),
+        (format!("[access]\nallowlist = \"{s}\"\n"), Mode::Closed),
+        (format!("access = \"{s}\"\n"), Mode::Closed),
         (
             format!("[limits.client.rx]\nbytes_per_second = \"{s}\"\n"),
-            true,
+            Mode::Open,
         ),
-        (format!("[tls]\ncert_mode = \"{s}\"\n"), false),
+        (format!("[tls]\ncert_mode = \"{s}\"\n"), Mode::Closed),
         (
             format!("[tls]\ncert_mode = \"Manual\"\nhostname = {{ a = \"{s}\" }}\n"),
-            false,
+            Mode::Closed,
         ),
-        (format!("enable_relay = \"{s}\"\n"), false),
+        (format!("enable_relay = \"{s}\"\n"), Mode::Closed),
         // Beside an unknown key and in text that is not TOML.
         (
             format!("[access]\nshared_token = [\"{s}\"]\nextra = \"{s}\"\n"),
-            false,
+            Mode::Closed,
         ),
-        (format!("[access]\nshared_token = [\"{s}\n"), false),
+        (format!("[access]\nshared_token = [\"{s}\n"), Mode::Closed),
         (
             format!("[access]\nshared_token = [\"{s}\"] \"{s}\"\n"),
-            false,
+            Mode::Closed,
         ),
     ]
     .into()
@@ -71,10 +71,10 @@ fn refused_with_secret() -> Vec<(String, bool)> {
 
 #[test]
 fn no_refusal_prints_a_token_a_bearer_token_or_a_query() {
-    for (text, open) in refused_with_secret() {
+    for (text, mode) in refused_with_secret() {
         // Every other rule passes, so each is refused where the secret is.
         let text = super::m(&text);
-        let message = check_config(&text, open).expect_err(&text).to_string();
+        let message = check_config(&text, mode).expect_err(&text).to_string();
         assert!(
             !message.contains(SECRET),
             "{text:?} printed the secret: {message}"

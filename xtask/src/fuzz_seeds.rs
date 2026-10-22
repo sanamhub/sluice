@@ -128,15 +128,19 @@ pub fn seeds(target: Target, vectors: &Path) -> anyhow::Result<Vec<Seed>> {
     Ok(seeds)
 }
 
-/// The relay image's two shipped configs, and iroh-relay 1.4.0's own examples that the guard's
-/// tests parse. No vector holds a relay config: it is iroh-relay's format, and not the wire's.
+/// The three configs the images ship, and iroh-relay 1.4.0's own examples that the guard's tests
+/// parse. No vector holds a relay config: it is iroh-relay's format, and not the wire's.
 fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
-    let relay = root.join("docker").join("relay");
-    let examples = relay
+    let docker = root.join("docker");
+    let examples = docker
         .join("guard")
         .join("testdata")
         .join("iroh-relay-1.4.0");
-    let mut paths = vec![relay.join("relay.toml"), relay.join("open.toml")];
+    let mut paths = vec![
+        docker.join("relay").join("relay.toml"),
+        docker.join("relay").join("open.toml"),
+        docker.join("rendezvous").join("manual.toml"),
+    ];
     let mut found = Vec::new();
     for entry in
         fs::read_dir(&examples).with_context(|| format!("cannot list {}", examples.display()))?

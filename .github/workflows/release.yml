@@ -300,7 +300,7 @@ jobs:
           docker build --provenance=false --sbom=false --tag "sluice-$IMAGE:$ARCH" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.version=${TAG#v}" \
-            "docker/$IMAGE"
+            --file "docker/$IMAGE/Dockerfile" docker
       # The distroless image has no shell, so the binary is run directly.
       - name: Smoke test
         run: docker run --rm --entrypoint /usr/local/bin/iroh-relay "sluice-$IMAGE:$ARCH" --version

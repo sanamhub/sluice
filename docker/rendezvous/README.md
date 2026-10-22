@@ -2,17 +2,40 @@
 
 The `rendezvous` image runs `iroh-relay` 1.4.0 with the relay half turned off. Peers behind NATs ask
 it for their own public address over QUIC and it answers. It carries no transfer bytes, so the
-smallest VPS runs it (ADR 0013). It is the upstream binary, built from crates.io with `--locked`,
-and nothing of ours. The version is the one `Cargo.lock` resolves for `iroh`, so the probe and the
-server come from one release.
+smallest VPS runs it (ADR 0013). `iroh-relay` is the upstream binary, built from crates.io with
+`--locked`. The version is the one `Cargo.lock` resolves for `iroh`, so the probe and the server
+come from one release.
 
 The `relay` image, which carries traffic and runs closed, is in [docker/relay](../relay/README.md).
+
+## The guard
+
+The entry point is [`sluice-relay-guard`](../guard/README.md), the relay image's guard, and the
+default command is `--rendezvous --config-path /etc/rendezvous/manual.toml` (ADR 0020).
+`enable_relay` defaults to true in `iroh-relay` 1.4.0, so a config with that line deleted would
+turn this server into an open relay with no byte limit. In `--rendezvous` mode the guard refuses a
+config that does not say `enable_relay = false`, and one that sets `access` or `[limits]`, which
+only a relay reads. It applies every other rule of the relay's guard too: no unknown key, no
+`dangerous_http_only = true`, and `enable_metrics` written out. A refusal is one line on stderr,
+and the container exits with 64.
+
+The guard then starts `iroh-relay --dev --config-path=/dev/stdin`, with the file it checked as
+standard input. `--dev` is the guard's, passed only in this mode and only after the check: this
+config needs it ([below](#what-iroh-relay-140-does-with-the-relay-half-off)), and the guard
+refuses `--dev` given on its command line.
+
+**Overriding the entry point skips the guard.** `docker run --entrypoint /usr/local/bin/iroh-relay`
+runs the server with whatever it is given.
 
 ## Build and run
 
 ```
-docker build -t sluice-rendezvous docker/rendezvous
+docker build -f docker/rendezvous/Dockerfile -t sluice-rendezvous docker
 ```
+
+The build context is `docker/`, for the guard's sources, and
+[Dockerfile.dockerignore](Dockerfile.dockerignore) lets in only `manual.toml` and the guard's
+manifest, lock file and sources.
 
 The image is 61.2 MB. It runs as uid 65532 on `gcr.io/distroless/cc-debian13:nonroot`, which has no
 shell. Both base images are pinned by digest in the [Dockerfile](Dockerfile).
@@ -92,8 +115,9 @@ given no certificate of its own (`main.rs:699-702`), so `Server::spawn` finds no
 `enable_quic_addr_discovery = true` and a `Manual` certificate exits at once with `Failed to bind
 QAD listener` and `TLS not configured`. The `--dev` branch is the only one that hands the
 certificate to the QUIC server (`main.rs:711`). It accepts `Manual` only (`main.rs:714-716`), and
-its other effect, plain HTTP for the relay, has nothing to switch here. The image passes `--dev` for
-this reason. It is an upstream bug, not a setting, and a later release may fix it.
+its other effect, plain HTTP for the relay, has nothing to switch here. The guard passes `--dev` for
+this reason, in `--rendezvous` mode alone. It is an upstream bug, not a setting, and a later
+release may fix it.
 
 **Logs.** To stderr. The filter is `EnvFilter::from_default_env()` (`main.rs:575`), so with
 `RUST_LOG` unset the server prints errors only. The image sets `RUST_LOG=info`, which prints one

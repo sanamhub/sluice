@@ -1,6 +1,8 @@
 # Address discovery only. The relay half is off, so no HTTP or HTTPS server runs and no transfer
-# bytes pass through. Run with --dev: without it iroh-relay 1.4.0 refuses this config with
-# "TLS not configured" (README.md).
+# bytes pass through. The guard starts this file only with --rendezvous, and only while this line
+# says false: iroh-relay 1.4.0 turns the relay on without it (ADR 0020). It passes iroh-relay the
+# --dev this config needs, without which iroh-relay refuses it with "TLS not configured"
+# (README.md).
 enable_relay = false
 enable_quic_addr_discovery = true
 

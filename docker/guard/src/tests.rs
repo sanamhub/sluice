@@ -1,6 +1,7 @@
 mod args;
 mod examples;
 mod files;
+mod rendezvous;
 mod rules;
 mod secrets;
 mod settings;
@@ -8,16 +9,26 @@ mod versions;
 
 use std::path::{Path, PathBuf};
 
-/// The `docker/relay` folder, which holds the shipped configs and the Dockerfile.
-fn relay_dir() -> &'static Path {
+/// The `docker` folder, which holds the guard and both images' folders.
+fn docker_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .expect("the guard lives in docker/relay")
+        .expect("the guard lives in docker/guard")
+}
+
+/// The `docker/relay` folder, which holds the relay's shipped configs and its Dockerfile.
+fn relay_dir() -> PathBuf {
+    docker_dir().join("relay")
+}
+
+/// The `docker/rendezvous` folder, which holds the rendezvous config and its Dockerfile.
+fn rendezvous_dir() -> PathBuf {
+    docker_dir().join("rendezvous")
 }
 
 /// The repository root, which holds the Cargo.lock of the probe and the workspace.
 fn repo_root() -> PathBuf {
-    relay_dir().join("../..")
+    docker_dir().join("..")
 }
 
 /// `body` after `enable_metrics = false`, which every config must write out (ADR 0020), so that a

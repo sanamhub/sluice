@@ -6,9 +6,10 @@ license = "Apache-2.0 OR MIT"
 publish = false
 description = "Checks an iroh-relay config, and refuses one that would open the relay by mistake"
 
-# The relay image's entry point (ADR 0019). It has its own workspace and lock file, so the image
-# builds from docker/relay alone: a member of the root workspace would need every other member's
-# manifest and sources in the Docker build context. ci.yml runs its fmt, clippy, tests and deny.
+# The entry point of both images (ADR 0019, ADR 0020). It has its own workspace and lock file, so
+# each image builds from docker/ alone: a member of the root workspace would need every other
+# member's manifest and sources in the Docker build context. ci.yml runs its fmt, clippy, tests
+# and deny.
 [workspace]
 
 [lib]

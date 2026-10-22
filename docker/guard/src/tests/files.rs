@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::Read;
 
-use crate::{open_config, relay_args};
+use crate::{Mode, open_config, relay_args};
 
 fn scratch() -> std::path::PathBuf {
     // Per test and per process, so parallel runs never share one.
@@ -65,7 +65,13 @@ fn a_file_that_is_not_utf8_is_refused() {
 
 #[test]
 fn iroh_relay_is_started_on_its_standard_input_and_nothing_else() {
-    assert_eq!(relay_args(), ["--config-path=/dev/stdin"]);
+    assert_eq!(relay_args(Mode::Closed), ["--config-path=/dev/stdin"]);
+    assert_eq!(relay_args(Mode::Open), ["--config-path=/dev/stdin"]);
+    // --dev is how iroh-relay 1.4.0 hands the QUIC server its certificate with the relay half off.
+    assert_eq!(
+        relay_args(Mode::Rendezvous),
+        ["--dev", "--config-path=/dev/stdin"]
+    );
 }
 
 /// A rename over the path after the check, as a ConfigMap update does, changes nothing the relay

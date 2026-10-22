@@ -1,8 +1,8 @@
-//! The schema is iroh-relay 1.4.0's. The image must build that release, and the probe must resolve
+//! The schema is iroh-relay 1.4.0's. Both images must build that release, and the probe must resolve
 //! it, or a new release could add a key the guard does not know and the guard would refuse a good
 //! config, or worse, let a key through that it reads differently.
 
-use super::{read, relay_dir, repo_root};
+use super::{docker_dir, read, relay_dir, rendezvous_dir, repo_root};
 use crate::IROH_RELAY_VERSION;
 
 /// The `version` of each `[[package]]` named `name` in a Cargo.lock.
@@ -22,14 +22,26 @@ fn locked(lock: &str, name: &str) -> Vec<String> {
         .collect()
 }
 
+/// The one `cargo install` of iroh-relay in each Dockerfile, which must take its version from the
+/// argument and not name one of its own.
+const INSTALL: &str = "RUN cargo install iroh-relay --version \"=${IROH_RELAY_VERSION}\" --locked \
+                       --features server --root /out";
+
 #[test]
-fn the_dockerfile_builds_the_release_the_schema_was_written_for() {
-    let dockerfile = read(&relay_dir().join("Dockerfile"));
-    let args: Vec<&str> = dockerfile
-        .lines()
-        .filter_map(|line| line.strip_prefix("ARG IROH_RELAY_VERSION="))
-        .collect();
-    assert_eq!(args, [IROH_RELAY_VERSION], "docker/relay/Dockerfile");
+fn both_dockerfiles_build_the_release_the_schema_was_written_for() {
+    for (image, dir) in [("relay", relay_dir()), ("rendezvous", rendezvous_dir())] {
+        let dockerfile = read(&dir.join("Dockerfile"));
+        let args: Vec<&str> = dockerfile
+            .lines()
+            .filter_map(|line| line.strip_prefix("ARG IROH_RELAY_VERSION="))
+            .collect();
+        assert_eq!(args, [IROH_RELAY_VERSION], "docker/{image}/Dockerfile");
+        let installs: Vec<&str> = dockerfile
+            .lines()
+            .filter(|line| line.contains("cargo install") && line.contains("iroh-relay"))
+            .collect();
+        assert_eq!(installs, [INSTALL], "docker/{image}/Dockerfile");
+    }
 }
 
 #[test]
@@ -45,7 +57,7 @@ fn the_root_lock_resolves_the_release_the_schema_was_written_for() {
 #[test]
 fn every_crate_the_guard_locks_is_one_the_root_lock_has_at_the_same_version() {
     let root = read(&repo_root().join("Cargo.lock"));
-    let guard = read(&relay_dir().join("guard/Cargo.lock"));
+    let guard = read(&docker_dir().join("guard/Cargo.lock"));
     let mut names = 0;
     for entry in guard.split("[[package]]").skip(1) {
         let field = |key: &str| {

@@ -18,8 +18,8 @@ the operator adds an id.
 
 ## The guard
 
-The entry point is [`sluice-relay-guard`](guard/README.md) (ADR 0019), and the default command is
-`--config-path /etc/relay/relay.toml`. It opens the config, checks it, and then replaces itself
+The entry point is [`sluice-relay-guard`](../guard/README.md) (ADR 0019), and the default command
+is `--config-path /etc/relay/relay.toml`. It opens the config, checks it, and then replaces itself
 with `iroh-relay --config-path=/dev/stdin`, with the file it checked as the relay's standard input
 (ADR 0020). The relay so reads the bytes that were checked, even if the file is replaced after,
 and it is PID 1 and gets the container's signals.
@@ -44,8 +44,11 @@ prints them:
 | `--config-path /etc/relay/open.toml` | ``sluice-relay-guard: `access` is "everyone", which lets anyone relay: list the ids that may relay in `[access] allowlist`, or start with --open to run it open on purpose`` |
 
 It also refuses `--dev`, every argument but `--open` and `--config-path`, `--open` with a closed
-config, and an allowlist entry that is not 64 hex digits. The [guard's README](guard/README.md)
-lists every rule. No message prints a value from the config, since a token may be one.
+config, and an allowlist entry that is not 64 hex digits. Since ADR 0020 it refuses
+`dangerous_http_only = true`, a config with no `enable_metrics` line, an `access.http.url` with a
+user name, password, query or fragment in it, and `enable_relay = false`, which is the rendezvous
+image's config. The [guard's README](../guard/README.md) lists every rule. No message prints a
+value from the config, since a token may be one.
 
 **Overriding the entry point skips the guard.** `docker run --entrypoint /usr/local/bin/iroh-relay`
 runs the server with whatever it is given, open default included. Name `sluice-relay-guard` instead,
@@ -64,7 +67,7 @@ Checked by running the image: those three listeners and no other, and `/generate
 ## Build and run
 
 ```
-docker build -t sluice-relay docker/relay
+docker build -f docker/relay/Dockerfile -t sluice-relay docker
 ```
 
 The default command runs [relay.toml](relay.toml), which reads `default.crt` and `default.key` from
