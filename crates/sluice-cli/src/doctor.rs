@@ -209,6 +209,15 @@ fn key_or_space(finding: &Finding) -> (String, Option<String>) {
                     .to_string(),
             ),
         ),
+        F::HomeAclNotPrivate => (
+            "the home's access list lets in more than this user, SYSTEM and Administrators"
+                .to_string(),
+            Some(
+                "in the Properties of the home folder, under Security > Advanced, disable \
+                 inheritance and remove every entry but yours, SYSTEM and Administrators"
+                    .to_string(),
+            ),
+        ),
         F::KeyUnreadable(why) => (
             format!("cannot be checked: {why}"),
             Some("check the permissions of identity.key in the home".to_string()),

@@ -124,8 +124,19 @@ fn home_open_to_others(home: &Path) -> Option<Finding> {
     }
 }
 
-/// On Windows the key carries an access list of its own, so the folder's does not decide.
-#[cfg(not(unix))]
+/// On Windows, the private access list the store gives a new home, read back and compared. The
+/// key has a list of its own, and the folder's list still decides who can add, swap or delete
+/// files beside it.
+#[cfg(windows)]
+fn home_open_to_others(home: &Path) -> Option<Finding> {
+    match super::super::private_windows::is_private_dir(home) {
+        Ok(true) => None,
+        Ok(false) => Some(Finding::HomeAclNotPrivate),
+        Err(e) => Some(Finding::KeyUnreadable(e.to_string())),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn home_open_to_others(_home: &Path) -> Option<Finding> {
     None
 }

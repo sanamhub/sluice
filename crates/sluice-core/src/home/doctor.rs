@@ -138,6 +138,10 @@ pub enum Finding {
     /// On Windows, the key's access list is not the private one the store sets: the user,
     /// `SYSTEM` and `Administrators`, with inheritance stopped.
     KeyAclNotPrivate,
+    /// On Windows, the home folder's access list is not the private one the store sets on a new
+    /// home: the same three entries, inherited by what is made inside, with inheritance from the
+    /// folder above stopped.
+    HomeAclNotPrivate,
     /// The key or its access cannot be read. Carries why.
     KeyUnreadable(String),
     /// Bytes free to this user on the home's volume.
@@ -239,6 +243,7 @@ impl Check {
             | F::KeyOpenToOthers(_)
             | F::HomeOpenToOthers(_)
             | F::KeyAclNotPrivate
+            | F::HomeAclNotPrivate
             | F::KeyUnreadable(_) => Name::Key,
             F::SpaceFree(_) | F::SpaceUnreadable(_) => Name::Space,
             F::NeedsHome(name) => *name,
@@ -300,7 +305,8 @@ impl Check {
             F::LayoutNewer { .. }
             | F::KeyOpenToOthers(_)
             | F::HomeOpenToOthers(_)
-            | F::KeyAclNotPrivate => Some(ErrorKind::Policy),
+            | F::KeyAclNotPrivate
+            | F::HomeAclNotPrivate => Some(ErrorKind::Policy),
             _ => None,
         }
     }

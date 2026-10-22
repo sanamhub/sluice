@@ -274,6 +274,7 @@ fn every_failure_has_a_kind_and_nothing_else_has_one() {
         Finding::KeyOpenToOthers(0o644),
         Finding::HomeOpenToOthers(0o755),
         Finding::KeyAclNotPrivate,
+        Finding::HomeAclNotPrivate,
     ];
     for (findings, kind) in [
         (&storage[..], ErrorKind::Storage),

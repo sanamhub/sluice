@@ -295,12 +295,23 @@ fn dacl_sddl(path: &Path) -> io::Result<String> {
 }
 
 /// Whether the file at `path` has the private access list [`restrict_file`] sets: inheritance
-/// stopped, and full control for the user, `SYSTEM` and `Administrators`, with nothing else. The
-/// list is read back by path and compared with the SDDL the store writes, entry by entry, because
-/// Windows may give the entries back in another order.
+/// stopped, and full control for the user, `SYSTEM` and `Administrators`, with nothing else.
 pub(super) fn is_private_file(path: &Path) -> io::Result<bool> {
+    has_private_list(path, "")
+}
+
+/// Whether the folder at `path` has the private access list [`restrict_dir`] sets on a new home:
+/// the same three entries, each with the inherit flags that pass it to what is made inside.
+pub(super) fn is_private_dir(path: &Path) -> io::Result<bool> {
+    has_private_list(path, INHERIT)
+}
+
+/// Whether the list of `path` is protected and holds exactly the entries the store writes with
+/// `inherit`. It is read back by path and compared entry by entry, because Windows may give the
+/// entries back in another order.
+fn has_private_list(path: &Path, inherit: &str) -> io::Result<bool> {
     let found = dacl_sddl(path)?;
-    let wanted = private_sddl(&user_sid()?, "");
+    let wanted = private_sddl(&user_sid()?, inherit);
     let (found_protected, found_entries) = split_sddl(&found);
     let (_, wanted_entries) = split_sddl(&wanted);
     Ok(found_protected && found_entries == wanted_entries)

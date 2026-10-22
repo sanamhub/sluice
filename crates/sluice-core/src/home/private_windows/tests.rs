@@ -154,21 +154,13 @@ fn doctor_reads_the_key_list_back_and_fails_on_an_extra_entry() {
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::{READ_CONTROL, WRITE_DAC};
 
-    use crate::doctor::{Finding, Name, examine_at};
+    use crate::doctor::Finding;
 
     let parent = parent_that_lets_everyone_read();
     let path = parent.path().join("home");
     drop(Home::open(&path).unwrap().identity().unwrap());
     let key = path.join("identity.key");
     assert!(super::is_private_file(&key).unwrap());
-    let key_check = |home: &Path| {
-        examine_at(home, false)
-            .into_iter()
-            .find(|check| check.name() == Name::Key)
-            .unwrap()
-            .finding()
-            .clone()
-    };
     assert_eq!(key_check(&path), Finding::KeyPrivate);
 
     // The private list with one more entry: Everyone may read.
@@ -188,4 +180,58 @@ fn the_free_space_of_a_volume_is_a_number_and_a_missing_path_is_an_error() {
     let dir = tempfile::tempdir().unwrap();
     assert!(super::free_bytes(dir.path()).unwrap() > 0);
     assert!(super::free_bytes(&dir.path().join("missing")).is_err());
+}
+
+/// What the key check of `sluice doctor` finds in `home`. The home's list is checked there.
+fn key_check(home: &Path) -> crate::doctor::Finding {
+    use crate::doctor::{Name, examine_at};
+    examine_at(home, false)
+        .into_iter()
+        .find(|check| check.name() == Name::Key)
+        .unwrap()
+        .finding()
+        .clone()
+}
+
+#[test]
+fn doctor_passes_a_home_the_store_made() {
+    use crate::doctor::Finding;
+    let parent = parent_that_lets_everyone_read();
+    let path = parent.path().join("home");
+    drop(Home::open(&path).unwrap().identity().unwrap());
+    assert!(super::is_private_dir(&path).unwrap());
+    assert_eq!(key_check(&path), Finding::KeyPrivate);
+}
+
+#[test]
+fn doctor_fails_a_home_whose_list_has_an_extra_entry() {
+    use crate::doctor::{Check, Finding, Status};
+    let parent = tempfile::tempdir().unwrap();
+    let path = parent.path().join("home");
+    drop(Home::open(&path).unwrap().identity().unwrap());
+    // The private list with one more entry: Everyone may read, here and in what is made inside.
+    let wider = format!(
+        "{}(A;{INHERIT};FR;;;WD)",
+        private_sddl(&user_sid().unwrap(), INHERIT)
+    );
+    set_dacl(&open_dir(&path).unwrap(), &wider).unwrap();
+    assert!(!super::is_private_dir(&path).unwrap());
+    let finding = key_check(&path);
+    assert_eq!(finding, Finding::HomeAclNotPrivate);
+    let check = Check::new(finding);
+    assert_eq!(check.status(), Status::Failed);
+    assert_eq!(check.failure(), Some(crate::ErrorKind::Policy));
+}
+
+#[test]
+fn doctor_fails_a_home_folder_made_by_hand_then_opened() {
+    use crate::doctor::Finding;
+    let parent = tempfile::tempdir().unwrap();
+    let path = parent.path().join("home");
+    fs::create_dir(&path).unwrap();
+    // The store leaves the list of a folder that was already there as it is, so it still
+    // inherits from the folder above.
+    drop(Home::open(&path).unwrap().identity().unwrap());
+    assert!(!super::is_private_dir(&path).unwrap());
+    assert_eq!(key_check(&path), Finding::HomeAclNotPrivate);
 }
