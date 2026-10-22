@@ -74,7 +74,10 @@ fn a_long_path_is_cut_in_the_failure_line() {
     let path = "a".repeat(255);
     dir.write(
         "paths/x.json",
-        &format!(r#"{{ "description": "d", "cases": [ {{ "path": "{path}", "valid": false, "rule": 5 }} ] }}"#),
+        &format!(
+            r#"{{ "description": "d", "cases": [
+            {{ "path": "{path}", "valid": false, "rule": 5 }} ] }}"#
+        ),
     );
     let text = check(dir.path()).expect("run").lines.join("\n");
     assert!(text.contains("... (255 bytes)"), "{text}");
@@ -137,9 +140,11 @@ const TICKET: &str = "sluice1040";
 fn ticket_case(text: &str, canonical: &str, relay: &str) -> String {
     let key = "11".repeat(32);
     format!(
-        r#"{{ "description": "tickets", "cases": [ {{ "ticket": "{text}", "valid": true, "canonical": "{canonical}",
+        r#"{{ "description": "tickets", "cases": [ {{ "ticket": "{text}", "valid": true,
+        "canonical": "{canonical}",
         "fields": {{ "version": 1, "kind": "live", "endpoint_id": "{key}",
-        "addrs": [], "relay_url": {relay}, "expiry_ms": null, "stream_id": "{}", "sender_key": "{key}" }} }} ] }}"#,
+        "addrs": [], "relay_url": {relay}, "expiry_ms": null, "stream_id": "{}",
+        "sender_key": "{key}" }} }} ] }}"#,
         "00".repeat(16)
     )
 }

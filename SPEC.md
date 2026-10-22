@@ -27,8 +27,8 @@ The transport, NAT traversal, and relay behaviour come from `iroh` and are out o
 - All hashes are BLAKE3-256, 32 bytes.
 - All signatures are Ed25519, 64 bytes, over the byte sequence stated at each use.
 - All variable-length fields are length-prefixed with a `varint` (LEB128, unsigned, max 10 bytes).
-- Paths in manifests are UTF-8, NFC-normalized, forward-slash separated, relative, and never begin with
-  `/` or contain a `..` component, and pass the receiver rules in section 8.
+- Paths in manifests are UTF-8, NFC-normalized, forward-slash separated, relative, and never begin
+  with `/` or contain a `..` component, and pass the receiver rules in section 8.
 - Timestamps are UTC milliseconds since the Unix epoch, as `u64`.
 - "MUST", "SHOULD", "MAY" carry their RFC 2119 meaning.
 
@@ -41,8 +41,8 @@ The transport, NAT traversal, and relay behaviour come from `iroh` and are out o
 | `iroh-bytes/...` | Static content. Owned by `iroh-blobs`, version pinned by the release |
 | `sluice/1` | Everything defined in this document |
 
-On a `sluice/1` connection the dialer opens a control stream and sends `Hello`, and the listener replies
-with `Hello`.
+On a `sluice/1` connection the dialer opens a control stream and sends `Hello`, and the listener
+replies with `Hello`.
 
 ```
 Hello = {
@@ -61,12 +61,12 @@ Hello = {
 | 4 | `RECEIPTS` |
 | 5 | `ZSTD` |
 
-Unknown bits MUST be ignored, never treated as an error. A capability is usable only when both sides set
-it. A `proto_version` mismatch MUST close the connection with a clear reason string.
+Unknown bits MUST be ignored, never treated as an error. A capability is usable only when both sides
+set it. A `proto_version` mismatch MUST close the connection with a clear reason string.
 
-A dialer MUST offer exactly one ALPN from this table per connection, so the order in which a listener
-registers or prefers them never decides which protocol runs. Static content and `sluice/1` use separate
-connections. A listener MAY close a connection that offers more than one.
+A dialer MUST offer exactly one ALPN from this table per connection, so the order in which a
+listener registers or prefers them never decides which protocol runs. Static content and `sluice/1`
+use separate connections. A listener MAY close a connection that offers more than one.
 
 Wire-breaking changes bump the ALPN to `sluice/2`. Additive changes take a new capability bit.
 
@@ -92,10 +92,10 @@ StaticBody = { root: [u8; 32], size: u64, format: u8 }   // format: 0 = raw, 1 =
 LiveBody   = { stream_id: [u8; 16], sender_key: [u8; 32] }
 ```
 
-**Bytes.** The ticket is written as bytes, then as text. The little-endian rule of section 2 does not
-apply inside a ticket: its bytes follow the `postcard` 1.x encoding as stated here, so a third party
-needs no copy of postcard. The fields come in this order, with no padding and no tag except where the
-table says so:
+**Bytes.** The ticket is written as bytes, then as text. The little-endian rule of section 2 does
+not apply inside a ticket: its bytes follow the `postcard` 1.x encoding as stated here, so a third
+party needs no copy of postcard. The fields come in this order, with no padding and no tag except
+where the table says so:
 
 | Field | Bytes |
 |---|---|
@@ -110,30 +110,30 @@ table says so:
 | body, Live | `stream_id` as 16 bytes, then `sender_key` as 32 bytes |
 
 The body has no tag of its own: `kind` selects it. A varint is LEB128: 7 bits per byte, the lowest
-group first, the high bit set on every byte but the last, and at most 10 bytes for a `u64` and 3 for a
-port. An encoder MUST write the shortest varint that holds the value.
+group first, the high bit set on every byte but the last, and at most 10 bytes for a `u64` and 3 for
+a port. An encoder MUST write the shortest varint that holds the value.
 
 **Text.** The bytes are written as Crockford base32 without padding, after the prefix `sluice1`. The
-alphabet is `0123456789abcdefghjkmnpqrstvwxyz`, which leaves out `i`, `l`, `o` and `u`. Each character
-carries 5 bits, taken from the bytes most significant first. If the last character is not full, its
-unused low bits MUST be zero. The encoder writes lower case. The result is URL-safe and double-click
-selectable.
+alphabet is `0123456789abcdefghjkmnpqrstvwxyz`, which leaves out `i`, `l`, `o` and `u`. Each
+character carries 5 bits, taken from the bytes most significant first. If the last character is not
+full, its unused low bits MUST be zero. The encoder writes lower case. The result is URL-safe and
+double-click selectable.
 
 A decoder reads the prefix and the body without regard to case. It MUST reject any character outside
-the alphabet, including `-`, `=`, white space, and `I`, `L`, `O` and `U` in either case, so one ticket
-has one spelling apart from case. Crockford's own rules would read `I` and `L` as `1`, `O` as `0`, and
-skip `-`.
+the alphabet, including `-`, `=`, white space, and `I`, `L`, `O` and `U` in either case, so one
+ticket has one spelling apart from case. Crockford's own rules would read `I` and `L` as `1`, `O` as
+`0`, and skip `-`.
 
 **Decoding.** A decoder MUST reject a ticket when:
 
 1. the text is longer than 4096 bytes. This is checked before any decoding
-2. the prefix is missing, a character is outside the alphabet, the body length is 1, 3 or 6 characters
-   more than a multiple of 8 (whole bytes cannot give it), or the unused bits of the last character
-   are not zero
+2. the prefix is missing, a character is outside the alphabet, the body length is 1, 3 or 6
+   characters more than a multiple of 8 (whole bytes cannot give it), or the unused bits of the last
+   character are not zero
 3. `version` is not 1, `kind` is not 0 or 1, or `format` is not 0 or 1
 4. bytes remain after the body, or the bytes end before it does
-5. an `Option` or address tag is not one of the two values in the table, `relay_url` is not UTF-8, or
-   a varint is longer than the shortest one for its value or does not fit its integer
+5. an `Option` or address tag is not one of the two values in the table, `relay_url` is not UTF-8,
+   or a varint is longer than the shortest one for its value or does not fit its integer
 6. `relay_url` is present and empty. Absence is `0x00`, and a second spelling of it is not allowed
 7. `relay_url` is present and is not an absolute URL with the scheme `https` or `http`, at most 2048
    bytes long, with a host, and with no user name, password, query or fragment. It MUST also equal
@@ -166,24 +166,24 @@ bytes and 190 characters. A Live ticket with the IPv4 pair is 101 bytes and 169 
 Implementations MUST accept tickets up to 4096 bytes of text and MUST NOT write longer ones.
 
 **Short codes.** Where a rendezvous is configured, a ticket MAY be published under a short code. The
-code is a SPAKE2 password; the rendezvous stores only the ciphertext and MUST rate-limit attempts per
-code. Short codes are optional, and the SPAKE2 implementation in use has no independent audit, which
-implementations MUST state in their documentation.
+code is a SPAKE2 password; the rendezvous stores only the ciphertext and MUST rate-limit attempts
+per code. Short codes are optional, and the SPAKE2 implementation in use has no independent audit,
+which implementations MUST state in their documentation.
 
 ---
 
 ## 5. Static content
 
-Delegated to `iroh-blobs`: BLAKE3 content addressing, 16 KiB chunk groups, verified range requests, and
-hash sequences for collections. This specification pins the exact `iroh-blobs` protocol version per
-release and does not restate it.
+Delegated to `iroh-blobs`: BLAKE3 content addressing, 16 KiB chunk groups, verified range requests,
+and hash sequences for collections. This specification pins the exact `iroh-blobs` protocol version
+per release and does not restate it.
 
 Two rules are ours:
 
-1. A range response MUST be verifiable against the root before any byte is exposed to the caller, either
-   through the application API or through a mounted filesystem.
-2. Chunk group size MAY be negotiated to 64 KiB for blobs above 8 GiB, to reduce outboard overhead from
-   about 0.4% to about 0.1% of content size. The choice is recorded in the request.
+1. A range response MUST be verifiable against the root before any byte is exposed to the caller,
+   either through the application API or through a mounted filesystem.
+2. Chunk group size MAY be negotiated to 64 KiB for blobs above 8 GiB, to reduce outboard overhead
+   from about 0.4% to about 0.1% of content size. The choice is recorded in the request.
 3. A provider MUST refuse every `iroh-blobs` push request. Content reaches a provider's store only
    because its own user added it.
 4. A provider MUST apply one access policy to `get`, `get_many` and `observe`. A request that one of
@@ -356,8 +356,8 @@ clocks disagree.
 
 ## 7. Delta hints
 
-Optional, capability `DELTA`. Purpose: resending a large file that changed slightly should not move the
-whole file.
+Optional, capability `DELTA`. Purpose: resending a large file that changed slightly should not move
+the whole file.
 
 ```
 SigList = { algo: u8, avg_bytes: u32, entries: [SigEntry] }   // algo 1 = FastCDC v2020, 64-bit
@@ -368,13 +368,13 @@ NeedRanges = { root: [u8;32], ranges: RangeSet }
 Flow:
 
 1. The **provider** sends `SigList` for the content the requester is already authorized to read.
-   Signatures flow provider to requester, never the reverse, so the requester discloses nothing about
-   its local files.
+   Signatures flow provider to requester, never the reverse, so the requester discloses nothing
+   about its local files.
 2. The requester chunks its own candidate files with the same parameters, matches strong hashes, and
    computes which byte ranges of the target it can reconstruct locally.
 3. The requester sends `NeedRanges` for the remainder and fetches those with the static protocol.
-4. The requester assembles and MUST verify the whole result against `root`. On failure it MUST discard
-   the assembly and fall back to a plain fetch.
+4. The requester assembles and MUST verify the whole result against `root`. On failure it MUST
+   discard the assembly and fall back to a plain fetch.
 
 Delta is a hint layer. No verification outcome may ever depend on it.
 
@@ -670,15 +670,15 @@ implementations MUST NOT describe it as proof of delivery.
 
 ## 11. Control API
 
-The local control interface is defined by `proto/sluice/v1`, governed by `buf`, and served over a Unix
-socket or Windows named pipe. An implementation MAY also serve it over TCP, and then MUST require TLS and
-token authentication.
+The local control interface is defined by `proto/sluice/v1`, governed by `buf`, and served over a
+Unix socket or Windows named pipe. An implementation MAY also serve it over TCP, and then MUST
+require TLS and token authentication.
 
-It is a control plane. **No file bytes ever traverse this API.** A client asks the engine to move bytes
-and observes progress; it never carries them.
+It is a control plane. **No file bytes ever traverse this API.** A client asks the engine to move
+bytes and observes progress; it never carries them.
 
-Store access is single-writer. A client MUST take an exclusive lock on the store directory, and if the
-lock is held by a live process it MUST connect to that process instead of opening the store.
+Store access is single-writer. A client MUST take an exclusive lock on the store directory, and if
+the lock is held by a live process it MUST connect to that process instead of opening the store.
 
 ---
 
@@ -704,7 +704,8 @@ implementation that passes these vectors is compatible with ours.
 
 - This document is versioned independently of the product.
 - Wire-breaking changes bump the ALPN. Additive changes take a capability bit.
-- CI runs interop of the current build against the previous release and the oldest supported release.
+- CI runs interop of the current build against the previous release and the oldest supported
+  release.
 - The on-disk store layout is versioned separately in `$SLUICE_HOME/VERSION`, with forward-only
   migrations. An older binary MUST refuse a newer layout rather than write to it.
 
@@ -712,13 +713,15 @@ implementation that passes these vectors is compatible with ours.
 
 ## 14. Open items before 0.2
 
-1. Confirm the exact `iroh-blobs` protocol version to pin, and whether its pre-1.0 ALPN change has landed.
+1. Confirm the exact `iroh-blobs` protocol version to pin, and whether its pre-1.0 ALPN change has
+   landed.
 2. Measure the segment size curve. 8 MiB is a guess trading latency against signature overhead.
-3. Measure the pack constants of section 9. They are fixed so that one folder gives one root, but the
-   values are not measured. A change breaks no receiver, which does not check the algorithm, but a
-   folder sent before and after it no longer dedups.
-4. Decide whether `zstd` applies per chunk group or per pack. Per pack is simpler and probably enough.
+3. Measure the pack constants of section 9. They are fixed so that one folder gives one root, but
+   the values are not measured. A change breaks no receiver, which does not check the algorithm, but
+   a folder sent before and after it no longer dedups.
+4. Decide whether `zstd` applies per chunk group or per pack. Per pack is simpler and probably
+   enough.
 5. Decide whether the tail-serving rule needs an explicit provisional-length field on the wire.
-6. Settle section 5 rule 2. `iroh-blobs` fixes its block size at 16 KiB, so a 64 KiB chunk group cannot
-   be negotiated while static content goes through it. Either the rule goes, or the block size becomes
-   configurable upstream.
+6. Settle section 5 rule 2. `iroh-blobs` fixes its block size at 16 KiB, so a 64 KiB chunk group
+   cannot be negotiated while static content goes through it. Either the rule goes, or the block
+   size becomes configurable upstream.

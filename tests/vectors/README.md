@@ -79,9 +79,9 @@ Some points a reader cannot see from the rules alone:
 
 ## `tickets/`
 
-A ticket is a secret, and these are made-up ones: the keys are patterns such as `11` repeated, and the
-addresses are in the documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `2001:db8::/32`). A
-case is a ticket text and a verdict. The text is a JSON string and not always canonical, so a
+A ticket is a secret, and these are made-up ones: the keys are patterns such as `11` repeated, and
+the addresses are in the documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`, `2001:db8::/32`).
+A case is a ticket text and a verdict. The text is a JSON string and not always canonical, so a
 decoder must be given it exactly.
 
 A valid case says what the ticket decodes to and what an encoder writes for it:
@@ -122,12 +122,12 @@ A rejected case has a `reason` for people, which a runner does not compare:
 In `fields`, `kind` is `static` or `live`. A static ticket has `root`, `size` and `format` (`raw` or
 `hash_sequence`). A live ticket has `stream_id` and `sender_key`. Keys and ids are lower-case hex.
 `addrs` are written as `ip:port`, with the IPv6 address in square brackets, and are compared as
-addresses, not as text. `relay_url` and `expiry_ms` are `null` when absent. `size` and `expiry_ms` are
-decimal strings, because a JSON number does not hold a `u64` in every language.
+addresses, not as text. `relay_url` and `expiry_ms` are `null` when absent. `size` and `expiry_ms`
+are decimal strings, because a JSON number does not hold a `u64` in every language.
 
 To check an implementation, for every valid case decode `ticket`, compare the result with `fields`,
-and encode the fields: the result must be `canonical`. For every rejected case, decoding `ticket` must
-fail.
+and encode the fields: the result must be `canonical`. For every rejected case, decoding `ticket`
+must fail.
 
 Where a rejected ticket can be a valid ticket with one fault, it is, so that fault is the reason it
 fails. The files split them by where the fault is:
@@ -135,10 +135,11 @@ fails. The files split them by where the fault is:
 - `invalid-text.json`: the prefix, a character outside the alphabet (each of `i`, `l`, `o`, `u` in
   both cases, `-`, `=`, white space, a non-ASCII character), a body length that whole bytes cannot
   give, spare bits that are not zero, and text of 4097 bytes. The largest ticket that fits is 4095
-  characters, because the base32 body can only end at certain lengths, and it is in `valid-static.json`.
-- `invalid-bytes.json`: the bytes under well formed base32. An unknown version, kind or format, bytes
-  after the body or missing from it, an empty `relay_url`, a tag that is neither value, text that is not
-  UTF-8, and a varint with a zero byte too many.
+  characters, because the base32 body can only end at certain lengths, and it is in
+  `valid-static.json`.
+- `invalid-bytes.json`: the bytes under well formed base32. An unknown version, kind or format,
+  bytes after the body or missing from it, an empty `relay_url`, a tag that is neither value, text
+  that is not UTF-8, and a varint with a zero byte too many.
 - `invalid-keys.json`: an `endpoint_id` or a `sender_key` that breaks rule 8, each in a Live ticket.
   A second spelling of a point (`y` of `p + 3`, `2^255 - 1` and `p + 1`, and the sign bit set on
   the neutral point, whose `x` is 0), a point of order 1, 4 and 8, and 32 bytes that are no point.
@@ -338,10 +339,10 @@ Some points a reader cannot see from the rules alone:
   the neutral point and `s` 0, which holds for every message.
 - A close before the entries it counts is refused by rule 12, and accepted once they have arrived.
 - One case has a `sender_key` out of its one encoding, `y = 2^255 - 1`, which a ZIP-215 decoder
-  reads as the point whose `y` is 18. The TEST 1 key has no second spelling: its `y` is far above 18, so
-  `y + p` does not fit in 255 bits, and its `x` is not 0. Nobody knows the secret of this point, so
-  the open's signature cannot verify either, and the case cannot show which check refused it. The
-  unit tests of both crates and `tickets/invalid-keys.json` do.
+  reads as the point whose `y` is 18. The TEST 1 key has no second spelling: its `y` is far above
+  18, so `y + p` does not fit in 255 bits, and its `x` is not 0. Nobody knows the secret of this
+  point, so the open's signature cannot verify either, and the case cannot show which check refused
+  it. The unit tests of both crates and `tickets/invalid-keys.json` do.
 - The fork cases are in `aborted.json`, at `seq` 0 and at a later `seq`.
 
 The files are `clean.json` (whole chains), `open.json` (the opening record and every bound of
