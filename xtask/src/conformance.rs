@@ -128,7 +128,8 @@ fn run_kind<C: DeserializeOwned>(
 ) -> Result<()> {
     let files = json_files(dir)?;
     if files.is_empty() {
-        // A directory that passes because it holds nothing would hide a vector set that went missing.
+        // A directory that passes because it holds nothing would hide a vector set that went
+        // missing.
         report.lines.push(format!("{kind}/  FAIL no vector files"));
         report.failed += 1;
         return Ok(());
