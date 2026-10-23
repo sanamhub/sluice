@@ -7,6 +7,7 @@ use std::path::Path;
 
 use super::{Finding, Name, finding};
 use crate::Home;
+#[cfg(unix)]
 use crate::doctor::{Status, examine_at};
 
 /// A link at `link` to the folder `target`: a symlink on Unix, a junction on Windows, which a user

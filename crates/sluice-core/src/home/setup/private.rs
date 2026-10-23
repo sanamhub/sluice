@@ -29,7 +29,6 @@ pub(in crate::home) use unix::{keep_home_private_for, make_0700_with};
 mod unix {
     use std::fs::File;
     use std::io;
-    use std::os::unix::fs::MetadataExt;
     use std::path::Path;
 
     use rustix::fs::{Mode, OFlags};
