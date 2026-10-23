@@ -292,6 +292,7 @@ fn every_failure_has_a_kind_and_nothing_else_has_one() {
         Finding::LayoutNewer { found: 2, known: 1 },
         Finding::KeyOpenToOthers(0o644),
         Finding::AccessOpenToOthers(0o755),
+        Finding::AccessOwnedByOther,
         Finding::KeyAclNotPrivate,
         Finding::AccessAclNotPrivate,
     ];

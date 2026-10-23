@@ -139,6 +139,7 @@ impl Check {
             | F::HomeNowhere => Name::Home,
             F::AccessPrivate
             | F::AccessOpenToOthers(_)
+            | F::AccessOwnedByOther
             | F::AccessAclNotPrivate
             | F::AccessUnreadable(_) => Name::Access,
             F::LayoutCurrent(_)
@@ -214,6 +215,7 @@ impl Check {
             F::LayoutNewer { .. }
             | F::KeyOpenToOthers(_)
             | F::AccessOpenToOthers(_)
+            | F::AccessOwnedByOther
             | F::KeyAclNotPrivate
             | F::AccessAclNotPrivate => Some(ErrorKind::Policy),
             _ => None,

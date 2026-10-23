@@ -71,6 +71,10 @@ pub enum Finding {
     AccessPrivate,
     /// On Unix, group or other has access to the home folder. Carries its mode.
     AccessOpenToOthers(u32),
+    /// Another user owns the home folder: the effective user on Unix, the user or `Administrators`
+    /// on Windows. An owner can change who has access whatever its mode or list says, so the
+    /// folder is not private to this user even if it looks it.
+    AccessOwnedByOther,
     /// On Windows, the key's access list is not the private one the store sets: the user,
     /// `SYSTEM` and `Administrators`, with inheritance stopped.
     KeyAclNotPrivate,

@@ -247,24 +247,64 @@ fn folder_builder(recursive: bool) -> DirBuilder {
     builder
 }
 
+/// Refuses a folder that another user owns, and then gives it the private list. The owner of a
+/// folder can always rewrite its list, so one that another user made first would stay theirs to
+/// open again, whatever sluice sets. It is the user, or `Administrators`, which is the owner of
+/// what an elevated process of the same user makes.
 #[cfg(windows)]
 fn keep_home_private(home: &Path) -> Result<(), Error> {
+    match super::private_windows::is_owned_by_us(home) {
+        Ok(true) => {}
+        Ok(false) => {
+            return Err(Error::Policy(format!(
+                "{} belongs to another user, who could open its access up again whatever sluice \
+                 sets. Use a folder of your own as the home, or take ownership of this one: in \
+                 its Properties, Security > Advanced, next to Owner, choose Change",
+                home.display()
+            )));
+        }
+        Err(e) => return Err(storage("read the owner of", home, e)),
+    }
     super::private_windows::restrict_dir(home).map_err(|e| storage("restrict access to", home, e))
 }
 
-/// Mode 0700. A folder this call made has it already, and one the user made first may not. A file
-/// system that keeps no Unix permissions, such as vfat, refuses the change, and the home is then
-/// refused rather than left open to every user.
+/// Mode 0700, read back. A folder this call made has it already, and one the user made first may
+/// not. A file system that keeps no Unix permissions, such as vfat, refuses the change, and the
+/// home is then refused rather than left open to every user. One mounted with `quiet` answers
+/// that the change worked and keeps the old mode, so the mode is read again, and a home that is
+/// still not 0700 is refused in the same words.
 #[cfg(unix)]
 fn keep_home_private(home: &Path) -> Result<(), Error> {
     use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(home, fs::Permissions::from_mode(0o700)).map_err(|e| {
+    make_0700(home, |home| {
+        fs::set_permissions(home, fs::Permissions::from_mode(0o700))
+    })
+}
+
+/// [`keep_home_private`] with the call that changes the mode as a parameter, so a test can be a
+/// file system that refuses it, or one that says it worked and did nothing.
+#[cfg(unix)]
+fn make_0700(home: &Path, change: fn(&Path) -> io::Result<()>) -> Result<(), Error> {
+    use std::os::unix::fs::PermissionsExt;
+    let refused = |why: String| {
         Error::Storage(format!(
-            "cannot restrict access to {}: {e}. The home must be a folder this user owns, on a \
+            "cannot restrict access to {}: {why}. The home must be a folder this user owns, on a \
              file system that keeps Unix permissions, which vfat and exFAT do not",
             home.display()
         ))
-    })
+    };
+    change(home).map_err(|e| refused(e.to_string()))?;
+    let mode = fs::metadata(home)
+        .map_err(|e| refused(e.to_string()))?
+        .permissions()
+        .mode()
+        & 0o7777;
+    if mode != 0o700 {
+        return Err(refused(format!(
+            "it still has mode {mode:04o} after the change"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(not(any(unix, windows)))]

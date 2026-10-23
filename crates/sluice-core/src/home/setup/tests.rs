@@ -2,6 +2,8 @@
 //! private and using it. The platform halves are in `unix.rs` and `windows.rs`.
 
 #[cfg(unix)]
+mod mode;
+#[cfg(unix)]
 mod unix;
 #[cfg(windows)]
 mod windows;

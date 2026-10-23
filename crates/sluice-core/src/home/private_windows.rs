@@ -42,6 +42,10 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
+mod lists;
+
+pub(in crate::home) use lists::{is_private_dir, is_private_file};
+
 /// Object and container inherit: a folder's entries reach the files and folders made inside it.
 const INHERIT: &str = "OICI";
 
@@ -294,39 +298,51 @@ fn dacl_sddl(path: &Path) -> io::Result<String> {
     unsafe { wide_to_string(text.0.cast()) }
 }
 
-/// Whether the file at `path` has the private access list [`restrict_file`] sets: inheritance
-/// stopped, and full control for the user, `SYSTEM` and `Administrators`, with nothing else.
-pub(super) fn is_private_file(path: &Path) -> io::Result<bool> {
-    has_private_list(path, "")
+/// The well-known SID of `Administrators`, which owns what a process that runs elevated creates.
+const ADMINISTRATORS: &str = "S-1-5-32-544";
+
+/// Whether the owner of `path` is the user this process runs as, or `Administrators`. An owner can
+/// always rewrite the access list, whatever the list says, so a new home that another user made
+/// first would stay theirs to open up again after sluice set it private.
+pub(super) fn is_owned_by_us(path: &Path) -> io::Result<bool> {
+    let owner = owner_sid(path)?;
+    Ok(owner == ADMINISTRATORS || owner == user_sid()?)
 }
 
-/// Whether the folder at `path` has the private access list [`restrict_dir`] sets on a new home:
-/// the same three entries, each with the inherit flags that pass it to what is made inside.
-pub(super) fn is_private_dir(path: &Path) -> io::Result<bool> {
-    has_private_list(path, INHERIT)
-}
+/// The owner of `path`, as SID text, read by path.
+fn owner_sid(path: &Path) -> io::Result<String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Security::Authorization::GetNamedSecurityInfoW;
+    use windows_sys::Win32::Security::OWNER_SECURITY_INFORMATION;
 
-/// Whether the list of `path` is protected and holds exactly the entries the store writes with
-/// `inherit`. It is read back by path and compared entry by entry, because Windows may give the
-/// entries back in another order.
-fn has_private_list(path: &Path, inherit: &str) -> io::Result<bool> {
-    let found = dacl_sddl(path)?;
-    let wanted = private_sddl(&user_sid()?, inherit);
-    let (found_protected, found_entries) = split_sddl(&found);
-    let (_, wanted_entries) = split_sddl(&wanted);
-    Ok(found_protected && found_entries == wanted_entries)
-}
-
-/// Whether an SDDL access list is protected from inheritance, and its entries, sorted.
-fn split_sddl(sddl: &str) -> (bool, Vec<&str>) {
-    let (header, entries) = sddl.split_once('(').unwrap_or((sddl, ""));
-    let mut entries: Vec<&str> = entries
-        .trim_end_matches(')')
-        .split(")(")
-        .filter(|entry| !entry.is_empty())
-        .collect();
-    entries.sort_unstable();
-    (header.starts_with("D:") && header.contains('P'), entries)
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let (mut owner, mut descriptor) = (ptr::null_mut(), ptr::null_mut());
+    // SAFETY: `wide` is NUL terminated and outlives the call. `owner` and `descriptor` are valid
+    // places for the pointers the call writes. Every other out parameter is optional and null,
+    // because only the owner is asked for.
+    let status = unsafe {
+        GetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &mut descriptor,
+        )
+    };
+    if status != 0 {
+        return Err(io::Error::from_raw_os_error(status as i32));
+    }
+    // Held to the end of the function: `owner` points into it.
+    let _descriptor = LocalBlock::new(descriptor)?;
+    if owner.is_null() {
+        return Err(io::Error::other("the object has no owner"));
+    }
+    // SAFETY: on success `owner` points to the owner SID inside the descriptor, which
+    // `_descriptor` keeps alive until the function returns, after this call.
+    unsafe { sid_to_string(owner) }
 }
 
 /// Bytes free to this user on the volume of `path`. That is less than free on the volume when a

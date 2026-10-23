@@ -106,3 +106,34 @@ fn an_unreadable_key_names_the_path_given() {
         assert!(!text.contains(&target.display().to_string()), "{text}");
     }
 }
+
+/// On Unix, a folder that another user owns is not private whatever its mode says: its owner can
+/// change the mode. The user is a parameter, because a folder of another user cannot be made
+/// without being root.
+#[cfg(unix)]
+#[test]
+fn a_home_that_another_user_owns_is_not_private() {
+    use super::super::checks::home_not_private_for;
+    use std::os::unix::fs::MetadataExt;
+    let parent = tempfile::tempdir().unwrap();
+    let path = parent.path().join("home");
+    drop(Home::open(&path).unwrap());
+    let me = fs::metadata(&path).unwrap().uid();
+    assert_eq!(home_not_private_for(&path, &path, me), None);
+    assert_eq!(
+        home_not_private_for(&path, &path, me.wrapping_add(1)),
+        Some(Finding::AccessOwnedByOther)
+    );
+    // The owner comes before the mode: a folder open to everyone, owned by someone else, is first
+    // of all someone else's.
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(
+        home_not_private_for(&path, &path, me.wrapping_add(1)),
+        Some(Finding::AccessOwnedByOther)
+    );
+    assert_eq!(
+        home_not_private_for(&path, &path, me),
+        Some(Finding::AccessOpenToOthers(0o755))
+    );
+}

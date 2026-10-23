@@ -207,6 +207,10 @@ fn access_key_or_space(finding: &Finding) -> (String, Option<String>) {
             format!("the home has mode {mode:04o}, so other users can reach the key"),
             Some("run `chmod 700` on the home".to_string()),
         ),
+        F::AccessOwnedByOther => (
+            "another user owns the home, so they can change who can reach it".to_string(),
+            Some(owned_by_other_fix().to_string()),
+        ),
         F::KeyAclNotPrivate => (
             "its access list lets in more than this user, SYSTEM and Administrators".to_string(),
             Some(
@@ -234,6 +238,17 @@ fn access_key_or_space(finding: &Finding) -> (String, Option<String>) {
             Some("check that the home is on a mounted volume".to_string()),
         ),
         _ => (String::new(), None),
+    }
+}
+
+/// The fix for a home that another user owns, which only the platform's own tools can change.
+fn owned_by_other_fix() -> &'static str {
+    if cfg!(windows) {
+        "take ownership: in the Properties of the home folder, under Security > Advanced, next \
+         to Owner choose Change and pick your user, or point SLUICE_HOME at a folder of your own"
+    } else {
+        "run `chown` on the home to make this user its owner, or point SLUICE_HOME at a folder of \
+         your own"
     }
 }
 

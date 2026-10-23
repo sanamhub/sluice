@@ -105,7 +105,7 @@ fn read_pid(home: &Path) -> Option<u32> {
 /// `home` is the folder with its links followed, which is read, and `given` the path the user
 /// gave, which an error names.
 pub(super) fn access(home: &Path, given: &Path) -> Finding {
-    home_open_to_others(home, given).unwrap_or(Finding::AccessPrivate)
+    home_not_private(home, given).unwrap_or(Finding::AccessPrivate)
 }
 
 /// The key's length and access, from its metadata and access list. Its bytes are never read.
@@ -130,12 +130,20 @@ fn named(given: &Path, file: &str, error: &io::Error) -> String {
     format!("{}: {error}", given.join(file).display())
 }
 
-/// On Unix, no access for group or other to the home folder, which the store creates with mode
-/// 0700, so that the key is not reachable through it even if its own mode were loosened.
+/// On Unix, the effective user owns the home folder, and no access is left for group or other,
+/// which the store creates with mode 0700, so that the key is not reachable through it even if its
+/// own mode were loosened. The owner is looked at first: an owner can change the mode.
 #[cfg(unix)]
-fn home_open_to_others(home: &Path, given: &Path) -> Option<Finding> {
-    use std::os::unix::fs::PermissionsExt;
+fn home_not_private(home: &Path, given: &Path) -> Option<Finding> {
+    home_not_private_for(home, given, rustix::process::geteuid().as_raw())
+}
+
+/// [`home_not_private`] for the user `me`, so a test can be someone a folder does not belong to.
+#[cfg(unix)]
+pub(super) fn home_not_private_for(home: &Path, given: &Path, me: u32) -> Option<Finding> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     match fs::metadata(home) {
+        Ok(meta) if meta.uid() != me => Some(Finding::AccessOwnedByOther),
         Ok(meta) if meta.permissions().mode() & 0o077 != 0 => Some(Finding::AccessOpenToOthers(
             meta.permissions().mode() & 0o7777,
         )),
@@ -149,12 +157,19 @@ fn unreadable(home: &Path, error: io::Error) -> Finding {
     Finding::AccessUnreadable(format!("{}: {error}", home.display()))
 }
 
-/// On Windows, the private access list the store gives a new home, read back and compared. The
-/// key has a list of its own, and the folder's list still decides who can add, swap or delete
-/// files beside it.
+/// On Windows, the user or `Administrators` owns the home folder, and it has the private access
+/// list the store gives a new home, read back and compared. The key has a list of its own, and the
+/// folder's list still decides who can add, swap or delete files beside it. The owner is looked at
+/// first: an owner can rewrite the list.
 #[cfg(windows)]
-fn home_open_to_others(home: &Path, given: &Path) -> Option<Finding> {
-    match super::super::private_windows::is_private_dir(home) {
+fn home_not_private(home: &Path, given: &Path) -> Option<Finding> {
+    use super::super::private_windows::{is_owned_by_us, is_private_dir};
+    match is_owned_by_us(home) {
+        Ok(true) => {}
+        Ok(false) => return Some(Finding::AccessOwnedByOther),
+        Err(e) => return Some(unreadable(given, e)),
+    }
+    match is_private_dir(home) {
         Ok(true) => None,
         Ok(false) => Some(Finding::AccessAclNotPrivate),
         Err(e) => Some(unreadable(given, e)),
@@ -162,7 +177,7 @@ fn home_open_to_others(home: &Path, given: &Path) -> Option<Finding> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn home_open_to_others(_home: &Path, _given: &Path) -> Option<Finding> {
+fn home_not_private(_home: &Path, _given: &Path) -> Option<Finding> {
     None
 }
 
