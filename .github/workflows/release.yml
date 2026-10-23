@@ -9,12 +9,16 @@
 # * the plan job refuses a tag with anything but letters, digits, `.` and `-` after the `v`;
 # * every step runs in bash, on Windows too, and no `${{ }}` is pasted into a script: each value
 #   a script needs comes in through `env:` and is quoted there;
-# * the workflow reads only, and the publishing jobs alone write, in the `release` environment;
+# * the workflow reads only, and the two publishing jobs are the only ones that ask for more than
+#   `contents: read` in the `release` environment. That is what this file asks for, and not what a
+#   tag is held to: the `release.yml` of the tagged commit is the one that runs (RELEASING.md);
 # * only sluice-cli's SBOM is released, for all targets, and it is uploaded: dist's template read
 #   `steps.cargo-cyclonedx.output.paths`, which is always empty, so the SBOM was left behind;
 # * the `rendezvous` and `relay` images are built here, the GitHub release waits for both, and they
 #   are pushed only after it is made: a failed build publishes nothing, and an image push that
 #   fails after the GitHub release leaves the release without images (RELEASING.md);
+# * the GitHub release is made as a draft with every file, then published, because an immutable
+#   release cannot take a file after it is published (RELEASING.md);
 # * every artifact `host` reads is kept 30 days and the images 60, so each outlives its approvals;
 # * the steps dist writes for system packages, containers and announcements are gone, because
 #   no target uses them.
@@ -267,9 +271,11 @@ jobs:
           retention-days: 30
 
   # Both images of ADR 0013 on native amd64 and arm64 runners, beside the binary builds. Builds and
-  # saves, and pushes nothing: only the publishing jobs may write to the registry. Compiling
-  # iroh-relay in the build stage is most of it, and 60 minutes leaves room on the arm64 runners,
-  # the slower half.
+  # saves, and pushes nothing: this job asks for no registry permission. The two `image-publish`
+  # jobs are the only ones in this file that hold `packages: write`, and the `release` environment
+  # reviews them. What a tag's own `release.yml` asks for is that commit's to say (RELEASING.md).
+  # Compiling iroh-relay in the build stage is most of it, and 60 minutes leaves room on the arm64
+  # runners, the slower half.
   image-build:
     needs: plan
     if: needs.plan.outputs.publishing == 'true'
@@ -411,7 +417,10 @@ jobs:
         with:
           subject-path: |
             artifacts/*
-      - name: Create GitHub Release
+      # An immutable release takes no file after it is published, so the release is made as a
+      # draft with every file and published last. GitHub's advice is the same: "create releases as
+      # drafts first, attach all assets, and then publish" (RELEASING.md).
+      - name: Create the draft release and add every file
         env:
           PRERELEASE_FLAG: >-
             ${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease &&
@@ -427,8 +436,14 @@ jobs:
 
           # PRERELEASE_FLAG is empty or one word, and must vanish when empty.
           # shellcheck disable=SC2086
-          gh release create "$TAG" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG \
+          gh release create "$TAG" --draft --target "$RELEASE_COMMIT" $PRERELEASE_FLAG \
             --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
+      # The one step that makes anything public. Every file is attached, and its attestation is in
+      # the store, before this runs.
+      - name: Publish the release
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false
 
   # Pushes, merges and attests one image, only after the GitHub release exists. It runs in the
   # `release` environment, which may ask for a second approval (RELEASING.md). Moves two images of

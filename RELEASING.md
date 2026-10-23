@@ -49,11 +49,27 @@ Two workflows do it:
 | `release-plz.yml` | every push to `main` | opens or updates the release pull request: the version bump and the new `CHANGELOG.md` section |
 | `release.yml` | a tag `v<version>` | runs all of `ci.yml`, checks the tag, builds the binaries with `dist` and both images for amd64 and arm64, waits for every build and then for approval, publishes the GitHub release, then waits again and pushes and attests the images |
 
-**A release needs a second person.** The required reviewer of the `release` environment approves
-the publishing jobs, and "Prevent self-review" stops whoever pushed the tag from doing it. That
-holds only if administrators cannot bypass the environment, which GitHub allows by default (see
-[the settings](#repository-settings-the-pipeline-needs)). Until the maintainer adds that person and
-turns the bypass off, no release is safe to publish.
+**Who can release.** The tag ruleset's bypass list names **Repository admin**, and in a repository
+owned by a user that is the owner alone. GitHub's ruleset page lists "Repository admins" as
+eligible for bypass access, and its permissions page says a repository owned by a personal account
+"has a single owner who has full control of the repository"
+([About rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets),
+[Permission levels](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/repository-access-and-collaboration/permission-levels-for-a-personal-account-repository)).
+So the owner can tag a commit that is not on `main`, whose `release.yml` names no environment and
+asks for whatever permissions it likes. Nothing in this repository stops that.
+
+The approval protects against two other things:
+
+- a release started by anyone other than the owner, who needs the admin bypass and a reviewer the
+  pusher cannot be;
+- a mistake by the owner: a tag on the wrong commit, a tag pushed before the release pull request
+  merged, or `.github/` changed on the tag. [The two checks
+  below](#checks-before-approving-host) catch the last two.
+
+Releasing alone takes both the admin bypass and a `release.yml` without the environment. With
+**Allow administrators to bypass configured protection rules** unticked, and a second person on the
+environment, every release through the shipped `release.yml` is reviewed. A reviewer is then the
+check that a release is one the owner meant, and not a bar to the owner releasing.
 
 ## What the maintainer approves, and where
 
@@ -71,6 +87,31 @@ turns the bypass off, no release is safe to publish.
 So one release asks for four approvals: the merge, the tag, and two reviews of the environment by
 the second person. The two reviews were read from GitHub's documentation, which says each job that
 names an environment with required reviewers waits for one, and have not been seen on a run yet.
+
+### Checks before approving `host`
+
+The run page names the commit being built. In a clone of this repository, with `main` fetched and
+`<sha>` that full 40-character commit:
+
+```
+git fetch origin main
+git merge-base --is-ancestor <sha> origin/main
+git diff --exit-code origin/main <sha> -- .github/
+```
+
+Approve only when both exit 0 and the second prints nothing. Otherwise refuse, and say which
+command failed.
+
+- The first passes only when the tagged commit is on `main`, so the release was not started from a
+  branch.
+- The second passes only when the tagged commit's `.github/` is `main`'s. The `release.yml` that
+  runs is the tagged commit's, so this is the check that the workflow which runs is the one that was
+  reviewed, with the environment, the permissions and the publishing order it has on `main`. A
+  diff is a refusal even when it looks harmless: the tag's copy is what runs, and the tag ruleset's
+  bypass is what makes a different copy possible.
+
+The same two commands answer "is this the commit the release pull request merged", which is what
+the tag is meant to name.
 
 ### Re-runs and who approves
 
@@ -166,6 +207,15 @@ release never skips the checks, even if the pull request merged without them.
    and the second starts when the first ends, so approve each within 30 days of the one before, or
    the images expire first and the release needs a new patch version.
 
+   **How `host` publishes.** It signs the provenance attestation of the files, creates the GitHub
+   release as a draft with every file attached, and marks it published in a last step. As it was,
+   one `gh release create ... artifacts/*` published the release and then uploaded the files one
+   by one, which an immutable release refuses: "you cannot add, replace, or delete assets after a
+   release is published"
+   ([Managing releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)).
+   The same page's advice is "create releases as drafts first, attach all assets, and then
+   publish". Nothing about the files changes: the attestation names their bytes, not the release.
+
 5. Check the release page. It holds:
 
    | Files | How many |
@@ -202,6 +252,21 @@ The first checks the provenance of the index, and the second the SBOM of the arm
 index, `-amd64` and `-arm64` each have a provenance attestation, and each architecture has an SBOM.
 The SPDX version in the predicate type is the one syft writes into the SBOM, which `actions/attest`
 copies (`src/sbom.ts:85`).
+
+**A tag is not the image.** `gh attestation verify` proves that `release.yml`, on that tag, built
+the digest it is given. It does not say what the tag names now: [no package can name one
+workflow](#repository-settings-the-pipeline-needs), so any workflow in a repository with access to
+the package and `packages: write` can move a tag. An image is trusted only after its attestation
+passes and it is pulled by that digest:
+
+```
+digest="$(docker buildx imagetools inspect ghcr.io/sanamhub/sluice-relay:0.2.0 \
+  --format '{{json .Manifest}}' | jq --raw-output .digest)"
+gh attestation verify "oci://ghcr.io/sanamhub/sluice-relay@$digest" --repo sanamhub/sluice \
+  --signer-workflow sanamhub/sluice/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.2.0
+docker pull "ghcr.io/sanamhub/sluice-relay@$digest"
+```
 
 Each binary also carries its dependency tree from `cargo auditable`, which `cargo audit bin sluice`
 checks against the RustSec database.
@@ -250,15 +315,37 @@ A release cannot be edited into a good one. Take it down and go back to the one 
   GitHub's documentation says the default is the opposite: "By default, administrators can bypass
   the protection rules and force deployments to specific environments"
   ([Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)).
-  The maintainer owns the repository, so with the box ticked they could force every pending
-  `release` job through alone, and "a release needs a second person" would be false. The same
-  page's steps for the setting read "Deselect **Allow administrators to bypass configured
+  The same page's steps for the setting read "Deselect **Allow administrators to bypass configured
   protection rules**"
   ([Managing environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)).
-  Ticking it again is the only way to release alone. GitHub's audit log records changes to an
-  environment's protection rules in an organization. For a repository owned by a user, no page
-  says it does, so this has not been checked: if the repository has no organization, the other
-  person should look at the box on the settings page before approving.
+  The maintainer owns the repository, so with the box ticked they could force every pending
+  `release` job through alone. Unticking it is what makes the environment's review real. It is not
+  the only way around a second person: the tag ruleset's bypass lets the owner tag a commit whose
+  `release.yml` names no environment. [The two checks above](#checks-before-approving-host) are
+  what catch that.
+  The audit log's environment events are documented for organizations only, and all three are
+  "via the API", such as `environment.update_protection_rule`; a personal account has a security
+  log instead. No page says either records this change, so it has not been checked: if the
+  repository has no organization, the other person should look at the box on the settings page
+  before approving.
+- **Release immutability**: Settings > scroll down to the **Releases** section > tick **Enable
+  release immutability**. GitHub's page says what it locks: "Immutable releases are releases where
+  the assets and associated Git tag cannot be changed after publication", and "you cannot add,
+  replace, or delete assets after a release is published, and you cannot move or delete its tag
+  while the release exists"
+  ([Immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases),
+  [Managing releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)).
+  It applies from the next release on: "immutability will only apply to future releases"
+  ([Prevent release changes](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes)).
+  Turn it on before the first release, or that one stays mutable.
+- **No package can name one workflow.** GitHub's package settings grant Actions access to a
+  repository, not to a workflow file: "you must give explicit access to the repository where the
+  workflow is stored", and "You can give multiple repositories workflow access to a package"
+  ([Configuring a package's access control](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)).
+  There is no per-workflow switch in those docs, so any workflow in a repository with that access
+  and `packages: write` can push to the package. A package's source label and the `release`
+  environment say which jobs are meant to push, not which ones can. See [Verify an image, and what
+  a binary carries](#verify-an-image-and-what-a-binary-carries).
 - **Actions may open pull requests**: Settings > Actions > General > Workflow permissions > tick
   **Allow GitHub Actions to create and approve pull requests**. Without it release-plz cannot open
   the pull request, and its job fails.
