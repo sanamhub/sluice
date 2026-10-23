@@ -13,9 +13,10 @@ Two workflows do it:
 | `release.yml` | a tag `v<version>` | runs all of `ci.yml`, checks the tag, builds the binaries with `dist` and both images for amd64 and arm64, waits for every build and then for approval, publishes the GitHub release, then waits again and pushes and attests the images |
 
 **A release needs a second person.** The required reviewer of the `release` environment approves
-the publishing jobs, and "Prevent self-review" stops whoever pushed the tag from doing it. Until the
-maintainer adds that person (see [the settings](#repository-settings-the-pipeline-needs)), no
-release can be published.
+the publishing jobs, and "Prevent self-review" stops whoever pushed the tag from doing it. That
+holds only if administrators cannot bypass the environment, which GitHub allows by default (see
+[the settings](#repository-settings-the-pipeline-needs)). Until the maintainer adds that person and
+turns the bypass off, no release is safe to publish.
 
 ## What the maintainer approves, and where
 
@@ -33,6 +34,21 @@ release can be published.
 So one release asks for four approvals: the merge, the tag, and two reviews of the environment by
 the second person. The two reviews were read from GitHub's documentation, which says each job that
 names an environment with required reviewers waits for one, and have not been seen on a run yet.
+
+### Re-runs and who approves
+
+GitHub's page on reviewing deployments says that, when the environment prevents self-approval,
+"you will not be able to approve a deployment from a workflow run you initiated"
+([Reviewing deployments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments)).
+The contexts page says a re-run has two actors: `github.actor` is "the user that triggered the
+initial workflow run" and `github.triggering_actor` is "the user that initiated the workflow run",
+and the two may differ on a re-run
+([Contexts](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts)).
+
+No page says which of the two "Prevent self-review" reads, and no run has shown it. So treat both
+as barred: whoever pushed the tag or clicked **Re-run** does not approve that run. When the
+maintainer pushed the tag and re-runs a failed job, the other person approves, and when the other
+person re-runs it, the maintainer cannot count on being allowed to.
 
 ## The release pull request's checks
 
@@ -197,6 +213,20 @@ A release cannot be edited into a good one. Take it down and go back to the one 
   the maintainer, and tick **Prevent self-review**. Nothing can be released until that person is
   added. Under **Deployment branches and tags**, choose **Selected branches and tags** and add the
   tag rule `v*`.
+- **Administrators must not bypass the `release` environment.** On the same page, Settings >
+  Environments > `release`, untick **Allow administrators to bypass configured protection rules**.
+  GitHub's documentation says the default is the opposite: "By default, administrators can bypass
+  the protection rules and force deployments to specific environments"
+  ([Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)).
+  The maintainer owns the repository, so with the box ticked they could force every pending
+  `release` job through alone, and "a release needs a second person" would be false. The same
+  page's steps for the setting read "Deselect **Allow administrators to bypass configured
+  protection rules**"
+  ([Managing environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)).
+  Ticking it again is the only way to release alone. GitHub's audit log records changes to an
+  environment's protection rules in an organization. For a repository owned by a user, no page
+  says it does, so this has not been checked: if the repository has no organization, the other
+  person should look at the box on the settings page before approving.
 - **Actions may open pull requests**: Settings > Actions > General > Workflow permissions > tick
   **Allow GitHub Actions to create and approve pull requests**. Without it release-plz cannot open
   the pull request, and its job fails.
