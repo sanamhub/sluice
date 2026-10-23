@@ -9,8 +9,9 @@
 //! mode it requires the relay half off, since a deleted `enable_relay = false` line would turn a
 //! rendezvous server into an open relay.
 //!
-//! It owns the check and the start, and nothing else. It never prints a value from the config,
-//! since a token may be one, and it never changes the config it was given.
+//! It owns the check and the handover, and nothing else. It never prints a value from the config,
+//! since a token may be one, and it never changes the config it was given. What iroh-relay reads is
+//! a sealed copy of the bytes that were checked (ADR 0021).
 
 use std::fmt;
 
@@ -22,9 +23,7 @@ mod schema;
 
 pub use args::Args;
 pub use file::open_config;
-pub use handover::{CONFIG_FD_PATH, relay_args};
-#[cfg(unix)]
-pub use handover::{check_handover, names_the_same_file};
+pub use handover::{CONFIG_FD_PATH, MEMFD_NAME, hand_over, relay_args};
 
 /// The iroh-relay release whose config `schema.rs` mirrors. Both Dockerfiles must build this one,
 /// and the root `Cargo.lock` must resolve it, or a test fails: a new release may add a key the

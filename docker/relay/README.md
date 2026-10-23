@@ -19,18 +19,18 @@ the operator adds an id.
 ## The guard
 
 The entry point is [`sluice-relay-guard`](../guard/README.md) (ADR 0019), and the default command
-is `--config-path /etc/relay/relay.toml`. It opens the config, checks it, and then replaces itself
-with `iroh-relay --config-path=/proc/self/fd/0`, with the file it checked as the relay's standard
-input
-(ADR 0020). The relay so reads the bytes that were checked, even if the file is replaced after,
-and it is PID 1 and gets the container's signals.
+is `--config-path /etc/relay/relay.toml`. It opens the config, checks it, copies the checked bytes
+into a sealed `memfd`, puts that copy on descriptor 0, and then replaces itself with
+`iroh-relay --config-path=/proc/self/fd/0` (ADR 0021). The relay so reads a file that cannot be
+written, renamed over or truncated after the check, and it is PID 1 and gets the container's
+signals.
 
 Checked on 2026-10-23 in WSL with Docker 29.1.3, by [smoke-test.sh](../smoke-test.sh): PID 1, read
 from the host, is `/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0`, and its descriptor 0
-has the bytes of the shipped `relay.toml`. The relay presented the certificate that was mounted, on
-HTTPS 443, logged `QUIC server listening`, and had port 9090 closed. Those three are what only that
-config asks for: with no config, iroh-relay 1.4.0 serves plain HTTP on 80, which answers
-`/generate_204` all the same, and metrics on 9090, and no HTTPS or QUIC.
+is a `memfd:` whose bytes are the shipped `relay.toml`. The relay presented the certificate that
+was mounted, on HTTPS 443, logged `QUIC server listening`, and had port 9090 closed. Those three
+are what only that config asks for: with no config, iroh-relay 1.4.0 serves plain HTTP on 80, which
+answers `/generate_204` all the same, and metrics on 9090, and no HTTPS or QUIC.
 
 `iroh-relay` 1.4.0 runs open, with no byte limit and nothing in its log, when `access` is left out,
 when a key is misspelled (it ignores keys it does not know), and when the config file is missing.
@@ -147,11 +147,12 @@ Address discovery on UDP 7842 answers anyone.
 - with `--open --config-path /etc/relay/open.toml`, the third key connected and relayed a datagram.
 
 It was run again through the guard, with new keys, and came out the same, with `iroh-relay` as the
-container's PID 1. On 2026-10-23 it was run a third time, with the config handed over as standard
-input and the container's root read-only, and came out the same again, with `iroh-relay` started
-as `--config-path=/dev/stdin` as the guard did then. [smoke-test.sh](../smoke-test.sh) checks the
-guard's refusals, that both images start as the config they were given with a read-only root, and
-what PID 1 is, and CI runs it on every build of either image.
+container's PID 1. On 2026-10-23 it was run a third time with the config handed over and the
+container's root read-only, and came out the same again, with `iroh-relay` started as
+`--config-path=/dev/stdin` as the guard did then; ADR 0021 moved that to a sealed copy read through
+`/proc/self/fd/0`. [smoke-test.sh](../smoke-test.sh) checks the guard's refusals, that both images
+start as the config they were given with a read-only root, and what PID 1 is, and CI runs it on
+every build of either image.
 
 ## Open mode
 

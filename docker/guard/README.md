@@ -1,10 +1,11 @@
 # sluice-relay-guard
 
 The entry point of both images, [`relay`](../relay/README.md) and
-[`rendezvous`](../rendezvous/README.md) (ADR 0019, ADR 0020). It checks the config that
+[`rendezvous`](../rendezvous/README.md) (ADR 0019, ADR 0020, ADR 0021). It checks the config that
 `iroh-relay` 1.4.0 is about to start with, refuses one that would open more than the operator
-wrote, and then replaces itself with `/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0`, so
-the server runs as PID 1 and gets the container's signals.
+wrote, and then replaces itself with `/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0`,
+with a sealed copy of the bytes it checked on descriptor 0, so the server runs as PID 1 and gets
+the container's signals.
 
 ```
 sluice-relay-guard [--open | --rendezvous] --config-path <file>
@@ -66,28 +67,30 @@ message, from a path or an argument, is escaped, so a refusal is one line.
 An empty allowlist starts: it is what the relay image ships, and it lets nobody in. If iroh-relay
 itself cannot be started, the guard exits with 69, `EX_UNAVAILABLE`.
 
-## The relay reads the file the guard checked
+## The relay reads a sealed copy of the bytes the guard checked
 
-The guard opens the config once, checks that the open file is a regular file, reads it, and hands
-that same open file to iroh-relay as its standard input (ADR 0020). iroh-relay is told to read
-`/proc/self/fd/0`, which on Linux opens that file again from its start. A rename over the path
-between the two reads, such as a Kubernetes ConfigMap update, so cannot start a file nobody
-checked. An edit in place, in the instant between them, still could: standard input pins the file,
-not its bytes.
+The guard opens the config once, checks that it is a regular file, reads it, and copies those bytes
+into a `memfd` (ADR 0021). It seals the copy against a write, a growth, a shrink and any further
+seal, puts it on descriptor 0 with `dup2`, and closes the file it opened. Before it replaces itself
+it checks that `/proc/self/fd/0` names the copy by device and inode, and reads the bytes back
+through it. Only then does it exec iroh-relay, told to read `/proc/self/fd/0`.
 
-iroh-relay 1.4.0 reads nothing else from standard input: no line of its `src/` reads `stdin`.
+A rename over the path cannot reach the relay, and neither can an edit in place, which ADR 0020
+accepted a window for. Nor can a write that truncates the file before it writes, as `cat >` or a
+generator script does, which would leave iroh-relay an empty file and `toml::from_str("")` is its
+open default.
 
 **The path must resolve, or the relay runs open.** iroh-relay tests its config path with
 `exists()`, which is false on any error, and then runs its open default: relay on, everyone, no
-limit (main.rs:542-567). Before it replaces itself, the guard takes `/proc/self/fd/<n>` for the
-descriptor `n` the config is open on, and checks that it names the same device and inode as that
-open file. That proves `/proc` is mounted and gives this process's own descriptors. If it does
-not, the guard prints one line that says why and exits with 69, and starts nothing. It was
-`/dev/stdin` before, which is a link the container runtime makes, and a microVM with a bare
-devtmpfs, a root without `/proc` or a volume over `/dev` may not have it.
+limit (main.rs:542-567). The check before the exec proves that `/proc` is mounted and gives this
+process's own descriptors. If it does not, the guard prints one line naming the step that failed
+and exits with 69, and starts nothing. `/proc/self/fd/0` is a path of the kernel's, and not
+`/dev/stdin`, which is a link the container runtime makes and some runtimes do not.
 
-The guard starts the relay only on Unix. Elsewhere `/proc/self/fd` does not exist, iroh-relay would
-find no config there and run its open default, so the guard stops after the check with exit 69.
+The guard starts the relay only on Linux, where `memfd_create` and its seals exist (Linux 3.17).
+Elsewhere it stops after the check with exit 69.
+
+iroh-relay 1.4.0 reads nothing from standard input: no line of its `src/` reads `stdin`.
 
 ## `--dev` in rendezvous mode
 
@@ -102,7 +105,7 @@ hands the certificate to QUIC. That is why the guard accepts it in this mode and
 
 ## What it must never do
 
-- Change the config, or start iroh-relay with anything but the open file it checked.
+- Change the config, or start iroh-relay with anything but the sealed copy of the bytes it checked.
 - Print a value from the config.
 - Accept a key because a newer iroh-relay might have it. The schema is 1.4.0's and no other.
 - Pass `--dev` to a server whose relay half is on.

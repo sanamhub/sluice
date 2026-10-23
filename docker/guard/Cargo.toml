@@ -32,6 +32,11 @@ url = "2.5.8"
 # What iroh-base 1.4.0 decodes an allowlist id with (`PublicKey::from_bytes`), so the guard refuses
 # the ids iroh-relay would refuse. Without default features: the guard verifies no signature.
 ed25519-dalek = { version = "3.0.0", default-features = false }
+# The safe calls for the sealed copy of the config: memfd_create, F_ADD_SEALS and dup2. `fs` brings
+# the memfd and seal calls, `stdio` the helper that replaces descriptor 0, and `std` the std
+# integration that makes it safe. The version is the root lock's, and a test fails if the guard's
+# lock resolves another.
+rustix = { version = "=1.1.5", default-features = false, features = ["fs", "stdio", "std"] }
 
 [lints.rust]
 unsafe_code = "forbid"

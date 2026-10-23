@@ -134,9 +134,11 @@ starts() {
 }
 
 # What the container's PID 1 is, as the host sees it: iroh-relay itself, started with the path of
-# its own descriptor 0, and that descriptor is the config the image shipped. The guard checked
-# that file, and iroh-relay reads it again from its start through /proc/self/fd/0. It runs as the
-# host user so that the host may read /proc/<pid>/fd, and only here.
+# its own descriptor 0, and that descriptor is the sealed copy of the shipped config, not the file
+# (ADR 0021). The copy's link names a `memfd:`, and its bytes are the shipped config's. The
+# container runs with no `--security-opt`, so Docker's default seccomp profile is what allows the
+# memfd and its seals, and with a read-only root. It runs as the host user so that the host may
+# read /proc/<pid>/fd, and only here.
 handover() {
   local container pid want cmdline
   container="$(next_name)"
@@ -154,10 +156,13 @@ handover() {
   cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline")"
   local shipped="$here/$kind/manual.toml"
   [ "$kind" = relay ] && shipped="$here/relay/relay.toml"
-  if [ "$cmdline" = "$want" ] && cmp -s "/proc/$pid/fd/0" "$shipped"; then
-    pass "handover: PID 1 is '${cmdline% }', and its descriptor 0 is the shipped config"
+  local copy
+  copy="$(readlink "/proc/$pid/fd/0")"
+  if [ "$cmdline" = "$want" ] && [[ "$copy" == *"memfd:"* ]] \
+    && cmp -s "/proc/$pid/fd/0" "$shipped"; then
+    pass "handover: PID 1 is '${cmdline% }', and its descriptor 0 is the sealed copy of the config"
   else
-    fail "handover: PID 1 is '$cmdline', descriptor 0: $(readlink "/proc/$pid/fd/0")"
+    fail "handover: PID 1 is '$cmdline', descriptor 0: $copy"
   fi
   docker rm -f "$container" > /dev/null
 }
