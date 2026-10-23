@@ -116,12 +116,19 @@ release never skips the checks, even if the pull request merged without them.
    image builds and the installers. `host` waits for all of them, and the reviewer approves it
    when they are green, then the two `image-publish` jobs once the GitHub release is up.
 
-   **A release goes out whole or not at all.** If the build of either image fails on either
-   architecture, `host` does not start, so no GitHub release, file or image is made public. The
-   fix is to open the run and choose **Re-run failed jobs**: the builds that passed keep their
-   artifacts for 30 days, and `host` then waits for the reviewer again. If the re-run fails the
-   same way, the cause is in the tagged commit: delete the tag, fix it on `main`, and tag the next
-   patch version.
+   **What a failure leaves behind.** A failed build publishes nothing: if the build of either
+   image fails on either architecture, `host` does not start, so no GitHub release, file or image
+   is made public. Open the run and choose **Re-run failed jobs**: the builds that passed keep
+   their artifacts (30 days for the binaries, 60 for the images), and `host` then waits for the
+   reviewer again. If the re-run fails the same way, the cause is in the tagged commit: delete the
+   tag, fix it on `main`, and tag the next patch version.
+
+   A push that fails after `host` is different. The GitHub release is already public, so a failed
+   `image-publish` leaves it without images. Re-run that job from the run page, within the images'
+   60 days, and the second reviewer approves it again. Each wait for approval lasts up to 30 days
+   and the second starts when the first ends, so approve each within 30 days of the one before, or
+   the images expire first and the release needs a new patch version.
+
 5. Check the release page. It holds:
 
    | Files | How many |

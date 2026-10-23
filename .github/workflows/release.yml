@@ -13,8 +13,9 @@
 # * only sluice-cli's SBOM is released, for all targets, and it is uploaded: dist's template read
 #   `steps.cargo-cyclonedx.output.paths`, which is always empty, so the SBOM was left behind;
 # * the `rendezvous` and `relay` images are built here, the GitHub release waits for both, and they
-#   are pushed only after it is made: a release goes out whole, or nothing of it is public;
-# * every artifact a publishing job reads is kept 30 days, so it outlives the approval;
+#   are pushed only after it is made: a failed build publishes nothing, and an image push that
+#   fails after the GitHub release leaves the release without images (RELEASING.md);
+# * every artifact `host` reads is kept 30 days and the images 60, so each outlives its approvals;
 # * the steps dist writes for system packages, containers and announcements are gone, because
 #   no target uses them.
 #
@@ -326,9 +327,10 @@ jobs:
           name: image-${{ matrix.image }}-${{ matrix.platform.arch }}
           path: ${{ runner.temp }}/image/
           if-no-files-found: error
-          # The publishing job reads it after two approvals, and an environment waits up to 30
-          # days for each. With 1 day, an approval given the next day found the images gone.
-          retention-days: 30
+          # The images are read after two approvals in a row: `host`'s, then `image-publish`'s,
+          # and an environment waits up to 30 days for each. The second wait starts when the
+          # first ends, so the images must outlive 60 days, and 30 would lose them on day 31.
+          retention-days: 60
 
   # Publishes the GitHub release. It waits in the `release` environment for a reviewer before it
   # starts (RELEASING.md). Uploads a few MB and signs one attestation: 30 minutes is plenty.
@@ -436,7 +438,11 @@ jobs:
       - plan
       - host
       - image-build
-    if: needs.host.result == 'success'
+    # Named in full, and not left to the implicit `success()`, so the condition says what it needs:
+    # the GitHub release exists and both architectures of every image built. `!cancelled()` so a
+    # cancelled run pushes nothing.
+    if: >-
+      !cancelled() && needs.host.result == 'success' && needs.image-build.result == 'success'
     strategy:
       fail-fast: false
       matrix:
