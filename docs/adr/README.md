@@ -28,4 +28,5 @@ testable. Consequences include what it costs and what would make us revisit it.
 | [0017](0017-bindings-in-one-repository.md) | Bindings for every language, generated, in this repository | Accepted |
 | [0018](0018-post-quantum-is-checked-at-the-handshake.md) | Post-quantum key exchange is checked at the handshake | Accepted |
 | [0019](0019-relay-starts-through-a-guard.md) | The relay image starts through a guard that refuses an open config | Accepted, extended by 0020 |
-| [0020](0020-guard-closes-more-defaults-and-guards-rendezvous.md) | The guard closes three more open defaults, pins the file it checked, and guards rendezvous | Accepted |
+| [0020](0020-guard-closes-more-defaults-and-guards-rendezvous.md) | The guard closes three more open defaults, pins the file it checked, and guards rendezvous | Accepted, extended by 0021 |
+| [0021](0021-guard-hands-over-a-sealed-copy.md) | The guard hands iroh-relay a sealed copy, and a relay without TLS needs a flag | Accepted |
