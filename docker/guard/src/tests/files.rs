@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::Read;
 
-use crate::{Mode, open_config, relay_args};
+use crate::open_config;
 
 fn scratch() -> std::path::PathBuf {
     // Per test and per process, so parallel runs never share one.
@@ -63,20 +63,9 @@ fn a_file_that_is_not_utf8_is_refused() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-#[test]
-fn iroh_relay_is_started_on_its_standard_input_and_nothing_else() {
-    assert_eq!(relay_args(Mode::Closed), ["--config-path=/dev/stdin"]);
-    assert_eq!(relay_args(Mode::Open), ["--config-path=/dev/stdin"]);
-    // --dev is how iroh-relay 1.4.0 hands the QUIC server its certificate with the relay half off.
-    assert_eq!(
-        relay_args(Mode::Rendezvous),
-        ["--dev", "--config-path=/dev/stdin"]
-    );
-}
-
 /// A rename over the path after the check, as a ConfigMap update does, changes nothing the relay
-/// reads. On Linux `/dev/stdin` is `/proc/self/fd/0`, and opening a `/proc/self/fd` link opens the
-/// file the descriptor holds, so the descriptor stands in for the relay's standard input here.
+/// reads. Opening a `/proc/self/fd` link opens the file the descriptor holds, so the descriptor
+/// stands in for the relay's descriptor 0 here.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_rename_over_the_path_after_the_check_does_not_reach_the_relay() {

@@ -16,11 +16,15 @@ use std::fmt;
 
 mod args;
 mod file;
+mod handover;
 mod rules;
 mod schema;
 
 pub use args::Args;
-pub use file::{CONFIG_ON_STDIN, open_config, relay_args};
+pub use file::open_config;
+pub use handover::{CONFIG_FD_PATH, relay_args};
+#[cfg(unix)]
+pub use handover::{check_handover, names_the_same_file};
 
 /// The iroh-relay release whose config `schema.rs` mirrors. Both Dockerfiles must build this one,
 /// and the root `Cargo.lock` must resolve it, or a test fails: a new release may add a key the

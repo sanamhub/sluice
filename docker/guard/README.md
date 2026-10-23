@@ -3,8 +3,8 @@
 The entry point of both images, [`relay`](../relay/README.md) and
 [`rendezvous`](../rendezvous/README.md) (ADR 0019, ADR 0020). It checks the config that
 `iroh-relay` 1.4.0 is about to start with, refuses one that would open more than the operator
-wrote, and then replaces itself with `/usr/local/bin/iroh-relay --config-path=/dev/stdin`, so the
-server runs as PID 1 and gets the container's signals.
+wrote, and then replaces itself with `/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0`, so
+the server runs as PID 1 and gets the container's signals.
 
 ```
 sluice-relay-guard [--open | --rendezvous] --config-path <file>
@@ -68,16 +68,23 @@ itself cannot be started, the guard exits with 69, `EX_UNAVAILABLE`.
 
 The guard opens the config once, checks that the open file is a regular file, reads it, and hands
 that same open file to iroh-relay as its standard input (ADR 0020). iroh-relay is told to read
-`/dev/stdin`, which on Linux opens that file again from its start. A rename over the path between
-the two reads, such as a Kubernetes ConfigMap update, so cannot start a file nobody checked. An
-edit in place, in the instant between them, still could: standard input pins the file, not its
-bytes.
+`/proc/self/fd/0`, which on Linux opens that file again from its start. A rename over the path
+between the two reads, such as a Kubernetes ConfigMap update, so cannot start a file nobody
+checked. An edit in place, in the instant between them, still could: standard input pins the file,
+not its bytes.
 
-iroh-relay 1.4.0 reads nothing else from standard input: no line of its `src/` reads `stdin`. In
-the image, `/dev/stdin` is the runtime's link to `/proc/self/fd/0`, and for the relay that is the
-config file (checked in WSL with Docker 29.1.3, see [the relay README](../relay/README.md)).
+iroh-relay 1.4.0 reads nothing else from standard input: no line of its `src/` reads `stdin`.
 
-The guard starts the relay only on Unix. Elsewhere `/dev/stdin` does not exist, iroh-relay would
+**The path must resolve, or the relay runs open.** iroh-relay tests its config path with
+`exists()`, which is false on any error, and then runs its open default: relay on, everyone, no
+limit (main.rs:542-567). Before it replaces itself, the guard takes `/proc/self/fd/<n>` for the
+descriptor `n` the config is open on, and checks that it names the same device and inode as that
+open file. That proves `/proc` is mounted and gives this process's own descriptors. If it does
+not, the guard prints one line that says why and exits with 69, and starts nothing. It was
+`/dev/stdin` before, which is a link the container runtime makes, and a microVM with a bare
+devtmpfs, a root without `/proc` or a volume over `/dev` may not have it.
+
+The guard starts the relay only on Unix. Elsewhere `/proc/self/fd` does not exist, iroh-relay would
 find no config there and run its open default, so the guard stops after the check with exit 69.
 
 ## `--dev` in rendezvous mode

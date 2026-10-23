@@ -1,6 +1,7 @@
 mod args;
 mod examples;
 mod files;
+mod handover;
 mod keys;
 mod rendezvous;
 mod rules;

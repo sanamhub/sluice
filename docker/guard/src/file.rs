@@ -1,25 +1,10 @@
-//! The config file, opened once, and the way iroh-relay is pointed at it.
-//!
-//! iroh-relay opens its config path itself (main.rs:542-567). If the guard passed it the path,
-//! a rename between the guard's read and the relay's, such as a Kubernetes ConfigMap update, would
-//! start a file nobody checked. So the guard keeps the file it read open, and hands that same file
-//! to iroh-relay as its standard input, with `--config-path=/dev/stdin` (ADR 0020).
+//! The config file, opened once. `handover.rs` says how iroh-relay is pointed at it.
 
-use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use crate::{Mode, Refusal};
-
-/// The path iroh-relay is told to read: its own standard input, which is the file the guard
-/// checked. Linux opens `/dev/stdin` as that file again, from its start, so a rename of the path
-/// after the check cannot change what the relay reads.
-///
-/// ```
-/// assert_eq!(sluice_relay_guard::CONFIG_ON_STDIN, "/dev/stdin");
-/// ```
-pub const CONFIG_ON_STDIN: &str = "/dev/stdin";
+use crate::Refusal;
 
 /// Opens the config file and reads it. The file must exist and be a regular file: iroh-relay runs
 /// its open default when the path does not exist. It returns the open file, at its start, with
@@ -64,32 +49,6 @@ pub fn open_config(path: &Path) -> Result<(File, String), Refusal> {
     let text = String::from_utf8(bytes)
         .map_err(|_| Refusal::new(format!("{shown} is not UTF-8 text, which TOML must be")))?;
     Ok((file, text))
-}
-
-/// The arguments iroh-relay is started with, after the guard has checked the file it hands over
-/// as standard input: `--config-path=/dev/stdin`, and nothing from the command line the guard was
-/// given.
-///
-/// In rendezvous mode `--dev` comes first. iroh-relay 1.4.0 gives the QUIC server of address
-/// discovery a certificate only on the path `--dev` takes when the relay half is off
-/// (main.rs:593-600 and 703-721), and without it refuses the config with `TLS not configured`.
-/// Its other effects, plain HTTP for the relay and a default HTTP port, have nothing to act on
-/// with no relay half, which the guard has checked is off. The guard refuses `--dev` from the
-/// command line, in every mode.
-///
-/// ```
-/// use sluice_relay_guard::{Mode, relay_args};
-///
-/// assert_eq!(relay_args(Mode::Closed), ["--config-path=/dev/stdin"]);
-/// assert_eq!(relay_args(Mode::Open), ["--config-path=/dev/stdin"]);
-/// assert_eq!(relay_args(Mode::Rendezvous), ["--dev", "--config-path=/dev/stdin"]);
-/// ```
-pub fn relay_args(mode: Mode) -> Vec<OsString> {
-    let config = OsString::from(format!("--config-path={CONFIG_ON_STDIN}"));
-    match mode {
-        Mode::Rendezvous => vec![OsString::from("--dev"), config],
-        Mode::Closed | Mode::Open => vec![config],
-    }
 }
 
 fn cannot_open(path: &Path, err: &io::Error) -> Refusal {

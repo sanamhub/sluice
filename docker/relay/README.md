@@ -20,7 +20,8 @@ the operator adds an id.
 
 The entry point is [`sluice-relay-guard`](../guard/README.md) (ADR 0019), and the default command
 is `--config-path /etc/relay/relay.toml`. It opens the config, checks it, and then replaces itself
-with `iroh-relay --config-path=/dev/stdin`, with the file it checked as the relay's standard input
+with `iroh-relay --config-path=/proc/self/fd/0`, with the file it checked as the relay's standard
+input
 (ADR 0020). The relay so reads the bytes that were checked, even if the file is replaced after,
 and it is PID 1 and gets the container's signals.
 
