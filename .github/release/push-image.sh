@@ -78,7 +78,8 @@ checked_digest() {
 # A failure to log in must not look like a push: the token goes in on standard input and nowhere
 # else.
 login() {
-  printf '%s\n' "$GITHUB_TOKEN" | docker login "$registry" --username "$GITHUB_ACTOR" --password-stdin
+  printf '%s\n' "$GITHUB_TOKEN" \
+    | docker login "$registry" --username "$GITHUB_ACTOR" --password-stdin
 }
 
 # The architecture each image is, before it is pushed under that architecture's name. A tarball
