@@ -13,6 +13,8 @@ sluice-relay-guard = { path = ".." }
 # The loose mirror of iroh-relay's config in relay_differential, at the guard's versions.
 serde = { version = "1", features = ["derive"] }
 toml = { version = "1.1", default-features = false, features = ["std", "serde", "parse"] }
+# The parser iroh-relay reads `access.http.url` with, and the guard's, for the URL assertion.
+url = "2.5.8"
 
 [[bin]]
 name = "relay_config"

@@ -454,6 +454,7 @@ dependencies = [
  "serde",
  "sluice-relay-guard",
  "toml",
+ "url",
 ]
 
 [[package]]

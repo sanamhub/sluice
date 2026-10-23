@@ -1,14 +1,18 @@
 #![no_main]
 
 //! The same text through the guard and through a loose mirror of how iroh-relay 1.4.0 reads it:
-//! no unknown key refused, a missing `access` read as everyone, and `enable_relay` true unless
-//! written (main.rs:94-159 and 370-389). Whatever the guard lets start is what iroh-relay would
-//! run: closed means iroh-relay's own `access` is an allowlist, an HTTP check or shared tokens,
-//! rendezvous means its relay half is off, and closed or open means it is on.
+//! no unknown key refused, a missing `access` read as everyone, `enable_relay` true unless written,
+//! and `enable_metrics` true unless written (main.rs:94-159 and 370-389). Whatever the guard lets
+//! start is what iroh-relay would run: closed means iroh-relay's own `access` is an allowlist, an
+//! HTTP check or shared tokens, rendezvous means its relay half is off, and closed or open means it
+//! is on. In every mode `enable_metrics` was written and HTTPS is not turned off; in open mode a
+//! per-client byte limit is set; and an HTTP check's URL holds no user name, password, query or
+//! fragment.
 
 use libfuzzer_sys::fuzz_target;
 use serde::Deserialize;
 use sluice_relay_guard::{Mode, check_config};
+use url::Url;
 
 /// iroh-relay 1.4.0's `Config`, as loose as it is there. Only the fields the assertions read are
 /// named, and every other key is ignored, as iroh-relay ignores keys it does not know.
@@ -16,8 +20,43 @@ use sluice_relay_guard::{Mode, check_config};
 struct Loose {
     #[serde(default = "on")]
     enable_relay: bool,
+    /// `Option` here, where iroh-relay defaults it to true (main.rs:145 and 384-386): the
+    /// assertion is that someone wrote it, since the default serves metrics with no login.
+    enable_metrics: Option<bool>,
     #[serde(default)]
     access: LooseAccess,
+    limits: Option<LooseLimits>,
+    tls: Option<LooseTls>,
+}
+
+/// `struct Limits`, main.rs:510-518, down to the one number open mode needs.
+#[derive(Deserialize)]
+struct LooseLimits {
+    client: Option<LooseClient>,
+}
+
+#[derive(Deserialize)]
+struct LooseClient {
+    rx: Option<LooseRate>,
+}
+
+#[derive(Deserialize)]
+struct LooseRate {
+    bytes_per_second: Option<u32>,
+}
+
+/// `struct TlsConfig`, main.rs:399-462, down to the setting that turns HTTPS off.
+#[derive(Deserialize)]
+struct LooseTls {
+    #[serde(default)]
+    dangerous_http_only: bool,
+}
+
+/// `struct HttpAccessConfig`, main.rs:203-214. The URL is a string here, and parsed by the
+/// assertion with the `url` crate, which iroh-relay reads it with.
+#[derive(Deserialize)]
+struct LooseHttp {
+    url: String,
 }
 
 /// `cfg_defaults::enable_relay`, main.rs:376-378.
@@ -35,7 +74,7 @@ enum LooseAccess {
     Everyone,
     Allowlist(Vec<String>),
     Denylist(Vec<String>),
-    Http(toml::Value),
+    Http(LooseHttp),
     #[serde(rename = "shared_token")]
     SharedToken(Vec<String>),
 }
@@ -56,6 +95,7 @@ fuzz_target!(|data: &[u8]| {
             Ok(loose) => loose,
             Err(err) => panic!("the guard passed {mode:?} text iroh-relay cannot read: {err}"),
         };
+        let rendezvous = mode == Mode::Rendezvous;
         match mode {
             Mode::Closed => assert!(
                 matches!(
@@ -68,10 +108,44 @@ fuzz_target!(|data: &[u8]| {
                 !loose.enable_relay,
                 "the guard passed as rendezvous what iroh-relay runs as a relay"
             ),
-            Mode::Open => {}
+            Mode::Open => assert!(
+                has_rate(&loose),
+                "the guard passed open with no per-client byte limit"
+            ),
         }
-        if mode != Mode::Rendezvous {
+        if !rendezvous {
             assert!(loose.enable_relay, "the guard passed {mode:?} with the relay half off");
+        }
+        assert!(
+            loose.enable_metrics.is_some(),
+            "the guard passed {mode:?} with enable_metrics unwritten, so iroh-relay serves metrics"
+        );
+        assert!(
+            !loose.tls.is_some_and(|tls| tls.dangerous_http_only),
+            "the guard passed {mode:?} with HTTPS turned off"
+        );
+        if let LooseAccess::Http(http) = &loose.access {
+            plain_url(&http.url);
         }
     }
 });
+
+/// Whether `limits.client.rx.bytes_per_second` is written.
+fn has_rate(loose: &Loose) -> bool {
+    loose
+        .limits
+        .as_ref()
+        .and_then(|limits| limits.client.as_ref())
+        .and_then(|client| client.rx.as_ref())
+        .is_some_and(|rx| rx.bytes_per_second.is_some())
+}
+
+/// iroh-relay logs a failed check's URL whole, so it may hold no secret: no user name, password,
+/// query or fragment, and it must be one iroh-relay can parse.
+fn plain_url(text: &str) {
+    let url = Url::parse(text).unwrap_or_else(|err| panic!("the guard passed a URL: {err}"));
+    assert!(matches!(url.scheme(), "http" | "https"), "the guard passed another scheme");
+    assert!(url.username().is_empty() && url.password().is_none(), "the guard passed userinfo");
+    assert!(url.query().is_none(), "the guard passed a query");
+    assert!(url.fragment().is_none(), "the guard passed a fragment");
+}

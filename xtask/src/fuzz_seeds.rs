@@ -37,7 +37,8 @@ pub enum Target {
     #[value(name = "relay_config")]
     RelayConfig,
     /// `sluice-relay-guard`: the text of an iroh-relay config, through the guard and a loose
-    /// mirror of iroh-relay's own reading. The same seeds as `relay_config`.
+    /// mirror of iroh-relay's own reading. The seeds of `relay_config`, each with a choice byte
+    /// in front.
     #[value(name = "relay_differential")]
     RelayDifferential,
 }
@@ -108,7 +109,11 @@ pub fn run(target: Target, dir: &Path) -> anyhow::Result<()> {
 pub fn seeds(target: Target, vectors: &Path) -> anyhow::Result<Vec<Seed>> {
     if matches!(target, Target::RelayConfig | Target::RelayDifferential) {
         // The vectors are in tests/vectors, two folders below the repository root.
-        return relay_configs(&vectors.join("..").join(".."));
+        let configs = relay_configs(&vectors.join("..").join(".."))?;
+        return Ok(match target {
+            Target::RelayDifferential => with_selector(configs),
+            _ => configs,
+        });
     }
     let Some(folder) = target.folder() else {
         return Ok(RANGES
@@ -138,8 +143,25 @@ pub fn seeds(target: Target, vectors: &Path) -> anyhow::Result<Vec<Seed>> {
     Ok(seeds)
 }
 
-/// The three configs the images ship, and iroh-relay 1.4.0's own examples that the guard's tests
-/// parse. No vector holds a relay config: it is iroh-relay's format, and not the wire's.
+/// The differential target reads its first byte as the choice of whether `IROH_RELAY_ACCESS_TOKEN`
+/// is set, and the rest as the config. A seed that starts with the config's own first byte, which
+/// is `#` in every shipped config, leaves a comment cut in two for the rest, so the config never
+/// parses and no assertion runs. So each seed is given twice, with `0x00` and with `0x01` in front.
+fn with_selector(configs: Vec<Seed>) -> Vec<Seed> {
+    configs
+        .into_iter()
+        .flat_map(|seed| {
+            [0u8, 1].map(|choice| Seed {
+                file: seed.file.clone(),
+                bytes: [&[choice][..], &seed.bytes].concat(),
+            })
+        })
+        .collect()
+}
+
+/// The three configs the images ship, iroh-relay 1.4.0's own examples that the guard's tests
+/// parse, and [`NEAR_MISSES`]. No vector holds a relay config: it is iroh-relay's format, and not
+/// the wire's.
 fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
     let docker = root.join("docker");
     let examples = docker
@@ -164,7 +186,7 @@ fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
     }
     found.sort();
     paths.extend(found);
-    paths
+    let mut seeds = paths
         .into_iter()
         .map(|path| {
             let bytes =
@@ -179,8 +201,33 @@ fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
                 bytes,
             })
         })
-        .collect()
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    seeds.extend(NEAR_MISSES.iter().map(|text| Seed {
+        file: None,
+        bytes: text.as_bytes().to_vec(),
+    }));
+    Ok(seeds)
 }
+
+/// Configs one line away from a rule of the guard, which the shipped configs and iroh-relay's
+/// examples are not: none of them turns HTTPS off, leaves a limit out of an open config, or puts a
+/// secret in a URL. Without a seed on each side of a rule, a run of seconds cannot tell a guard
+/// that has the rule from one that lost it.
+const NEAR_MISSES: [&str; 6] = [
+    // `dangerous_http_only`, for a relay and for a rendezvous server.
+    "enable_metrics = false\n[access]\nallowlist = []\n[tls]\ncert_mode = \"Manual\"\n\
+     dangerous_http_only = true\n",
+    "enable_relay = false\nenable_metrics = false\n[tls]\ncert_mode = \"Manual\"\n\
+     dangerous_http_only = true\n",
+    // Open with no per-client byte limit.
+    "enable_metrics = false\naccess = \"everyone\"\n",
+    // No `enable_metrics`.
+    "[access]\nallowlist = []\n",
+    // A URL with a user name, a query and a fragment.
+    "enable_metrics = false\n[access.http]\nurl = \"https://u@a.example/?k=v#f\"\n",
+    // An empty shared token list.
+    "enable_metrics = false\n[access]\nshared_token = []\n",
+];
 
 /// The `cases` of every `.json` file in `dir`, by file name, in name order. A name that is not
 /// UTF-8 is an error and not a skip, because a vector file left out would quietly seed less.

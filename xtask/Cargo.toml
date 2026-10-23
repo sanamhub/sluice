@@ -26,6 +26,10 @@ sluice-cli = { path = "../crates/sluice-cli" }
 tempfile = { workspace = true }
 wasmparser = { workspace = true }
 
+[dev-dependencies]
+# The relay seeds must parse as TOML, which is what lets the differential target reach the guard.
+toml = { workspace = true }
+
 [lints]
 workspace = true
 

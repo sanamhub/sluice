@@ -220,9 +220,43 @@ fn the_relay_config_seeds_are_the_shipped_configs_and_every_iroh_example() {
     );
     let relay = fs::read(vectors_dir().join("../../docker/relay/relay.toml")).unwrap();
     assert_eq!(seeds[0].bytes, relay);
-    let differential = super::seeds(Target::RelayDifferential, &vectors_dir()).unwrap();
-    let bytes = |seeds: &[super::Seed]| seeds.iter().map(|s| s.bytes.clone()).collect::<Vec<_>>();
-    assert_eq!(bytes(&differential), bytes(&seeds));
+    // The configs one line from a rule come after them, and are all TOML, so each reaches the check.
+    let near: Vec<_> = seeds.iter().filter(|seed| seed.file.is_none()).collect();
+    assert_eq!(near.len(), 6);
+    for seed in near {
+        let text = std::str::from_utf8(&seed.bytes).unwrap();
+        assert!(text.parse::<toml::Table>().is_ok(), "{text}");
+    }
+}
+
+/// The differential target takes its first byte as a choice and the rest as the config. Every
+/// shipped config starts with `#`, so without a byte in front the rest is a comment cut in two and
+/// no rule runs. Each seed comes twice, with `0x00` and with `0x01`, and the rest of each is the
+/// config as it was, which parses, so it reaches the guard's check.
+#[test]
+fn each_differential_seed_comes_twice_with_a_choice_byte_and_reaches_the_guards_check() {
+    let configs = seeds(Target::RelayConfig, &vectors_dir()).unwrap();
+    let seeds = seeds(Target::RelayDifferential, &vectors_dir()).unwrap();
+    assert_eq!(seeds.len(), 2 * configs.len());
+    for (config, pair) in configs.iter().zip(seeds.chunks(2)) {
+        assert_eq!(pair[0].file, config.file);
+        for (choice, seed) in [0u8, 1].into_iter().zip(pair) {
+            assert_eq!(seed.bytes[0], choice, "{:?}", seed.file);
+            assert_eq!(seed.bytes[1..], config.bytes, "{:?}", seed.file);
+            let rest = std::str::from_utf8(&seed.bytes[1..]).unwrap();
+            assert!(
+                rest.parse::<toml::Table>().is_ok(),
+                "{:?} is not TOML",
+                seed.file
+            );
+        }
+    }
+    // What was wrong: with the config's own first byte taken as the choice, a shipped config is
+    // cut in the middle of its first comment and is not TOML.
+    let shipped = &configs[0].bytes;
+    assert_eq!(shipped[0], b'#');
+    let cut = std::str::from_utf8(&shipped[1..]).unwrap();
+    assert!(cut.parse::<toml::Table>().is_err());
 }
 
 #[test]

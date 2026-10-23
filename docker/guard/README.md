@@ -126,7 +126,9 @@ It is its own project with its own `Cargo.lock`, outside the root workspace, so 
 from `docker/` with only the files it needs: each Dockerfile has a `Dockerfile.dockerignore` beside
 it that lists them, which BuildKit reads. The legacy builder (`DOCKER_BUILDKIT=0`) reads only
 `docker/.dockerignore`, so that holds the union of the two lists, and each Dockerfile copies only
-`guard/Cargo.toml`, `guard/Cargo.lock` and `guard/src`. Tests check both. ci.yml runs its gates; to run them by hand from the repository root:
+`guard/Cargo.toml`, `guard/Cargo.lock` and `guard/src`. Tests check both.
+
+ci.yml runs its gates; to run them by hand from the repository root:
 
 ```
 cargo fmt --manifest-path docker/guard/Cargo.toml --check
@@ -135,6 +137,18 @@ cargo test --manifest-path docker/guard/Cargo.toml --locked
 cargo deny --manifest-path docker/guard/Cargo.toml check
 ```
 
-The fuzz target `relay_config` in `fuzz/` reads any bytes as a config, in each mode. `cargo xtask
-fuzz-seeds relay_config <dir>` writes its seeds: the three shipped configs and the iroh-relay
-examples.
+Two fuzz targets are in `fuzz/`. `relay_config` reads any bytes as a config, in each mode, and as a
+command line split at each NUL, and asserts that no refusal holds a control character or prints a
+key or an argument outside the rules above. `relay_differential` reads the same bytes through the
+guard and through a loose mirror of how iroh-relay 1.4.0 reads them, and asserts that whatever the
+guard lets start is what iroh-relay would run: closed means a closed `access`, rendezvous means the
+relay half is off, `enable_metrics` was written, `dangerous_http_only` is not true, an open config
+has a per-client byte limit, and an HTTP check's URL holds no user name, password, query or
+fragment. Its first byte says whether `IROH_RELAY_ACCESS_TOKEN` is set and the rest is the config.
+
+`cargo xtask fuzz-seeds relay_config <dir>` writes the seeds of the first: the three shipped
+configs, the iroh-relay examples, and six configs one line from a rule, such as an open config
+without a limit. For `relay_differential` it writes each of them twice, with `0x00` and `0x01` in
+front: every shipped config starts with `#`, and as the first byte it would leave a comment cut in
+two, so no rule would run. With only these seeds, deleting `check_rate`, `check_metrics` or
+`check_tls` in a scratch copy makes the target fail on its first run.
