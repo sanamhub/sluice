@@ -2,42 +2,51 @@
 # Pushes one image of a release to a registry, in two calls, so that each public tag is attested
 # before the next is written:
 #
-#   push-image.sh arch    each architecture under `<version>-<arch>`, after checking its platform
-#   push-image.sh index   the version tag as the index of those two digests, after checking it
+#   push-image.sh <registry> arch    each architecture under `<version>-<arch>`, after checking it
+#   push-image.sh <registry> index   the version tag as the index of those two digests, after
+#                                     checking it
 #
 # release.yml's image-publish job runs `arch`, attests both architectures, then runs `index` and
 # attests the index. A failure in between leaves public tags without their attestation, which a
 # re-run overwrites (RELEASING.md).
 #
+# The registry is the first argument and never comes from the environment: release.yml writes the
+# literal `ghcr.io`, and images.yml's push test writes `localhost:5000`. A value an earlier step
+# wrote to GITHUB_ENV cannot change it, and on a tag any registry but ghcr.io is refused.
+#
 # IMAGE is `rendezvous` or `relay`, OWNER the repository owner and TAG the checked `v<version>`
-# tag. The image-build jobs left `<arch>.tar.gz` for each architecture in RUNNER_TEMP/image.
-# REGISTRY is the registry to push to and has no default: release.yml sets `ghcr.io` on each step,
-# and images.yml's push test sets a local one. A default would let a value written to GITHUB_ENV by
-# an earlier step choose where a release goes.
+# tag. The image-build jobs left `<arch>.tar.gz` and its recorded `.sha256` for each architecture
+# in RUNNER_TEMP/image.
 set -euo pipefail
 # A failed command inside `$(...)` stops the script too, and not only the line that reads it.
 shopt -s inherit_errexit
 
-usage="usage: push-image.sh arch|index"
-step="${1:?$usage}"
+usage="usage: push-image.sh <registry> arch|index"
+registry="${1:?$usage}"
+step="${2:?$usage}"
 case "$step" in
   arch | index) ;;
   *)
     echo "$usage" >&2
     exit 2 ;;
 esac
+# A registry is a host name and an optional port. A slash, a space or a leading dash would make
+# the repository name below mean something else.
+if [[ ! "$registry" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
+  echo "'$registry' is not a registry: give a host name and an optional port" >&2
+  exit 2
+fi
 
 : "${IMAGE:?}" "${OWNER:?}" "${TAG:?}" "${GITHUB_TOKEN:?}" "${GITHUB_ACTOR:?}"
-: "${RUNNER_TEMP:?}" "${GITHUB_OUTPUT:?}" "${REGISTRY:?}"
+: "${RUNNER_TEMP:?}" "${GITHUB_OUTPUT:?}"
 
 # GitHub's documentation says a step's `env` overrides a job's or the workflow's, and says nothing
-# of a value an earlier step wrote to GITHUB_ENV. So on a tag, which is a release, the only
-# registry is ghcr.io, and the token is never sent anywhere else, whatever an earlier step did.
-if [[ "${GITHUB_REF:-}" == refs/tags/* && "$REGISTRY" != ghcr.io ]]; then
-  echo "REGISTRY is '$REGISTRY', and a release on a tag pushes to ghcr.io only" >&2
+# of a value an earlier step wrote to GITHUB_ENV. On a tag, which is a release, the only registry
+# is ghcr.io, and the token is never sent anywhere else, whatever an earlier step did.
+if [[ "${GITHUB_REF:-}" == refs/tags/* && "$registry" != ghcr.io ]]; then
+  echo "the registry is '$registry', and a release on a tag pushes to ghcr.io only" >&2
   exit 1
 fi
-registry="$REGISTRY"
 version="${TAG#v}"
 # A ghcr.io name is lower case, and an owner's login may not be.
 repo="$registry/$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')/sluice-$IMAGE"
