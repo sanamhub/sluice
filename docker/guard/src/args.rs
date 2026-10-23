@@ -40,11 +40,14 @@ impl Args {
         let mut mode: Option<Mode> = None;
         let mut config_path: Option<PathBuf> = None;
         let mut rest = args.iter();
+        let mut position = 0;
         while let Some(arg) = rest.next() {
+            position += 1;
             let path = if let Some(flag) = mode_flag(arg) {
                 mode = Some(both(mode, flag)?);
                 continue;
             } else if arg == "--config-path" {
+                position += 1;
                 match rest.next() {
                     Some(path) => path.clone(),
                     None => return Err(missing_path()),
@@ -52,7 +55,7 @@ impl Args {
             } else if let Some(path) = value_of(arg) {
                 path
             } else {
-                return Err(unknown(arg));
+                return Err(unknown(arg, position));
             };
             if path.is_empty() {
                 return Err(missing_path());
@@ -117,14 +120,28 @@ fn missing_path() -> Refusal {
     Refusal::new("--config-path needs the path of the config file after it")
 }
 
-fn unknown(arg: &OsStr) -> Refusal {
+/// An unknown argument is text from the command line, and may be a token pasted in the wrong
+/// place, or hold a terminal escape code. It is printed only when it looks like a flag: `--`, then
+/// 1 to 32 lower-case letters or `-`, as every flag iroh-relay has is. Any other is "an argument",
+/// with its 1-based position, so that a token on the command line stays out of the log.
+fn unknown(arg: &OsStr, position: usize) -> Refusal {
     if arg == "--dev" {
         return Refusal::new(
             "--dev is refused: it turns TLS off and is meant for a relay on a laptop; remove it",
         );
     }
+    let named = match arg.to_str().filter(|arg| looks_like_a_flag(arg)) {
+        Some(flag) => format!("unknown argument `{flag}`"),
+        None => format!("an argument at position {position} is unknown"),
+    };
     Refusal::new(format!(
-        "unknown argument `{}`: the guard takes only [--open | --rendezvous] --config-path <file>",
-        arg.to_string_lossy()
+        "{named}: the guard takes only [--open | --rendezvous] --config-path <file>"
     ))
+}
+
+/// `--` and then 1 to 32 characters of `a-z` or `-`.
+fn looks_like_a_flag(arg: &str) -> bool {
+    arg.strip_prefix("--").is_some_and(|name| {
+        (1..=32).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_lowercase() || b == b'-')
+    })
 }

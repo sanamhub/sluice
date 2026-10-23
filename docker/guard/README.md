@@ -35,10 +35,12 @@ login on the metrics port.
 Every refusal is one line on stderr, starting `sluice-relay-guard:`, and exits with 64, `EX_USAGE`.
 No message prints a value from the config: a `shared_token` entry, `access.http.bearer_token` and
 the query of `access.http.url` can be secrets. A key the guard does not know is named only when it
-is 1 to 64 ASCII letters, digits, `_` or `-`, as every iroh-relay setting is; any other is "a key",
-with its line, since it may be a token pasted in the wrong place. A key of that alphabet is printed,
-so a token made only of letters and digits, of 64 characters or fewer, pasted as a key, would be.
-Every control character in a message, from a path or an argument, is escaped, so a refusal is one
+is 1 to 32 lower-case ASCII letters or `_`, which every iroh-relay 1.4.0 setting is; any other is
+"a key", with its line, since it may be a token pasted in the wrong place. A hex or base64url key
+has digits or capitals, or is longer, so it is not printed. A token of lower-case letters alone, 32
+characters or fewer, would be: no rule can tell it from a setting. An unknown argument is named
+only when it is `--` and 1 to 32 lower-case letters or `-`; any other is "an argument", with its
+position, so a token on the command line stays out of the log. Every control character in a message, from a path or an argument, is escaped, so a refusal is one
 line.
 
 | Refused | Why |

@@ -65,24 +65,60 @@ fn dev_is_refused_alone_and_with_a_config_in_every_mode() {
 
 #[test]
 fn every_other_argument_is_refused_and_named() {
-    for arg in [
-        "--help",
-        "-c",
-        "-h",
-        "--version",
-        "--config",
-        "relay.toml",
-        "--open=yes",
-        "--rendezvous=yes",
-        "-",
-    ] {
+    for arg in ["--help", "--version", "--config"] {
         refused(
             &[arg, "--config-path", "/etc/relay/relay.toml"],
             &format!("`{arg}`"),
         );
     }
+}
+
+/// An argument that does not look like a flag may be a token pasted in the wrong place, so it is
+/// not printed, and its position says which one it is.
+#[test]
+fn an_argument_that_is_not_a_flag_is_not_printed() {
+    let base64url = "c2VjcmV0LXRva2Vu-_Tg9Zk";
+    let hex = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    let long = format!("--{}", "a".repeat(33));
+    for arg in [
+        base64url,
+        hex,
+        "relay.toml",
+        "--open=yes",
+        "--rendezvous=yes",
+        "-c",
+        "-h",
+        "-",
+        "--Open",
+        "--a1",
+        &long,
+        "--",
+    ] {
+        let args = ["--open", arg, "--config-path", "/etc/relay/relay.toml"];
+        let message = parse(&args).expect_err("refused");
+        assert!(
+            message.contains("an argument at position 2 is unknown"),
+            "{arg}: {message}"
+        );
+        // The whole message, so that nothing of the argument is in it.
+        assert_eq!(
+            message,
+            "an argument at position 2 is unknown: the guard takes only [--open | --rendezvous] \
+             --config-path <file>"
+        );
+    }
+    // The position counts the path after --config-path, so it is the place on the command line.
+    let args = ["--config-path", "a.toml", base64url];
+    let message = parse(&args).expect_err("refused");
+    assert!(
+        message.contains("an argument at position 3 is unknown"),
+        "{message}"
+    );
     // iroh-relay's own short flag for the config path is not one of the guard's.
-    refused(&["-c", "/etc/relay/relay.toml"], "unknown argument `-c`");
+    refused(
+        &["-c", "/etc/relay/relay.toml"],
+        "an argument at position 1",
+    );
 }
 
 #[test]

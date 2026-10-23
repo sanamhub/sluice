@@ -188,3 +188,13 @@ With a certificate from outside, the `certbot` recipe of the
 [`rendezvous` README](../rendezvous/README.md#certificates) works with one change: `--standalone`
 needs TCP 80, which the relay holds, so add `--pre-hook 'docker stop relay'` and end the deploy hook
 with `docker start relay`. This recipe was not run either.
+
+## A config with no `[tls]`
+
+The guard lets a config with no `[tls]` table start (ADR 0020), for a relay behind a reverse proxy.
+Then iroh-relay serves plain HTTP only, and **the proxy in front must end TLS**: a client reaches
+the proxy over HTTPS, and the proxy reaches the relay over HTTP. Whatever the clients present
+crosses that second hop in clear text, shared tokens included. Keep it on one host or one private
+network, and never on a path another party can read. The guard refuses `dangerous_http_only =
+true`, which turns HTTPS off on a relay that has a `[tls]` table, but it cannot see what is in
+front of one that has none.

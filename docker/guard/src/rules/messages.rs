@@ -2,8 +2,10 @@
 //! key on it when the key looks like a setting's name, but never what toml quoted from a value.
 //!
 //! A key the guard does not know is text from the config, and may be a token pasted in the wrong
-//! place, or hold a newline or a terminal escape code. Its name is printed only when it is 1 to 64
-//! ASCII letters, digits, `_` or `-`, as every iroh-relay setting is. Any other is "a key".
+//! place, or hold a newline or a terminal escape code. Its name is printed only when it is 1 to 32
+//! lower-case ASCII letters or `_`, as every iroh-relay 1.4.0 setting is. A hex or base64url token
+//! has digits or capitals, or is longer, so it is not printed. Any other is "a key", with the
+//! line.
 
 use crate::Refusal;
 
@@ -73,11 +75,11 @@ fn quoted_after<'a>(message: &'a str, prefix: &str) -> Option<&'a str> {
     (after == "`" || after.starts_with("`,")).then_some(name)
 }
 
-/// `name` if it is 1 to 64 ASCII letters, digits, `_` or `-`, the way every iroh-relay setting is
-/// written, and so cannot be a token of another alphabet, a newline or an escape code.
+/// `name` if it is 1 to 32 lower-case ASCII letters or `_`, the way every iroh-relay 1.4.0 setting
+/// is written, and so cannot be a hex or base64url token, a newline or an escape code.
 fn printable(name: &str) -> Option<&str> {
-    let plain = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-');
-    (1..=64)
+    let plain = |b: u8| b.is_ascii_lowercase() || b == b'_';
+    (1..=32)
         .contains(&name.len())
         .then_some(name)
         .filter(|name| name.bytes().all(plain))
@@ -99,5 +101,5 @@ fn key_on_line<'a>(text: &'a str, err: &toml::de::Error) -> Option<&'a str> {
     }
     .trim();
     let parts_printable = key.split('.').all(|part| printable(part.trim()).is_some());
-    (key.len() <= 64 && parts_printable).then_some(key)
+    parts_printable.then_some(key)
 }
