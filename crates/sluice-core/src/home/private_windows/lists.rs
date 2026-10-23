@@ -6,14 +6,15 @@ use std::path::Path;
 
 use super::{INHERIT, dacl_sddl, private_sddl, user_sid};
 
-/// Whether the file at `path` has the private access list [`super::restrict_file`] sets: inheritance
-/// stopped, and full control for the user, `SYSTEM` and `Administrators`, with nothing else.
+/// Whether the file at `path` has the private access list [`super::restrict_file`] sets:
+/// inheritance stopped, and full control for the user, `SYSTEM` and `Administrators`, with nothing
+/// else.
 pub(in crate::home) fn is_private_file(path: &Path) -> io::Result<bool> {
     has_private_list(path, "")
 }
 
-/// Whether the folder at `path` has the private access list [`super::restrict_dir`] sets on a new home:
-/// the same three entries, each with the inherit flags that pass it to what is made inside.
+/// Whether the folder at `path` has the private access list [`super::restrict_dir`] sets on a new
+/// home: the same three entries, each with the inherit flags that pass it to what is made inside.
 pub(in crate::home) fn is_private_dir(path: &Path) -> io::Result<bool> {
     has_private_list(path, INHERIT)
 }

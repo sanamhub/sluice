@@ -57,8 +57,9 @@ fn a_home_with_a_trailing_dot_component_is_that_folder_and_not_another() {
     assert_eq!(failed(&home), []);
 }
 
-/// A home over 260 characters. `std` adds `\\?\` to a path that long for its own calls, but doctor's
-/// calls to `GetNamedSecurityInfoW` and `GetDiskFreeSpaceExW` take the path as it is, and failed.
+/// A home over 260 characters. `std` adds `\\?\` to a path that long for its own calls, but
+/// doctor's calls to `GetNamedSecurityInfoW` and `GetDiskFreeSpaceExW` took the path as it was, and
+/// failed.
 #[test]
 fn a_home_longer_than_260_characters_opens_and_doctor_passes_it() {
     let parent = tempfile::tempdir().unwrap();
