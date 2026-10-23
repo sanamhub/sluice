@@ -37,7 +37,8 @@ fn link_file(target: &Path, link: &Path) -> bool {
             Err(e) if e.raw_os_error() == Some(1314) => {
                 assert!(
                     !std::env::var_os("SLUICE_REQUIRE_SYMLINKS").is_some_and(|v| !v.is_empty()),
-                    "SLUICE_REQUIRE_SYMLINKS is set, and this user may not make a symbolic link: {e}"
+                    "SLUICE_REQUIRE_SYMLINKS is set, and this user may not make a \
+                     symbolic link: {e}"
                 );
                 eprintln!("SKIPPED: this user may not make a symbolic link: {e}");
                 false
