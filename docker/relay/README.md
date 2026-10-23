@@ -210,5 +210,5 @@ the relay over HTTP. Whatever the clients present crosses that second hop in cle
 tokens and bearer tokens included. Keep it on one host or one private network, and never on a path
 another party can read.
 
-`dangerous_http_only = true` stays refused in a config that has `[tls]`: it turns HTTPS off, which is
-what `--dev` does, and the flag is not a second way to ask for that.
+`dangerous_http_only = true` stays refused in a config that has `[tls]`: it turns HTTPS off, which
+is what `--dev` does, and the flag is not a second way to ask for that.

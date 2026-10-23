@@ -145,7 +145,8 @@ impl std::error::Error for Refusal {}
 /// assert!(check_config(rendezvous, Mode::Rendezvous, None, true).is_err());
 ///
 /// // The variable replaces an empty list, and is refused when it is empty itself.
-/// let tokens = "enable_metrics = false\n[access]\nshared_token = []\n[tls]\ncert_mode = \"Manual\"\n";
+/// let tokens =
+///     "enable_metrics = false\n[access]\nshared_token = []\n[tls]\ncert_mode = \"Manual\"\n";
 /// assert!(check_config(tokens, Mode::Closed, None, false).is_err());
 /// assert_eq!(check_config(tokens, Mode::Closed, Some("t"), false), Ok(()));
 /// assert!(check_config(&closed, Mode::Closed, Some(""), false).is_err());

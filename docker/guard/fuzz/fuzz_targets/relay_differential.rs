@@ -155,7 +155,8 @@ fuzz_target!(|data: &[u8]| {
             // a rule was not deleted, not a comparison with what iroh-relay does.
             assert!(
                 loose.enable_metrics.is_some(),
-                "the guard passed {mode:?} with enable_metrics unwritten, so iroh-relay serves metrics"
+                "the guard passed {mode:?} with enable_metrics unwritten, \
+                 so iroh-relay serves metrics"
             );
             assert!(
                 !loose.tls.is_some_and(|tls| tls.dangerous_http_only),
