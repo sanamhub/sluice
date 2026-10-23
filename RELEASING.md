@@ -47,7 +47,7 @@ Two workflows do it:
 | Workflow | Runs on | Does |
 |---|---|---|
 | `release-plz.yml` | every push to `main` | opens or updates the release pull request: the version bump and the new `CHANGELOG.md` section |
-| `release.yml` | a tag `v<version>` | runs all of `ci.yml`, checks the tag, builds the binaries with `dist` and both images for amd64 and arm64, waits for every build and then for approval, publishes the GitHub release, then waits again and pushes and attests the images |
+| `release.yml` | a tag `v<version>` | runs all of `ci.yml`, checks the tag, builds the binaries with `dist` and both images for amd64 and arm64, waits for every build and then for approval, publishes the GitHub release as a draft and then publishes it, then waits again and pushes and attests the images: each architecture first, then the version index |
 
 **Who can release.** The tag ruleset's bypass list names **Repository admin**, and in a repository
 owned by a user that is the owner alone. GitHub's ruleset page lists "Repository admins" as
@@ -203,8 +203,20 @@ release never skips the checks, even if the pull request merged without them.
    tag, fix it on `main`, and tag the next patch version.
 
    A push that fails after `host` is different. The GitHub release is already public, so a failed
-   `image-publish` leaves it without images. Re-run that job from the run page within 30 days of
-   the tag push, and the second reviewer approves it again.
+   `image-publish` leaves it without images, or with fewer than all of them. The job pushes in this
+   order, and a failure leaves what the table says:
+
+   | Step that fails | Tags left public |
+   |---|---|
+   | `push-image.sh arch`, on either architecture | the architecture tags pushed before it, unattested |
+   | an architecture's provenance or SBOM attestation | both architecture tags, partly attested |
+   | `push-image.sh index` | both architecture tags, attested; the index only if it was written |
+   | the index attestation | the index, unattested |
+
+   Every step of a re-run writes its tag again: `docker push` replaces the manifest behind
+   `<version>-<arch>`, and `docker buildx imagetools create --tag` replaces the index. So a re-run
+   overwrites what the failed one left. Re-run that job from the run page within 30 days of the tag
+   push, and the second reviewer approves it again.
 
    **Both limits are GitHub's.** A run is cancelled 35 days after it starts, and approval time
    counts: "If a workflow run reaches this limit, the workflow run is cancelled. This period

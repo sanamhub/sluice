@@ -447,8 +447,10 @@ jobs:
         run: gh release edit "$TAG" --draft=false
 
   # Pushes, merges and attests one image, only after the GitHub release exists. It runs in the
-  # `release` environment, which may ask for a second approval (RELEASING.md). Moves two images of
-  # at most 62 MB each and signs five attestations: 30 minutes is plenty.
+  # `release` environment, which may ask for a second approval (RELEASING.md). `push-image.sh arch`
+  # writes both architecture tags, each is attested with its SBOM, and only then does
+  # `push-image.sh index` create the version tag, which is attested last. Moves two images of at
+  # most 62 MB each and signs five attestations: 30 minutes is plenty.
   image-publish:
     needs:
       - plan
@@ -487,49 +489,57 @@ jobs:
           pattern: image-${{ matrix.image }}-*
           path: ${{ runner.temp }}/image
           merge-multiple: true
-      # Each architecture goes up under its own tag, and the version tag is the index of both.
-      - name: Push
-        id: push
+      # Each architecture goes up under its own tag, after its platform is checked, and nothing is
+      # attested or pushed after it until the attestation of each one below has succeeded.
+      - name: Push each architecture
+        id: push-arch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # On the step itself, so no job or workflow value can change it. A value an earlier step
           # writes to GITHUB_ENV is not covered by GitHub's documented precedence, and push-image.sh
           # refuses any other registry on a tag.
           REGISTRY: ghcr.io
-        run: bash .github/release/push-image.sh
-      # Provenance for the index, which `docker pull <image>:<version>` resolves, and for each
-      # architecture's image, which is what a pull on that architecture fetches.
-      - name: Attest the index
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-name: ${{ steps.push.outputs.name }}
-          subject-digest: ${{ steps.push.outputs.index }}
-          push-to-registry: true
+        run: bash .github/release/push-image.sh arch
+      # Provenance for each architecture's image, which is what a pull on that architecture fetches.
       - name: Attest amd64
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-name: ${{ steps.push.outputs.name }}
-          subject-digest: ${{ steps.push.outputs.amd64 }}
+          subject-name: ${{ steps.push-arch.outputs.name }}
+          subject-digest: ${{ steps.push-arch.outputs.amd64 }}
           push-to-registry: true
       - name: Attest arm64
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-name: ${{ steps.push.outputs.name }}
-          subject-digest: ${{ steps.push.outputs.arm64 }}
+          subject-name: ${{ steps.push-arch.outputs.name }}
+          subject-digest: ${{ steps.push-arch.outputs.arm64 }}
           push-to-registry: true
       - name: Attest the amd64 SBOM
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-name: ${{ steps.push.outputs.name }}
-          subject-digest: ${{ steps.push.outputs.amd64 }}
+          subject-name: ${{ steps.push-arch.outputs.name }}
+          subject-digest: ${{ steps.push-arch.outputs.amd64 }}
           sbom-path: ${{ runner.temp }}/image/amd64.spdx.json
           push-to-registry: true
       - name: Attest the arm64 SBOM
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-name: ${{ steps.push.outputs.name }}
-          subject-digest: ${{ steps.push.outputs.arm64 }}
+          subject-name: ${{ steps.push-arch.outputs.name }}
+          subject-digest: ${{ steps.push-arch.outputs.arm64 }}
           sbom-path: ${{ runner.temp }}/image/arm64.spdx.json
+          push-to-registry: true
+      # The version tag, which `docker pull <image>:<version>` resolves. It is created only after
+      # both architectures are attested, so no public tag is left without one.
+      - name: Create the version index
+        id: push-index
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY: ghcr.io
+        run: bash .github/release/push-image.sh index
+      - name: Attest the index
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.push-index.outputs.name }}
+          subject-digest: ${{ steps.push-index.outputs.index }}
           push-to-registry: true
       # A step and not a job condition: it removes the registry login, so it runs on a cancel too.
       - if: always()
