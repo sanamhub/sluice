@@ -87,45 +87,62 @@ fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(rest);
     let token = (choice & 1 == 1).then_some("t");
     for mode in [Mode::Closed, Mode::Open, Mode::Rendezvous] {
-        if check_config(&text, mode, token).is_err() {
-            continue;
-        }
-        // The guard's schema is stricter at every point, so text it passes, the mirror reads.
-        let loose: Loose = match toml::from_str(&text) {
-            Ok(loose) => loose,
-            Err(err) => panic!("the guard passed {mode:?} text iroh-relay cannot read: {err}"),
-        };
-        let rendezvous = mode == Mode::Rendezvous;
-        match mode {
-            Mode::Closed => assert!(
-                matches!(
-                    loose.access,
-                    LooseAccess::Allowlist(_) | LooseAccess::Http(_) | LooseAccess::SharedToken(_)
+        for behind_proxy in [false, true] {
+            if check_config(&text, mode, token, behind_proxy).is_err() {
+                continue;
+            }
+            // The guard's schema is stricter at every point, so text it passes, the mirror reads.
+            let loose: Loose = match toml::from_str(&text) {
+                Ok(loose) => loose,
+                Err(err) => panic!("the guard passed {mode:?} text iroh-relay cannot read: {err}"),
+            };
+            let rendezvous = mode == Mode::Rendezvous;
+            match mode {
+                Mode::Closed => assert!(
+                    matches!(
+                        loose.access,
+                        LooseAccess::Allowlist(_)
+                            | LooseAccess::Http(_)
+                            | LooseAccess::SharedToken(_)
+                    ),
+                    "the guard passed as closed what iroh-relay runs open"
                 ),
-                "the guard passed as closed what iroh-relay runs open"
-            ),
-            Mode::Rendezvous => assert!(
-                !loose.enable_relay,
-                "the guard passed as rendezvous what iroh-relay runs as a relay"
-            ),
-            Mode::Open => assert!(
-                has_rate(&loose),
-                "the guard passed open with no per-client byte limit"
-            ),
-        }
-        if !rendezvous {
-            assert!(loose.enable_relay, "the guard passed {mode:?} with the relay half off");
-        }
-        assert!(
-            loose.enable_metrics.is_some(),
-            "the guard passed {mode:?} with enable_metrics unwritten, so iroh-relay serves metrics"
-        );
-        assert!(
-            !loose.tls.is_some_and(|tls| tls.dangerous_http_only),
-            "the guard passed {mode:?} with HTTPS turned off"
-        );
-        if let LooseAccess::Http(http) = &loose.access {
-            plain_url(&http.url);
+                Mode::Rendezvous => assert!(
+                    !loose.enable_relay,
+                    "the guard passed as rendezvous what iroh-relay runs as a relay"
+                ),
+                Mode::Open => assert!(
+                    has_rate(&loose),
+                    "the guard passed open with no per-client byte limit"
+                ),
+            }
+            if !rendezvous {
+                assert!(
+                    loose.enable_relay,
+                    "the guard passed {mode:?} with the relay half off"
+                );
+                // A relay config's [tls] and the flag are the one pair that must agree: no [tls]
+                // means the operator says a proxy ends TLS, and [tls] means iroh-relay does.
+                assert_eq!(
+                    behind_proxy,
+                    loose.tls.is_none(),
+                    "the guard passed {mode:?} with --behind-proxy={behind_proxy} and [tls]={}",
+                    loose.tls.is_some()
+                );
+            } else {
+                assert!(!behind_proxy, "the guard passed rendezvous with --behind-proxy");
+            }
+            assert!(
+                loose.enable_metrics.is_some(),
+                "the guard passed {mode:?} with enable_metrics unwritten, so iroh-relay serves metrics"
+            );
+            assert!(
+                !loose.tls.is_some_and(|tls| tls.dangerous_http_only),
+                "the guard passed {mode:?} with HTTPS turned off"
+            );
+            if let LooseAccess::Http(http) = &loose.access {
+                plain_url(&http.url);
+            }
         }
     }
 });

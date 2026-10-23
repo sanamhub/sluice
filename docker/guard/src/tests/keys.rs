@@ -9,7 +9,7 @@ use super::m;
 use crate::{Args, Mode, check_config, open_config};
 
 fn refusal(text: &str, mode: Mode) -> String {
-    let message = check_config(text, mode, None)
+    let message = check_config(text, mode, None, false)
         .expect_err("refused")
         .to_string();
     assert!(!message.chars().any(char::is_control), "{message:?}");

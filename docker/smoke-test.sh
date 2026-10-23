@@ -228,7 +228,7 @@ relay() {
   refuses "open.toml without --open" "\`access\` is \"everyone\"" \
     "$image" --config-path /etc/relay/open.toml
   refuses "--open without a rate" "--open needs \`limits.client.rx.bytes_per_second\`" \
-    -v "$(config norate "${metrics}access = \"everyone\"\n" relay.toml)" \
+    -v "$(config norate "${metrics}access = \"everyone\"\n${tls}" relay.toml)" \
     "$image" --open --config-path /etc/relay/relay.toml
   refuses "--rendezvous with relay.toml" "needs \`enable_relay = false\`" \
     "$image" --rendezvous --config-path /etc/relay/relay.toml
@@ -244,13 +244,17 @@ relay_configs() {
   refuses "a mounted config with [acess]" "unknown key \`acess\`" \
     -v "$(config acess "${metrics}[acess]\nallowlist = []\n" relay.toml)" "$image"
   refuses "a denylist without --open" "\`access\` is a denylist" \
-    -v "$(config deny "${metrics}[access]\ndenylist = []\n" relay.toml)" "$image"
+    -v "$(config deny "${metrics}[access]\ndenylist = []\n${tls}" relay.toml)" "$image"
   refuses "no access" "\`access\` is not set" \
-    -v "$(config none "$metrics" relay.toml)" "$image"
+    -v "$(config none "${metrics}${tls}" relay.toml)" "$image"
   refuses "dangerous_http_only" "\`dangerous_http_only\` is true" \
     -v "$(config http "${metrics}${allow}${tls}dangerous_http_only = true\n" relay.toml)" "$image"
+  refuses "no [tls] without --behind-proxy" "there is no [tls] table" \
+    -v "$(config notls "${metrics}${allow}" relay.toml)" "$image"
+  refuses "--behind-proxy with relay.toml" "--behind-proxy was given" \
+    "$image" --behind-proxy --config-path /etc/relay/relay.toml
   refuses "no enable_metrics" "\`enable_metrics\` is not set" \
-    -v "$(config metrics "$allow" relay.toml)" "$image"
+    -v "$(config metrics "${allow}${tls}" relay.toml)" "$image"
   refuses "an HTTP check with a query" "\`access.http.url\` holds a query" \
     -v "$(config query "${metrics}[access.http]\nurl = \"https://a.example/?k=v\"\n" \
       relay.toml)" "$image"

@@ -15,7 +15,12 @@ use crate::schema::{AccessConfig, Config};
 use crate::{Mode, Refusal};
 
 /// The whole check of a config's text.
-pub(crate) fn check(text: &str, mode: Mode, access_token: Option<&str>) -> Result<(), Refusal> {
+pub(crate) fn check(
+    text: &str,
+    mode: Mode,
+    access_token: Option<&str>,
+    behind_proxy: bool,
+) -> Result<(), Refusal> {
     let readme = readme(mode);
     // Before the file: it is wrong whatever the file says, since iroh-relay would take the empty
     // value as the only token of a `shared_token` list.
@@ -41,7 +46,7 @@ pub(crate) fn check(text: &str, mode: Mode, access_token: Option<&str>) -> Resul
     if let Some(access) = &config.access {
         access::check(access, access_token)?;
     }
-    check_tls(&config)?;
+    check_tls(&config, mode, behind_proxy)?;
     check_metrics(&config)?;
     match mode {
         Mode::Rendezvous => Ok(()),
@@ -94,10 +99,13 @@ fn check_relay_half_on(config: &Config) -> Result<(), Refusal> {
     Ok(())
 }
 
-/// `dangerous_http_only = true` turns HTTPS off, which is what `--dev` does (main.rs:593-600 and
-/// 703-721), and a shared token would then cross the network in clear text. No `[tls]` at all
-/// stays allowed, for a relay behind a proxy that ends TLS.
-fn check_tls(config: &Config) -> Result<(), Refusal> {
+/// HTTPS stays on, and a relay with no `[tls]` at all needs `--behind-proxy`. `dangerous_http_only`
+/// turns HTTPS off on a relay that has TLS (main.rs:593-600 and 703-721), which is what `--dev`
+/// does, so a shared token would then cross the network in clear text. A config with no `[tls]`
+/// serves plain HTTP only, which is right behind a proxy that ends TLS and wrong anywhere else: the
+/// guard cannot tell those apart, so the operator says which one it is with the flag. A rendezvous
+/// server relays nothing and answers no token, so the flag has nothing to stand behind there.
+fn check_tls(config: &Config, mode: Mode, behind_proxy: bool) -> Result<(), Refusal> {
     if config
         .tls
         .as_ref()
@@ -105,10 +113,30 @@ fn check_tls(config: &Config) -> Result<(), Refusal> {
     {
         return Err(Refusal::new(
             "`dangerous_http_only` is true, which turns HTTPS off as --dev does: remove it, or \
-             leave out [tls] for a relay behind a proxy that ends TLS",
+             leave out [tls] and start with --behind-proxy behind a proxy that ends TLS",
         ));
     }
-    Ok(())
+    match mode {
+        Mode::Rendezvous => match behind_proxy {
+            true => Err(Refusal::new(
+                "--behind-proxy is for a relay behind a proxy that ends TLS, and a rendezvous \
+                 server relays nothing: remove it, or start a relay without --rendezvous",
+            )),
+            false => Ok(()),
+        },
+        Mode::Closed | Mode::Open => match (config.tls.is_none(), behind_proxy) {
+            (true, false) => Err(Refusal::new(
+                "there is no [tls] table, so iroh-relay serves plain HTTP only, and a shared token \
+                 or an HTTP bearer token would cross the network in clear text: add [tls], or \
+                 start with --behind-proxy when a proxy in front ends TLS",
+            )),
+            (false, true) => Err(Refusal::new(
+                "--behind-proxy was given, but the config has a [tls] table, so iroh-relay ends \
+                 TLS itself: remove the flag, or leave out [tls] when a proxy in front ends TLS",
+            )),
+            _ => Ok(()),
+        },
+    }
 }
 
 /// iroh-relay runs its metrics server unless the file says otherwise (main.rs:145 and 384-386),

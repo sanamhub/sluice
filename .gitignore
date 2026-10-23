@@ -21,6 +21,11 @@ bench/wasm-hash/page/test-results/
 bench/results/local/
 *.log
 
+# The guard and its fuzz crate are workspaces of their own, so the /target above does not cover
+# their builds.
+/docker/guard/target/
+/docker/guard/fuzz/target/
+
 # editors
 .vscode/
 .idea/

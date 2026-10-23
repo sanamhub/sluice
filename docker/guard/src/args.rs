@@ -12,15 +12,19 @@ pub struct Args {
     /// [`Mode::Open`] for `--open`, [`Mode::Rendezvous`] for `--rendezvous`, and
     /// [`Mode::Closed`] for neither.
     pub mode: Mode,
+    /// `--behind-proxy`: a relay whose config has no `[tls]`, in front of a proxy that ends TLS.
+    pub behind_proxy: bool,
     /// `--config-path`: the config file the relay is started with.
     pub config_path: PathBuf,
 }
 
 impl Args {
     /// Reads the arguments after the program name. `--config-path` is required, and may be written
-    /// `--config-path <file>` or `--config-path=<file>`. `--open` and `--rendezvous` are each
-    /// allowed once, and not together. Anything else is refused, `--dev` and `--help` included:
-    /// iroh-relay's `--dev` turns TLS off and runs on any config.
+    /// `--config-path <file>` or `--config-path=<file>`. `--open`, `--rendezvous` and
+    /// `--behind-proxy` are each allowed once; `--open` and `--rendezvous` are not given together,
+    /// and `--behind-proxy` is refused with `--rendezvous`, where it has nothing to stand behind.
+    /// Anything else is refused, `--dev` and `--help` included: iroh-relay's `--dev` turns TLS off
+    /// and runs on any config.
     ///
     /// ```
     /// use std::ffi::OsString;
@@ -32,12 +36,19 @@ impl Args {
     ///     .collect();
     /// let parsed = Args::parse(&args).unwrap();
     /// assert_eq!(parsed.mode, Mode::Open);
+    /// assert!(!parsed.behind_proxy);
     /// assert_eq!(parsed.config_path, std::path::Path::new("/etc/relay/open.toml"));
     ///
+    /// let behind: Vec<OsString> = ["--behind-proxy", "--config-path", "/etc/relay/a.toml"]
+    ///     .iter()
+    ///     .map(OsString::from)
+    ///     .collect();
+    /// assert!(Args::parse(&behind).unwrap().behind_proxy);
     /// assert!(Args::parse(&[OsString::from("--dev")]).is_err());
     /// ```
     pub fn parse(args: &[OsString]) -> Result<Args, Refusal> {
         let mut mode: Option<Mode> = None;
+        let mut behind_proxy = false;
         let mut config_path: Option<PathBuf> = None;
         let mut rest = args.iter();
         let mut position = 0;
@@ -45,6 +56,12 @@ impl Args {
             position += 1;
             let path = if let Some(flag) = mode_flag(arg) {
                 mode = Some(both(mode, flag)?);
+                continue;
+            } else if arg == "--behind-proxy" {
+                if behind_proxy {
+                    return Err(Refusal::new("--behind-proxy is given twice: give it once"));
+                }
+                behind_proxy = true;
                 continue;
             } else if arg == "--config-path" {
                 position += 1;
@@ -64,9 +81,17 @@ impl Args {
                 return Err(Refusal::new("--config-path is given twice: give it once"));
             }
         }
+        let mode = mode.unwrap_or(Mode::Closed);
+        if behind_proxy && mode == Mode::Rendezvous {
+            return Err(Refusal::new(
+                "--behind-proxy is for a relay behind a proxy that ends TLS, and a rendezvous \
+                 server relays nothing: remove it, or start a relay without --rendezvous",
+            ));
+        }
         match config_path {
             Some(config_path) => Ok(Args {
-                mode: mode.unwrap_or(Mode::Closed),
+                mode,
+                behind_proxy,
                 config_path,
             }),
             None => Err(Refusal::new(

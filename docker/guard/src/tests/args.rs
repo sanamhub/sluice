@@ -19,6 +19,7 @@ fn the_arguments_in_either_order_and_either_spelling() {
     for (flag, mode) in [("--open", Mode::Open), ("--rendezvous", Mode::Rendezvous)] {
         let want = Args {
             mode,
+            behind_proxy: false,
             config_path: "/etc/relay/a.toml".into(),
         };
         assert_eq!(
@@ -152,4 +153,32 @@ fn a_path_that_looks_like_a_flag_is_still_the_path() {
     let args = parse(&["--config-path", "--open"]).unwrap();
     assert_eq!(args.mode, Mode::Closed);
     assert_eq!(args.config_path, Path::new("--open"));
+}
+
+#[test]
+fn behind_proxy_is_parsed_once_and_only_for_a_relay() {
+    let args = parse(&["--behind-proxy", "--config-path", "a.toml"]).unwrap();
+    assert!(args.behind_proxy);
+    assert_eq!(args.mode, Mode::Closed);
+    let open = parse(&["--behind-proxy", "--open", "--config-path", "a.toml"]).unwrap();
+    assert!(open.behind_proxy);
+    assert_eq!(open.mode, Mode::Open);
+    refused(
+        &[
+            "--behind-proxy",
+            "--behind-proxy",
+            "--config-path",
+            "a.toml",
+        ],
+        "--behind-proxy is given twice",
+    );
+    // It is for a relay whose config has no [tls]; a rendezvous server relays nothing.
+    refused(
+        &["--rendezvous", "--behind-proxy", "--config-path", "a.toml"],
+        "--behind-proxy is for a relay behind a proxy",
+    );
+    refused(
+        &["--behind-proxy", "--rendezvous", "--config-path", "a.toml"],
+        "--behind-proxy is for a relay behind a proxy",
+    );
 }

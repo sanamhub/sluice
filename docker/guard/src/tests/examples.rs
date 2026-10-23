@@ -41,13 +41,17 @@ fn each_example_is_closed_open_or_refused_for_its_ids() {
             true => text,
             false => super::m(&text),
         };
-        let closed = check_config(&text, Mode::Closed, None).is_ok();
+        // The examples are checked for their access rules, not for `[tls]`: one without it is a
+        // relay behind a proxy, so it gets the flag rather than a refusal for the rule under test
+        // here. ADR 0021's rule has tests of its own.
+        let behind_proxy = !text.contains("[tls]");
+        let closed = check_config(&text, Mode::Closed, None, behind_proxy).is_ok();
         let rated = match text.contains("[limits.client.rx]") {
             true => text.clone(),
             false => format!("{text}\n[limits.client.rx]\nbytes_per_second = 1\n"),
         };
-        let open = check_config(&rated, Mode::Open, None).is_ok();
-        let rendezvous = check_config(&text, Mode::Rendezvous, None).is_ok();
+        let open = check_config(&rated, Mode::Open, None, behind_proxy).is_ok();
+        let rendezvous = check_config(&text, Mode::Rendezvous, None, false).is_ok();
         let want = match name.as_str() {
             // The README's placeholder is not an id, in either list.
             "readme-allowlist" | "readme-denylist" => (false, false, false),

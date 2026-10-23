@@ -8,7 +8,7 @@ with a sealed copy of the bytes it checked on descriptor 0, so the server runs a
 the container's signals.
 
 ```
-sluice-relay-guard [--open | --rendezvous] --config-path <file>
+sluice-relay-guard [--open | --rendezvous | --behind-proxy] --config-path <file>
 ```
 
 | Mode | Flag | Starts a config that |
@@ -16,6 +16,10 @@ sluice-relay-guard [--open | --rendezvous] --config-path <file>
 | closed | none | relays only for an allowlist, an HTTP check or shared tokens |
 | open | `--open` | lets anyone relay, with `limits.client.rx.bytes_per_second` set |
 | rendezvous | `--rendezvous` | says `enable_relay = false`, and sets no `access` and no `[limits]` |
+
+`--behind-proxy` is not a mode: it is added to closed or open mode when the config has no `[tls]`
+table and a proxy in front ends TLS (ADR 0021). It is refused with `[tls]`, and with
+`--rendezvous`.
 
 ## Why it exists
 
@@ -54,10 +58,13 @@ message, from a path or an argument, is escaped, so a refusal is one line.
 | `access` missing, `"everyone"` or a denylist, without `--open` | it lets in ids nobody listed |
 | `--open` without `limits.client.rx.bytes_per_second` | ADR 0011: open needs a per-client byte limit |
 | `--open` with an allowlist, an HTTP check or shared tokens | the flag must mean what it says |
+| a relay config with no `[tls]` table, without `--behind-proxy` | iroh-relay serves plain HTTP, and a shared token or bearer token would cross the network in clear text (ADR 0021) |
+| `--behind-proxy` with a `[tls]` table | iroh-relay ends TLS itself, so the flag and the config disagree |
+| `--behind-proxy` with `--rendezvous` | a rendezvous server relays nothing and answers no token |
 | an allowlist or denylist entry that is not 64 lower-case hex digits of an ed25519 public key | iroh-relay refuses to start on an id it cannot read, and the README says to paste what `sluice id` prints |
 | an empty `access.shared_token` list, or an empty token in it, unless `IROH_RELAY_ACCESS_TOKEN` is set | iroh-relay refuses both at start, and the variable replaces the list |
 | `IROH_RELAY_ACCESS_TOKEN` set but empty, in every mode | iroh-relay would take the empty value as the only token |
-| `[tls] dangerous_http_only = true` (ADR 0020) | it turns HTTPS off, as `--dev` does; no `[tls]` at all still starts |
+| `[tls] dangerous_http_only = true` (ADR 0020) | it turns HTTPS off, as `--dev` does; a config with no `[tls]` needs `--behind-proxy` instead |
 | no `enable_metrics` line (ADR 0020) | iroh-relay then serves metrics on port 9090 with no login; `true` and `false` both start |
 | an `access.http.url` that is not an absolute http or https URL, or holds a user name, password, query or fragment (ADR 0020) | iroh-relay logs the URL when a check fails; a secret goes in `bearer_token`, a header |
 | `--rendezvous` without `enable_relay = false` written out (ADR 0020) | iroh-relay turns the relay half on by default |

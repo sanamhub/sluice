@@ -6,7 +6,7 @@ const ID: &str = "68852edc24884118b7c22e87f75094674a9b3268ba83b3005e4da869de4ed9
 const RATE: &str = "\n[limits.client.rx]\nbytes_per_second = 2097152\n";
 
 fn refused(text: &str, mode: Mode, says: &str) -> String {
-    let message = check_config(text, mode, None)
+    let message = check_config(text, mode, None, false)
         .expect_err("refused")
         .to_string();
     assert!(message.contains(says), "{text:?} {mode:?}: {message}");
@@ -88,7 +88,7 @@ fn each_closed_mode_starts_without_open_and_is_refused_with_it() {
     ];
     for text in closed {
         assert_eq!(
-            check_config(&m(&text), Mode::Closed, None),
+            check_config(&m(&text), Mode::Closed, None, false),
             Ok(()),
             "{text}"
         );
@@ -134,7 +134,7 @@ fn each_open_mode_needs_open_and_a_rate() {
             "--open needs `limits.client.rx.bytes_per_second`",
         );
         assert_eq!(
-            check_config(&m(&format!("{text}{RATE}")), Mode::Open, None),
+            check_config(&m(&format!("{text}{RATE}")), Mode::Open, None, false),
             Ok(()),
             "{text}"
         );
@@ -153,8 +153,8 @@ fn an_id_must_be_64_lower_case_hex_digits_of_a_key_in_either_list() {
         ("denylist", Mode::Open, RATE),
     ] {
         let ids = |ids: &[&str]| m(&format!("[access]\n{list} = {ids:?}\n{rate}"));
-        assert_eq!(check_config(&ids(&[]), mode, None), Ok(()));
-        assert_eq!(check_config(&ids(&[ID]), mode, None), Ok(()));
+        assert_eq!(check_config(&ids(&[]), mode, None, false), Ok(()));
+        assert_eq!(check_config(&ids(&[ID]), mode, None, false), Ok(()));
         let entry = |n: usize| format!("entry {n} of `access.{list}`");
         let short = format!("{} is not 64 lower-case hex digits", entry(1));
         refused(&ids(&[&ID[..63]]), mode, &short);
@@ -221,14 +221,14 @@ fn a_required_key_left_out_is_named() {
 fn the_shipped_configs_start_only_as_the_readme_says() {
     let relay = super::read(&super::relay_dir().join("relay.toml"));
     let open = super::read(&super::relay_dir().join("open.toml"));
-    assert_eq!(check_config(&relay, Mode::Closed, None), Ok(()));
+    assert_eq!(check_config(&relay, Mode::Closed, None, false), Ok(()));
     refused(
         &relay,
         Mode::Open,
         "--open was given, but `access` is an allowlist",
     );
     refused(&open, Mode::Closed, "`access` is \"everyone\"");
-    assert_eq!(check_config(&open, Mode::Open, None), Ok(()));
+    assert_eq!(check_config(&open, Mode::Open, None, false), Ok(()));
 }
 
 #[test]

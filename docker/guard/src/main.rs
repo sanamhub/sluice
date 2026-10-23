@@ -1,6 +1,6 @@
-//! `sluice-relay-guard [--open | --rendezvous] --config-path <file>`: checks the config, then runs
-//! iroh-relay with a sealed copy of it. See the library for the rules, and docker/guard/README.md
-//! for what an operator sees.
+//! `sluice-relay-guard [--open | --rendezvous | --behind-proxy] --config-path <file>`: checks the
+//! config, then runs iroh-relay with a sealed copy of it. See the library for the rules, and
+//! docker/guard/README.md for what an operator sees.
 
 use std::ffi::OsString;
 use std::fs::File;
@@ -30,7 +30,7 @@ fn checked(args: &[OsString]) -> Result<(Mode, File, String), Refusal> {
     let (file, text) = open_config(&args.config_path)?;
     // As iroh-relay reads it: a value that is not UTF-8 counts as unset there too.
     let access_token = std::env::var(ACCESS_TOKEN_VAR).ok();
-    check_config(&text, args.mode, access_token.as_deref())?;
+    check_config(&text, args.mode, access_token.as_deref(), args.behind_proxy)?;
     Ok((args.mode, file, text))
 }
 

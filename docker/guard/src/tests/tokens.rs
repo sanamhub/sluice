@@ -11,7 +11,7 @@ fn tokens(list: &str) -> String {
 }
 
 fn refused(text: &str, mode: Mode, token: Option<&str>, says: &str) {
-    let message = check_config(text, mode, token)
+    let message = check_config(text, mode, token, false)
         .expect_err("refused")
         .to_string();
     assert!(message.contains(says), "{text:?} {mode:?}: {message}");
@@ -35,7 +35,7 @@ fn an_empty_list_or_an_empty_token_is_refused_without_the_variable() {
         "entry 2 of `access.shared_token` is empty",
     );
     assert_eq!(
-        check_config(&tokens("[\"a\", \"b\"]"), Mode::Closed, None),
+        check_config(&tokens("[\"a\", \"b\"]"), Mode::Closed, None, false),
         Ok(())
     );
 }
@@ -44,7 +44,7 @@ fn an_empty_list_or_an_empty_token_is_refused_without_the_variable() {
 fn a_set_variable_replaces_the_list_so_an_empty_one_passes() {
     for list in ["[]", "[\"\"]", "[\"a\", \"\"]", "[\"a\"]"] {
         assert_eq!(
-            check_config(&tokens(list), Mode::Closed, Some("t")),
+            check_config(&tokens(list), Mode::Closed, Some("t"), false),
             Ok(()),
             "{list}"
         );
@@ -68,7 +68,11 @@ fn an_empty_variable_is_refused_in_every_mode_and_whatever_the_file_says() {
         (open.as_str(), Mode::Open),
         (rendezvous, Mode::Rendezvous),
     ] {
-        assert_eq!(check_config(text, mode, Some("t")), Ok(()), "{mode:?}");
+        assert_eq!(
+            check_config(text, mode, Some("t"), false),
+            Ok(()),
+            "{mode:?}"
+        );
     }
 }
 

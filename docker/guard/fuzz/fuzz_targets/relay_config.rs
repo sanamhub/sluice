@@ -6,18 +6,20 @@ use libfuzzer_sys::fuzz_target;
 use sluice_relay_guard::{Args, Mode, check_config, open_config};
 
 // Any bytes as the text of a config, in each mode the guard has, with and without
-// IROH_RELAY_ACCESS_TOKEN. The check never panics, and every refusal is one line that holds no
-// control character and names an unknown key only by a name of 1 to 32 lower-case letters or `_`.
-// The same bytes as a file name, in a folder that does not exist, give a refusal that holds no
-// control character either. Split at each NUL, they are a command line, and a refusal names an
-// unknown argument only as `--` and 1 to 32 lower-case letters or `-`.
+// IROH_RELAY_ACCESS_TOKEN and with and without --behind-proxy. The check never panics, and every
+// refusal is one line that holds no control character and names an unknown key only by a name of 1
+// to 32 lower-case letters or `_`. The same bytes as a file name, in a folder that does not exist,
+// give a refusal that holds no control character either. Split at each NUL, they are a command
+// line, and a refusal names an unknown argument only as `--` and 1 to 32 lower-case letters or `-`.
 fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
     for mode in [Mode::Closed, Mode::Open, Mode::Rendezvous] {
         for token in [None, Some("t")] {
-            if let Err(refusal) = check_config(&text, mode, token) {
-                one_line(&refusal.to_string());
-                named_plainly(&refusal.to_string());
+            for behind_proxy in [false, true] {
+                if let Err(refusal) = check_config(&text, mode, token, behind_proxy) {
+                    one_line(&refusal.to_string());
+                    named_plainly(&refusal.to_string());
+                }
             }
         }
     }

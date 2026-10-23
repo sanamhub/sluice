@@ -35,10 +35,15 @@ fn repo_root() -> PathBuf {
     docker_dir().join("..")
 }
 
-/// `body` after `enable_metrics = false`, which every config must write out (ADR 0020), so that a
-/// test of another rule is not refused for that one first. Line numbers in it move down by one.
+/// `body` after `enable_metrics = false`, which every config must write out (ADR 0020), and with a
+/// `[tls]` table unless the body writes one, so that a test of another rule is not refused for the
+/// rule of ADR 0021 first. A table added at the end moves no line of the body.
 fn m(body: &str) -> String {
-    format!("enable_metrics = false\n{body}")
+    let tls = match body.contains("[tls]") {
+        true => "",
+        false => "[tls]\ncert_mode = \"Manual\"\n",
+    };
+    format!("enable_metrics = false\n{body}{tls}")
 }
 
 fn read(path: &Path) -> String {
