@@ -56,3 +56,78 @@ jobs:
       # Each image starts with a read-only root, and its guard refuses each config that would open
       # more than it says, so a guard that lets a mistake through fails here (ADR 0019, ADR 0020).
       - run: bash docker/smoke-test.sh "$IMAGE" "sluice-$IMAGE:ci"
+      # What the push job below pushes. One build is saved under both architectures' tags, because
+      # push-image.sh loads `amd64.tar.gz` and `arm64.tar.gz` and tags each by its architecture.
+      # Each tarball holds only its own tag, as in a release.
+      - name: Save for the push test
+        run: |
+          mkdir -p "$RUNNER_TEMP/image"
+          for arch in amd64 arm64; do
+            docker tag "sluice-$IMAGE:ci" "sluice-$IMAGE:$arch"
+            docker save "sluice-$IMAGE:$arch" | gzip > "$RUNNER_TEMP/image/$arch.tar.gz"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-${{ matrix.image }}
+          path: ${{ runner.temp }}/image/
+          if-no-files-found: error
+          # Only the push job below reads it, minutes later.
+          retention-days: 1
+
+  # Runs .github/release/push-image.sh, the script a release uses, against a registry on this
+  # runner, so a change to the script, the workflow or an image is tested before a tag and not on
+  # it. It cannot test ghcr.io: the login, the permissions and the attestations need a tag run.
+  push:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [rendezvous, relay]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      # The distribution registry, by digest of its 3.1.2 index. Plain HTTP on localhost, which
+      # Docker treats as insecure by default. It holds nothing after the job.
+      registry:
+        image: "registry:3.1.2@sha256:\
+          01cd312e67026f06f5d89c3e133a4a9adc7cb9eeb9b1194e0b2954dfd770efd2"
+        ports:
+          - 5000:5000
+    env:
+      IMAGE: ${{ matrix.image }}
+      OWNER: sanamhub
+      TAG: v0.0.0-test
+      REGISTRY: localhost:5000
+      # The local registry asks for no login. The script requires a token and a user, so these are
+      # literals and not a secret.
+      GITHUB_TOKEN: not-a-secret
+      GITHUB_ACTOR: ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-${{ matrix.image }}
+          path: ${{ runner.temp }}/image
+      - id: push
+        run: bash .github/release/push-image.sh
+      # The script wrote a digest for each architecture and the index. Each must answer in the
+      # registry as the manifest the script checked, and the version tag must be the index.
+      - name: Check what was pushed
+        env:
+          NAME: ${{ steps.push.outputs.name }}
+          INDEX: ${{ steps.push.outputs.index }}
+          AMD64: ${{ steps.push.outputs.amd64 }}
+          ARM64: ${{ steps.push.outputs.arm64 }}
+        run: |
+          for digest in "$INDEX" "$AMD64" "$ARM64"; do
+            docker buildx imagetools inspect "$NAME@$digest" > /dev/null
+          done
+          # `--format '{{.Manifest.Digest}}'` prints the whole report, so the manifest is read as
+          # JSON, as push-image.sh reads it.
+          tagged="$(docker buildx imagetools inspect "$NAME:0.0.0-test" \
+            --format '{{json .Manifest}}' | jq --raw-output .digest)"
+          [ "$tagged" = "$INDEX" ]
+      - if: always()
+        run: docker logout "$REGISTRY"

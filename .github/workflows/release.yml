@@ -476,6 +476,10 @@ jobs:
         id: push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # On the step itself, so no job or workflow value can change it. A value an earlier step
+          # writes to GITHUB_ENV is not covered by GitHub's documented precedence, and push-image.sh
+          # refuses any other registry on a tag.
+          REGISTRY: ghcr.io
         run: bash .github/release/push-image.sh
       # Provenance for the index, which `docker pull <image>:<version>` resolves, and for each
       # architecture's image, which is what a pull on that architecture fetches.
@@ -513,4 +517,6 @@ jobs:
           push-to-registry: true
       # A step and not a job condition: it removes the registry login, so it runs on a cancel too.
       - if: always()
-        run: docker logout ghcr.io
+        env:
+          REGISTRY: ghcr.io
+        run: docker logout "$REGISTRY"

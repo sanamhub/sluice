@@ -5,15 +5,24 @@
 #
 # IMAGE is `rendezvous` or `relay`, OWNER the repository owner and TAG the checked `v<version>`
 # tag. The image-build jobs left `<arch>.tar.gz` for each architecture in RUNNER_TEMP/image.
-# REGISTRY is unset in a release; a test of this script points it at a local registry.
+# REGISTRY is the registry to push to and has no default: release.yml sets `ghcr.io` on the push
+# step, and images.yml's push test sets a local one. A default would let a value written to
+# GITHUB_ENV by an earlier step choose where a release goes.
 set -euo pipefail
 # A failed command inside `$(...)` stops the script too, and not only the line that reads it.
 shopt -s inherit_errexit
 
 : "${IMAGE:?}" "${OWNER:?}" "${TAG:?}" "${GITHUB_TOKEN:?}" "${GITHUB_ACTOR:?}"
-: "${RUNNER_TEMP:?}" "${GITHUB_OUTPUT:?}"
+: "${RUNNER_TEMP:?}" "${GITHUB_OUTPUT:?}" "${REGISTRY:?}"
 
-registry="${REGISTRY:-ghcr.io}"
+# GitHub's documentation says a step's `env` overrides a job's or the workflow's, and says nothing
+# of a value an earlier step wrote to GITHUB_ENV. So on a tag, which is a release, the only
+# registry is ghcr.io, and the token is never sent anywhere else, whatever an earlier step did.
+if [[ "${GITHUB_REF:-}" == refs/tags/* && "$REGISTRY" != ghcr.io ]]; then
+  echo "REGISTRY is '$REGISTRY', and a release on a tag pushes to ghcr.io only" >&2
+  exit 1
+fi
+registry="$REGISTRY"
 version="${TAG#v}"
 # A ghcr.io name is lower case, and an owner's login may not be.
 repo="$registry/$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')/sluice-$IMAGE"
