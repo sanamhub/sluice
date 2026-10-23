@@ -96,7 +96,9 @@ mode, after checking that the relay half is off. iroh-relay 1.4.0 hands the addr
 server a certificate only on the path `--dev` takes (main.rs:593-600 and 703-721), and without it
 refuses a config with the relay half off: `Failed to bind QAD listener` and `TLS not configured`
 (see [the rendezvous README](../rendezvous/README.md)). Its other effects, plain HTTP for the
-relay and a default HTTP port, have nothing to act on when no relay runs.
+relay and a default HTTP port, have nothing to act on when no relay runs: with `enable_relay =
+false`, `Server::spawn` builds no HTTP or HTTPS listener (`server.rs:713-835`), so `--dev` here only
+hands the certificate to QUIC. That is why the guard accepts it in this mode and no other.
 
 ## What it must never do
 
