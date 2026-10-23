@@ -5,8 +5,10 @@
 #
 # Build from docker/, which both images share for the guard's sources:
 #   docker build -f docker/rendezvous/Dockerfile -t sluice-rendezvous docker
-# Dockerfile.dockerignore, beside this file, lets in only manual.toml and the guard's manifest,
-# lock file and sources.
+# BuildKit reads Dockerfile.dockerignore, beside this file, and lets in only manual.toml and
+# the guard's manifest, lock file and sources. The legacy builder reads only .dockerignore in
+# docker/, which lets in the same for both images. Either way the COPY lines below name only what
+# the build needs, so a stray folder in docker/ never reaches the build stage.
 
 FROM rust:1.99.1-slim-trixie@sha256:4df2ae8cfdfebdfc13a65da7f253b73d68983dc0339f2719bc17a279c913b13d AS build
 
@@ -21,7 +23,8 @@ RUN cargo install iroh-relay --version "=${IROH_RELAY_VERSION}" --locked --featu
 
 # After iroh-relay, so a change to the guard does not rebuild the server. --locked uses the guard's
 # own Cargo.lock, whose versions are the root lock's.
-COPY guard /src/guard
+COPY guard/Cargo.toml guard/Cargo.lock /src/guard/
+COPY guard/src /src/guard/src
 RUN cargo install --path /src/guard --locked --root /out
 
 # distroless has no shell, no package manager and no root login. cc is the glibc and libgcc layer

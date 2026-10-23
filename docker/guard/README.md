@@ -40,8 +40,8 @@ is 1 to 32 lower-case ASCII letters or `_`, which every iroh-relay 1.4.0 setting
 has digits or capitals, or is longer, so it is not printed. A token of lower-case letters alone, 32
 characters or fewer, would be: no rule can tell it from a setting. An unknown argument is named
 only when it is `--` and 1 to 32 lower-case letters or `-`; any other is "an argument", with its
-position, so a token on the command line stays out of the log. Every control character in a message, from a path or an argument, is escaped, so a refusal is one
-line.
+position, so a token on the command line stays out of the log. Every control character in a
+message, from a path or an argument, is escaped, so a refusal is one line.
 
 | Refused | Why |
 |---|---|
@@ -124,7 +124,9 @@ so before moving `IROH_RELAY_VERSION`:
 
 It is its own project with its own `Cargo.lock`, outside the root workspace, so each image builds
 from `docker/` with only the files it needs: each Dockerfile has a `Dockerfile.dockerignore` beside
-it that lists them. ci.yml runs its gates; to run them by hand from the repository root:
+it that lists them, which BuildKit reads. The legacy builder (`DOCKER_BUILDKIT=0`) reads only
+`docker/.dockerignore`, so that holds the union of the two lists, and each Dockerfile copies only
+`guard/Cargo.toml`, `guard/Cargo.lock` and `guard/src`. Tests check both. ci.yml runs its gates; to run them by hand from the repository root:
 
 ```
 cargo fmt --manifest-path docker/guard/Cargo.toml --check
