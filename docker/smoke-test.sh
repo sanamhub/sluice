@@ -56,7 +56,11 @@ up() {
     port="$(docker port "$container" 80/tcp | head -n 1 | cut -d: -f2)"
     [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/generate_204")" = 204 ]
   else
-    docker logs "$container" 2>&1 | grep -q 'QUIC server listening'
+    # Into a variable first: with `grep -q` at the end of a pipe, grep exits on its first match,
+    # docker gets SIGPIPE, and pipefail turns the match into a failure.
+    local logs
+    logs="$(docker logs "$container" 2>&1)"
+    grep -q 'QUIC server listening' <<< "$logs"
   fi
 }
 
