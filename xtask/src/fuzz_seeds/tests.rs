@@ -220,7 +220,8 @@ fn the_relay_config_seeds_are_the_shipped_configs_and_every_iroh_example() {
     );
     let relay = fs::read(vectors_dir().join("../../docker/relay/relay.toml")).unwrap();
     assert_eq!(seeds[0].bytes, relay);
-    // The configs one line from a rule come after them, and are all TOML, so each reaches the check.
+    // The configs one line from a rule come after them, and are all TOML, so each reaches the
+    // check.
     let near: Vec<_> = seeds.iter().filter(|seed| seed.file.is_none()).collect();
     assert_eq!(near.len(), 6);
     for seed in near {

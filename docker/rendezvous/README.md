@@ -20,9 +20,10 @@ only a relay reads. It applies every other rule of the relay's guard too: no unk
 and the container exits with 64.
 
 The guard then starts `iroh-relay --dev --config-path=/proc/self/fd/0`, with the file it
-checked as standard input. `--dev` is the guard's, passed only in this mode and only after the check: this
-config needs it ([below](#what-iroh-relay-140-does-with-the-relay-half-off)), and the guard
-refuses `--dev` given on its command line.
+checked as standard input. `--dev` is the guard's, passed only in this mode and only after the
+check: this config needs it
+([below](#what-iroh-relay-140-does-with-the-relay-half-off)), and the guard refuses `--dev` given on
+its command line.
 
 **Overriding the entry point skips the guard.** `docker run --entrypoint /usr/local/bin/iroh-relay`
 runs the server with whatever it is given.

@@ -1,6 +1,6 @@
-//! The schema is iroh-relay 1.4.0's. Both images must build that release, and the probe must resolve
-//! it, or a new release could add a key the guard does not know and the guard would refuse a good
-//! config, or worse, let a key through that it reads differently.
+//! The schema is iroh-relay 1.4.0's. Both images must build that release, and the probe must
+//! resolve it, or a new release could add a key the guard does not know and the guard would
+//! refuse a good config, or worse, let a key through that it reads differently.
 
 use super::{docker_dir, read, relay_dir, rendezvous_dir, repo_root};
 use crate::IROH_RELAY_VERSION;
