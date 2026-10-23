@@ -63,6 +63,36 @@ fn a_file_that_is_not_utf8_is_refused() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+/// The value of `--config-path` is printed only when it looks like a path and cannot be a token.
+/// Everything else becomes "the path given to --config-path", so a token pasted after the flag does
+/// not end up in the container log.
+#[test]
+fn a_config_path_that_may_be_a_token_is_not_printed() {
+    let unnamed = "the path given to --config-path";
+    for secret in [
+        "s3cr3t-T0KEN",
+        "C:\\s3cr3t-T0KEN",
+        "/etc/relay.toml?token=s3cr3t",
+        "/etc/relay.toml#s3cr3t",
+        "/etc has a space/relay.toml",
+        "relay.toml",
+        "/etc/relay.toml\ns3cr3t",
+    ] {
+        let message = refusal(std::path::Path::new(secret));
+        assert!(!message.contains("s3cr3t"), "{secret:?}: {message}");
+        assert!(message.contains(unnamed), "{secret:?}: {message}");
+    }
+    // A path that looks like one is printed, so an operator can see what was opened.
+    let path = "/etc/relay/relay.toml";
+    let message = refusal(std::path::Path::new(path));
+    assert!(message.contains(path), "{message}");
+    // The length counts characters, and 200 of them is still a path.
+    let longest = format!("/{}", "a".repeat(199));
+    assert!(refusal(std::path::Path::new(&longest)).contains(&longest));
+    let too_long = format!("/{}", "a".repeat(200));
+    assert!(refusal(std::path::Path::new(&too_long)).contains(unnamed));
+}
+
 /// A rename over the path after the check, as a ConfigMap update does, changes nothing the relay
 /// reads. Opening a `/proc/self/fd` link opens the file the descriptor holds, so the descriptor
 /// stands in for the relay's descriptor 0 here.

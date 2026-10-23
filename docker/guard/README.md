@@ -45,8 +45,10 @@ is 1 to 32 lower-case ASCII letters or `_`, which every iroh-relay 1.4.0 setting
 has digits or capitals, or is longer, so it is not printed. A token of lower-case letters alone, 32
 characters or fewer, would be: no rule can tell it from a setting. An unknown argument is named
 only when it is `--` and 1 to 32 lower-case letters or `-`; any other is "an argument", with its
-position, so a token on the command line stays out of the log. Every control character in a
-message, from a path or an argument, is escaped, so a refusal is one line.
+position, so a token on the command line stays out of the log. A `--config-path` value is printed
+only when it starts with `/` or `./`, is at most 200 characters, and uses only `[A-Za-z0-9._/-]`;
+any other is "the path given to --config-path". Every control character in a message, from a path or
+an argument, is escaped, so a refusal is one line.
 
 | Refused | Why |
 |---|---|

@@ -44,12 +44,18 @@ prints them:
 | a mounted `relay.toml` that says `[acess]` | ``sluice-relay-guard: line 1: unknown key `acess`: iroh-relay 1.4.0 has no such setting, and would ignore it; check the spelling against docker/relay/README.md`` |
 | `--config-path /etc/relay/open.toml` | ``sluice-relay-guard: `access` is "everyone", which lets anyone relay: list the ids that may relay in `[access] allowlist`, or start with --open to run it open on purpose`` |
 
-It also refuses `--dev`, every argument but `--open` and `--config-path`, `--open` with a closed
-config, and an allowlist entry that is not 64 hex digits. Since ADR 0020 it refuses
-`dangerous_http_only = true`, a config with no `enable_metrics` line, an `access.http.url` with a
-user name, password, query or fragment in it, and `enable_relay = false`, which is the rendezvous
-image's config. The [guard's README](../guard/README.md) lists every rule. No message prints a
-value from the config, since a token may be one.
+It also refuses `--dev`, every argument but `--open`, `--rendezvous`, `--behind-proxy` and
+`--config-path`, `--open` with a closed config, and an allowlist entry that is not 64 hex digits.
+Since ADR 0020 it refuses `dangerous_http_only = true`, a config with no `enable_metrics` line, an
+`access.http.url` with a user name, password, query or fragment in it, and `enable_relay = false`,
+which is the rendezvous image's config. Since ADR 0021 it refuses a config with no `[tls]` unless
+`--behind-proxy` is given. The [guard's README](../guard/README.md) lists every rule. No message
+prints a value from the config, since a token may be one.
+
+One exception is the maintainer's: a key name made only of 1 to 32 lower-case letters and `_` is
+printed, because no rule can tell it from a setting's name. A `--config-path` value is printed only
+when it starts with `/` or `./`, is at most 200 characters, and uses only `[A-Za-z0-9._/-]`; any
+other becomes "the path given to --config-path".
 
 **Overriding the entry point skips the guard.** `docker run --entrypoint /usr/local/bin/iroh-relay`
 runs the server with whatever it is given, open default included. Name `sluice-relay-guard` instead,
@@ -192,10 +198,16 @@ with `docker start relay`. This recipe was not run either.
 
 ## A config with no `[tls]`
 
-The guard lets a config with no `[tls]` table start (ADR 0020), for a relay behind a reverse proxy.
-Then iroh-relay serves plain HTTP only, and **the proxy in front must end TLS**: a client reaches
-the proxy over HTTPS, and the proxy reaches the relay over HTTP. Whatever the clients present
-crosses that second hop in clear text, shared tokens included. Keep it on one host or one private
-network, and never on a path another party can read. The guard refuses `dangerous_http_only =
-true`, which turns HTTPS off on a relay that has a `[tls]` table, but it cannot see what is in
-front of one that has none.
+A config with no `[tls]` table makes iroh-relay serve plain HTTP, so it is refused unless the
+operator says a proxy in front ends TLS. Add `--behind-proxy` to the `docker run` command for that.
+The flag and the file have to agree: `--behind-proxy` with a `[tls]` table is refused, because then
+iroh-relay ends TLS itself, and `--behind-proxy` in `--rendezvous` mode is refused, because a
+rendezvous server relays nothing.
+
+**The proxy in front must end TLS.** A client reaches the proxy over HTTPS, and the proxy reaches
+the relay over HTTP. Whatever the clients present crosses that second hop in clear text, shared
+tokens and bearer tokens included. Keep it on one host or one private network, and never on a path
+another party can read.
+
+`dangerous_http_only = true` stays refused in a config that has `[tls]`: it turns HTTPS off, which is
+what `--dev` does, and the flag is not a second way to ask for that.

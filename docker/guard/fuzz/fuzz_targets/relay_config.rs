@@ -7,10 +7,11 @@ use sluice_relay_guard::{Args, Mode, check_config, open_config};
 
 // Any bytes as the text of a config, in each mode the guard has, with and without
 // IROH_RELAY_ACCESS_TOKEN and with and without --behind-proxy. The check never panics, and every
-// refusal is one line that holds no control character and names an unknown key only by a name of 1
-// to 32 lower-case letters or `_`. The same bytes as a file name, in a folder that does not exist,
-// give a refusal that holds no control character either. Split at each NUL, they are a command
-// line, and a refusal names an unknown argument only as `--` and 1 to 32 lower-case letters or `-`.
+// refusal is one line that holds no control character, names an unknown key only by a name of 1 to
+// 32 lower-case letters or `_`, and puts no value between backticks. The same bytes as a file name,
+// in a folder that does not exist, give a refusal that holds no control character either. Split at
+// each NUL, they are a command line, and a refusal names an unknown argument only as `--` and 1 to
+// 32 lower-case letters or `-`.
 fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
     for mode in [Mode::Closed, Mode::Open, Mode::Rendezvous] {
@@ -19,6 +20,7 @@ fuzz_target!(|data: &[u8]| {
                 if let Err(refusal) = check_config(&text, mode, token, behind_proxy) {
                     one_line(&refusal.to_string());
                     named_plainly(&refusal.to_string());
+                    spans_are_fixed_or_names(&refusal.to_string());
                 }
             }
         }
@@ -60,5 +62,38 @@ fn argument_named_plainly(message: &str) {
             (1..=32).contains(&flag.len()) && flag.bytes().all(plain),
             "{message:?}"
         );
+    }
+}
+
+/// The fixed text the guard puts between backticks in a config refusal. Everything else it quotes
+/// is a setting name, which is 1 to 32 lower-case letters or `_` per dot-separated part. A span
+/// that is neither would be a value from the config, and a value may be a token.
+const FIXED_SPANS: &[&str] = &[
+    // Whole settings of the guard's advice, with a space and an `=` in them.
+    "enable_metrics = false",
+    "enable_relay = false",
+    // The name of a table as the README writes it.
+    "[access] allowlist",
+    // The command that prints an id.
+    "sluice id",
+];
+
+/// Every backticked span of a config refusal is [`FIXED_SPANS`] or dotted parts that each match
+/// `[a-z_]{1,32}`. A span left open is a bug in the message.
+fn spans_are_fixed_or_names(message: &str) {
+    let plain = |b: u8| b.is_ascii_lowercase() || b == b'_';
+    let name = |part: &str| (1..=32).contains(&part.len()) && part.bytes().all(plain);
+    let mut rest = message;
+    while let Some(start) = rest.find('`') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('`') else {
+            panic!("a backtick is left open in {message:?}");
+        };
+        let span = &after[..end];
+        assert!(
+            FIXED_SPANS.contains(&span) || span.split('.').all(name),
+            "a backticked span in {message:?} is neither fixed text nor a dotted name: {span:?}"
+        );
+        rest = &after[end + 1..];
     }
 }
