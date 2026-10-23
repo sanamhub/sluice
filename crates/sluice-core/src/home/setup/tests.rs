@@ -129,6 +129,86 @@ fn something_that_appears_while_the_home_is_made_private_stops_the_open() {
     assert!(prepare(empty.path(), true, restrict).is_ok());
 }
 
+/// What a second sluice finds when it opens the same new home a moment after the first: the first
+/// one's files, which are exactly what sluice makes, and are accepted after a second look.
+#[test]
+fn what_sluice_makes_appearing_while_the_home_is_made_private_is_accepted() {
+    fn restrict_while_another_sluice_arrives(home: &Path) -> Result<(), Error> {
+        fs::create_dir(home.join("blobs")).unwrap();
+        fs::write(home.join("VERSION"), "1\n").unwrap();
+        fs::write(home.join("lock"), "").unwrap();
+        Ok(())
+    }
+    fn restrict_while_a_link_arrives(home: &Path) -> Result<(), Error> {
+        fs::create_dir(home.join("elsewhere")).unwrap();
+        link_folder(&home.join("elsewhere"), &home.join("blobs"));
+        Ok(())
+    }
+    let dir = tempfile::tempdir().unwrap();
+    prepare(dir.path(), true, restrict_while_another_sluice_arrives).unwrap();
+    // The same name as a folder of the home is not enough: a link there is not what sluice makes.
+    let dir = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        prepare(dir.path(), true, restrict_while_a_link_arrives),
+        Err(Error::Policy(_))
+    ));
+}
+
+/// Two opens of one new home at once, which is two `sluice` commands started together. Each gets
+/// through making it private, and neither is told that something appeared in it. The lock then goes
+/// to one of them, and the other is refused for that, which is a different and expected answer.
+#[test]
+fn two_opens_of_one_new_home_at_once_both_get_through_50_times() {
+    let parent = tempfile::tempdir().unwrap();
+    for round in 0..50 {
+        let path = parent.path().join(format!("home{round}"));
+        let start = std::sync::Barrier::new(2);
+        let results: Vec<Result<PathBuf, Error>> = std::thread::scope(|scope| {
+            let open = || {
+                start.wait();
+                super::create_folders(&path)
+            };
+            let (first, second) = (scope.spawn(open), scope.spawn(open));
+            vec![first.join().unwrap(), second.join().unwrap()]
+        });
+        for result in results {
+            assert!(result.is_ok(), "round {round}: {result:?}");
+        }
+        assert!(is_private(&path), "round {round}");
+    }
+}
+
+/// The same race through `Home::open`: whichever gets the lock holds the home, and the other says
+/// so. Nothing else is an acceptable answer.
+#[test]
+fn two_opens_through_home_open_are_either_open_or_refused_for_the_lock() {
+    let parent = tempfile::tempdir().unwrap();
+    for round in 0..50 {
+        let path = parent.path().join(format!("home{round}"));
+        let start = std::sync::Barrier::new(2);
+        let results: Vec<Result<Home, Error>> = std::thread::scope(|scope| {
+            let open = || {
+                start.wait();
+                Home::open(&path)
+            };
+            let (first, second) = (scope.spawn(open), scope.spawn(open));
+            vec![first.join().unwrap(), second.join().unwrap()]
+        });
+        assert!(
+            results.iter().any(Result::is_ok),
+            "round {round}: {results:?}"
+        );
+        for result in results {
+            if let Err(error) = result {
+                let Error::Policy(message) = error else {
+                    panic!("round {round}: {error:?}");
+                };
+                assert!(message.contains("is using the store"), "{message}");
+            }
+        }
+    }
+}
+
 #[test]
 fn a_link_in_place_of_blobs_is_refused_and_named() {
     let parent = tempfile::tempdir().unwrap();

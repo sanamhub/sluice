@@ -13,12 +13,29 @@
 use std::fs::{self, DirBuilder};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use super::storage;
 use crate::Error;
 
 /// The folders `open` creates under the home, besides the home itself.
 pub(super) const FOLDERS: [&str; 3] = ["blobs", "db", "logs"];
+
+/// The files sluice makes in a home, and the temporary names it makes them under. Another process
+/// opening the same new home at the same moment may have made any of them before this one looks.
+const FILES: [&str; 7] = [
+    "VERSION",
+    "VERSION.tmp",
+    "lock",
+    "lock.pid",
+    "lock.pid.tmp",
+    "identity.key",
+    "identity.key.tmp",
+];
+
+/// How long a second look waits, so a process that is half way through making a home has finished
+/// its files. Long next to a few file creations, and short next to a command.
+const SETTLE: Duration = Duration::from_millis(50);
 
 /// Creates the home and its folders if they are missing, and returns the home with every link
 /// followed. On Unix they get mode 0700, so the identity key is not readable through the folder
@@ -127,12 +144,17 @@ fn cannot_resolve(path: &Path, error: &io::Error) -> Error {
 }
 
 /// Makes an empty home private, then lists it again. Anything that appeared in between was made
-/// with the access the folder had before, possibly by another user, and is not the store's to
-/// keep, so the open stops and names the home. `restrict` is a parameter so a test can put a file
-/// in the gap.
+/// with the access the folder had before, possibly by another user, so the open stops and names
+/// the home, unless it is only what sluice itself makes. Another sluice opening the same new home
+/// at the same moment is the usual cause: it is given a moment to finish, and listed once more.
+/// `restrict` is a parameter so a test can put a file in the gap.
 fn private_while_empty(home: &Path, restrict: fn(&Path) -> Result<(), Error>) -> Result<(), Error> {
     restrict(home)?;
     if is_empty(home)? {
+        return Ok(());
+    }
+    std::thread::sleep(SETTLE);
+    if holds_only_what_sluice_makes(home)? {
         return Ok(());
     }
     Err(Error::Policy(format!(
@@ -141,6 +163,29 @@ fn private_while_empty(home: &Path, restrict: fn(&Path) -> Result<(), Error>) ->
          run the command again",
         home.display()
     )))
+}
+
+/// Whether every entry is a file or folder of the names sluice makes, and is what it should be: a
+/// real folder for `blobs`, `db` and `logs`, a plain file for the rest. A link by one of those
+/// names is not.
+fn holds_only_what_sluice_makes(home: &Path) -> Result<bool, Error> {
+    for entry in fs::read_dir(home).map_err(|e| storage("list", home, e))? {
+        let entry = entry.map_err(|e| storage("list", home, e))?;
+        let Ok(meta) = fs::symlink_metadata(entry.path()) else {
+            return Ok(false);
+        };
+        let made = match entry.file_name().to_str() {
+            Some(name) if FOLDERS.contains(&name) => {
+                meta.is_dir() && !meta.file_type().is_symlink()
+            }
+            Some(name) if FILES.contains(&name) => meta.is_file(),
+            _ => false,
+        };
+        if !made {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// Makes the parents of the home, then the home, and says whether the home was new. The home is
