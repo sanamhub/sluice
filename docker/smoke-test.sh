@@ -9,7 +9,9 @@
 #
 # It needs a Linux host with Docker, openssl, curl and bash. It makes one network, a throwaway
 # certificate and the containers it needs, all named after a random suffix, and removes them when
-# it exits. It touches no other container.
+# it exits, on a cancel too. It touches no other container. The listeners are read from the
+# container's own /proc, so a host that cannot reach a container address is not a pass, and a
+# container that stops on SIGINT has to say so within ten seconds.
 set -euo pipefail
 
 usage="usage: smoke-test.sh relay|rendezvous <image>"
@@ -28,14 +30,18 @@ failed=0
 runs=0
 
 # Called by the trap below, which shellcheck does not follow. Every container is named after
-# $name, so a run that timed out is removed here too.
+# $name, so a run that timed out is removed here too. `set +e`, so one failure does not stop the
+# removal of what follows, and TERM and INT exit through this trap as well.
 # shellcheck disable=SC2329
 cleanup() {
+  set +e
   docker ps -aq --filter "name=^${name}-" | xargs -r docker rm -f > /dev/null
   docker network rm "$name" > /dev/null 2>&1 || true
   rm -rf "$work"
 }
 trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 # A certificate for 127.0.0.1 that says CA:FALSE, which the server needs to start. The folder and
 # key are readable by everyone, so uid 65532 in the container can read them without a chown: they
@@ -55,16 +61,27 @@ fail() { echo "FAIL  $1"; failed=1; }
 # A name of its own for each container, so a cleanup finds it whatever it did.
 next_name() { runs=$((runs + 1)); printf '%s-%s' "$name" "$runs"; }
 
-# The address of a container on the network of this run.
-address_of() {
-  docker inspect --format "{{(index .NetworkSettings.Networks \"$name\").IPAddress}}" "$1"
-}
-
-# Whether something accepts a TCP connection at the address and port, within 3 seconds.
-listens() {
-  # The address and port are passed as $0 and $1, and not written into the command.
-  # shellcheck disable=SC2016
-  timeout 3 bash -c 'exec 3<> "/dev/tcp/$0/$1"' "$1" "$2" 2> /dev/null
+# The local ports the container's network namespace has open: the TCP sockets that listen, and the
+# UDP sockets that are bound. They are read from the container's own /proc, so a host that cannot
+# reach a container address still sees every listener, and a port that is missing means something.
+open_ports() {
+  local pid="$1" file addr state
+  for file in tcp tcp6 udp udp6; do
+    [ -r "/proc/$pid/net/$file" ] || return 1
+  done
+  for file in tcp tcp6; do
+    while read -r _ addr _ state _; do
+      if [ "$addr" = "local_address" ]; then continue; fi
+      if [ "$state" = "0A" ]; then printf '%d\n' "0x${addr##*:}"; fi
+    done < "/proc/$pid/net/$file"
+  done
+  for file in udp udp6; do
+    while read -r _ addr _ _; do
+      if [ "$addr" = "local_address" ]; then continue; fi
+      printf '%d\n' "0x${addr##*:}"
+    done < "/proc/$pid/net/$file"
+  done
+  return 0
 }
 
 # Whether the TLS server on a published port presents the throwaway certificate, which only this
@@ -88,21 +105,29 @@ up() {
   grep -q 'QUIC server listening' <<< "$logs" || return 1
   [ "$kind" = relay ] || return 0
   port="$(docker port "$container" 80/tcp | head -n 1 | cut -d: -f2)"
-  [ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/generate_204")" = 204 ] \
-    || return 1
+  [ "$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:$port/generate_204")" = 204 ] || return 1
   port="$(docker port "$container" 443/tcp | head -n 1 | cut -d: -f2)"
   presents_our_certificate "$port"
 }
 
-# The metrics server is on at port 9090 with no login unless the config turns it off. The relay's
-# own HTTPS port is the control: if it cannot be reached from here either, the 9090 result means
-# nothing.
+# The metrics server is on at port 9090 with no login unless the config turns it off. The control
+# is a port the config does start: the relay's HTTPS 443, or the rendezvous server's QUIC 7842,
+# which is bound over UDP. Both are read from the container's own /proc, so a host that cannot reach
+# the container's address still gets a truthful answer, and a container with no listener fails the
+# control instead of passing the 9090 check.
 metrics_are_off() {
-  local container="$1" address
-  address="$(address_of "$container")"
-  if ! listens "$address" 443 && [ "$kind" = relay ]; then
-    fail "metrics: the relay's port 443 cannot be reached from the test, so 9090 proves nothing"
-  elif listens "$address" 9090; then
+  local container="$1" pid ports control
+  pid="$(docker inspect --format '{{.State.Pid}}' "$container")"
+  if ! ports="$(open_ports "$pid")"; then
+    fail "metrics: /proc/$pid/net is not readable, so port 9090 proves nothing"
+    return
+  fi
+  control=443
+  [ "$kind" = rendezvous ] && control=7842
+  if ! grep -qx "$control" <<< "$ports"; then
+    fail "metrics: port $control, which this config starts, is not open, so 9090 proves nothing"
+  elif grep -qx 9090 <<< "$ports"; then
     fail "metrics: port 9090 is open"
   else
     pass "metrics: port 9090 is closed"
@@ -116,8 +141,9 @@ starts() {
   container="$(next_name)"
   shift 1
   [ "$kind" = relay ] && publish=(-p 127.0.0.1::80 -p 127.0.0.1::443)
-  docker run -d --read-only --name "$container" --network "$name" "${publish[@]}" \
-    -v "$work/certs:$etc/certs:ro" "$image" "$@" > /dev/null
+  # An empty array under `set -u` on an older bash is an unbound variable; this expands to nothing.
+  docker run -d --read-only --name "$container" --network "$name" \
+    ${publish[@]+"${publish[@]}"} -v "$work/certs:$etc/certs:ro" "$image" "$@" > /dev/null
   local ok=no
   for _ in $(seq 1 50); do
     if up "$container"; then ok=yes; break; fi
@@ -140,14 +166,32 @@ starts() {
 # memfd and its seals, and with a read-only root. It runs as the host user so that the host may
 # read /proc/<pid>/fd, and only here.
 handover() {
-  local container pid want cmdline
+  local container pid want cmdline copy running started=no
   container="$(next_name)"
   docker run -d --read-only --user "$(id -u):$(id -g)" --name "$container" --network "$name" \
     -v "$work/certs:$etc/certs:ro" "$image" > /dev/null
-  for _ in $(seq 1 50); do up_quic "$container" && break; sleep 0.2; done
+  for _ in $(seq 1 50); do
+    if up_quic "$container"; then started=yes; break; fi
+    sleep 0.2
+  done
+  running="$(docker inspect --format '{{.State.Running}}' "$container")"
   pid="$(docker inspect --format '{{.State.Pid}}' "$container")"
+  # A dead container or a start that never showed is a failure, not a reason to skip: only a
+  # container that runs while /proc is out of reach from here is the non-native case.
+  if [ "$running" != "true" ] || [ "$pid" = 0 ]; then
+    fail "handover: the container is not running"
+    docker logs "$container" 2>&1 | tail -n 5
+    docker rm -f "$container" > /dev/null
+    return
+  fi
+  if [ "$started" != yes ]; then
+    fail "handover: the QUIC start line never appeared"
+    docker logs "$container" 2>&1 | tail -n 5
+    docker rm -f "$container" > /dev/null
+    return
+  fi
   if [ ! -r "/proc/$pid/cmdline" ] || [ ! -r "/proc/$pid/fd/0" ]; then
-    echo "SKIP  handover: /proc/$pid is not readable from here (not a native Linux engine)"
+    echo "SKIP  handover: the container runs, and /proc/$pid is not readable from here"
     docker rm -f "$container" > /dev/null
     return
   fi
@@ -163,6 +207,37 @@ handover() {
     pass "handover: PID 1 is '${cmdline% }', and its descriptor 0 is the sealed copy of the config"
   else
     fail "handover: PID 1 is '$cmdline', descriptor 0: $copy"
+  fi
+  docker rm -f "$container" > /dev/null
+}
+
+# iroh-relay stops on SIGINT and not on SIGTERM (main.rs:610-614), so an image with no STOPSIGNAL
+# makes `docker stop` wait out its 30-second grace period and kill the process. Both Dockerfiles
+# say STOPSIGNAL SIGINT, so the stop returns in about a second with iroh-relay's own exit code.
+stops() {
+  local container start end elapsed code started=no
+  container="$(next_name)"
+  docker run -d --read-only --name "$container" --network "$name" \
+    -v "$work/certs:$etc/certs:ro" "$image" > /dev/null
+  for _ in $(seq 1 50); do
+    if up_quic "$container"; then started=yes; break; fi
+    sleep 0.2
+  done
+  if [ "$started" != yes ]; then
+    fail "stop: the container did not come up"
+    docker logs "$container" 2>&1 | tail -n 5
+    docker rm -f "$container" > /dev/null
+    return
+  fi
+  start="$(date +%s%N)"
+  docker stop -t 30 "$container" > /dev/null
+  end="$(date +%s%N)"
+  elapsed=$(((end - start) / 1000000))
+  code="$(docker inspect --format '{{.State.ExitCode}}' "$container")"
+  if [ "$elapsed" -lt 10000 ] && [ "$code" = 0 ]; then
+    pass "stop: docker stop -t 30 returned in $elapsed ms, exit $code"
+  else
+    fail "stop: docker stop -t 30 returned in $elapsed ms, exit $code"
   fi
   docker rm -f "$container" > /dev/null
 }
@@ -221,6 +296,7 @@ both() {
 
 relay() {
   starts "the shipped image"
+  stops
   starts "open.toml with --open" --open --config-path /etc/relay/open.toml
   handover
   refuses "--open with relay.toml" "--open was given, but \`access\` is an allowlist" \
@@ -269,6 +345,7 @@ relay_configs() {
 
 rendezvous() {
   starts "the shipped image"
+  stops
   handover
   refuses "no enable_relay = false" "needs \`enable_relay = false\`" \
     -v "$(config on "${metrics}${quic}${tls}" manual.toml)" "$image"

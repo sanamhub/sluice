@@ -48,6 +48,11 @@ EXPOSE 443/tcp 80/tcp 7842/udp
 # --entrypoint that names iroh-relay skips every check (README.md).
 ENTRYPOINT ["/usr/local/bin/sluice-relay-guard"]
 
+# iroh-relay stops on SIGINT and not on SIGTERM (main.rs:610-614), so this is what makes
+# `docker stop` return in about a second instead of waiting out its grace period and killing the
+# process. It reaches the relay through the exec.
+STOPSIGNAL SIGINT
+
 # The closed config: only the endpoint ids on its allowlist may use the relay, and it ships empty.
 # Open mode is `--open --config-path /etc/relay/open.toml`, and only that (README.md).
 CMD ["--config-path", "/etc/relay/relay.toml"]

@@ -46,6 +46,11 @@ EXPOSE 7842/udp
 # --entrypoint that names iroh-relay skips every check (README.md).
 ENTRYPOINT ["/usr/local/bin/sluice-relay-guard"]
 
+# iroh-relay stops on SIGINT and not on SIGTERM (main.rs:610-614), so this is what makes
+# `docker stop` return in about a second instead of waiting out its grace period and killing the
+# process. It reaches the relay through the exec.
+STOPSIGNAL SIGINT
+
 # The guard passes iroh-relay the --dev it needs with the relay half off (README.md), and refuses
 # --dev from the command line.
 CMD ["--rendezvous", "--config-path", "/etc/rendezvous/manual.toml"]

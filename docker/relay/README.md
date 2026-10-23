@@ -157,8 +157,9 @@ container's PID 1. On 2026-10-23 it was run a third time with the config handed 
 container's root read-only, and came out the same again, with `iroh-relay` started as
 `--config-path=/dev/stdin` as the guard did then; ADR 0021 moved that to a sealed copy read through
 `/proc/self/fd/0`. [smoke-test.sh](../smoke-test.sh) checks the guard's refusals, that both images
-start as the config they were given with a read-only root, and what PID 1 is, and CI runs it on
-every build of either image.
+start as the config they were given with a read-only root, what PID 1 is, and that `docker stop`
+returns in under a second with exit 0, because the Dockerfile sends SIGINT. CI runs it on every
+build of either image.
 
 ## Open mode
 
