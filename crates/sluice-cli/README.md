@@ -86,10 +86,12 @@ failure the step that fixes it. With `--json` it prints one object:
 
 `name` is `version`, `home`, `access`, `layout`, `lock`, `key`, `space` or `transport`, in that
 order. `access` reports the home folder, whether another user owns it or others can reach it, and
-`key` the key alone, so a home and a key that are both open to others are two failures. A home is
-read by the path the system resolves for it, so one that is a link, or longer than 260 characters
-on Windows, is checked as `sluice id` opens it, and a message names the path as it was given.
-`detail` and `fix` are for people, and `fix` is `null` when there is nothing to do.
+`key` the key alone, so a home and a key that are both open to others are two failures. `home` also
+fails when `blobs`, `db` or `logs` is a link, which `sluice id` refuses to open, and when the lock
+or `lock.pid` is not a plain file. A home is read by the path the system resolves for it, so one
+that is a link, or longer than 260 characters on Windows, is checked as `sluice id` opens it, and a
+message names the path as it was given. `detail` and `fix` are for people, and `fix` is `null` when
+there is nothing to do.
 
 The report is the command's result, so it goes to stdout whatever it finds, with or without
 `--json`, and nothing goes to stderr. The exit code is 0 when no check failed: warnings do not fail.

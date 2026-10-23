@@ -363,7 +363,7 @@ The QUIC stack is tested by its own project, so we don't simulate QUIC.
 
 | Concern | Tool |
 |---|---|
-| Toolchain | `rust-toolchain.toml`, Rust 2024 edition, MSRV 1.90 in the CI matrix |
+| Toolchain | `rust-toolchain.toml`, Rust 2024 edition. MSRV 1.90 is one CI job, `cargo +1.90 check --all-targets --workspace --exclude sluice-probe`, not a matrix entry: `iroh` 1.4.0 and `iroh-blobs` 0.103.1 need Rust 1.91, and the probe is not a product crate |
 | Tasks | `cargo xtask` |
 | Tests and snapshots | `cargo nextest`, `insta` |
 | Benchmarks | Planned, none run by a workflow: `divan` with CodSpeed for CPU work per pull request, and a self-hosted pair for throughput |
@@ -375,5 +375,5 @@ The QUIC stack is tested by its own project, so we don't simulate QUIC.
 | Releases | `release-plz` for the version and the changelog pull request, `dist` 0.33.1 for the six archives and the two installers, from one tag through `release.yml`. The steps, the approvals and how to verify a release are in [RELEASING.md](../RELEASING.md) |
 | Signing | GitHub artifact attestations: build provenance for every release file and image, and SBOMs. Azure Artifact Signing on Windows and notarization on macOS are planned and not done ([RELEASING.md](../RELEASING.md#not-done-yet)) |
 | Containers | distroless, amd64 and arm64 built on native runners, each image starting through [`sluice-relay-guard`](../docker/guard/README.md) |
-| Observability | `tracing`, optional OTLP export and Prometheus endpoint, both off by default |
+| Observability | Planned, no workflow runs it: `tracing`, optional OTLP export and Prometheus endpoint, both off by default. Today the log lines are there and neither export is built |
 | CLI | `clap` with completions and man pages, `indicatif`, `NO_COLOR`, `--json` on every command |
