@@ -65,6 +65,7 @@ jobs:
           for arch in amd64 arm64; do
             docker tag "sluice-$IMAGE:ci" "sluice-$IMAGE:$arch"
             docker save "sluice-$IMAGE:$arch" | gzip > "$RUNNER_TEMP/image/$arch.tar.gz"
+            ( cd "$RUNNER_TEMP/image" && sha256sum "$arch.tar.gz" > "$arch.tar.gz.sha256" )
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -3,8 +3,8 @@
 # what to put back. The changes from dist's output:
 #
 # * every action is pinned to a commit SHA, with its version in a comment;
-# * dist, cargo-auditable and cargo-cyclonedx are installed at exact versions and checked, not
-#   piped from an installer script or taken from "latest";
+# * dist, cargo-auditable, cargo-cyclonedx and syft are installed at exact versions and checked,
+#   not piped from an installer script or taken from "latest";
 # * a tag first runs the whole of ci.yml, and nothing builds until it passes;
 # * the plan job refuses a tag with anything but letters, digits, `.` and `-` after the `v`;
 # * every step runs in bash, on Windows too, and no `${{ }}` is pasted into a script: each value
@@ -55,6 +55,7 @@ defaults:
 
 env:
   DIST_VERSION: 0.33.1
+  SYFT_VERSION: 1.55.0
 
 jobs:
   # The checks of every push to main, run again on the tagged commit. A release pull request is
@@ -316,19 +317,30 @@ jobs:
       # more than it says (ADR 0019, ADR 0020).
       - name: Guard smoke test
         run: bash docker/smoke-test.sh "$IMAGE" "sluice-$IMAGE:$ARCH"
-      # From this architecture's own image, on its own runner, so each SBOM lists what that image
-      # holds. The publishing job attests it on the digest the registry gives the image.
-      - name: SBOM
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          image: sluice-${{ matrix.image }}:${{ matrix.platform.arch }}
-          format: spdx-json
-          output-file: ${{ runner.temp }}/image/${{ matrix.platform.arch }}.spdx.json
-          syft-version: v1.55.0
-          upload-artifact: false
-          upload-release-assets: false
+      # Saved before the SBOM is made, and the SBOM reads this tarball and not the running image, so
+      # what was signed is the bytes that are pushed. The sha256 is recorded beside it, and the
+      # publishing job refuses a tarball that does not match.
       - name: Save
-        run: docker save "sluice-$IMAGE:$ARCH" | gzip > "$RUNNER_TEMP/image/$ARCH.tar.gz"
+        run: |
+          mkdir -p "$RUNNER_TEMP/image"
+          docker save "sluice-$IMAGE:$ARCH" | gzip > "$RUNNER_TEMP/image/$ARCH.tar.gz"
+          ( cd "$RUNNER_TEMP/image" && sha256sum "$ARCH.tar.gz" > "$ARCH.tar.gz.sha256" )
+      # At an exact version, from its release, with its hash checked first. The action this
+      # replaces downloaded syft's install script at run time and ran syft with the Docker socket
+      # before the image was saved, so a bad syft could have changed what was signed.
+      - name: Install syft
+        run: bash .github/release/install-syft.sh
+      # From this architecture's own image, on its own runner, so each SBOM lists what that image
+      # holds. The publishing job attests it on the digest the registry gives the image. syft reads
+      # a Docker tar and not a gzipped one, so it scans a decompressed copy of the same bytes, and
+      # the sha256 above is what shows the copy is the artifact.
+      - name: SBOM
+        run: |
+          tar="$RUNNER_TEMP/$IMAGE-$ARCH.tar"
+          gzip -dc "$RUNNER_TEMP/image/$ARCH.tar.gz" > "$tar"
+          syft "docker-archive:$tar" \
+            --output "spdx-json=$RUNNER_TEMP/image/$ARCH.spdx.json"
+          rm -f "$tar"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-${{ matrix.image }}-${{ matrix.platform.arch }}

@@ -79,6 +79,9 @@ push_architectures() {
   local arch image platform digest loaded
   for arch in amd64 arm64; do
     image="sluice-$IMAGE:$arch"
+    # The sha256 recorded beside the tarball when the image was saved, before anything reads the
+    # tarball: one swapped in the artifact store is not the image the SBOM describes.
+    ( cd "$RUNNER_TEMP/image" && sha256sum --check --strict "$arch.tar.gz.sha256" )
     loaded="$(docker load --input "$RUNNER_TEMP/image/$arch.tar.gz")"
     # The tag inside the tarball, and not whatever the runner had under this name before, is what
     # the platform below is read from.
