@@ -51,7 +51,7 @@ it and can change in any release.
 | 3 | `Network`: a peer or relay could not be reached, or a connection failed mid-transfer. Retrying can help |
 | 4 | `Verify`: received bytes did not match the BLAKE3 root. The bytes are discarded |
 | 5 | `Storage`: the store or filesystem failed: full disk, permission or quota |
-| 6 | `Policy`: sluice refused by rule, such as a home with a newer layout, a key that other users can read, or `--rotate` with nobody to ask |
+| 6 | `Policy`: sluice refused by rule, such as a home with a newer layout, a home another user owns, a key that other users can read, or `--rotate` with nobody to ask |
 | 70 | `Bug`: an internal invariant broke, or sluice panicked. A defect in sluice, never in the environment |
 | 130 | `Cancelled`: the caller cancelled, for example by answering no to a prompt |
 
@@ -75,24 +75,27 @@ or with `--json`, it refuses with code 6 unless `--yes` is given.
 
 **`sluice doctor`**
 
-`sluice doctor` checks the home, who other than the user can reach it, its layout version, its
-lock, the identity key and the free space on the home's volume, and changes nothing. It prints one line per check with its status, `ok`,
-`warning`, `failed` or `skipped`, and under a warning or a failure the step that fixes it. With
-`--json` it prints one object:
+`sluice doctor` checks the home, who owns it and who else can reach it, its layout version, its
+lock, the identity key and the free space on the home's volume, and changes nothing. It prints one
+line per check with its status, `ok`, `warning`, `failed` or `skipped`, and under a warning or a
+failure the step that fixes it. With `--json` it prints one object:
 
 ```
 {"checks":[{"name":"home","status":"ok","detail":"<path>, from SLUICE_HOME","fix":null},...]}
 ```
 
 `name` is `version`, `home`, `access`, `layout`, `lock`, `key`, `space` or `transport`, in that
-order. `access` reports the home folder and `key` the key alone, so a home and a key that are both
-open to others are two failures.
+order. `access` reports the home folder, whether another user owns it or others can reach it, and
+`key` the key alone, so a home and a key that are both open to others are two failures. A home is
+read by the path the system resolves for it, so one that is a link, or longer than 260 characters
+on Windows, is checked as `sluice id` opens it, and a message names the path as it was given.
 `detail` and `fix` are for people, and `fix` is `null` when there is nothing to do.
 
 The report is the command's result, so it goes to stdout whatever it finds, with or without
 `--json`, and nothing goes to stderr. The exit code is 0 when no check failed: warnings do not fail.
 Otherwise it is the code of the most serious kind that failed, which is the highest number: 6 for
-policy, such as a key other users can read or a layout newer than this sluice, and 5 for storage.
+policy, such as a key other users can read, a home that another user owns, or a layout newer than
+this sluice, and 5 for storage.
 
 **Other commands**
 

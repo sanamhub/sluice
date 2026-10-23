@@ -12,13 +12,13 @@ closed.
 
 ## Supported versions
 
-Before 1.0, only the latest release gets fixes. From 1.0, the latest minor release and the one before
-it get fixes.
+Before 1.0, only the latest release gets fixes. From 1.0, the latest minor release and the one
+before it get fixes.
 
 ## What Sluice protects against
 
-See [`docs/threat-model.md`](docs/threat-model.md), which also lists what it does not protect against
-and its known weaknesses.
+See [`docs/threat-model.md`](docs/threat-model.md), which also lists what it does not protect
+against and its known weaknesses.
 
 ## Verifying a release
 
@@ -34,5 +34,5 @@ gh attestation verify sluice-cli-x86_64-unknown-linux-gnu.tar.xz --repo <owner>/
 [RELEASING.md](RELEASING.md#install-a-release) says what the two flags add, and what the installers
 check and do not.
 
-If you are asked to pipe an unsigned binary into a shell from anywhere claiming to be this project, it
-is not this project.
+If you are asked to pipe an unsigned binary into a shell from anywhere claiming to be this project,
+it is not this project.
