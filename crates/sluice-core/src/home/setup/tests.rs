@@ -12,7 +12,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::{cannot_resolve, prepare, resolve, resolve_with};
+use super::{cannot_resolve, prepare, prepare_with, resolve, resolve_with};
 use crate::doctor::{Finding, Name, Status, examine_at};
 use crate::{Error, Home};
 
@@ -138,6 +138,45 @@ fn something_that_appears_while_the_home_is_made_private_stops_the_open() {
 
 /// What a second sluice finds when it opens the same new home a moment after the first: the first
 /// one's files, which are exactly what sluice makes, and are accepted after a second look.
+#[test]
+fn a_key_planted_in_the_gap_is_refused() {
+    fn restrict_while_a_key_arrives(home: &Path) -> Result<(), Error> {
+        fs::write(home.join("identity.key"), [7u8; 32]).unwrap();
+        Ok(())
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let Err(Error::Policy(message)) = prepare(dir.path(), true, restrict_while_a_key_arrives)
+    else {
+        panic!("a planted identity.key was accepted");
+    };
+    assert!(message.contains("something appeared in it"), "{message}");
+}
+
+/// A name sluice makes is not enough: the entry has to be this user's, because its owner can
+/// change what it is after the second look and before the key is read. The owner check is the
+/// parameter, so the test can be another user on every platform.
+#[test]
+fn an_entry_this_user_did_not_make_is_refused() {
+    fn restrict_while_a_version_arrives(home: &Path) -> Result<(), Error> {
+        fs::write(home.join("VERSION"), "1\n").unwrap();
+        Ok(())
+    }
+    fn not_ours(_: &Path) -> io::Result<bool> {
+        Ok(false)
+    }
+    let dir = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        prepare_with(dir.path(), true, restrict_while_a_version_arrives, not_ours),
+        Err(Error::Policy(_))
+    ));
+    // The same entry, owned by this user, is what a second sluice makes and is accepted.
+    let dir = tempfile::tempdir().unwrap();
+    prepare_with(dir.path(), true, restrict_while_a_version_arrives, |_| {
+        Ok(true)
+    })
+    .unwrap();
+}
+
 #[test]
 fn what_sluice_makes_appearing_while_the_home_is_made_private_is_accepted() {
     fn restrict_while_another_sluice_arrives(home: &Path) -> Result<(), Error> {

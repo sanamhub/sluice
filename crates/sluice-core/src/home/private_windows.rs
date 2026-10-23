@@ -43,14 +43,17 @@ use windows_sys::Win32::Storage::FileSystem::{
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 mod lists;
+mod owner;
 
 pub(in crate::home) use lists::{is_private_dir, is_private_file};
+pub(in crate::home) use owner::{is_owned_by_this_user, is_owned_by_us, is_owned_by_us_handle};
 
 /// Object and container inherit: a folder's entries reach the files and folders made inside it.
 const INHERIT: &str = "OICI";
 
 /// Stops inheritance on a folder and gives it the private list, with entries that what is created
 /// inside it inherits. Opens the folder itself, so the caller passes a path.
+#[cfg(test)]
 pub(super) fn restrict_dir(path: &Path) -> io::Result<()> {
     let dir = open_dir(path)?;
     set_dacl(&dir, &private_sddl(&user_sid()?, INHERIT))
@@ -62,6 +65,19 @@ pub(super) fn restrict_file(file: &File) -> io::Result<()> {
     set_dacl(file, &private_sddl(&user_sid()?, ""))
 }
 
+/// [`restrict_file`] for a folder: the list carries the inherit flags, so what is made inside it
+/// gets the same three entries. It is the one call that sets a home's list through the handle the
+/// home was opened with, so the owner that was checked and the object that is restricted are the
+/// same.
+pub(in crate::home) fn restrict_dir_file(file: &File) -> io::Result<()> {
+    set_dacl(file, &private_sddl(&user_sid()?, INHERIT))
+}
+
+/// Whether the folder `file` is a handle to has the private list, read back through that handle.
+pub(in crate::home) fn is_private_dir_file(file: &File) -> io::Result<bool> {
+    lists::has_private_list_text(&dacl_sddl_of(file)?, INHERIT)
+}
+
 /// A handle to a folder with the access that changing its list needs: `WRITE_DAC`, and
 /// `READ_CONTROL` because `SetSecurityInfo` reads the list it replaces and answers "Access is
 /// denied" without it. `BACKUP_SEMANTICS` is what lets Windows open a folder at all.
@@ -69,7 +85,7 @@ pub(super) fn restrict_file(file: &File) -> io::Result<()> {
 /// followed to wherever it points. The default share mode stays, and the access is named and not
 /// `MAXIMUM_ALLOWED`, because with either changed `SetSecurityInfo` stops pushing the inheritable
 /// entries into children that already exist.
-fn open_dir(path: &Path) -> io::Result<File> {
+pub(in crate::home) fn open_dir(path: &Path) -> io::Result<File> {
     OpenOptions::new()
         .access_mode(READ_CONTROL | WRITE_DAC)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
@@ -298,34 +314,23 @@ fn dacl_sddl(path: &Path) -> io::Result<String> {
     unsafe { wide_to_string(text.0.cast()) }
 }
 
-/// The well-known SID of `Administrators`, which owns what a process that runs elevated creates.
-const ADMINISTRATORS: &str = "S-1-5-32-544";
+/// The access list of the object `file` is a handle to, as SDDL. The handle is the one the list
+/// was set through, so the read-back cannot be of another object behind a swapped link.
+fn dacl_sddl_of(file: &File) -> io::Result<String> {
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, GetSecurityInfo,
+    };
 
-/// Whether the owner of `path` is the user this process runs as, or `Administrators`. An owner can
-/// always rewrite the access list, whatever the list says, so a new home that another user made
-/// first would stay theirs to open up again after sluice set it private.
-pub(super) fn is_owned_by_us(path: &Path) -> io::Result<bool> {
-    let owner = owner_sid(path)?;
-    Ok(owner == ADMINISTRATORS || owner == user_sid()?)
-}
-
-/// The owner of `path`, as SID text, read by path.
-fn owner_sid(path: &Path) -> io::Result<String> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Security::Authorization::GetNamedSecurityInfoW;
-    use windows_sys::Win32::Security::OWNER_SECURITY_INFORMATION;
-
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    let (mut owner, mut descriptor) = (ptr::null_mut(), ptr::null_mut());
-    // SAFETY: `wide` is NUL terminated and outlives the call. `owner` and `descriptor` are valid
-    // places for the pointers the call writes. Every other out parameter is optional and null,
-    // because only the owner is asked for.
+    let mut descriptor = ptr::null_mut();
+    // SAFETY: the handle is open for as long as the borrow of `file` lasts, which covers the call.
+    // `descriptor` is a valid place for the pointer the call writes. Every other out parameter is
+    // optional and null, because only the DACL is asked for.
     let status = unsafe {
-        GetNamedSecurityInfoW(
-            wide.as_ptr(),
+        GetSecurityInfo(
+            file.as_raw_handle(),
             SE_FILE_OBJECT,
-            OWNER_SECURITY_INFORMATION,
-            &mut owner,
+            DACL_SECURITY_INFORMATION,
+            ptr::null_mut(),
             ptr::null_mut(),
             ptr::null_mut(),
             ptr::null_mut(),
@@ -335,15 +340,32 @@ fn owner_sid(path: &Path) -> io::Result<String> {
     if status != 0 {
         return Err(io::Error::from_raw_os_error(status as i32));
     }
-    // Held to the end of the function: `owner` points into it.
-    let _descriptor = LocalBlock::new(descriptor)?;
-    if owner.is_null() {
-        return Err(io::Error::other("the object has no owner"));
+    let descriptor = LocalBlock::new(descriptor)?;
+
+    let mut text: *mut u16 = ptr::null_mut();
+    // SAFETY: `descriptor` is the valid descriptor the call above returned and it is alive until
+    // the end of the function. `text` is a valid place for the string pointer, and the length out
+    // parameter is optional and null.
+    let converted = unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor.0,
+            SDDL_REVISION_1,
+            DACL_SECURITY_INFORMATION,
+            &mut text,
+            ptr::null_mut(),
+        )
+    };
+    if converted == 0 {
+        return Err(io::Error::last_os_error());
     }
-    // SAFETY: on success `owner` points to the owner SID inside the descriptor, which
-    // `_descriptor` keeps alive until the function returns, after this call.
-    unsafe { sid_to_string(owner) }
+    let text = LocalBlock::new(text.cast())?;
+    // SAFETY: on success `text` is a NUL terminated UTF-16 string in a LocalAlloc block that the
+    // guard keeps alive for the call.
+    unsafe { wide_to_string(text.0.cast()) }
 }
+
+/// The well-known SID of `Administrators`, which owns what a process that runs elevated creates.
+const ADMINISTRATORS: &str = "S-1-5-32-544";
 
 /// Bytes free to this user on the volume of `path`. That is less than free on the volume when a
 /// quota applies.

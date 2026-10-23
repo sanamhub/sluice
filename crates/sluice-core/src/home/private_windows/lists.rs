@@ -23,9 +23,14 @@ pub(in crate::home) fn is_private_dir(path: &Path) -> io::Result<bool> {
 /// `inherit`. It is read back by path and compared entry by entry, because Windows may give the
 /// entries back in another order.
 fn has_private_list(path: &Path, inherit: &str) -> io::Result<bool> {
-    let found = dacl_sddl(path)?;
+    has_private_list_text(&dacl_sddl(path)?, inherit)
+}
+
+/// [`has_private_list`] over the text of a list that was read back, so a caller with a handle can
+/// compare what its own handle returned.
+pub(super) fn has_private_list_text(found: &str, inherit: &str) -> io::Result<bool> {
     let wanted = private_sddl(&user_sid()?, inherit);
-    let (found_protected, found_entries) = split_sddl(&found);
+    let (found_protected, found_entries) = split_sddl(found);
     let (_, wanted_entries) = split_sddl(&wanted);
     Ok(found_protected && found_entries == wanted_entries)
 }

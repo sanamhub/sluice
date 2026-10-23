@@ -18,20 +18,23 @@ use std::time::Duration;
 use super::storage;
 use crate::Error;
 
+mod private;
+
+/// The handle-based owner check, for the tests of doctor and of the mode change.
+#[cfg(all(test, unix))]
+pub(in crate::home) use private::keep_home_private_for;
+
 /// The folders `open` creates under the home, besides the home itself.
 pub(super) const FOLDERS: [&str; 3] = ["blobs", "db", "logs"];
 
 /// The files sluice makes in a home, and the temporary names it makes them under. Another process
 /// opening the same new home at the same moment may have made any of them before this one looks.
-const FILES: [&str; 7] = [
-    "VERSION",
-    "VERSION.tmp",
-    "lock",
-    "lock.pid",
-    "lock.pid.tmp",
-    "identity.key",
-    "identity.key.tmp",
-];
+///
+/// `identity.key` and `identity.key.tmp` are missing on purpose: the second look never accepts a
+/// key, not even one this user made, because a key planted in the gap is a key another user knows.
+/// `Home::open` never creates either file, so only a process that already holds the lock and is
+/// making an identity can be the one whose key is refused; the operator runs the command again.
+const FILES: [&str; 5] = ["VERSION", "VERSION.tmp", "lock", "lock.pid", "lock.pid.tmp"];
 
 /// How long a second look waits, so a process that is half way through making a home has finished
 /// its files. Long next to a few file creations, and short next to a command.
@@ -49,7 +52,7 @@ const SETTLE: Duration = Duration::from_millis(50);
 ///
 /// Errors name the home by the path given, not by where its links lead.
 pub(super) fn create_folders(home: &Path) -> Result<PathBuf, Error> {
-    create_folders_with(home, keep_home_private)
+    create_folders_with(home, private::keep_home_private)
 }
 
 /// [`create_folders`] with the step that makes an empty home private as a parameter, so a test can
@@ -71,8 +74,20 @@ pub(super) fn prepare(
     created: bool,
     restrict: fn(&Path) -> Result<(), Error>,
 ) -> Result<(), Error> {
+    prepare_with(root, created, restrict, owned_by_this_user)
+}
+
+/// [`prepare`] with the owner check as a parameter, so a test can be an entry another user made.
+/// An entry that this user did not make is not accepted however it is named, since its owner can
+/// change what it is after the check.
+pub(super) fn prepare_with(
+    root: &Path,
+    created: bool,
+    restrict: fn(&Path) -> Result<(), Error>,
+    owner: fn(&Path) -> io::Result<bool>,
+) -> Result<(), Error> {
     if created || is_empty(root)? {
-        private_while_empty(root, restrict)?;
+        private_while_empty(root, restrict, owner)?;
     }
     let builder = folder_builder(false);
     for name in FOLDERS {
@@ -148,13 +163,17 @@ fn cannot_resolve(path: &Path, error: &io::Error) -> Error {
 /// the home, unless it is only what sluice itself makes. Another sluice opening the same new home
 /// at the same moment is the usual cause: it is given a moment to finish, and listed once more.
 /// `restrict` is a parameter so a test can put a file in the gap.
-fn private_while_empty(home: &Path, restrict: fn(&Path) -> Result<(), Error>) -> Result<(), Error> {
+fn private_while_empty(
+    home: &Path,
+    restrict: fn(&Path) -> Result<(), Error>,
+    owner: fn(&Path) -> io::Result<bool>,
+) -> Result<(), Error> {
     restrict(home)?;
     if is_empty(home)? {
         return Ok(());
     }
     std::thread::sleep(SETTLE);
-    if holds_only_what_sluice_makes(home)? {
+    if holds_only_what_sluice_makes(home, owner)? {
         return Ok(());
     }
     Err(Error::Policy(format!(
@@ -166,12 +185,18 @@ fn private_while_empty(home: &Path, restrict: fn(&Path) -> Result<(), Error>) ->
 }
 
 /// Whether every entry is a file or folder of the names sluice makes, and is what it should be: a
-/// real folder for `blobs`, `db` and `logs`, a plain file for the rest. A link by one of those
-/// names is not.
-fn holds_only_what_sluice_makes(home: &Path) -> Result<bool, Error> {
+/// real folder for `blobs`, `db` and `logs`, a plain file for the rest, and owned by this user. An
+/// entry this user did not make is not accepted: another user who can write in the folder can
+/// plant a key, a lock or a `VERSION` there, and their owner can change it again after the check.
+/// A link by one of those names is not accepted either.
+fn holds_only_what_sluice_makes(
+    home: &Path,
+    owner: fn(&Path) -> io::Result<bool>,
+) -> Result<bool, Error> {
     for entry in fs::read_dir(home).map_err(|e| storage("list", home, e))? {
         let entry = entry.map_err(|e| storage("list", home, e))?;
-        let Ok(meta) = fs::symlink_metadata(entry.path()) else {
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
             return Ok(false);
         };
         let made = match entry.file_name().to_str() {
@@ -182,6 +207,10 @@ fn holds_only_what_sluice_makes(home: &Path) -> Result<bool, Error> {
             _ => false,
         };
         if !made {
+            return Ok(false);
+        }
+        let ours = owner(&path).map_err(|e| storage("read the owner of", &path, e))?;
+        if !ours {
             return Ok(false);
         }
     }
@@ -236,6 +265,27 @@ fn real_folder(folder: &Path) -> Result<(), Error> {
     )))
 }
 
+/// Whether this user made the entry at `path`: on Unix its uid is the effective uid, and on
+/// Windows its owner is this user or `Administrators`. The owner is read from a handle opened
+/// without following a link, so it is the owner of the object the name holds now.
+#[cfg(unix)]
+fn owned_by_this_user(path: &Path) -> io::Result<bool> {
+    use rustix::fs::{Mode, OFlags};
+    let file = rustix::fs::open(path, OFlags::NOFOLLOW | OFlags::CLOEXEC, Mode::empty())?;
+    let stat = rustix::fs::fstat(&file)?;
+    Ok(stat.st_uid == rustix::process::geteuid().as_raw())
+}
+
+#[cfg(windows)]
+fn owned_by_this_user(path: &Path) -> io::Result<bool> {
+    super::private_windows::is_owned_by_this_user(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn owned_by_this_user(_path: &Path) -> io::Result<bool> {
+    Ok(true)
+}
+
 fn folder_builder(recursive: bool) -> DirBuilder {
     let mut builder = DirBuilder::new();
     builder.recursive(recursive);
@@ -245,71 +295,6 @@ fn folder_builder(recursive: bool) -> DirBuilder {
         builder.mode(0o700);
     }
     builder
-}
-
-/// Refuses a folder that another user owns, and then gives it the private list. The owner of a
-/// folder can always rewrite its list, so one that another user made first would stay theirs to
-/// open again, whatever sluice sets. It is the user, or `Administrators`, which is the owner of
-/// what an elevated process of the same user makes.
-#[cfg(windows)]
-fn keep_home_private(home: &Path) -> Result<(), Error> {
-    match super::private_windows::is_owned_by_us(home) {
-        Ok(true) => {}
-        Ok(false) => {
-            return Err(Error::Policy(format!(
-                "{} belongs to another user, who could open its access up again whatever sluice \
-                 sets. Use a folder of your own as the home, or take ownership of this one: in \
-                 its Properties, Security > Advanced, next to Owner, choose Change",
-                home.display()
-            )));
-        }
-        Err(e) => return Err(storage("read the owner of", home, e)),
-    }
-    super::private_windows::restrict_dir(home).map_err(|e| storage("restrict access to", home, e))
-}
-
-/// Mode 0700, read back. A folder this call made has it already, and one the user made first may
-/// not. A file system that keeps no Unix permissions, such as vfat, refuses the change, and the
-/// home is then refused rather than left open to every user. One mounted with `quiet` answers
-/// that the change worked and keeps the old mode, so the mode is read again, and a home that is
-/// still not 0700 is refused in the same words.
-#[cfg(unix)]
-fn keep_home_private(home: &Path) -> Result<(), Error> {
-    use std::os::unix::fs::PermissionsExt;
-    make_0700(home, |home| {
-        fs::set_permissions(home, fs::Permissions::from_mode(0o700))
-    })
-}
-
-/// [`keep_home_private`] with the call that changes the mode as a parameter, so a test can be a
-/// file system that refuses it, or one that says it worked and did nothing.
-#[cfg(unix)]
-fn make_0700(home: &Path, change: fn(&Path) -> io::Result<()>) -> Result<(), Error> {
-    use std::os::unix::fs::PermissionsExt;
-    let refused = |why: String| {
-        Error::Storage(format!(
-            "cannot restrict access to {}: {why}. The home must be a folder this user owns, on a \
-             file system that keeps Unix permissions, which vfat and exFAT do not",
-            home.display()
-        ))
-    };
-    change(home).map_err(|e| refused(e.to_string()))?;
-    let mode = fs::metadata(home)
-        .map_err(|e| refused(e.to_string()))?
-        .permissions()
-        .mode()
-        & 0o7777;
-    if mode != 0o700 {
-        return Err(refused(format!(
-            "it still has mode {mode:04o} after the change"
-        )));
-    }
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-fn keep_home_private(_home: &Path) -> Result<(), Error> {
-    Ok(())
 }
 
 #[cfg(test)]

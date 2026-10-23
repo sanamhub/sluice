@@ -1,36 +1,44 @@
 //! A change of mode that did nothing, on Unix. A file system such as vfat or exFAT mounted with
 //! `quiet` answers `chmod` with success and keeps the old mode.
 
-use std::fs;
+use std::fs::{self, File};
+use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-use super::super::make_0700;
+use rustix::fs::Mode;
+
+use super::super::private::make_0700_with;
 use crate::Error;
 
 fn mode(path: &Path) -> u32 {
     fs::metadata(path).unwrap().permissions().mode() & 0o7777
 }
 
-fn changes_nothing(_: &Path) -> std::io::Result<()> {
+fn changes_nothing(_: &File) -> io::Result<()> {
     Ok(())
 }
 
-fn is_refused(_: &Path) -> std::io::Result<()> {
-    Err(std::io::Error::from_raw_os_error(libc::EPERM))
+fn is_refused(_: &File) -> io::Result<()> {
+    Err(io::Error::from_raw_os_error(libc::EPERM))
 }
 
-/// The mode is read back after `chmod`, and a home that is not 0700 is refused in the same words
-/// as a refused `chmod`.
+fn sets_0700(file: &File) -> io::Result<()> {
+    rustix::fs::fchmod(file, Mode::from_raw_mode(0o700)).map_err(io::Error::from)
+}
+
+/// The mode is read back through the same handle after `fchmod`, and a home that is not 0700 is
+/// refused in the same words as a refused `fchmod`.
 #[test]
 fn a_change_of_mode_that_did_nothing_is_refused_like_one_that_failed() {
     let parent = tempfile::tempdir().unwrap();
     let path = parent.path().join("home");
     fs::create_dir(&path).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    let me = rustix::process::geteuid().as_raw();
     let mut messages = Vec::new();
     for change in [changes_nothing, is_refused] {
-        let Err(Error::Storage(message)) = make_0700(&path, change) else {
+        let Err(Error::Storage(message)) = make_0700_with(&path, me, change) else {
             panic!("a home that is not private was not refused");
         };
         messages.push(message);
@@ -47,12 +55,6 @@ fn a_change_of_mode_that_did_nothing_is_refused_like_one_that_failed() {
     );
     assert_eq!(mode(&path), 0o755, "nothing was changed");
     // A change that works is the same call, and passes.
-    assert!(
-        make_0700(&path, |p| fs::set_permissions(
-            p,
-            fs::Permissions::from_mode(0o700)
-        ))
-        .is_ok()
-    );
+    assert!(make_0700_with(&path, me, sets_0700).is_ok());
     assert_eq!(mode(&path), 0o700);
 }

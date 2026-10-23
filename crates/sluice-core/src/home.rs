@@ -96,7 +96,11 @@ impl Home {
     /// file goes in. Messages name `path` as given.
     ///
     /// - Something that appears in an empty home while it is made private fails with
-    ///   [`Error::Policy`] naming the home, and so does a `blobs`, `db` or `logs` that is a link.
+    ///   [`Error::Policy`] naming the home unless sluice makes it and this user made it. A key or
+    ///   its temporary file is never accepted, even this user's, and neither is a `blobs`, `db` or
+    ///   `logs` that is a link.
+    /// - A home that is new to sluice and not owned by this user fails with [`Error::Policy`]: its
+    ///   owner could change whatever sluice sets.
     /// - A home with a newer layout version than this build reads fails with [`Error::Policy`]
     ///   naming both versions, before anything is created or written.
     /// - A `VERSION` file that does not hold a version fails with [`Error::Storage`].

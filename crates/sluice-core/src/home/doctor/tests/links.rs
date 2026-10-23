@@ -137,3 +137,31 @@ fn a_home_that_another_user_owns_is_not_private() {
         Some(Finding::AccessOpenToOthers(0o755))
     );
 }
+
+/// The same rule on the other side: a fresh home whose owner is another user is refused by the
+/// open, with a policy error, and doctor flags the same owner. The owner is injected, because a
+/// folder of another user cannot be made without being root.
+#[cfg(unix)]
+#[test]
+fn a_fresh_home_another_user_owns_is_refused_by_open_and_named_by_doctor() {
+    use super::super::checks::home_not_private_for;
+    use crate::home::setup::keep_home_private_for;
+    let me = rustix::process::geteuid().as_raw();
+    let other = me.wrapping_add(1);
+    let parent = tempfile::tempdir().unwrap();
+    let path = parent.path().join("home");
+    fs::create_dir(&path).unwrap();
+    assert_eq!(
+        home_not_private_for(&path, &path, other),
+        Some(Finding::AccessOwnedByOther)
+    );
+    let Err(crate::Error::Policy(message)) = keep_home_private_for(&path, other) else {
+        panic!("a home owned by another user was accepted");
+    };
+    assert!(message.contains("belongs to another user"), "{message}");
+    assert!(!message.contains(&other.to_string()), "no uid: {message}");
+    assert!(
+        fs::read_dir(&path).unwrap().next().is_none(),
+        "nothing was written"
+    );
+}

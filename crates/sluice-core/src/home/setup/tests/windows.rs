@@ -2,10 +2,35 @@
 //! user changed, makes a folder not empty; and the paths Win32 would read as another folder.
 
 use std::fs;
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 
-use super::{failed, is_private, open_folder};
-use crate::Home;
+use super::{failed, is_private, open_folder, prepare_with};
+use crate::{Error, Home};
+
+/// The `Ok(false)` branch of the home's owner check, which cannot be built on one machine: a home
+/// that exists and is not ours is refused before anything in it is made private.
+#[test]
+fn a_fresh_home_another_user_owns_is_refused() {
+    fn restrict_not_ours(home: &Path) -> Result<(), Error> {
+        super::super::private::keep_home_private_with(home, |_| Ok(false))
+    }
+    fn owns_it(_: &Path) -> io::Result<bool> {
+        Ok(true)
+    }
+    let parent = tempfile::tempdir().unwrap();
+    let path = parent.path().join("home");
+    fs::create_dir(&path).unwrap();
+    let Err(Error::Policy(message)) = prepare_with(&path, true, restrict_not_ours, owns_it) else {
+        panic!("a home owned by another user was accepted");
+    };
+    assert!(message.contains("belongs to another user"), "{message}");
+    assert_eq!(
+        fs::read_dir(&path).unwrap().count(),
+        0,
+        "nothing was written"
+    );
+}
 
 #[test]
 fn a_folder_that_holds_only_a_hidden_desktop_ini_is_not_new_and_is_left_alone() {

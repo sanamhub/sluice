@@ -94,15 +94,28 @@ fn empty_folder_of_another_user() -> Option<&'static Path> {
 #[test]
 fn a_fresh_home_whose_access_cannot_be_changed_is_a_storage_error() {
     let Some(path) = empty_folder_of_another_user() else {
+        // A CI runner that cannot find one would otherwise pass by not looking, and this is the
+        // test that proves another user's folder is refused.
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "CI is set, and no empty folder of another user was found to test the refusal with"
+        );
         eprintln!("SKIPPED: no empty folder that refuses this user a change of mode");
         return;
     };
     let before = mode(path);
-    let Err(Error::Storage(message)) = Home::open(path) else {
-        panic!("expected a storage error for {}", path.display());
-    };
-    assert!(message.contains("restrict access to"), "{message}");
-    assert!(message.contains("keeps Unix permissions"), "{message}");
+    // The owner is checked first now: a folder another user made is refused as theirs, and a
+    // folder that is ours but whose mode cannot be changed is the storage error.
+    match Home::open(path) {
+        Err(Error::Policy(message)) => {
+            assert!(message.contains("belongs to another user"), "{message}");
+        }
+        Err(Error::Storage(message)) => {
+            assert!(message.contains("restrict access to"), "{message}");
+            assert!(message.contains("keeps Unix permissions"), "{message}");
+        }
+        other => panic!("a folder whose access cannot be changed was accepted: {other:?}"),
+    }
     assert_eq!(mode(path), before);
     assert!(
         fs::read_dir(path).unwrap().next().is_none(),
