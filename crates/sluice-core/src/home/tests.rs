@@ -96,6 +96,15 @@ mod as_given {
         assert_eq!(shown, "/hx/lock /other/h/lock /g/lock /g");
     }
 
+    /// A separator or the end of the text is the only boundary, so a name that goes on with a dot
+    /// or a letter is another folder and is not replaced.
+    #[test]
+    fn a_path_that_goes_on_with_a_name_is_not_the_resolved_one() {
+        let text = "/srv/real.old/lock /srv/realx/lock /srv/real/lock";
+        let shown = show(text, Path::new("/srv/real"), Path::new("/g"));
+        assert_eq!(shown, "/srv/real.old/lock /srv/realx/lock /g/lock");
+    }
+
     #[test]
     fn only_a_storage_or_policy_message_is_rewritten() {
         let shown = as_given(Error::Cancelled, Path::new("/h"), Path::new("/g"));

@@ -62,6 +62,12 @@ pub(super) fn symlink(target: &str, at: &Path) -> bool {
         match std::os::windows::fs::symlink_file(target, at) {
             Ok(()) => true,
             Err(e) => {
+                // The CI legs set this, because their runners can make one: a skip there would
+                // hide a check that never ran.
+                assert!(
+                    !std::env::var("SLUICE_REQUIRE_SYMLINKS").is_ok_and(|v| !v.is_empty()),
+                    "SLUICE_REQUIRE_SYMLINKS is set, and this account cannot make a symlink: {e}"
+                );
                 eprintln!("SKIPPED: this account cannot create a symlink on Windows ({e})");
                 false
             }

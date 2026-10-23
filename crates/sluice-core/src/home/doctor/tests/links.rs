@@ -7,6 +7,7 @@ use std::path::Path;
 
 use super::{Finding, Name, finding};
 use crate::Home;
+use crate::doctor::{Status, examine_at};
 
 /// A link at `link` to the folder `target`: a symlink on Unix, a junction on Windows, which a user
 /// may make without the right a Windows symlink needs.
@@ -76,12 +77,12 @@ fn an_unreadable_lock_names_the_path_given() {
     assert!(!text.contains(&target.display().to_string()), "{text}");
 }
 
-/// Nothing of the home can be listed when its folder has no access at all, so the layout, the lock
-/// and the key all fail to read, and each names the path given. Root reads it anyway, and then
-/// there is nothing to check.
+/// Nothing of the home can be listed when its folder has no access at all. The home check now sees
+/// that too, and names the path the user gave, not the folder the link leads to. Root reads it
+/// anyway, and then there is nothing to check.
 #[cfg(unix)]
 #[test]
-fn an_unreadable_key_names_the_path_given() {
+fn an_unreadable_home_names_the_path_given() {
     use std::os::unix::fs::PermissionsExt;
     let parent = tempfile::tempdir().unwrap();
     let (target, link) = (parent.path().join("target"), parent.path().join("home"));
@@ -89,22 +90,22 @@ fn an_unreadable_key_names_the_path_given() {
     link_folder(&target, &link);
     fs::set_permissions(&target, fs::Permissions::from_mode(0o000)).unwrap();
     let readable = fs::read_dir(&target).is_ok();
-    let found = [
-        finding(&link, Name::Layout),
-        finding(&link, Name::Lock),
-        finding(&link, Name::Key),
-    ];
+    let checks = examine_at(&link, true);
     fs::set_permissions(&target, fs::Permissions::from_mode(0o700)).unwrap();
     if readable {
         eprintln!("SKIPPED: this user can read a folder with mode 0000");
         return;
     }
-    for (found, file) in found.iter().zip(["VERSION", "lock", "identity.key"]) {
-        let text = why(found);
-        let named = link.join(file).display().to_string();
-        assert!(text.contains(&named), "{found:?}");
-        assert!(!text.contains(&target.display().to_string()), "{text}");
-    }
+    let Finding::HomeUnreadable(at, _) = checks[0].finding() else {
+        panic!("{:?}", checks[0].finding());
+    };
+    assert_eq!(at.path, link, "the path given, not the target");
+    assert!(
+        checks[1..]
+            .iter()
+            .all(|check| check.status() == Status::Skipped),
+        "nothing else is checked through a home that cannot be read"
+    );
 }
 
 /// On Unix, a folder that another user owns is not private whatever its mode says: its owner can

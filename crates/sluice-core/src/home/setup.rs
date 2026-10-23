@@ -272,10 +272,11 @@ fn exists_as_folder(error: io::Error, path: &Path) -> io::Result<()> {
 }
 
 /// `blobs`, `db` and `logs` are folders of the home itself. A link there would put the store's
-/// files wherever it leads, with the access that place has. On Windows `is_symlink` is true for a
-/// symlink and for a junction, the two ways to point a folder elsewhere, and for no other reparse
-/// point: OneDrive Files On-Demand, deduplication and WCI folders carry other tags, and a home
-/// under one of them must not be refused for good.
+/// files wherever it leads, with the access that place has. On Windows `is_symlink` is true for
+/// every reparse point with a name-surrogate tag, which is a symlink and a junction, and also the
+/// WCI links a cloud folder uses for a placeholder. The behaviour stays: a name that a link can
+/// stand in for is refused, whichever link kind it is, and no other reparse point (deduplication,
+/// Files On-Demand) is.
 fn real_folder(folder: &Path) -> Result<(), Error> {
     let meta = fs::symlink_metadata(folder).map_err(|e| storage("read", folder, e))?;
     if meta.is_dir() && !meta.file_type().is_symlink() {

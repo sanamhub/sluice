@@ -126,6 +126,10 @@ fn the_folder_that_was_sent_is_followed_when_it_is_itself_a_link() {
     std::os::unix::fs::symlink("real", &link).expect("a symlink");
     #[cfg(windows)]
     if let Err(e) = std::os::windows::fs::symlink_dir("real", &link) {
+        assert!(
+            !std::env::var("SLUICE_REQUIRE_SYMLINKS").is_ok_and(|v| !v.is_empty()),
+            "SLUICE_REQUIRE_SYMLINKS is set, and this account cannot make a symlink: {e}"
+        );
         eprintln!("SKIPPED: this account cannot create a symlink on Windows ({e})");
         return;
     }

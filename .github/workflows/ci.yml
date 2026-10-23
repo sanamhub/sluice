@@ -56,6 +56,11 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      # The Windows runners can create symbolic links, so a test that needs one must not pass by
+      # skipping. An empty value on the other runners is not set: `var` is empty there, and the
+      # tests read it as absent.
+      SLUICE_REQUIRE_SYMLINKS: ${{ matrix.os == 'windows-latest' && '1' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -263,8 +263,12 @@ pub(crate) fn show(text: &str, root: &Path, given: &Path) -> String {
     if root == given || root.is_empty() {
         return text.to_string();
     }
-    let in_a_name =
-        |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-');
+    // A path is replaced only as a whole. A character that can go on with a path name, a dot
+    // included, means the text holds another path: `/srv/real.old` is not `/srv/real`. A
+    // separator, punctuation, a space or the end of the text ends it.
+    let path_char = |c: Option<char>| {
+        c.is_some_and(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '~'))
+    };
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     let mut before = None;
@@ -272,7 +276,7 @@ pub(crate) fn show(text: &str, root: &Path, given: &Path) -> String {
         let (head, tail) = rest.split_at(at);
         let after = tail[root.len()..].chars().next();
         out.push_str(head);
-        let whole = !in_a_name(head.chars().next_back().or(before)) && !in_a_name(after);
+        let whole = !path_char(head.chars().next_back().or(before)) && !path_char(after);
         out.push_str(if whole { given } else { &root });
         rest = &tail[root.len()..];
         before = root.chars().next_back();

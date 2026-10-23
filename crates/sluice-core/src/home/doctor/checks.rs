@@ -79,36 +79,42 @@ pub(super) fn classify_layout(read: Result<Option<u32>, crate::Error>, current: 
 /// waiting and the lock file is never created. A free lock with `lock.pid` still beside it was
 /// left by a process that ended without letting go.
 pub(super) fn lock(home: &Path, given: &Path) -> Finding {
-    let pid = read_pid(home);
+    // Bounded and without following a link, so a FIFO or a link to a device cannot hang the report.
+    let pid = match super::super::lock::read_pid(home) {
+        Ok(pid) => pid,
+        Err(e) => return Finding::LockUnreadable(named(given, "lock.pid", &e)),
+    };
     let file = match super::super::lock::open(&home.join("lock"), false) {
         Ok(file) => file,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return free_or_stale(home, pid),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return free_or_stale(home, given, pid),
         Err(e) => return Finding::LockUnreadable(named(given, "lock", &e)),
     };
     match file.try_lock() {
         Ok(()) => {
             // Dropping the file would let go too. Unlocking first says so.
             let _ = file.unlock();
-            free_or_stale(home, pid)
+            free_or_stale(home, given, pid)
         }
         Err(TryLockError::WouldBlock) => Finding::LockHeld(pid),
         Err(TryLockError::Error(e)) => Finding::LockUnreadable(named(given, "lock", &e)),
     }
 }
 
-fn free_or_stale(home: &Path, pid: Option<u32>) -> Finding {
-    if home.join("lock.pid").exists() {
-        Finding::LockStale(pid)
-    } else {
-        Finding::LockFree
+fn free_or_stale(home: &Path, given: &Path, pid: Option<u32>) -> Finding {
+    match fs::symlink_metadata(home.join("lock.pid")) {
+        Ok(meta) if meta.is_file() => Finding::LockStale(pid),
+        Ok(_) => Finding::LockUnreadable(named(
+            given,
+            "lock.pid",
+            &io::Error::new(io::ErrorKind::InvalidInput, NOT_A_FILE),
+        )),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Finding::LockFree,
+        Err(e) => Finding::LockUnreadable(named(given, "lock.pid", &e)),
     }
 }
 
-fn read_pid(home: &Path) -> Option<u32> {
-    fs::read_to_string(home.join("lock.pid"))
-        .ok()
-        .and_then(|text| text.trim().parse().ok())
-}
+/// What a pid file that is not a file is, in the report. The same words as `lock`'s own refusal.
+const NOT_A_FILE: &str = "is not a file of the home: remove it";
 
 /// Who can reach the home folder. A check of its own, and not part of the key's, so a home and a
 /// key that are both open show as two failures at once, and not one after the other is fixed.
