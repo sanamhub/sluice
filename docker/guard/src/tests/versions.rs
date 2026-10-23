@@ -78,3 +78,34 @@ fn every_crate_the_guard_locks_is_one_the_root_lock_has_at_the_same_version() {
     }
     assert!(names > 0, "the guard's Cargo.lock lists no dependency");
 }
+
+/// The `major.minor` of a locked version, `1.1` for `1.1.6+spec-1.1.0`.
+fn minor(version: &str) -> String {
+    version.split('.').take(2).collect::<Vec<_>>().join(".")
+}
+
+/// The image builds iroh-relay from the Cargo.lock it was published with, and the guard parses a
+/// config with its own toml and serde. If their major or minor versions differ, the two could read
+/// one file by different rules, which is what the guard exists to rule out. The published lock's
+/// entries are checked in, with the file they came from, so this runs without the network.
+#[test]
+fn the_toml_and_serde_iroh_relay_builds_with_are_the_guards_to_the_minor_version() {
+    let published = read(&docker_dir().join("guard/testdata/iroh-relay-1.4.0/Cargo.lock.excerpt"));
+    let guard = read(&docker_dir().join("guard/Cargo.lock"));
+    for name in [
+        "toml",
+        "toml_parser",
+        "toml_datetime",
+        "serde",
+        "serde_core",
+    ] {
+        let (theirs, ours) = (locked(&published, name), locked(&guard, name));
+        assert_eq!(theirs.len(), 1, "{name} in the published lock");
+        assert_eq!(ours.len(), 1, "{name} in the guard's lock");
+        assert_eq!(
+            minor(&theirs[0]),
+            minor(&ours[0]),
+            "{name}: {theirs:?} against {ours:?}"
+        );
+    }
+}

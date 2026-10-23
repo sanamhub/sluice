@@ -89,6 +89,9 @@ pub(crate) struct TlsConfig {
     pub cert_dir: Option<PathBuf>,
     pub manual_cert_path: Option<PathBuf>,
     pub manual_key_path: Option<PathBuf>,
+    /// `true` by default there (main.rs:389-391 and 448), and `false` here, which differs. It only
+    /// picks the LetsEncrypt directory, so the guard never reads it: no rule depends on what it
+    /// says, and the field exists so that a misspelling of it is refused.
     #[serde(default)]
     pub prod_tls: bool,
     pub contact: Option<String>,
