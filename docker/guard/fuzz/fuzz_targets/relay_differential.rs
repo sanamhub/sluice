@@ -5,9 +5,13 @@
 //! and `enable_metrics` true unless written (main.rs:94-159 and 370-389). Whatever the guard lets
 //! start is what iroh-relay would run: closed means iroh-relay's own `access` is an allowlist, an
 //! HTTP check or shared tokens, rendezvous means its relay half is off, and closed or open means it
-//! is on. In every mode `enable_metrics` was written and HTTPS is not turned off; in open mode a
-//! per-client byte limit is set; and an HTTP check's URL holds no user name, password, query or
-//! fragment.
+//! is on. `--behind-proxy` and a `[tls]` table agree. The environment variable is modelled too: a
+//! value that is set but empty is refused, and a set one replaces the `shared_token` list
+//! (main.rs:236-244).
+//!
+//! The other asserts restate the guard's own rules, such as `enable_metrics` being written or an
+//! open config having a byte limit. They are regression checks: they catch a rule deleted from the
+//! guard, not a difference from iroh-relay.
 
 use libfuzzer_sys::fuzz_target;
 use serde::Deserialize;
@@ -85,10 +89,25 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let text = String::from_utf8_lossy(rest);
-    let token = (choice & 1 == 1).then_some("t");
+    // 0: unset, 1: set to a token, 2: set but empty. iroh-relay would take the empty value as the
+    // only token of a shared-token list, and a set one replaces the list (main.rs:236-244), so the
+    // guard refuses the empty case before it reads the file.
+    let token = match choice % 3 {
+        0 => None,
+        1 => Some("t"),
+        _ => Some(""),
+    };
     for mode in [Mode::Closed, Mode::Open, Mode::Rendezvous] {
         for behind_proxy in [false, true] {
-            if check_config(&text, mode, token, behind_proxy).is_err() {
+            let checked = check_config(&text, mode, token, behind_proxy);
+            if token == Some("") {
+                assert!(
+                    checked.is_err(),
+                    "the guard passed a set-but-empty IROH_RELAY_ACCESS_TOKEN in {mode:?}"
+                );
+                continue;
+            }
+            if checked.is_err() {
                 continue;
             }
             // The guard's schema is stricter at every point, so text it passes, the mirror reads.
@@ -132,6 +151,8 @@ fuzz_target!(|data: &[u8]| {
             } else {
                 assert!(!behind_proxy, "the guard passed rendezvous with --behind-proxy");
             }
+            // From here the asserts restate the guard's own rules: they are regression checks that
+            // a rule was not deleted, not a comparison with what iroh-relay does.
             assert!(
                 loose.enable_metrics.is_some(),
                 "the guard passed {mode:?} with enable_metrics unwritten, so iroh-relay serves metrics"
@@ -140,6 +161,12 @@ fuzz_target!(|data: &[u8]| {
                 !loose.tls.is_some_and(|tls| tls.dangerous_http_only),
                 "the guard passed {mode:?} with HTTPS turned off"
             );
+            if let LooseAccess::SharedToken(tokens) = &loose.access {
+                assert!(
+                    token.is_some() || !tokens.is_empty(),
+                    "the guard passed an empty shared_token list without IROH_RELAY_ACCESS_TOKEN"
+                );
+            }
             if let LooseAccess::Http(http) = &loose.access {
                 plain_url(&http.url);
             }

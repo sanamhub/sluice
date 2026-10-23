@@ -151,14 +151,17 @@ cargo test --manifest-path docker/guard/Cargo.toml --locked
 cargo deny --manifest-path docker/guard/Cargo.toml check
 ```
 
-Two fuzz targets are in `fuzz/`. `relay_config` reads any bytes as a config, in each mode, and as a
-command line split at each NUL, and asserts that no refusal holds a control character or prints a
-key or an argument outside the rules above. `relay_differential` reads the same bytes through the
-guard and through a loose mirror of how iroh-relay 1.4.0 reads them, and asserts that whatever the
-guard lets start is what iroh-relay would run: closed means a closed `access`, rendezvous means the
-relay half is off, `enable_metrics` was written, `dangerous_http_only` is not true, an open config
-has a per-client byte limit, and an HTTP check's URL holds no user name, password, query or
-fragment. Its first byte says whether `IROH_RELAY_ACCESS_TOKEN` is set and the rest is the config.
+Two fuzz targets are in `fuzz/`. `relay_config` reads any bytes as a config, in each mode, with and
+without `--behind-proxy`, and as a command line split at each NUL. It asserts that no refusal holds
+a control character or prints a key or an argument outside the rules above, and that every
+backticked span of a config refusal is fixed text of the guard's or a dotted setting name of 1 to 32
+lower-case letters or `_`. `relay_differential` reads the same bytes through the guard and through a
+loose mirror of how iroh-relay 1.4.0 reads them, and asserts that whatever the guard lets start is
+what iroh-relay would run: closed means a closed `access`, rendezvous means the relay half is off,
+`enable_metrics` was written, `dangerous_http_only` is not true, an open config has a per-client
+byte limit, a relay config's `[tls]` agrees with `--behind-proxy`, and an HTTP check's URL holds no
+user name, password, query or fragment. Its first byte says whether `IROH_RELAY_ACCESS_TOKEN` is
+unset, set, or set but empty, which the guard must refuse, and the rest is the config.
 
 `cargo xtask fuzz-seeds relay_config <dir>` writes the seeds of the first: the three shipped
 configs, the iroh-relay examples, and six configs one line from a rule, such as an open config
