@@ -85,8 +85,9 @@ check that a release is one the owner meant, and not a bar to the owner releasin
    review in the same run. They wait together, so one review approves both.
 
 So one release asks for four approvals: the merge, the tag, and two reviews of the environment by
-the second person. The two reviews were read from GitHub's documentation, which says each job that
-names an environment with required reviewers waits for one, and have not been seen on a run yet.
+the second person, both within 35 days of the tag push ([why](#cut-a-release)). The two reviews
+were read from GitHub's documentation, which says each job that names an environment with required
+reviewers waits for one, and have not been seen on a run yet.
 
 ### Checks before approving `host`
 
@@ -197,15 +198,23 @@ release never skips the checks, even if the pull request merged without them.
    **What a failure leaves behind.** A failed build publishes nothing: if the build of either
    image fails on either architecture, `host` does not start, so no GitHub release, file or image
    is made public. Open the run and choose **Re-run failed jobs**: the builds that passed keep
-   their artifacts (30 days for the binaries, 60 for the images), and `host` then waits for the
+   their artifacts (30 days for the binaries, 35 for the images), and `host` then waits for the
    reviewer again. If the re-run fails the same way, the cause is in the tagged commit: delete the
    tag, fix it on `main`, and tag the next patch version.
 
    A push that fails after `host` is different. The GitHub release is already public, so a failed
-   `image-publish` leaves it without images. Re-run that job from the run page, within the images'
-   60 days, and the second reviewer approves it again. Each wait for approval lasts up to 30 days
-   and the second starts when the first ends, so approve each within 30 days of the one before, or
-   the images expire first and the release needs a new patch version.
+   `image-publish` leaves it without images. Re-run that job from the run page within 30 days of
+   the tag push, and the second reviewer approves it again.
+
+   **Both limits are GitHub's.** A run is cancelled 35 days after it starts, and approval time
+   counts: "If a workflow run reaches this limit, the workflow run is cancelled. This period
+   includes execution duration, and time spent on waiting and approval"
+   ([Limits](https://docs.github.com/en/actions/reference/limits)). A re-run is possible only "up
+   to 30 days after its initial run"
+   ([Re-running workflows and jobs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)).
+   So both approvals have to land within 35 days of the tag push, and a failed `image-publish` has
+   to be re-run within 30 days of it. Past either limit the fix is a new patch version: the run and
+   its artifacts are gone, and the version cannot be reused.
 
    **How `host` publishes.** It signs the provenance attestation of the files, creates the GitHub
    release as a draft with every file attached, and marks it published in a last step. As it was,

@@ -19,7 +19,8 @@
 #   fails after the GitHub release leaves the release without images (RELEASING.md);
 # * the GitHub release is made as a draft with every file, then published, because an immutable
 #   release cannot take a file after it is published (RELEASING.md);
-# * every artifact `host` reads is kept 30 days and the images 60, so each outlives its approvals;
+# * every artifact `host` reads is kept 30 days and the images 35, so each outlives the run that
+#   would read it;
 # * the steps dist writes for system packages, containers and announcements are gone, because
 #   no target uses them.
 #
@@ -333,10 +334,10 @@ jobs:
           name: image-${{ matrix.image }}-${{ matrix.platform.arch }}
           path: ${{ runner.temp }}/image/
           if-no-files-found: error
-          # The images are read after two approvals in a row: `host`'s, then `image-publish`'s,
-          # and an environment waits up to 30 days for each. The second wait starts when the
-          # first ends, so the images must outlive 60 days, and 30 would lose them on day 31.
-          retention-days: 60
+          # GitHub cancels a run 35 days after it starts, waiting for an approval included, and a
+          # re-run is allowed only within 30 days of that start. So these outlive every run that
+          # could read them, and no longer.
+          retention-days: 35
 
   # Publishes the GitHub release. It waits in the `release` environment for a reviewer before it
   # starts (RELEASING.md). Uploads a few MB and signs one attestation: 30 minutes is plenty.
