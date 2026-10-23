@@ -358,6 +358,32 @@ fn a_file_system_that_cannot_be_asked_gives_the_path_when_the_home_is_not_a_link
     assert!(message.starts_with("cannot get access to "), "{message}");
 }
 
+/// A file system that cannot resolve a path cannot say where a link in the middle of it leads
+/// either, so every ancestor is checked, and a link is refused by name.
+#[test]
+fn a_link_in_the_path_is_refused_when_the_file_system_cannot_resolve() {
+    let parent = tempfile::tempdir().unwrap();
+    let target = parent.path().join("target");
+    let link = parent.path().join("link");
+    fs::create_dir(&target).unwrap();
+    fs::create_dir(target.join("home")).unwrap();
+    link_folder(&target, &link);
+    let home = link.join("home");
+    let Err(Error::Policy(message)) = resolve_with(&home, unsupported) else {
+        panic!("a link in the path was resolved");
+    };
+    assert!(
+        message.contains(&link.display().to_string()),
+        "the link is named: {message}"
+    );
+    assert!(message.contains("is a link"), "{message}");
+    // The same path with no link is taken as it is, and is absolute.
+    let plain = target.join("home");
+    let resolved = resolve_with(&plain, unsupported).unwrap();
+    assert_eq!(resolved, plain);
+    assert!(resolved.is_absolute());
+}
+
 #[cfg(windows)]
 #[test]
 fn error_invalid_function_is_the_same_answer_as_unsupported() {

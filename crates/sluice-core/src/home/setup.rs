@@ -122,12 +122,34 @@ pub(super) fn resolve_with(
     match canonicalize(path) {
         Ok(root) => Ok(root),
         Err(e) if cannot_ask(&e) => match fs::symlink_metadata(path) {
-            Ok(meta) if !meta.file_type().is_symlink() => Ok(path.to_path_buf()),
-            Ok(_) => Err(cannot_resolve(path, &e)),
+            Ok(meta) if meta.file_type().is_symlink() => Err(cannot_resolve(path, &e)),
+            Ok(_) => absolute_without_links(path),
             Err(other) => Err(cannot_resolve(path, &other)),
         },
         Err(e) => Err(cannot_resolve(path, &e)),
     }
+}
+
+/// The path given, made absolute, after every ancestor is checked with `symlink_metadata` and any
+/// link is refused by name. A file system that cannot resolve a path cannot say where it leads, so
+/// the one thing left is to walk it. The home itself was checked by the caller; a link higher up
+/// would still put everything under wherever it points.
+fn absolute_without_links(path: &Path) -> Result<PathBuf, Error> {
+    let absolute = std::path::absolute(path).map_err(|e| storage("resolve", path, e))?;
+    for ancestor in absolute.ancestors() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(Error::Policy(format!(
+                    "{} is a link, and this file system cannot say where a path leads, so sluice \
+                     cannot check where the home is: remove the link, or give the home's real path",
+                    ancestor.display()
+                )));
+            }
+            Ok(_) => {}
+            Err(e) => return Err(storage("read", ancestor, e)),
+        }
+    }
+    Ok(absolute)
 }
 
 /// The file system does not implement the call that follows links, as opposed to refusing it.
