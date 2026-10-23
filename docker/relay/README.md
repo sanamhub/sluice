@@ -25,12 +25,12 @@ input
 (ADR 0020). The relay so reads the bytes that were checked, even if the file is replaced after,
 and it is PID 1 and gets the container's signals.
 
-Checked on 2026-10-23 in WSL with Docker 29.1.3, from a second container in the relay's PID
-namespace: PID 1 is `/usr/local/bin/iroh-relay --config-path=/dev/stdin`, its descriptor 0 is
-`/etc/relay/relay.toml`, a regular file, and `/dev/stdin` in the image links to
-`/proc/self/fd/0`. The relay bound HTTPS on 443 and QUIC on 7842, which only that config asks for:
-with no config, iroh-relay 1.4.0 serves plain HTTP on 80 and metrics on 9090, and no HTTPS or
-QUIC.
+Checked on 2026-10-23 in WSL with Docker 29.1.3, by [smoke-test.sh](../smoke-test.sh): PID 1, read
+from the host, is `/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0`, and its descriptor 0
+has the bytes of the shipped `relay.toml`. The relay presented the certificate that was mounted, on
+HTTPS 443, logged `QUIC server listening`, and had port 9090 closed. Those three are what only that
+config asks for: with no config, iroh-relay 1.4.0 serves plain HTTP on 80, which answers
+`/generate_204` all the same, and metrics on 9090, and no HTTPS or QUIC.
 
 `iroh-relay` 1.4.0 runs open, with no byte limit and nothing in its log, when `access` is left out,
 when a key is misspelled (it ignores keys it does not know), and when the config file is missing.
@@ -148,10 +148,10 @@ Address discovery on UDP 7842 answers anyone.
 
 It was run again through the guard, with new keys, and came out the same, with `iroh-relay` as the
 container's PID 1. On 2026-10-23 it was run a third time, with the config handed over as standard
-input and the container's root read-only, and came out the same again: PID 1 was
-`iroh-relay --config-path=/dev/stdin`, and its descriptor 0 was the `relay.toml` with the two keys
-mounted over the shipped one. [smoke-test.sh](../smoke-test.sh) checks the guard's refusals and
-that both images start with a read-only root, and CI runs it on every build of either image.
+input and the container's root read-only, and came out the same again, with `iroh-relay` started
+as `--config-path=/dev/stdin` as the guard did then. [smoke-test.sh](../smoke-test.sh) checks the
+guard's refusals, that both images start as the config they were given with a read-only root, and
+what PID 1 is, and CI runs it on every build of either image.
 
 ## Open mode
 
