@@ -23,16 +23,27 @@ pub(super) fn without_home(home: Finding) -> Vec<Check> {
 }
 
 pub(super) fn home(location: Location) -> Finding {
-    // `symlink_metadata` would call a link to a folder a non-folder, and the store follows it.
+    // The home itself may be a link, which `Home::open` follows once, so its own metadata follows
+    // it. The folders inside are different: `open` refuses a link there, so doctor reads each with
+    // `symlink_metadata` and reports the link instead of following it.
     match fs::metadata(&location.path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Finding::HomeMissing(location),
         Err(e) => Finding::HomeUnreadable(location, e.to_string()),
         Ok(meta) if !meta.is_dir() => Finding::HomeNotAFolder(location),
         Ok(_) => {
-            let missing: Vec<&'static str> = setup::FOLDERS
-                .into_iter()
-                .filter(|name| !location.path.join(name).is_dir())
-                .collect();
+            let mut missing = Vec::new();
+            for name in setup::FOLDERS {
+                let folder = location.path.join(name);
+                match fs::symlink_metadata(&folder) {
+                    Ok(meta) if meta.file_type().is_symlink() => {
+                        return Finding::HomeFolderIsLink(location, name);
+                    }
+                    Ok(meta) if meta.is_dir() => {}
+                    Ok(_) => missing.push(name),
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => missing.push(name),
+                    Err(e) => return Finding::HomeUnreadable(location, e.to_string()),
+                }
+            }
             if missing.is_empty() {
                 Finding::HomeReady(location)
             } else {

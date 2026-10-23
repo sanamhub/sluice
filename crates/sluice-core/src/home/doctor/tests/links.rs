@@ -165,3 +165,35 @@ fn a_fresh_home_another_user_owns_is_refused_by_open_and_named_by_doctor() {
         "nothing was written"
     );
 }
+
+/// A link at one of the home's folders is what `open` refuses and what doctor used to follow with
+/// `is_dir()`. Both fail it now, and the report names the link.
+#[test]
+fn a_blobs_that_is_a_link_fails_doctor_and_open() {
+    use crate::Error;
+    use crate::ErrorKind;
+    use crate::doctor::Check;
+    let parent = tempfile::tempdir().unwrap();
+    let home = parent.path().join("home");
+    let elsewhere = parent.path().join("elsewhere");
+    drop(Home::open(&home).unwrap());
+    fs::create_dir(&elsewhere).unwrap();
+    fs::remove_dir(home.join("blobs")).unwrap();
+    link_folder(&elsewhere, &home.join("blobs"));
+    let found = finding(&home, Name::Home);
+    let Finding::HomeFolderIsLink(at, folder) = found.clone() else {
+        panic!("{found:?}");
+    };
+    assert_eq!(folder, "blobs");
+    assert_eq!(at.path, home);
+    assert_eq!(
+        Check::new(found).failure(),
+        Some(ErrorKind::Policy),
+        "a link is a policy failure"
+    );
+    let Err(Error::Policy(message)) = Home::open(&home) else {
+        panic!("a linked blobs was opened");
+    };
+    assert!(message.contains("blobs"), "{message}");
+    assert!(message.contains("is a link"), "{message}");
+}

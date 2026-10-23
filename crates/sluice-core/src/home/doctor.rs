@@ -135,6 +135,7 @@ impl Check {
             | F::HomeMissing(_)
             | F::HomeNotAFolder(_)
             | F::HomeFoldersMissing(..)
+            | F::HomeFolderIsLink(..)
             | F::HomeUnreadable(..)
             | F::HomeNowhere => Name::Home,
             F::AccessPrivate
@@ -216,6 +217,7 @@ impl Check {
             | F::KeyOpenToOthers(_)
             | F::AccessOpenToOthers(_)
             | F::AccessOwnedByOther
+            | F::HomeFolderIsLink(..)
             | F::KeyAclNotPrivate
             | F::AccessAclNotPrivate => Some(ErrorKind::Policy),
             _ => None,
@@ -272,7 +274,7 @@ pub fn examine_at(path: &Path, from_env: bool) -> Vec<Check> {
     let home = checks::home(location.clone());
     if !matches!(
         home,
-        Finding::HomeReady(_) | Finding::HomeFoldersMissing(..)
+        Finding::HomeReady(_) | Finding::HomeFoldersMissing(..) | Finding::HomeFolderIsLink(..)
     ) {
         return checks::without_home(home);
     }

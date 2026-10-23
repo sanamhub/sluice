@@ -24,6 +24,9 @@ pub enum Finding {
     HomeNotAFolder(Location),
     /// The home is there, and these folders of its layout are not.
     HomeFoldersMissing(Location, Vec<&'static str>),
+    /// One of the home's folders is a link. `Home::open` refuses a link there, since it would put
+    /// the store's files wherever it leads, so doctor fails it too. Carries the folder's name.
+    HomeFolderIsLink(Location, &'static str),
     /// The home's path cannot be looked at. Carries why.
     HomeUnreadable(Location, String),
     /// There is no `$SLUICE_HOME`, and this user has no data folder to put a home in.

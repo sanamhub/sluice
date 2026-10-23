@@ -101,6 +101,13 @@ fn words(finding: &Finding) -> (String, Option<String>) {
             format!("{} has no {} folder", at.path.display(), missing.join(", ")),
             Some("run `sluice id`, which creates the missing folders".to_string()),
         ),
+        F::HomeFolderIsLink(at, folder) => (
+            format!(
+                "{} is a link, not a folder of the home",
+                at.path.join(folder).display()
+            ),
+            Some("remove it, and run `sluice id`, which makes the folder".to_string()),
+        ),
         F::HomeUnreadable(at, why) => (
             format!("{} cannot be looked at: {why}", at.path.display()),
             Some(format!(
