@@ -37,6 +37,17 @@ like in 1000s, and a decimal such as `4.1G` is rounded down to a whole byte. The
 `sluice-core` (`range`) and is tested and fuzzed; `sluice recv`, which will take it, is not built
 yet.
 
+## Install
+
+Nothing has been released yet. A release is built in CI from a tag, and the way to install one is to
+download the archive for the machine from the release page, run `gh attestation verify` on it with
+`--signer-workflow` and `--source-ref`, and only then run `sluice`.
+[RELEASING.md](RELEASING.md#install-a-release) has the six archive names and the exact commands.
+
+The release also has a shell and a PowerShell installer, as a convenience. They check less than the
+command above: the shell one compares a SHA-256 written into the script, and the PowerShell one
+checks nothing. What each does is in the [threat model](docs/threat-model.md#supply-chain).
+
 ## What 1.0 does
 
 - **Fills fast links.** The 10 GbE target is within 10% of `iperf3`. Large transfers spread across

@@ -23,11 +23,16 @@ and its known weaknesses.
 ## Verifying a release
 
 Every release is built in CI and carries a GitHub artifact attestation with SLSA provenance and an
-SBOM:
+SBOM. Check the archive before running anything from it:
 
 ```
-gh attestation verify sluice-x86_64-unknown-linux-gnu.tar.xz --repo <owner>/sluice
+gh attestation verify sluice-cli-x86_64-unknown-linux-gnu.tar.xz --repo <owner>/sluice \
+  --signer-workflow <owner>/sluice/.github/workflows/release.yml \
+  --source-ref refs/tags/v<version>
 ```
+
+[RELEASING.md](RELEASING.md#install-a-release) says what the two flags add, and what the installers
+check and do not.
 
 If you are asked to pipe an unsigned binary into a shell from anywhere claiming to be this project, it
 is not this project.

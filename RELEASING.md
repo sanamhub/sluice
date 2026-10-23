@@ -5,6 +5,43 @@ installer, checksums, a CycloneDX SBOM and GitHub artifact attestations, on a Gi
 `rendezvous` and `relay` images go to ghcr.io from the same run, after the GitHub release exists,
 each with its provenance and an SBOM per architecture attested. Nothing goes to crates.io.
 
+## Install a release
+
+Nothing has been released yet. When something is, this is how to install it: download the archive
+for the machine, check where it came from, and only then run anything from it.
+
+| Machine | Archive |
+|---|---|
+| Linux, x86-64 | `sluice-cli-x86_64-unknown-linux-gnu.tar.xz` |
+| Linux, ARM64 | `sluice-cli-aarch64-unknown-linux-gnu.tar.xz` |
+| macOS, Apple silicon | `sluice-cli-aarch64-apple-darwin.tar.xz` |
+| macOS, Intel | `sluice-cli-x86_64-apple-darwin.tar.xz` |
+| Windows, x86-64 | `sluice-cli-x86_64-pc-windows-msvc.zip` |
+| Windows, ARM64 | `sluice-cli-aarch64-pc-windows-msvc.zip` |
+
+```
+gh release download v0.2.0 --repo sanamhub/sluice \
+  --pattern 'sluice-cli-x86_64-unknown-linux-gnu.tar.xz'
+gh attestation verify sluice-cli-x86_64-unknown-linux-gnu.tar.xz --repo sanamhub/sluice \
+  --signer-workflow sanamhub/sluice/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.2.0
+```
+
+`Verification succeeded!` means the file was built by `release.yml` in that repository, from the
+commit of tag `v0.2.0`. Without `--signer-workflow`, any workflow of the repository that holds
+`id-token: write` could have signed it, and without `--source-ref`, a run on any branch or tag.
+Unpack the archive after that, and run `sluice`.
+
+**The installers are a convenience, and check less.** The release also has `sluice-cli-installer.sh`
+and `sluice-cli-installer.ps1`, which download the archive for the machine and unpack it. The shell
+one compares the archive's SHA-256 with a value written into the script, and skips that on a
+machine without `sha256sum`. The PowerShell one checks nothing. Neither checks a signature or an
+attestation, so each is only as good as the copy of the script that was run. Prefer the archive,
+and use an installer where those limits are acceptable. What `dist` 0.33.1 writes into them is in
+the [threat model](docs/threat-model.md#supply-chain).
+
+## The pipeline
+
 Two workflows do it:
 
 | Workflow | Runs on | Does |
@@ -141,24 +178,12 @@ release never skips the checks, even if the pull request merged without them.
    | `sluice-cli.cdx.xml`, the SBOM | 1 |
    | `dist-manifest.json`, what dist built and where | 1 |
 
-   Then verify one archive and one image as below.
+   Then verify one archive as in [Install a release](#install-a-release), and one image as below.
 
-## Verify a release
+## Verify an image, and what a binary carries
 
-Every file of the release has a provenance attestation signed through Sigstore. Check one with the
-GitHub CLI, from any machine, against the workflow and the tag that built it:
-
-```
-gh release download v0.2.0 --repo sanamhub/sluice \
-  --pattern 'sluice-cli-x86_64-unknown-linux-gnu.tar.xz'
-gh attestation verify sluice-cli-x86_64-unknown-linux-gnu.tar.xz --repo sanamhub/sluice \
-  --signer-workflow sanamhub/sluice/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.2.0
-```
-
-`Verification succeeded!` means the file was built by `release.yml` in that repository, from the
-commit of tag `v0.2.0`. Without `--signer-workflow`, any workflow of the repository that holds
-`id-token: write` could have signed it, and without `--source-ref`, a run on any branch or tag.
+Every file of the release has a provenance attestation signed through Sigstore, and
+[the first section](#install-a-release) shows how to check an archive.
 
 An image is checked the same way, by its name in the registry. The version tag is the index of both
 architectures, and `-amd64` and `-arm64` name each one:
