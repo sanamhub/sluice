@@ -1,6 +1,6 @@
 //! One function per check. Each reads and returns a finding, and none writes.
 
-use std::fs::{self, File, TryLockError};
+use std::fs::{self, TryLockError};
 use std::io;
 use std::path::Path;
 
@@ -69,7 +69,7 @@ pub(super) fn classify_layout(read: Result<Option<u32>, crate::Error>, current: 
 /// left by a process that ended without letting go.
 pub(super) fn lock(home: &Path, given: &Path) -> Finding {
     let pid = read_pid(home);
-    let file = match File::open(home.join("lock")) {
+    let file = match super::super::lock::open(&home.join("lock"), false) {
         Ok(file) => file,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return free_or_stale(home, pid),
         Err(e) => return Finding::LockUnreadable(named(given, "lock", &e)),
