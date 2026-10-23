@@ -2,9 +2,13 @@
 //! private before anything is written in it.
 //!
 //! The home's path is resolved once, every link followed, and everything after works on the
-//! folder the files really land in. A Windows junction or a Unix symlink given as the home would
-//! otherwise be made private itself, as Windows does when a list is set on a junction, while the
-//! folders and the key went into its target with the access the target inherited.
+//! folder the files really land in, by the path the system gave: on Windows with its `\\?\`
+//! prefix, which the Win32 calls take literally. Without it they normalise a path again, so a
+//! component with a trailing dot or space can name another folder, a component named `CON` can
+//! reach a device, and a path over 260 characters fails. A Windows junction or a Unix symlink given
+//! as the home would otherwise be made private itself, as Windows does when a list is set on a
+//! junction, while the folders and the key went into its target with the access the target
+//! inherited.
 
 use std::fs::{self, DirBuilder};
 use std::io;
@@ -28,15 +32,30 @@ pub(super) const FOLDERS: [&str; 3] = ["blobs", "db", "logs"];
 ///
 /// Errors name the home by the path given, not by where its links lead.
 pub(super) fn create_folders(home: &Path) -> Result<PathBuf, Error> {
+    create_folders_with(home, keep_home_private)
+}
+
+/// [`create_folders`] with the step that makes an empty home private as a parameter, so a test can
+/// put something in the gap.
+pub(super) fn create_folders_with(
+    home: &Path,
+    restrict: fn(&Path) -> Result<(), Error>,
+) -> Result<PathBuf, Error> {
     let created = create_home(home)?;
-    let root = resolve(home).map_err(|e| storage("find", home, e))?;
-    prepare(&root, created).map_err(|e| super::as_given(e, &root, home))?;
+    let root = resolve(home)?;
+    prepare(&root, created, restrict).map_err(|e| super::as_given(e, &root, home))?;
     Ok(root)
 }
 
-fn prepare(root: &Path, created: bool) -> Result<(), Error> {
+/// Makes the home private if it is new, and makes its folders. `restrict` is what makes a folder
+/// private, a parameter for the same reason as in [`create_folders_with`].
+pub(super) fn prepare(
+    root: &Path,
+    created: bool,
+    restrict: fn(&Path) -> Result<(), Error>,
+) -> Result<(), Error> {
     if created || is_empty(root)? {
-        private_while_empty(root, keep_home_private)?;
+        private_while_empty(root, restrict)?;
     }
     let builder = folder_builder(false);
     for name in FOLDERS {
@@ -50,42 +69,61 @@ fn prepare(root: &Path, created: bool) -> Result<(), Error> {
     Ok(())
 }
 
-/// `path` with every link followed, and on Windows without the `\\?\` that
-/// `std::fs::canonicalize` puts in front, so the path can be shown and compared as the user would
-/// write it.
-pub(super) fn resolve(path: &Path) -> io::Result<PathBuf> {
-    fs::canonicalize(path).map(plain)
+/// `path` with every link followed, as `std::fs::canonicalize` gives it. On Windows that is the
+/// verbatim form, `\\?\C:\...`, and it stays that way here: every call that touches the home takes
+/// it, and a message shows the path as the user gave it (see `as_given`).
+///
+/// Some file systems cannot be asked: a RAM disk, a WinFsp or Dokan drive, a VirtualBox share, an
+/// old SMB server. When the system answers that the call is unsupported, and the home itself is
+/// not a link, the path given is the one to use. Any other error is refused, with a verb that fits
+/// it: access denied is not "cannot find".
+pub(super) fn resolve(path: &Path) -> Result<PathBuf, Error> {
+    resolve_with(path, |path| fs::canonicalize(path))
 }
 
-#[cfg(windows)]
-fn plain(path: PathBuf) -> PathBuf {
-    use std::ffi::OsString;
-    use std::path::{Component, Prefix};
-
-    let mut components = path.components();
-    let start = match components.next() {
-        Some(Component::Prefix(prefix)) => match prefix.kind() {
-            Prefix::VerbatimDisk(letter) => OsString::from(format!("{}:\\", char::from(letter))),
-            Prefix::VerbatimUNC(server, share) => {
-                let mut start = OsString::from(r"\\");
-                start.push(server);
-                start.push(r"\");
-                start.push(share);
-                start.push(r"\");
-                start
-            }
-            _ => return path,
+/// [`resolve`] with the call that follows links as a parameter, so a test can be a file system that
+/// does not have it.
+pub(super) fn resolve_with(
+    path: &Path,
+    canonicalize: fn(&Path) -> io::Result<PathBuf>,
+) -> Result<PathBuf, Error> {
+    match canonicalize(path) {
+        Ok(root) => Ok(root),
+        Err(e) if cannot_ask(&e) => match fs::symlink_metadata(path) {
+            Ok(meta) if !meta.file_type().is_symlink() => Ok(path.to_path_buf()),
+            Ok(_) => Err(cannot_resolve(path, &e)),
+            Err(other) => Err(cannot_resolve(path, &other)),
         },
-        _ => return path,
-    };
-    let mut plain = PathBuf::from(start);
-    plain.extend(components.filter(|c| !matches!(c, Component::RootDir)));
-    plain
+        Err(e) => Err(cannot_resolve(path, &e)),
+    }
+}
+
+/// The file system does not implement the call that follows links, as opposed to refusing it.
+fn cannot_ask(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::Unsupported || invalid_function(error)
+}
+
+/// `ERROR_INVALID_FUNCTION`, which a Windows file system answers when it has no such call. Only on
+/// Windows, where the number means that: on Unix 1 is `EPERM`.
+#[cfg(windows)]
+fn invalid_function(error: &io::Error) -> bool {
+    use windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION;
+    error.raw_os_error() == Some(ERROR_INVALID_FUNCTION as i32)
 }
 
 #[cfg(not(windows))]
-fn plain(path: PathBuf) -> PathBuf {
-    path
+fn invalid_function(_error: &io::Error) -> bool {
+    false
+}
+
+/// The refusal for a home that cannot be resolved, by the path the user gave.
+fn cannot_resolve(path: &Path, error: &io::Error) -> Error {
+    let verb = match error.kind() {
+        io::ErrorKind::NotFound => "find",
+        io::ErrorKind::PermissionDenied => "get access to",
+        _ => "resolve",
+    };
+    storage(verb, path, io::Error::new(error.kind(), error.to_string()))
 }
 
 /// Makes an empty home private, then lists it again. Anything that appeared in between was made
@@ -137,29 +175,20 @@ fn exists_as_folder(error: io::Error, path: &Path) -> io::Result<()> {
     }
 }
 
-/// `blobs`, `db` and `logs` are folders of the home itself. A link there, or on Windows any
-/// reparse point, would put the store's files wherever it leads, with the access that place has.
+/// `blobs`, `db` and `logs` are folders of the home itself. A link there would put the store's
+/// files wherever it leads, with the access that place has. On Windows `is_symlink` is true for a
+/// symlink and for a junction, the two ways to point a folder elsewhere, and for no other reparse
+/// point: OneDrive Files On-Demand, deduplication and WCI folders carry other tags, and a home
+/// under one of them must not be refused for good.
 fn real_folder(folder: &Path) -> Result<(), Error> {
     let meta = fs::symlink_metadata(folder).map_err(|e| storage("read", folder, e))?;
-    if meta.is_dir() && !is_link(&meta) {
+    if meta.is_dir() && !meta.file_type().is_symlink() {
         return Ok(());
     }
     Err(Error::Policy(format!(
         "{} is a link and not a folder of the home: remove it, and sluice makes the folder",
         folder.display()
     )))
-}
-
-#[cfg(windows)]
-fn is_link(meta: &fs::Metadata) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
-    meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn is_link(meta: &fs::Metadata) -> bool {
-    meta.file_type().is_symlink()
 }
 
 fn folder_builder(recursive: bool) -> DirBuilder {

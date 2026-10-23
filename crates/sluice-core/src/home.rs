@@ -234,15 +234,47 @@ fn storage(doing: &str, path: &Path, source: io::Error) -> Error {
 /// one its links lead to. Every message here names a path with `display`, so the resolved path is
 /// found as text and put back the way the caller wrote it.
 fn as_given(err: Error, root: &Path, given: &Path) -> Error {
-    if root == given {
-        return err;
-    }
-    let (root, given) = (root.display().to_string(), given.display().to_string());
     match err {
-        Error::Storage(message) => Error::Storage(message.replace(&root, &given)),
-        Error::Policy(message) => Error::Policy(message.replace(&root, &given)),
+        Error::Storage(message) => Error::Storage(show(&message, root, given)),
+        Error::Policy(message) => Error::Policy(show(&message, root, given)),
         other => other,
     }
+}
+
+/// `text` with the resolved `root` written as the caller gave it, `given`. On Windows `root` is
+/// the verbatim form, `\\?\C:\...`, which the user never has to read.
+///
+/// - A separator at the end of `given` is dropped, or `blobs` would be joined to it twice.
+/// - Only a whole path is replaced: the one that ends there, or goes on with a separator. `/h`
+///   inside `/hx/lock` is another folder's name.
+/// - It runs once over `text`, so a `given` that holds `root`, as `/h/../h` holds `/h`, is not
+///   replaced again inside what was just put there.
+pub(crate) fn show(text: &str, root: &Path, given: &Path) -> String {
+    let root = root.display().to_string();
+    let shown = given.display().to_string();
+    let given = match shown.trim_end_matches(['/', '\\']) {
+        "" => shown.as_str(),
+        trimmed => trimmed,
+    };
+    if root == given || root.is_empty() {
+        return text.to_string();
+    }
+    let in_a_name =
+        |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-');
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut before = None;
+    while let Some(at) = rest.find(&root) {
+        let (head, tail) = rest.split_at(at);
+        let after = tail[root.len()..].chars().next();
+        out.push_str(head);
+        let whole = !in_a_name(head.chars().next_back().or(before)) && !in_a_name(after);
+        out.push_str(if whole { given } else { &root });
+        rest = &tail[root.len()..];
+        before = root.chars().next_back();
+    }
+    out.push_str(rest);
+    out
 }
 
 #[cfg(test)]

@@ -42,8 +42,11 @@ pub(super) fn home(location: Location) -> Finding {
     }
 }
 
-pub(super) fn layout(home: &Path) -> Finding {
-    classify_layout(layout::read_version(home), layout::current())
+/// `home` is the folder with its links followed, which is read, and `given` the path the user
+/// gave, which a message names.
+pub(super) fn layout(home: &Path, given: &Path) -> Finding {
+    let read = layout::read_version(home).map_err(|e| super::super::as_given(e, home, given));
+    classify_layout(read, layout::current())
 }
 
 /// The finding for what `VERSION` gave, against the version this build writes. Apart from the
@@ -64,12 +67,12 @@ pub(super) fn classify_layout(read: Result<Option<u32>, crate::Error>, current: 
 /// Tries the lock without waiting and lets it go at once, so a running sluice is never kept
 /// waiting and the lock file is never created. A free lock with `lock.pid` still beside it was
 /// left by a process that ended without letting go.
-pub(super) fn lock(home: &Path) -> Finding {
+pub(super) fn lock(home: &Path, given: &Path) -> Finding {
     let pid = read_pid(home);
     let file = match File::open(home.join("lock")) {
         Ok(file) => file,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return free_or_stale(home, pid),
-        Err(e) => return Finding::LockUnreadable(e.to_string()),
+        Err(e) => return Finding::LockUnreadable(named(given, "lock", &e)),
     };
     match file.try_lock() {
         Ok(()) => {
@@ -78,7 +81,7 @@ pub(super) fn lock(home: &Path) -> Finding {
             free_or_stale(home, pid)
         }
         Err(TryLockError::WouldBlock) => Finding::LockHeld(pid),
-        Err(TryLockError::Error(e)) => Finding::LockUnreadable(e.to_string()),
+        Err(TryLockError::Error(e)) => Finding::LockUnreadable(named(given, "lock", &e)),
     }
 }
 
@@ -106,20 +109,25 @@ pub(super) fn access(home: &Path, given: &Path) -> Finding {
 }
 
 /// The key's length and access, from its metadata and access list. Its bytes are never read.
-pub(super) fn key(home: &Path) -> Finding {
+pub(super) fn key(home: &Path, given: &Path) -> Finding {
     let path = home.join("identity.key");
     let meta = match fs::metadata(&path) {
         Ok(meta) => meta,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Finding::KeyMissing,
-        Err(e) => return Finding::KeyUnreadable(e.to_string()),
+        Err(e) => return Finding::KeyUnreadable(named(given, "identity.key", &e)),
     };
-    if let Some(open) = key_open_to_others(&path, &meta) {
+    if let Some(open) = key_open_to_others(&path, given, &meta) {
         return open;
     }
     if meta.len() != 32 {
         return Finding::KeyWrongSize(meta.len());
     }
     Finding::KeyPrivate
+}
+
+/// An error of a file in the home, told with the path the user gave and not where its links lead.
+fn named(given: &Path, file: &str, error: &io::Error) -> String {
+    format!("{}: {error}", given.join(file).display())
 }
 
 /// On Unix, no access for group or other to the home folder, which the store creates with mode
@@ -160,7 +168,7 @@ fn home_open_to_others(_home: &Path, _given: &Path) -> Option<Finding> {
 
 /// The rule the store applies to the key on Unix: no access at all for group or other.
 #[cfg(unix)]
-fn key_open_to_others(_key: &Path, meta: &fs::Metadata) -> Option<Finding> {
+fn key_open_to_others(_key: &Path, _given: &Path, meta: &fs::Metadata) -> Option<Finding> {
     use std::os::unix::fs::PermissionsExt;
     let mode = meta.permissions().mode() & 0o7777;
     (mode & 0o077 != 0).then_some(Finding::KeyOpenToOthers(mode))
@@ -168,16 +176,16 @@ fn key_open_to_others(_key: &Path, meta: &fs::Metadata) -> Option<Finding> {
 
 /// The private access list the store gives a key on Windows, read back and compared.
 #[cfg(windows)]
-fn key_open_to_others(key: &Path, _meta: &fs::Metadata) -> Option<Finding> {
+fn key_open_to_others(key: &Path, given: &Path, _meta: &fs::Metadata) -> Option<Finding> {
     match super::super::private_windows::is_private_file(key) {
         Ok(true) => None,
         Ok(false) => Some(Finding::KeyAclNotPrivate),
-        Err(e) => Some(Finding::KeyUnreadable(e.to_string())),
+        Err(e) => Some(Finding::KeyUnreadable(named(given, "identity.key", &e))),
     }
 }
 
 #[cfg(not(any(unix, windows)))]
-fn key_open_to_others(_key: &Path, _meta: &fs::Metadata) -> Option<Finding> {
+fn key_open_to_others(_key: &Path, _given: &Path, _meta: &fs::Metadata) -> Option<Finding> {
     None
 }
 

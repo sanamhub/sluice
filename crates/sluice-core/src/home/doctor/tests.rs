@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod links;
+
 use super::checks::classify_layout;
 use super::{Check, Finding, LOW_SPACE_BYTES, Location, Name, Status, examine_at};
 use crate::{Error, ErrorKind, Home};
