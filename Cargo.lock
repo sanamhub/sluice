@@ -3724,6 +3724,7 @@ dependencies = [
  "blake3",
  "ed25519-dalek",
  "proptest",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

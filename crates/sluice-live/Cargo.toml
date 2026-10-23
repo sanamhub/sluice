@@ -14,6 +14,8 @@ thiserror.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+# Reads the live vector files, to check every case's sender key and not one match per file.
+serde_json.workspace = true
 
 [lints]
 workspace = true

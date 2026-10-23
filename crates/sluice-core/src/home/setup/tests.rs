@@ -76,6 +76,11 @@ fn a_link_to_an_empty_folder_makes_the_target_private_and_doctor_passes_it() {
     let home = Home::open(&link).unwrap();
     home.identity().unwrap();
     assert_eq!(home.path(), link, "the path as given");
+    // The one thing a Unix symlink does not show by itself: chmod, mkdir and open all follow it,
+    // so the target is private and holds the files with or without the resolve. What the home
+    // holds as the place of its files is the resolved path, which is not the link.
+    assert_eq!(home.root, fs::canonicalize(&target).unwrap());
+    assert_ne!(home.root, link);
     drop(home);
     assert!(is_private(&target), "the target is the home");
     for name in ["blobs", "db", "logs", "identity.key", "VERSION"] {
