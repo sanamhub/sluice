@@ -27,8 +27,10 @@ pub(in crate::home) use unix::keep_home_private;
 pub(in crate::home) use unix::{keep_home_private_for, make_0700_with};
 #[cfg(unix)]
 mod unix {
+    use std::fs;
     use std::fs::File;
     use std::io;
+    use std::os::unix::fs::MetadataExt;
     use std::path::Path;
 
     use rustix::fs::{Mode, OFlags};
@@ -61,8 +63,9 @@ mod unix {
         change: fn(&File) -> io::Result<()>,
     ) -> Result<(), Error> {
         let flags = OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-        let file =
-            File::from(rustix::fs::open(home, flags, Mode::empty()).map_err(|e| opened(home, e))?);
+        let file = File::from(
+            rustix::fs::open(home, flags, Mode::empty()).map_err(|e| opened(home, e, me))?,
+        );
         let before =
             rustix::fs::fstat(&file).map_err(|e| storage("read", home, io::Error::from(e)))?;
         if before.st_uid != me {
@@ -80,15 +83,23 @@ mod unix {
         Ok(())
     }
 
-    /// A link or something that is not a folder is refused by name. Any other open failure is the
-    /// refusal of a home whose access cannot be changed, which is what the handle needed the access
-    /// for, and not a planted link.
-    fn opened(home: &Path, errno: Errno) -> Error {
+    /// A link or something that is not a folder is refused by name. An open refused with access
+    /// denied is the refusal of a folder whose access cannot be changed, and the owner says which
+    /// one it is: `lstat` needs no access to the entry, so another user's folder is the policy
+    /// error, and this user's is the file system refusing the change.
+    fn opened(home: &Path, errno: Errno, me: u32) -> Error {
         if errno == Errno::LOOP || errno == Errno::NOTDIR {
             return Error::Policy(format!(
                 "{} is a link and not a folder of the home: remove it, and sluice makes the folder",
                 home.display()
             ));
+        }
+        if errno == Errno::ACCESS || errno == Errno::PERM {
+            if let Ok(meta) = fs::symlink_metadata(home) {
+                if meta.uid() != me {
+                    return owned_by_other(home);
+                }
+            }
         }
         refused(home, &io::Error::from(errno))
     }
@@ -131,8 +142,18 @@ mod windows_impl {
         home: &Path,
         owner: fn(&File) -> io::Result<bool>,
     ) -> Result<(), Error> {
-        let dir =
-            private_windows::open_dir(home).map_err(|e| storage("restrict access to", home, e))?;
+        let dir = match private_windows::open_dir(home) {
+            Ok(dir) => dir,
+            // The open needed `WRITE_DAC`. A handle that asks for `READ_CONTROL` only says whether
+            // the folder is another user's, which is the answer that explains the refusal; a folder
+            // that refuses even that keeps the storage error.
+            Err(e) => {
+                return match private_windows::is_owned_by_this_user(home) {
+                    Ok(false) => Err(owned_by_other(home)),
+                    _ => Err(storage("restrict access to", home, e)),
+                };
+            }
+        };
         if dir
             .metadata()
             .map_err(|e| storage("read", home, e))?

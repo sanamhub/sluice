@@ -340,32 +340,37 @@ fn denied(_: &Path) -> io::Result<PathBuf> {
 }
 
 /// A RAM disk, a WinFsp or Dokan drive, a VirtualBox share or an old SMB server cannot be asked
-/// where a path leads. A home on one that is not a link is the path given.
+/// where a path leads. A home on one that is not a link is the path given, and the test runs from a
+/// canonicalized temporary folder so a system link above it, such as macOS's `/var`, is not in the
+/// path: those are the system's, and the fallback has to accept them.
 #[test]
 fn a_file_system_that_cannot_be_asked_gives_the_path_when_the_home_is_not_a_link() {
     let dir = tempfile::tempdir().unwrap();
-    assert_eq!(resolve_with(dir.path(), unsupported).unwrap(), dir.path());
+    let base = fs::canonicalize(dir.path()).unwrap();
+    assert_eq!(resolve_with(&base, unsupported).unwrap(), base);
     // A link on such a file system is refused: nothing says where it leads.
-    let target = dir.path().join("target");
-    let link = dir.path().join("link");
+    let target = base.join("target");
+    let link = base.join("link");
     fs::create_dir(&target).unwrap();
     link_folder(&target, &link);
     assert!(resolve_with(&link, unsupported).is_err());
     // A missing home is not found, and a refusal is not "unsupported".
-    assert!(resolve_with(&dir.path().join("missing"), unsupported).is_err());
-    let Err(Error::Storage(message)) = resolve_with(dir.path(), denied) else {
+    assert!(resolve_with(&base.join("missing"), unsupported).is_err());
+    let Err(Error::Storage(message)) = resolve_with(&base, denied) else {
         panic!("a refusal was resolved");
     };
     assert!(message.starts_with("cannot get access to "), "{message}");
 }
 
 /// A file system that cannot resolve a path cannot say where a link in the middle of it leads
-/// either, so every ancestor is checked, and a link is refused by name.
+/// either, so every ancestor is checked, and a link is refused by name. The base is canonicalized
+/// for the same reason as the test above.
 #[test]
 fn a_link_in_the_path_is_refused_when_the_file_system_cannot_resolve() {
     let parent = tempfile::tempdir().unwrap();
-    let target = parent.path().join("target");
-    let link = parent.path().join("link");
+    let base = fs::canonicalize(parent.path()).unwrap();
+    let target = base.join("target");
+    let link = base.join("link");
     fs::create_dir(&target).unwrap();
     fs::create_dir(target.join("home")).unwrap();
     link_folder(&target, &link);
@@ -392,8 +397,6 @@ fn error_invalid_function_is_the_same_answer_as_unsupported() {
         Err(io::Error::from_raw_os_error(1))
     }
     let dir = tempfile::tempdir().unwrap();
-    assert_eq!(
-        resolve_with(dir.path(), invalid_function).unwrap(),
-        dir.path()
-    );
+    let base = fs::canonicalize(dir.path()).unwrap();
+    assert_eq!(resolve_with(&base, invalid_function).unwrap(), base);
 }

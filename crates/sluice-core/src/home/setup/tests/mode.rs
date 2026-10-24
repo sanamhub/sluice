@@ -58,3 +58,24 @@ fn a_change_of_mode_that_did_nothing_is_refused_like_one_that_failed() {
     assert!(make_0700_with(&path, me, sets_0700).is_ok());
     assert_eq!(mode(&path), 0o700);
 }
+
+/// A folder this user may not open is refused by its owner, which `lstat` reads without opening it.
+/// When the owner is not the user the check is for, that is another user's folder; when it is, the
+/// file system is what refused the change, and the storage error stays.
+#[test]
+fn a_folder_that_cannot_be_opened_is_refused_by_its_owner() {
+    let parent = tempfile::tempdir().unwrap();
+    let path = parent.path().join("home");
+    fs::create_dir(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    let me = rustix::process::geteuid().as_raw();
+    let Err(Error::Policy(message)) = make_0700_with(&path, me.wrapping_add(1), sets_0700) else {
+        panic!("a folder that cannot be opened was not refused");
+    };
+    assert!(message.contains("belongs to another user"), "{message}");
+    let Err(Error::Storage(message)) = make_0700_with(&path, me, sets_0700) else {
+        panic!("a folder that cannot be opened was not refused");
+    };
+    assert!(message.contains("cannot restrict access to"), "{message}");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+}

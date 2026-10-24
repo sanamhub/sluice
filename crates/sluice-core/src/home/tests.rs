@@ -39,6 +39,94 @@ fn no_data_folder_and_no_sluice_home_is_a_storage_error_that_says_what_to_do() {
     assert!(message.contains("SLUICE_HOME"), "{message}");
 }
 
+mod resolve {
+    use std::cell::RefCell;
+    use std::fs;
+    use std::io;
+    use std::path::{Path, PathBuf};
+
+    use super::super::setup::resolve_with;
+    use crate::Error;
+
+    /// A link at `link` to the folder `target`: a symlink on Unix, a junction on Windows, which a
+    /// user may make without the right a Windows symlink needs.
+    fn link_folder(target: &Path, link: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        {
+            let status = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success(), "mklink /J failed");
+        }
+    }
+
+    /// A file system that cannot resolve a path whose last component is `home`, as one that cannot
+    /// answer for the folder the home is in, and resolves every other path.
+    fn fails_at_home(path: &Path) -> io::Result<PathBuf> {
+        if path.file_name().is_some_and(|name| name == "home") {
+            return Err(io::Error::from(io::ErrorKind::Unsupported));
+        }
+        fs::canonicalize(path)
+    }
+
+    thread_local! {
+        static BASE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    }
+
+    /// A file system that resolves `BASE` and its ancestors and nothing below it.
+    fn fails_below_base(path: &Path) -> io::Result<PathBuf> {
+        let base = BASE.with(|cell| cell.borrow().clone()).expect("a base");
+        if path == base || base.starts_with(path) {
+            fs::canonicalize(path)
+        } else {
+            Err(io::Error::from(io::ErrorKind::Unsupported))
+        }
+    }
+
+    /// A link above the ancestor the file system can still resolve was followed by the call that
+    /// resolved it, so the resolved path is used and the home opens.
+    #[test]
+    fn a_link_above_the_ancestor_the_file_system_cannot_resolve_is_accepted() {
+        let parent = tempfile::tempdir().unwrap();
+        let base = fs::canonicalize(parent.path()).unwrap();
+        let real = base.join("real");
+        fs::create_dir(&real).unwrap();
+        fs::create_dir(real.join("home")).unwrap();
+        let link = base.join("link");
+        link_folder(&real, &link);
+        let resolved = resolve_with(&link.join("home"), fails_at_home).unwrap();
+        assert_eq!(resolved, fs::canonicalize(real.join("home")).unwrap());
+    }
+
+    /// A link below the ancestor the file system can resolve is refused by name: that file system
+    /// cannot say where it leads either.
+    #[test]
+    fn a_link_below_the_ancestor_the_file_system_cannot_resolve_is_refused() {
+        let parent = tempfile::tempdir().unwrap();
+        let base = fs::canonicalize(parent.path()).unwrap();
+        let real = base.join("real");
+        fs::create_dir(&real).unwrap();
+        fs::create_dir(real.join("home")).unwrap();
+        let link = base.join("link");
+        link_folder(&real, &link);
+        BASE.with(|cell| *cell.borrow_mut() = Some(base.clone()));
+        let Err(Error::Policy(message)) = resolve_with(&link.join("home"), fails_below_base) else {
+            panic!("a link below the resolved ancestor was accepted");
+        };
+        assert!(
+            message.contains(&link.display().to_string()),
+            "the link is named: {message}"
+        );
+        assert!(message.contains("is a link"), "{message}");
+    }
+}
+
 mod as_given {
     use std::path::Path;
 
