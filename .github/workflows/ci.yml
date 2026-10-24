@@ -70,6 +70,16 @@ jobs:
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: nextest
+      # A test refuses a home another user owns, and only root can make one. The Linux and macOS
+      # runner images "both run using passwordless sudo" (GitHub's runner reference), so this needs
+      # no secret and no password.
+      - name: Make a folder owned by root
+        if: runner.os != 'Windows'
+        run: |
+          dir="$(mktemp -d)"
+          sudo chown root:root "$dir"
+          sudo chmod 755 "$dir"
+          echo "SLUICE_ROOT_OWNED_DIR=$dir" >> "$GITHUB_ENV"
       # nextest does not run doctests.
       - run: cargo nextest run
       - run: cargo test --doc --workspace

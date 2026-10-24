@@ -3,11 +3,11 @@
 //!
 //! A file system that keeps no Unix permissions, such as vfat, refuses the change of mode the way
 //! a folder of another user does, with the same message. No test mounts one, which needs root:
-//! `mode.rs` stands in for it, and the folder of another user is looked for below.
+//! `mode.rs` stands in for it, and the folder of another user comes from the test job of `ci.yml`.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::doctor::{Status, examine_at};
 use crate::{Error, Home};
@@ -69,13 +69,19 @@ fn a_folder_that_holds_only_a_hidden_file_is_not_new_and_is_left_alone() {
     );
 }
 
-/// An empty folder that another user owns, which this one may list and not change. Only root can
-/// make one, so the test looks for one the system already has, and asks the system whether it is
-/// one: `chmod` to the mode it has already must be refused with `EPERM`, which is what a folder of
-/// another user answers, and not what an owner, root, or a process with `CAP_FOWNER` gets. It
-/// guesses nothing from who owns the temporary folder, and the open below is only made on a folder
-/// that has just refused.
-fn empty_folder_of_another_user() -> Option<&'static Path> {
+/// An empty folder that another user owns, which only root can make. The test job of `ci.yml` makes
+/// one with `sudo` and puts its path in `SLUICE_ROOT_OWNED_DIR`; outside CI the test looks for one
+/// the system already has. A CI run without the variable fails: this test is the one that proves
+/// another user's folder is refused, and it must not pass by not looking. The folder is made
+/// readable, so the open reaches the change of mode and is refused there.
+fn root_owned_empty_folder() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("SLUICE_ROOT_OWNED_DIR") {
+        return Some(PathBuf::from(path));
+    }
+    assert!(
+        std::env::var_os("CI").is_none(),
+        "CI is set, and SLUICE_ROOT_OWNED_DIR is not: the test job makes a root-owned folder"
+    );
     ["/srv", "/opt", "/media", "/mnt", "/home"]
         .into_iter()
         .map(Path::new)
@@ -89,36 +95,26 @@ fn empty_folder_of_another_user() -> Option<&'static Path> {
                 .is_err_and(|e| e.raw_os_error() == Some(libc::EPERM));
             meta.is_dir() && empty && refused
         })
+        .map(Path::to_path_buf)
 }
 
+/// A home another user owns is refused as theirs, and not as a storage error about permissions:
+/// the owner can change whatever sluice sets, so the way out is to take the folder or use another
+/// one. The folder is left exactly as it was.
 #[test]
-fn a_fresh_home_whose_access_cannot_be_changed_is_a_storage_error() {
-    let Some(path) = empty_folder_of_another_user() else {
-        // A CI runner that cannot find one would otherwise pass by not looking, and this is the
-        // test that proves another user's folder is refused.
-        assert!(
-            std::env::var_os("CI").is_none(),
-            "CI is set, and no empty folder of another user was found to test the refusal with"
-        );
-        eprintln!("SKIPPED: no empty folder that refuses this user a change of mode");
+fn a_home_another_user_owns_is_refused_as_theirs() {
+    let Some(path) = root_owned_empty_folder() else {
+        eprintln!("SKIPPED: no empty folder of another user was found to test the refusal with");
         return;
     };
-    let before = mode(path);
-    // The owner is checked first now: a folder another user made is refused as theirs, and a
-    // folder that is ours but whose mode cannot be changed is the storage error.
-    match Home::open(path) {
-        Err(Error::Policy(message)) => {
-            assert!(message.contains("belongs to another user"), "{message}");
-        }
-        Err(Error::Storage(message)) => {
-            assert!(message.contains("restrict access to"), "{message}");
-            assert!(message.contains("keeps Unix permissions"), "{message}");
-        }
-        other => panic!("a folder whose access cannot be changed was accepted: {other:?}"),
-    }
-    assert_eq!(mode(path), before);
+    let before = mode(&path);
+    let Err(Error::Policy(message)) = Home::open(&path) else {
+        panic!("a home another user owns was accepted");
+    };
+    assert!(message.contains("belongs to another user"), "{message}");
+    assert_eq!(mode(&path), before, "the folder's mode is as it was");
     assert!(
-        fs::read_dir(path).unwrap().next().is_none(),
+        fs::read_dir(&path).unwrap().next().is_none(),
         "nothing was written"
     );
 }

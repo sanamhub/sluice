@@ -137,8 +137,9 @@ fn something_that_appears_while_the_home_is_made_private_stops_the_open() {
     assert!(prepare(empty.path(), true, restrict).is_ok());
 }
 
-/// What a second sluice finds when it opens the same new home a moment after the first: the first
-/// one's files, which are exactly what sluice makes, and are accepted after a second look.
+/// A key is never what sluice makes: `Home::open` does not create one, so a key that appears in the
+/// gap between making the home private and listing it was put there by someone else, even when the
+/// owner check would accept it as this user's. It is refused.
 #[test]
 fn a_key_planted_in_the_gap_is_refused() {
     fn restrict_while_a_key_arrives(home: &Path) -> Result<(), Error> {
@@ -178,6 +179,8 @@ fn an_entry_this_user_did_not_make_is_refused() {
     .unwrap();
 }
 
+/// What a second sluice finds when it opens the same new home a moment after the first: the first
+/// one's files, which are exactly what sluice makes, and are accepted after a second look.
 #[test]
 fn what_sluice_makes_appearing_while_the_home_is_made_private_is_accepted() {
     fn restrict_while_another_sluice_arrives(home: &Path) -> Result<(), Error> {
