@@ -47,13 +47,61 @@ fn the_legacy_builders_ignore_file_is_the_union_of_the_two_images_in_order() {
     assert_eq!(both, named);
 }
 
-/// The `COPY` and `ADD` instructions of a Dockerfile, in order.
-fn copies(dockerfile: &str) -> Vec<String> {
+/// A Dockerfile instruction as Docker reads it: the keyword, and the rest after the space or tab
+/// that has to follow it. A line whose keyword is not followed by whitespace, a comment and a blank
+/// line are not instructions. The keyword is returned as written: Docker matches it without regard
+/// to case, so `copy` is a `COPY`.
+fn instruction(line: &str) -> Option<(&str, &str)> {
+    let line = line.trim_start();
+    let end = line.find([' ', '\t']).filter(|end| *end > 0)?;
+    let (keyword, rest) = line.split_at(end);
+    if !keyword.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+        return None;
+    }
+    Some((keyword, rest.trim_start()))
+}
+
+/// Whether a `RUN`'s arguments mount the build context. A `type=bind` mount without a source
+/// mounts the context root, and `source=.` or `from=.` names it directly. A cache mount does not.
+fn mount_names_context(run: &str) -> bool {
+    let mut words = run.split_whitespace();
+    while let Some(word) = words.next() {
+        let options = if let Some(value) = word.strip_prefix("--mount=") {
+            value
+        } else if word == "--mount" {
+            match words.next() {
+                Some(value) => value,
+                None => return false,
+            }
+        } else {
+            continue;
+        };
+        if options.split(',').any(|option| {
+            let option = option.trim();
+            option.eq_ignore_ascii_case("type=bind")
+                || option.starts_with("source=.")
+                || option.starts_with("from=.")
+        }) {
+            return true;
+        }
+    }
+    false
+}
+
+/// The lines of a Dockerfile that read the build context: every `COPY` and `ADD`, and a `RUN` that
+/// mounts the context. Anything else, such as a cache mount, reads no file of it.
+fn context_readers(dockerfile: &str) -> Vec<String> {
     dockerfile
         .lines()
-        .map(str::trim)
-        .filter(|line| line.starts_with("COPY ") || line.starts_with("ADD "))
-        .map(str::to_string)
+        .filter(|line| {
+            let Some((keyword, rest)) = instruction(line) else {
+                return false;
+            };
+            keyword.eq_ignore_ascii_case("copy")
+                || keyword.eq_ignore_ascii_case("add")
+                || (keyword.eq_ignore_ascii_case("run") && mount_names_context(rest))
+        })
+        .map(|line| line.trim_start().to_string())
         .collect()
 }
 
@@ -71,7 +119,7 @@ fn each_dockerfile_copies_only_what_the_image_needs() {
     expected.extend(common);
     expected.push("COPY relay/relay.toml relay/open.toml /etc/relay/");
     assert_eq!(
-        copies(&read(&relay_dir().join("Dockerfile"))),
+        context_readers(&read(&relay_dir().join("Dockerfile"))),
         expected,
         "docker/relay/Dockerfile"
     );
@@ -80,8 +128,50 @@ fn each_dockerfile_copies_only_what_the_image_needs() {
     expected.extend(common);
     expected.push("COPY rendezvous/manual.toml /etc/rendezvous/");
     assert_eq!(
-        copies(&read(&rendezvous_dir().join("Dockerfile"))),
+        context_readers(&read(&rendezvous_dir().join("Dockerfile"))),
         expected,
         "docker/rendezvous/Dockerfile"
     );
+}
+
+/// Docker reads a keyword in any case, and a tab is as good as a space after it, so each of these
+/// reads the build context. None of them is one of the lines the image needs, so the test above
+/// refuses it.
+#[test]
+fn a_copy_or_a_mount_in_another_case_is_refused() {
+    let expected = "COPY guard/src /src/guard/src";
+    for line in [
+        "copy guard/src /src/guard/src",
+        "Add\tguard/src /src/guard/src",
+        "COPY\tguard/src /src/guard/src",
+    ] {
+        assert_eq!(context_readers(line), [line], "{line}");
+        assert_ne!(
+            context_readers(line),
+            [expected],
+            "{line} has to differ from the line the image needs"
+        );
+    }
+    for line in [
+        "RUN --mount=type=bind,target=/src cargo build",
+        "RUN --mount=type=cache,target=/cargo --mount=type=bind cargo build",
+        "run --mount=type=bind,target=/src cargo build",
+    ] {
+        assert_eq!(context_readers(line), [line], "{line}");
+    }
+}
+
+/// A cache mount of the context reads nothing of it, and a `COPY` in a comment or a word that only
+/// starts like an instruction is not one.
+#[test]
+fn a_line_that_reads_no_file_of_the_context_is_not_a_copy() {
+    for line in [
+        "RUN --mount=type=cache,target=/cargo cargo build",
+        "# COPY . /src",
+        "COPYING nonsense",
+        "COPY",
+        " FROM alpine",
+    ] {
+        assert!(context_readers(line).is_empty(), "{line}");
+    }
 }
