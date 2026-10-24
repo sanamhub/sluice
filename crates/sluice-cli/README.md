@@ -51,7 +51,7 @@ it and can change in any release.
 | 3 | `Network`: a peer or relay could not be reached, or a connection failed mid-transfer. Retrying can help |
 | 4 | `Verify`: received bytes did not match the BLAKE3 root. The bytes are discarded |
 | 5 | `Storage`: the store or filesystem failed: full disk, permission or quota |
-| 6 | `Policy`: sluice refused by rule, such as a home with a newer layout, a home another user owns, a key that other users can read, or `--rotate` with nobody to ask |
+| 6 | `Policy`: sluice refused by rule, such as a home with a newer layout, a home or a key another user owns, a key that other users can read or that has more than one name, or `--rotate` with nobody to ask |
 | 70 | `Bug`: an internal invariant broke, or sluice panicked. A defect in sluice, never in the environment |
 | 130 | `Cancelled`: the caller cancelled, for example by answering no to a prompt |
 
@@ -86,12 +86,14 @@ failure the step that fixes it. With `--json` it prints one object:
 
 `name` is `version`, `home`, `access`, `layout`, `lock`, `key`, `space` or `transport`, in that
 order. `access` reports the home folder, whether another user owns it or others can reach it, and
-`key` the key alone, so a home and a key that are both open to others are two failures. `home` also
-fails when `blobs`, `db` or `logs` is a link, which `sluice id` refuses to open, and when the lock
-or `lock.pid` is not a plain file. A home is read by the path the system resolves for it, so one
-that is a link, or longer than 260 characters on Windows, is checked as `sluice id` opens it, and a
-message names the path as it was given. `detail` and `fix` are for people, and `fix` is `null` when
-there is nothing to do.
+`key` the key: its owner, whether it is a link or a regular file, how many names it has, and its
+access. So a home and a key that are both open to others are two failures. `home` also fails when
+`blobs`, `db` or `logs` is a link or belongs to another user, which `sluice id` refuses to open, and
+when the lock or `lock.pid` is not a plain file. `sluice id` refuses a key that is a link, is not a
+regular file, has more than one name, or belongs to another user, and doctor reports each the same
+way. A home is read by the path the system resolves for it, so one that is a link, or longer than
+260 characters on Windows, is checked as `sluice id` opens it, and a message names the path as it
+was given. `detail` and `fix` are for people, and `fix` is `null` when there is nothing to do.
 
 The report is the command's result, so it goes to stdout whatever it finds, with or without
 `--json`, and nothing goes to stderr. The exit code is 0 when no check failed: warnings do not fail.

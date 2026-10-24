@@ -55,7 +55,7 @@ prints a value from the config, since a token may be one.
 One exception is the maintainer's: a key name made only of 1 to 32 lower-case letters and `_` is
 printed, because no rule can tell it from a setting's name. A `--config-path` value is printed only
 when it starts with `/` or `./`, is at most 200 characters, and uses only `[A-Za-z0-9._/-]`; any
-other becomes "the path given to --config-path".
+other becomes "the config file given to --config-path".
 
 **Overriding the entry point skips the guard.** `docker run --entrypoint /usr/local/bin/iroh-relay`
 runs the server with whatever it is given, open default included. Name `sluice-relay-guard` instead,

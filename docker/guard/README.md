@@ -47,12 +47,13 @@ characters or fewer, would be: no rule can tell it from a setting. An unknown ar
 only when it is `--` and 1 to 32 lower-case letters or `-`; any other is "an argument", with its
 position, so a token on the command line stays out of the log. A `--config-path` value is printed
 only when it starts with `/` or `./`, is at most 200 characters, and uses only `[A-Za-z0-9._/-]`;
-any other is "the path given to --config-path". Every control character in a message, from a path or
-an argument, is escaped, so a refusal is one line.
+any other is "the config file given to --config-path". Every control character in a message, from a
+path or an argument, is escaped, so a refusal is one line.
 
 | Refused | Why |
 |---|---|
 | no `--config-path`, a path that does not exist, a folder | iroh-relay runs open without a file |
+| a FIFO at the config path, even one swapped in after the path was read | it is not a regular file, and the open must not wait for a writer |
 | `--dev`, and any argument but `--open`, `--rendezvous` and `--config-path` | `--dev` turns TLS off and runs on any config |
 | `--open` and `--rendezvous` together | a rendezvous server has nothing to open |
 | a key iroh-relay 1.4.0 does not have, at any level | iroh-relay would ignore it |
@@ -79,10 +80,12 @@ itself cannot be started, the guard exits with 69, `EX_UNAVAILABLE`.
 ## The relay reads a sealed copy of the bytes the guard checked
 
 The guard opens the config once, checks that it is a regular file, reads it, and copies those bytes
-into a `memfd` (ADR 0021). It seals the copy against a write, a growth, a shrink and any further
-seal, puts it on descriptor 0 with `dup2`, and closes the file it opened. Before it replaces itself
-it checks that `/proc/self/fd/0` names the copy by device and inode, and reads the bytes back
-through it. Only then does it exec iroh-relay, told to read `/proc/self/fd/0`.
+into a `memfd` (ADR 0021). The open does not wait on a FIFO (`O_NONBLOCK`), and the open file's own
+metadata is checked, so a FIFO put at the path after the first look is refused instead of waiting
+for a writer. It seals the copy against a write, a growth, a shrink and any further seal, puts it on
+descriptor 0 with `dup2`, and closes the file it opened. Before it replaces itself it checks that
+`/proc/self/fd/0` names the copy by device and inode, and reads the bytes back through it. Only then
+does it exec iroh-relay, told to read `/proc/self/fd/0`.
 
 A rename over the path cannot reach the relay, and neither can an edit in place, which ADR 0020
 accepted a window for. Nor can a write that truncates the file before it writes, as `cat >` or a
