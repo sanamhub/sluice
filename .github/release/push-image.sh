@@ -5,12 +5,13 @@
 #   push-image.sh <registry> arch <amd64-id> <arm64-id>
 #       each architecture under `<version>-<arch>`, after checking the loaded image's ID and
 #       platform against what the build recorded
-#   push-image.sh <registry> index
-#       the version tag as the index of both architectures, after checking it
+#   push-image.sh <registry> index <amd64-digest> <arm64-digest>
+#       the version tag as the index of exactly those two digests, after checking it
 #
-# release.yml's image-publish job runs `arch`, attests both architectures, then runs `index` and
-# attests the index. A failure in between leaves public tags without their attestation, which a
-# re-run overwrites (RELEASING.md).
+# release.yml's image-publish job runs `arch`, attests both architectures, then runs `index` with
+# the digests it just attested, and attests the index. The index is built from the digests and
+# never from a tag, so a tag moved in between cannot put an unattested manifest in it. A failure in
+# between leaves public tags without their attestation, which a re-run overwrites (RELEASING.md).
 #
 # The registry is the first argument and never comes from the environment: release.yml writes the
 # literal `ghcr.io`, and images.yml's push test writes `localhost:5000`. A value an earlier step
@@ -23,9 +24,11 @@ set -euo pipefail
 # A failed command inside `$(...)` stops the script too, and not only the line that reads it.
 shopt -s inherit_errexit
 
-usage="usage: push-image.sh <registry> arch <amd64-id> <arm64-id> | index"
+usage="usage: push-image.sh <registry> arch|index <amd64> <arm64>"
 registry="${1:?$usage}"
 step="${2:?$usage}"
+amd64="${3:?$usage}"
+arm64="${4:?$usage}"
 case "$step" in
   arch | index) ;;
   *)
@@ -42,20 +45,22 @@ fi
 : "${IMAGE:?}" "${OWNER:?}" "${TAG:?}" "${GITHUB_TOKEN:?}" "${GITHUB_ACTOR:?}"
 : "${RUNNER_TEMP:?}" "${GITHUB_OUTPUT:?}"
 
-# An image ID is `sha256:` and 64 lower-case hex digits. The IDs come from a build job's outputs,
-# so they are checked before anything is loaded or pushed.
+# An image ID and a manifest digest are both `sha256:` and 64 lower-case hex digits. The IDs come
+# from a build job's output, so they are checked before anything is loaded or pushed.
 check_sha256() {
   if [[ ! "$1" =~ ^sha256:[0-9a-f]{64}$ ]]; then
     echo "the $2 '$1' is not sha256: and 64 lower-case hex digits" >&2
     exit 2
   fi
 }
-if [ "$step" = arch ]; then
-  amd64="${3:?$usage}"
-  arm64="${4:?$usage}"
-  check_sha256 "$amd64" "amd64 image ID"
-  check_sha256 "$arm64" "arm64 image ID"
-fi
+case "$step" in
+  arch)
+    check_sha256 "$amd64" "amd64 image ID"
+    check_sha256 "$arm64" "arm64 image ID" ;;
+  index)
+    check_sha256 "$amd64" "amd64 digest"
+    check_sha256 "$arm64" "arm64 digest" ;;
+esac
 
 # GitHub's documentation says a step's `env` overrides a job's or the workflow's, and says nothing
 # of a value an earlier step wrote to GITHUB_ENV. On a tag, which is a release, the only registry
@@ -148,8 +153,8 @@ $image: nothing was attested" >&2
   echo "name=$repo" >> "$GITHUB_OUTPUT"
 }
 
-# That the version tag lists exactly the two digests pushed above, one per Linux architecture, so
-# the index attestation names what a pull of the version tag resolves and then fetches.
+# That the version tag lists exactly the two digests given to this call, one per Linux architecture,
+# so the index attestation names what a pull of the version tag resolves and then fetches.
 check_index() {
   local reference="$1" amd64="$2" arm64="$3" raw want got
   raw="$(docker buildx imagetools inspect "$reference" --raw)"
@@ -159,18 +164,16 @@ check_index() {
   if [ "$got" = "$want" ]; then
     return 0
   fi
-  echo "$reference lists these manifests, and push-image.sh expected the two it pushed:" >&2
+  echo "$reference lists these manifests, and push-image.sh expected the two it was given:" >&2
   printf '%s\n' "$got" "--- expected ---" "$want" >&2
   return 1
 }
 
-# The version tag as the index of both architectures. The digests are read back from the registry
-# and not passed in from the `arch` call: the index names what is there now, which is also what the
-# architecture attestations signed.
+# The version tag as the index of the two digests this call was given: the ones image-publish
+# attested. A tag read back from the registry would name whatever is there now, which a push in
+# between can have moved.
 create_index() {
-  local amd64 arm64 index
-  amd64="$(checked_digest "$repo:$version-amd64" image)"
-  arm64="$(checked_digest "$repo:$version-arm64" image)"
+  local index
   docker buildx imagetools create --tag "$repo:$version" "$repo@$amd64" "$repo@$arm64"
   index="$(checked_digest "$repo:$version" index)"
   check_index "$repo:$version" "$amd64" "$arm64"

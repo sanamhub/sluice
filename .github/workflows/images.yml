@@ -168,16 +168,35 @@ jobs:
           AMD64_ID: ${{ steps.standins.outputs.amd64 }}
           ARM64_ID: ${{ steps.standins.outputs.arm64 }}
         run: bash .github/release/push-image.sh localhost:5000 arch "$AMD64_ID" "$ARM64_ID"
+      # A third digest under the version tag, after the two architecture pushes. `index` must build
+      # the index from the digests it is given, which are the ones attested, and not from this tag.
+      - id: moved
+        name: Move the version tag to a third digest
+        run: |
+          docker buildx build --platform linux/amd64 --tag "sluice-$IMAGE:moved" --load \
+            --file docker/push-test/Dockerfile \
+            --label "org.opencontainers.image.version=moved" docker/push-test
+          docker tag "sluice-$IMAGE:moved" "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test"
+          docker push "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test"
+          moved="$(docker buildx imagetools inspect \
+            "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test" \
+            --format '{{json .Manifest}}' | jq --raw-output .digest)"
+          echo "moved=$moved" >> "$GITHUB_OUTPUT"
       - id: push-index
-        run: bash .github/release/push-image.sh localhost:5000 index
+        env:
+          AMD64_DIGEST: ${{ steps.push-arch.outputs.amd64 }}
+          ARM64_DIGEST: ${{ steps.push-arch.outputs.arm64 }}
+        run: bash .github/release/push-image.sh localhost:5000 index "$AMD64_DIGEST" "$ARM64_DIGEST"
       # The script wrote a digest for each architecture and the index. Each must answer in the
-      # registry as the manifest the script checked, and the version tag must be the index.
+      # registry as the manifest the script checked, the version tag must be the index, and the
+      # index must list the two digests it was given and not the moved tag's.
       - name: Check what was pushed
         env:
           NAME: ${{ steps.push-index.outputs.name }}
           INDEX: ${{ steps.push-index.outputs.index }}
           AMD64: ${{ steps.push-arch.outputs.amd64 }}
           ARM64: ${{ steps.push-arch.outputs.arm64 }}
+          MOVED: ${{ steps.moved.outputs.moved }}
         run: |
           for digest in "$INDEX" "$AMD64" "$ARM64"; do
             docker buildx imagetools inspect "$NAME@$digest" > /dev/null
@@ -187,6 +206,11 @@ jobs:
           tagged="$(docker buildx imagetools inspect "$NAME:0.0.0-test" \
             --format '{{json .Manifest}}' | jq --raw-output .digest)"
           [ "$tagged" = "$INDEX" ]
+          [ "$INDEX" != "$MOVED" ]
+          listed="$(docker buildx imagetools inspect "$NAME:0.0.0-test" --raw \
+            | jq --raw-output '.manifests[].digest' | sort)"
+          want="$(printf '%s\n%s\n' "$AMD64" "$ARM64" | sort)"
+          [ "$listed" = "$want" ]
       # A tag is a release, and a release goes to ghcr.io only. The run must stop at the registry
       # check, before a token is sent anywhere, so the log may not hold a login.
       - name: A tag refuses another registry

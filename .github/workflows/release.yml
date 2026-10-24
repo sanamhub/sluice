@@ -674,13 +674,17 @@ jobs:
           subject-digest: ${{ steps.push-arch.outputs.arm64 }}
           sbom-path: ${{ runner.temp }}/image/arm64.spdx.json
           push-to-registry: true
-      # The version tag, which `docker pull <image>:<version>` resolves. It is created only after
-      # both architectures are attested, so no public tag is left without one.
+      # The version tag, which `docker pull <image>:<version>` resolves. It is created from the two
+      # digests that were attested above and never from a tag, so a tag moved in between cannot
+      # put an unattested image in the index. It is created only after both architectures are
+      # attested, so no public tag is left without one.
       - name: Create the version index
         id: push-index
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash .github/release/push-image.sh ghcr.io index
+          AMD64_DIGEST: ${{ steps.push-arch.outputs.amd64 }}
+          ARM64_DIGEST: ${{ steps.push-arch.outputs.arm64 }}
+        run: bash .github/release/push-image.sh ghcr.io index "$AMD64_DIGEST" "$ARM64_DIGEST"
       - name: Attest the index
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
