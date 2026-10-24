@@ -22,8 +22,9 @@ pub(crate) fn check(
     behind_proxy: bool,
 ) -> Result<(), Refusal> {
     let readme = readme(mode);
-    // Before the file: it is wrong whatever the file says, since iroh-relay would take the empty
-    // value as the only token of a `shared_token` list.
+    // iroh-relay 1.4.0 stops at start on an empty token: an empty value replaces the list with one
+    // empty entry, and `bail_any!` refuses it (main.rs:236-243). The guard refuses it first so the
+    // operator gets exit 64 and one line that names the variable.
     if access_token == Some("") {
         return Err(Refusal::new(
             "IROH_RELAY_ACCESS_TOKEN is set but empty: unset it, or set it to the token clients \

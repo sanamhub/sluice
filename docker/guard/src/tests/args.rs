@@ -104,8 +104,8 @@ fn an_argument_that_is_not_a_flag_is_not_printed() {
         // The whole message, so that nothing of the argument is in it.
         assert_eq!(
             message,
-            "an argument at position 2 is unknown: the guard takes only [--open | --rendezvous] \
-             --config-path <file>"
+            "an argument at position 2 is unknown: the guard takes only \
+             [--open | --rendezvous | --behind-proxy] --config-path <file>"
         );
     }
     // The position counts the path after --config-path, so it is the place on the command line.

@@ -37,18 +37,18 @@ pub fn open_config(path: &Path) -> Result<(File, String), Refusal> {
     // The open file's own metadata decides, since the path may name another file by now.
     let opened = file
         .metadata()
-        .map_err(|err| Refusal::new(format!("cannot read {}: {err}", shown(path))))?;
+        .map_err(|err| Refusal::new(format!("cannot read {}: {err}", config_file(path))))?;
     if !opened.is_file() {
         return Err(not_a_file(path));
     }
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
         .and_then(|_| file.seek(SeekFrom::Start(0)))
-        .map_err(|err| Refusal::new(format!("cannot read {}: {err}", shown(path))))?;
+        .map_err(|err| Refusal::new(format!("cannot read {}: {err}", config_file(path))))?;
     let text = String::from_utf8(bytes).map_err(|_| {
         Refusal::new(format!(
             "{} is not UTF-8 text, which TOML must be",
-            shown(path)
+            config_file(path)
         ))
     })?;
     Ok((file, text))
@@ -74,20 +74,32 @@ fn shown(path: &Path) -> String {
     }
 }
 
-fn cannot_open(path: &Path, err: &io::Error) -> Refusal {
+/// The config file as a refusal names it: "the config file /etc/relay/x.toml" when the path can be
+/// shown, and "the config file given to --config-path" when it may be a token. Both read as a
+/// sentence after "does not exist", "is not a regular file" and "cannot read".
+fn config_file(path: &Path) -> String {
+    const UNNAMED: &str = "the path given to --config-path";
     let shown = shown(path);
+    match shown == UNNAMED {
+        true => "the config file given to --config-path".to_string(),
+        false => format!("the config file {shown}"),
+    }
+}
+
+fn cannot_open(path: &Path, err: &io::Error) -> Refusal {
+    let file = config_file(path);
     Refusal::new(match err.kind() {
         io::ErrorKind::NotFound => format!(
-            "the config file {shown} does not exist, and iroh-relay would run open with no \
-             limit: mount the file there, or fix --config-path"
+            "{file} does not exist, and iroh-relay would run open with no limit: mount the file \
+             there, or fix --config-path"
         ),
-        _ => format!("cannot read the config file {shown}: {err}"),
+        _ => format!("cannot read {file}: {err}"),
     })
 }
 
 fn not_a_file(path: &Path) -> Refusal {
     Refusal::new(format!(
         "{} is not a regular file: point --config-path at the config file itself",
-        shown(path)
+        config_file(path)
     ))
 }

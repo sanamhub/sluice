@@ -1,5 +1,6 @@
-//! The command line, `sluice-relay-guard [--open | --rendezvous] --config-path <file>`, and
-//! nothing else.
+//! The command line, `sluice-relay-guard [--open | --rendezvous | --behind-proxy]
+//! --config-path <file>`, and nothing else. `--open` and `--behind-proxy` may be given together:
+//! a relay that runs open can still stand behind a proxy that ends TLS.
 
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
@@ -160,7 +161,8 @@ fn unknown(arg: &OsStr, position: usize) -> Refusal {
         None => format!("an argument at position {position} is unknown"),
     };
     Refusal::new(format!(
-        "{named}: the guard takes only [--open | --rendezvous] --config-path <file>"
+        "{named}: the guard takes only [--open | --rendezvous | --behind-proxy] \
+         --config-path <file>"
     ))
 }
 

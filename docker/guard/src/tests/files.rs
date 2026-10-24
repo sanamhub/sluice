@@ -64,11 +64,11 @@ fn a_file_that_is_not_utf8_is_refused() {
 }
 
 /// The value of `--config-path` is printed only when it looks like a path and cannot be a token.
-/// Everything else becomes "the path given to --config-path", so a token pasted after the flag does
-/// not end up in the container log.
+/// Everything else becomes "the config file given to --config-path", so a token pasted after the
+/// flag does not end up in the container log.
 #[test]
 fn a_config_path_that_may_be_a_token_is_not_printed() {
-    let unnamed = "the path given to --config-path";
+    let unnamed = "the config file given to --config-path";
     for secret in [
         "s3cr3t-T0KEN",
         "C:\\s3cr3t-T0KEN",
@@ -85,12 +85,35 @@ fn a_config_path_that_may_be_a_token_is_not_printed() {
     // A path that looks like one is printed, so an operator can see what was opened.
     let path = "/etc/relay/relay.toml";
     let message = refusal(std::path::Path::new(path));
-    assert!(message.contains(path), "{message}");
+    assert!(
+        message.contains(&format!("the config file {path}")),
+        "{message}"
+    );
     // The length counts characters, and 200 of them is still a path.
     let longest = format!("/{}", "a".repeat(199));
     assert!(refusal(std::path::Path::new(&longest)).contains(&longest));
     let too_long = format!("/{}", "a".repeat(200));
     assert!(refusal(std::path::Path::new(&too_long)).contains(unnamed));
+}
+
+/// Both forms read as a sentence after the verb, so a message never says "the config file the path
+/// given to --config-path".
+#[test]
+fn a_config_file_is_named_with_or_without_its_path() {
+    let named = refusal(std::path::Path::new("/etc/relay/x.toml"));
+    assert!(
+        named.contains("the config file /etc/relay/x.toml does not exist"),
+        "{named}"
+    );
+    let unnamed = refusal(std::path::Path::new("s3cr3t-T0KEN"));
+    assert!(
+        unnamed.contains("the config file given to --config-path does not exist"),
+        "{unnamed}"
+    );
+    assert!(
+        !unnamed.contains("config file the path given"),
+        "the two forms are not stacked: {unnamed}"
+    );
 }
 
 /// A rename over the path after the check, as a ConfigMap update does, changes nothing the relay

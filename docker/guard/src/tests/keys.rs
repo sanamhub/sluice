@@ -104,7 +104,7 @@ fn a_path_with_control_characters_is_not_printed() {
     let message = open_config(path).unwrap_err().to_string();
     assert!(!message.chars().any(char::is_control), "{message:?}");
     assert!(
-        message.contains("the path given to --config-path"),
+        message.contains("the config file given to --config-path"),
         "{message}"
     );
     assert!(!message.contains("re\nlay"), "{message:?}");
