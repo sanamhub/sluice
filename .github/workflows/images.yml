@@ -211,6 +211,22 @@ jobs:
             | jq --raw-output '.manifests[].digest' | sort)"
           want="$(printf '%s\n%s\n' "$AMD64" "$ARM64" | sort)"
           [ "$listed" = "$want" ]
+      # A registry that starts with a dash would make the repository name below mean something
+      # else, so it is refused before a token is sent.
+      - name: A registry with a leading dash is refused
+        env:
+          GITHUB_OUTPUT: ${{ runner.temp }}/refusal-output
+          AMD64_ID: ${{ steps.standins.outputs.amd64 }}
+          ARM64_ID: ${{ steps.standins.outputs.arm64 }}
+        run: |
+          : > "$GITHUB_OUTPUT"
+          set +e
+          message="$(bash .github/release/push-image.sh -x arch "$AMD64_ID" "$ARM64_ID" 2>&1)"
+          code=$?
+          set -e
+          printf '%s\n' "$message"
+          test "$code" = 2
+          grep -q "is not a registry" <<< "$message"
       # A tag is a release, and a release goes to ghcr.io only. The run must stop at the registry
       # check, before a token is sent anywhere, so the log may not hold a login.
       - name: A tag refuses another registry
@@ -228,6 +244,7 @@ jobs:
           set -e
           printf '%s\n' "$message"
           test "$code" = 1
+          grep -q 'pushes to ghcr.io only' <<< "$message"
           if grep -q 'Login Succeeded' <<< "$message"; then
             echo "::error::push-image.sh logged in before it refused the registry"
             exit 1

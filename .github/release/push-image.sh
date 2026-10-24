@@ -35,9 +35,9 @@ case "$step" in
     echo "$usage" >&2
     exit 2 ;;
 esac
-# A registry is a host name and an optional port. A slash, a space or a leading dash would make
-# the repository name below mean something else.
-if [[ ! "$registry" =~ ^[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
+# A registry is a host name and an optional port, and starts with a letter or a digit. A slash, a
+# space or a leading dash would make the repository name below mean something else.
+if [[ ! "$registry" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?$ ]]; then
   echo "'$registry' is not a registry: give a host name and an optional port" >&2
   exit 2
 fi
