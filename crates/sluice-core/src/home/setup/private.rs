@@ -95,10 +95,13 @@ mod unix {
             ));
         }
         if errno == Errno::ACCESS || errno == Errno::PERM {
-            if let Ok(meta) = fs::symlink_metadata(home) {
-                if meta.uid() != me {
-                    return owned_by_other(home);
-                }
+            // lstat needs no access to the entry, so the owner is read even when the open was
+            // refused. A folder this user owns is the file system refusing the change; another
+            // user's is the policy error.
+            let another_user_owns_it =
+                fs::symlink_metadata(home).is_ok_and(|meta| meta.uid() != me);
+            if another_user_owns_it {
+                return owned_by_other(home);
             }
         }
         refused(home, &io::Error::from(errno))
