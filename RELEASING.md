@@ -38,7 +38,7 @@ one compares the archive's SHA-256 with a value written into the script, and ski
 machine without `sha256sum`. The PowerShell one checks nothing. Neither checks a signature or an
 attestation, so each is only as good as the copy of the script that was run. Prefer the archive,
 and use an installer where those limits are acceptable. What `dist` 0.33.1 writes into them is in
-the [threat model](docs/threat-model.md#supply-chain).
+the [threat model][threat-model].
 
 ## The pipeline
 
@@ -53,23 +53,26 @@ Two workflows do it:
 owned by a user that is the owner alone. GitHub's ruleset page lists "Repository admins" as
 eligible for bypass access, and its permissions page says a repository owned by a personal account
 "has a single owner who has full control of the repository"
-([About rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets),
-[Permission levels](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/repository-access-and-collaboration/permission-levels-for-a-personal-account-repository)).
+([About rulesets][about-rulesets],
+[Permission levels][permission-levels]).
 So the owner can tag a commit that is not on `main`, whose `release.yml` names no environment and
 asks for whatever permissions it likes. Nothing in this repository stops that.
 
-The approval protects against two other things:
+The approval protects against two things, and only those:
 
 - a release started by anyone other than the owner, who needs the admin bypass and a reviewer the
   pusher cannot be;
 - a mistake by the owner: a tag on the wrong commit, a tag pushed before the release pull request
   merged, or `.github/` changed on the tag. [The two checks
-  below](#checks-before-approving-host) catch the last two.
+  below][checks] catch the last two, when there is a review to run them.
 
-Releasing alone takes both the admin bypass and a `release.yml` without the environment. With
-**Allow administrators to bypass configured protection rules** unticked, and a second person on the
-environment, every release through the shipped `release.yml` is reviewed. A reviewer is then the
-check that a release is one the owner meant, and not a bar to the owner releasing.
+The owner can undo every setting that makes the review real. Ticking **Allow administrators to
+bypass configured protection rules** again, removing the second reviewer from the `release`
+environment, or unticking **Prevent self-review** gives the shipped `release.yml` a release with no
+review at all: the owner tags `main` and it runs. The tag ruleset's bypass does the same for a
+commit that is not on `main` ([above][who-can-release]). So the approval is a check on a release
+started by someone else and on the owner's mistakes, and it is not a bar to the owner releasing
+alone.
 
 ## What the maintainer approves, and where
 
@@ -85,7 +88,7 @@ check that a release is one the owner meant, and not a bar to the owner releasin
    review in the same run. They wait together, so one review approves both.
 
 So one release asks for four approvals: the merge, the tag, and two reviews of the environment by
-the second person, both within 35 days of the tag push ([why](#cut-a-release)). The two reviews
+the second person, both within 35 days of the tag push ([why][cut-a-release]). The two reviews
 were read from GitHub's documentation, which says each job that names an environment with required
 reviewers waits for one, and have not been seen on a run yet.
 
@@ -111,18 +114,21 @@ command failed.
   diff is a refusal even when it looks harmless: the tag's copy is what runs, and the tag ruleset's
   bypass is what makes a different copy possible.
 
-The same two commands answer "is this the commit the release pull request merged", which is what
-the tag is meant to name.
+Two things these checks cannot do. They cannot catch a tag whose `release.yml` names no
+environment: nobody is asked to approve, so nobody runs them, and that is the bypass
+[above][who-can-release]. And they pass for a later commit on `main` that keeps `.github/` the
+same, so they say the tag is on `main` with the workflow that was reviewed, not that the tag is the
+merge commit of the release pull request.
 
 ### Re-runs and who approves
 
 GitHub's page on reviewing deployments says that, when the environment prevents self-approval,
 "you will not be able to approve a deployment from a workflow run you initiated"
-([Reviewing deployments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments)).
+([Reviewing deployments][reviewing-deployments]).
 The contexts page says a re-run has two actors: `github.actor` is "the user that triggered the
 initial workflow run" and `github.triggering_actor` is "the user that initiated the workflow run",
 and the two may differ on a re-run
-([Contexts](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts)).
+([Contexts][contexts]).
 
 No page says which of the two "Prevent self-review" reads, and no run has shown it. So treat both
 as barred: whoever pushed the tag or clicked **Re-run** does not approve that run. When the
@@ -142,9 +148,9 @@ gh workflow run ci.yml --repo sanamhub/sluice \
 
 | Page | What it says, quoted |
 |---|---|
-| [GITHUB_TOKEN](https://docs.github.com/en/actions/concepts/security/github_token) | "events triggered by the `GITHUB_TOKEN` will not create a new workflow run", and "`workflow_dispatch` and `repository_dispatch` events always create workflow runs" |
-| [Events that trigger workflows](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows) | for `workflow_dispatch`, `GITHUB_SHA` is the "Last commit on the `GITHUB_REF` branch or tag", and the event "will only trigger a workflow run if the workflow file exists on the default branch"; for `pull_request`, "By default, a workflow only runs when a `pull_request` event's activity type is `opened`, `synchronize`, or `reopened`" |
-| [Troubleshooting required status checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks) | "Required checks must pass on the latest commit SHA" |
+| [GITHUB_TOKEN][github-token] | "events triggered by the `GITHUB_TOKEN` will not create a new workflow run", and "`workflow_dispatch` and `repository_dispatch` events always create workflow runs" |
+| [Events that trigger workflows][events] | for `workflow_dispatch`, `GITHUB_SHA` is the "Last commit on the `GITHUB_REF` branch or tag", and the event "will only trigger a workflow run if the workflow file exists on the default branch"; for `pull_request`, "By default, a workflow only runs when a `pull_request` event's activity type is `opened`, `synchronize`, or `reopened`" |
+| [Troubleshooting required status checks][required-checks] | "Required checks must pass on the latest commit SHA" |
 
 So a dispatched run starts despite the token, and runs on the pull request's head commit, which is
 the commit the required checks are read from. No page says in one sentence that such a run
@@ -165,7 +171,7 @@ release never skips the checks, even if the pull request merged without them.
    expect. release-plz works it out from the Conventional Commits since the last tag. Before 1.0 a
    breaking change bumps the minor version and anything else the patch. From 1.0 on, a breaking
    change bumps the major, `feat` the minor, and anything else the patch.
-2. Run its checks ([above](#the-release-pull-requests-checks)). Edit its `CHANGELOG.md` section
+2. Run its checks ([above][pr-checks]). Edit its `CHANGELOG.md` section
    on the pull request branch if needed, and merge it right after, with nothing merged to `main`
    in between. When `main` moves, release-plz 0.3.174 closes a release pull request that holds a
    commit of anyone but itself, and opens a new one from `main` without that commit. Its source
@@ -202,6 +208,12 @@ release never skips the checks, even if the pull request merged without them.
    reviewer again. If the re-run fails the same way, the cause is in the tagged commit: delete the
    tag, fix it on `main`, and tag the next patch version.
 
+   If `host` itself fails after it created the draft, the draft is still there and the next run of
+   `host` refuses to start while a release or draft for the tag exists. The refusal names the
+   command: `gh release delete <tag> --yes`. That deletes the release or draft and leaves the tag,
+   which is the one this run was started from. Then choose **Re-run failed jobs**: the tag is not
+   pushed again, and `host` waits for the reviewer again.
+
    A push that fails after `host` is different. The GitHub release is already public, so a failed
    `image-publish` leaves it without images, or with fewer than all of them. The job pushes in this
    order, and a failure leaves what the table says:
@@ -221,21 +233,53 @@ release never skips the checks, even if the pull request merged without them.
    **Both limits are GitHub's.** A run is cancelled 35 days after it starts, and approval time
    counts: "If a workflow run reaches this limit, the workflow run is cancelled. This period
    includes execution duration, and time spent on waiting and approval"
-   ([Limits](https://docs.github.com/en/actions/reference/limits)). A re-run is possible only "up
+   ([Limits][run-limits]). A re-run is possible only "up
    to 30 days after its initial run"
-   ([Re-running workflows and jobs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)).
-   So both approvals have to land within 35 days of the tag push, and a failed `image-publish` has
-   to be re-run within 30 days of it. Past either limit the fix is a new patch version: the run and
-   its artifacts are gone, and the version cannot be reused.
+   ([Re-running workflows and jobs][re-running-runs]).
+   An environment also waits at most 30 days for its approval: "If a job is not approved within 30
+   days, it will automatically fail"
+   ([Reviewing deployments][reviewing-deployments]).
+   So `host` has to be approved within 30 days of when it starts waiting, and `image-publish`
+   within 30 days of when it starts waiting, which is after `host` makes the release. Both
+   approvals have to land within 35 days of the tag push, and a failed `image-publish` has to be
+   re-run within 30 days of it. Past any of those limits the fix is a new patch version: the run
+   and its artifacts are gone, and the version cannot be reused.
 
-   **How `host` publishes.** It signs the provenance attestation of the files, creates the GitHub
-   release as a draft with every file attached, and marks it published in a last step. As it was,
-   one `gh release create ... artifacts/*` published the release and then uploaded the files one
-   by one, which an immutable release refuses: "you cannot add, replace, or delete assets after a
-   release is published"
-   ([Managing releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)).
+   **How `host` publishes.** It creates the GitHub release as a draft with every file attached, and
+   marks it published in a last step. An immutable release refuses a file added later: "you cannot
+   add, replace, or delete assets after a release is published"
+   ([Managing releases][managing-releases]).
    The same page's advice is "create releases as drafts first, attach all assets, and then
    publish". Nothing about the files changes: the attestation names their bytes, not the release.
+
+   **The `create` command already did that**, so the reason for the two steps is not that one
+   `create` published first. On the `ubuntu-24.04` image of 2026-10-12, which is image version
+   20261012.334.1, `gh` is 2.102.0, and `gh release create` with files and no `--draft` creates a
+   draft, uploads the assets, and then publishes. Its source says so, in
+   `pkg/cmd/release/create/create.go`:
+
+   ```
+   if hasAssets && !opts.Draft {
+       ...
+       draftWhileUploading = true
+       params["draft"] = true
+   }
+   ```
+
+   The comment there reads "Save the release initially as draft and publish it after all assets
+   have finished uploading", and after the uploads:
+
+   ```
+   if draftWhileUploading {
+       rel, err := publishRelease(httpClient, baseRepo.RepoHost(), ...)
+       ...
+   }
+   ```
+
+   The workflow writes the same sequence itself so that the draft is a step it can name: a job that
+   fails after the draft exists leaves it for the operator to delete, as below, while `create`
+   deletes its own draft when an upload fails. The publish is then one line after the attestation
+   of every file.
 
 5. Check the release page. It holds:
 
@@ -249,12 +293,12 @@ release never skips the checks, even if the pull request merged without them.
    | `sluice-cli.cdx.xml`, the SBOM | 1 |
    | `dist-manifest.json`, what dist built and where | 1 |
 
-   Then verify one archive as in [Install a release](#install-a-release), and one image as below.
+   Then verify one archive as in [Install a release][install], and one image as below.
 
 ## Verify an image, and what a binary carries
 
 Every file of the release has a provenance attestation signed through Sigstore, and
-[the first section](#install-a-release) shows how to check an archive.
+[the first section][install] shows how to check an archive.
 
 An image is checked the same way, by its name in the registry. The version tag is the index of both
 architectures, and `-amd64` and `-arm64` name each one:
@@ -276,7 +320,7 @@ copies (`src/sbom.ts:85`).
 
 **A tag is not the image.** `gh attestation verify` proves that `release.yml`, on that tag, built
 the digest it is given. It does not say what the tag names now: [no package can name one
-workflow](#repository-settings-the-pipeline-needs), so any workflow in a repository with access to
+workflow][settings], so any workflow in a repository with access to
 the package and `packages: write` can move a tag. An image is trusted only after its attestation
 passes and it is pulled by that digest:
 
@@ -335,15 +379,18 @@ A release cannot be edited into a good one. Take it down and go back to the one 
   Environments > `release`, untick **Allow administrators to bypass configured protection rules**.
   GitHub's documentation says the default is the opposite: "By default, administrators can bypass
   the protection rules and force deployments to specific environments"
-  ([Deployments and environments](https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments)).
+  ([Deployments and environments][deployments]).
   The same page's steps for the setting read "Deselect **Allow administrators to bypass configured
   protection rules**"
-  ([Managing environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)).
+  ([Managing environments][managing-environments]).
   The maintainer owns the repository, so with the box ticked they could force every pending
   `release` job through alone. Unticking it is what makes the environment's review real. It is not
-  the only way around a second person: the tag ruleset's bypass lets the owner tag a commit whose
-  `release.yml` names no environment. [The two checks above](#checks-before-approving-host) are
-  what catch that.
+  the only way around a second person, and none of the others asks anyone to approve: the owner can
+  tick this box again, remove the second reviewer from the environment, or untick **Prevent
+  self-review**, and the tag ruleset's bypass lets the owner tag a commit whose `release.yml` names
+  no environment. [The two checks above][checks] run only when a review is
+  asked for, so they catch a tag on the wrong commit or with a changed `.github/`, and not a
+  setting the owner has changed.
   The audit log's environment events are documented for organizations only, and all three are
   "via the API", such as `environment.update_protection_rule`; a personal account has a security
   log instead. No page says either records this change, so it has not been checked: if the
@@ -354,19 +401,19 @@ A release cannot be edited into a good one. Take it down and go back to the one 
   the assets and associated Git tag cannot be changed after publication", and "you cannot add,
   replace, or delete assets after a release is published, and you cannot move or delete its tag
   while the release exists"
-  ([Immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases),
-  [Managing releases](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)).
+  ([Immutable releases][immutable],
+  [Managing releases][managing-releases]).
   It applies from the next release on: "immutability will only apply to future releases"
-  ([Prevent release changes](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes)).
+  ([Prevent release changes][prevent-changes]).
   Turn it on before the first release, or that one stays mutable.
 - **No package can name one workflow.** GitHub's package settings grant Actions access to a
   repository, not to a workflow file: "you must give explicit access to the repository where the
   workflow is stored", and "You can give multiple repositories workflow access to a package"
-  ([Configuring a package's access control](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)).
+  ([Configuring a package's access control][package-access]).
   There is no per-workflow switch in those docs, so any workflow in a repository with that access
   and `packages: write` can push to the package. A package's source label and the `release`
   environment say which jobs are meant to push, not which ones can. See [Verify an image, and what
-  a binary carries](#verify-an-image-and-what-a-binary-carries).
+  a binary carries][verify-image].
 - **Actions may open pull requests**: Settings > Actions > General > Workflow permissions > tick
   **Allow GitHub Actions to create and approve pull requests**. Without it release-plz cannot open
   the pull request, and its job fails.
@@ -411,3 +458,27 @@ To move release-plz on, set `RELEASE_PLZ_VERSION` in `release-plz.yml`, and the 
 in `.github/release/install-release-plz.sh`. Its releases have no checksum file, so take the hash
 from the asset's `digest` in `gh api repos/release-plz/release-plz/releases/tags/<tag>`, and check
 that a download hashes to the same value.
+
+[checks]: #checks-before-approving-host
+[cut-a-release]: #cut-a-release
+[install]: #install-a-release
+[settings]: #repository-settings-the-pipeline-needs
+[pr-checks]: #the-release-pull-requests-checks
+[verify-image]: #verify-an-image-and-what-a-binary-carries
+[who-can-release]: #who-can-release
+[threat-model]: docs/threat-model.md#supply-chain
+[github-token]: https://docs.github.com/en/actions/concepts/security/github_token
+[managing-environments]: https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments
+[reviewing-deployments]: https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments
+[re-running-runs]: https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs
+[run-limits]: https://docs.github.com/en/actions/reference/limits
+[contexts]: https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
+[deployments]: https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments
+[events]: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
+[immutable]: https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases
+[prevent-changes]: https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes
+[package-access]: https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility
+[required-checks]: https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks
+[about-rulesets]: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets
+[permission-levels]: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/repository-access-and-collaboration/permission-levels-for-a-personal-account-repository
+[managing-releases]: https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository
