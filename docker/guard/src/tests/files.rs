@@ -1,6 +1,8 @@
 use std::fs;
 use std::io::Read;
 
+#[cfg(target_os = "linux")]
+use crate::file::open_regular;
 use crate::open_config;
 
 fn scratch() -> std::path::PathBuf {
@@ -138,7 +140,8 @@ fn a_rename_over_the_path_after_the_check_does_not_reach_the_relay() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-/// A FIFO is refused from the path's metadata, before an open that would wait for a writer.
+/// A FIFO that is there from the start is refused from the path's metadata, before an open that
+/// would wait for a writer.
 #[cfg(unix)]
 #[test]
 fn a_fifo_is_refused_without_waiting_for_a_writer() {
@@ -150,5 +153,30 @@ fn a_fifo_is_refused_without_waiting_for_a_writer() {
         return;
     }
     assert!(refusal(&path).contains("is not a regular file"));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// The path's metadata said regular a moment ago, and the open finds a FIFO, as a swap in between
+/// leaves one. The open itself has to refuse it, so the open file's metadata is checked too. A
+/// writer is held open here so this test cannot hang if the non-blocking flag were lost: the
+/// refusal still comes from the opened file, and not from the path's metadata.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_open_itself_refuses_a_fifo() {
+    let dir = scratch();
+    let path = dir.join("relay.toml");
+    fs::write(&path, "enable_metrics = false\n").unwrap();
+    assert!(open_regular(&path).is_ok());
+    fs::remove_file(&path).unwrap();
+    let made = std::process::Command::new("mkfifo").arg(&path).status();
+    if !made.is_ok_and(|status| status.success()) {
+        eprintln!("SKIPPED: mkfifo is not available");
+        return;
+    }
+    // O_RDWR on a FIFO does not wait on Linux, so there is a writer for the whole test.
+    let _writer = rustix::fs::open(&path, rustix::fs::OFlags::RDWR, rustix::fs::Mode::empty())
+        .expect("a FIFO with a writer");
+    let message = open_regular(&path).unwrap_err().to_string();
+    assert!(message.contains("is not a regular file"), "{message}");
     fs::remove_dir_all(dir).unwrap();
 }

@@ -33,14 +33,7 @@ pub fn open_config(path: &Path) -> Result<(File, String), Refusal> {
     if !named.is_file() {
         return Err(not_a_file(path));
     }
-    let mut file = File::open(path).map_err(|err| cannot_open(path, &err))?;
-    // The open file's own metadata decides, since the path may name another file by now.
-    let opened = file
-        .metadata()
-        .map_err(|err| Refusal::new(format!("cannot read {}: {err}", config_file(path))))?;
-    if !opened.is_file() {
-        return Err(not_a_file(path));
-    }
+    let mut file = open_regular(path)?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)
         .and_then(|_| file.seek(SeekFrom::Start(0)))
@@ -52,6 +45,41 @@ pub fn open_config(path: &Path) -> Result<(File, String), Refusal> {
         ))
     })?;
     Ok((file, text))
+}
+
+/// Opens the config file without waiting on a FIFO, and refuses anything but a regular file. The
+/// path's metadata said what it was a moment ago, and the open may find another object: a FIFO put
+/// there in between waits for a writer on a blocking open, and the guard would hang before it could
+/// refuse. The open file's own metadata is what decides, as before.
+pub(crate) fn open_regular(path: &Path) -> Result<File, Refusal> {
+    let file = open_unblocking(path).map_err(|err| cannot_open(path, &err))?;
+    let opened = file
+        .metadata()
+        .map_err(|err| Refusal::new(format!("cannot read {}: {err}", config_file(path))))?;
+    if !opened.is_file() {
+        return Err(not_a_file(path));
+    }
+    Ok(file)
+}
+
+/// `File::open`, with `O_NONBLOCK` where the platform has it. On Unix a FIFO's read end waits for a
+/// writer on a blocking open; the flag makes it return at once, and a regular file's reads ignore
+/// it.
+#[cfg(unix)]
+fn open_unblocking(path: &Path) -> io::Result<File> {
+    use std::fs::OpenOptions;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32)
+        .open(path)
+}
+
+/// Windows has no FIFOs on an ordinary file system, so a plain open cannot wait for a writer.
+#[cfg(not(unix))]
+fn open_unblocking(path: &Path) -> io::Result<File> {
+    File::open(path)
 }
 
 /// How the value of `--config-path` is named in a refusal. It is text from the command line and may
