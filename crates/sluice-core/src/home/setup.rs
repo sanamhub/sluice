@@ -69,6 +69,11 @@ pub(super) fn create_folders_with(
 
 /// Makes the home private if it is new, and makes its folders. `restrict` is what makes a folder
 /// private, a parameter for the same reason as in [`create_folders_with`].
+///
+/// The home and each folder of the layout are checked for their owner on every open, not only when
+/// the home is new: another user's folder can be replaced or opened up by that user after sluice
+/// set anything on it. Root and `SYSTEM` are accepted with this user, since they can already do
+/// anything to the files, so a home a backup tool restored still opens.
 pub(super) fn prepare(
     root: &Path,
     created: bool,
@@ -86,6 +91,9 @@ pub(super) fn prepare_with(
     restrict: fn(&Path) -> Result<(), Error>,
     owner: fn(&Path) -> io::Result<bool>,
 ) -> Result<(), Error> {
+    if !owner(root).map_err(|e| storage("read the owner of", root, e))? {
+        return Err(private::owned_by_other(root));
+    }
     if created || is_empty(root)? {
         private_while_empty(root, restrict, owner)?;
     }
@@ -97,6 +105,9 @@ pub(super) fn prepare_with(
             .or_else(|e| exists_as_folder(e, &folder))
             .map_err(|e| storage("create the folder", &folder, e))?;
         real_folder(&folder)?;
+        if !owner(&folder).map_err(|e| storage("read the owner of", &folder, e))? {
+            return Err(private::owned_by_other(&folder));
+        }
     }
     Ok(())
 }
@@ -288,24 +299,42 @@ fn real_folder(folder: &Path) -> Result<(), Error> {
     )))
 }
 
-/// Whether this user made the entry at `path`: on Unix its uid is the effective uid, and on
-/// Windows its owner is this user or `Administrators`. The owner is read from a handle opened
-/// without following a link, so it is the owner of the object the name holds now.
+/// Whether this user made the entry at `path`: on Unix its uid is the effective uid or root, and on
+/// Windows its owner is this user, `Administrators` or `SYSTEM`. The owner is read from a handle
+/// opened without following a link, so it is the owner of the object the name holds now. A folder
+/// this user may not open, as another user's mode 0700 folder is, still has an owner that `lstat`
+/// reads without the access the open needed.
 #[cfg(unix)]
-fn owned_by_this_user(path: &Path) -> io::Result<bool> {
+pub(in crate::home) fn owned_by_this_user(path: &Path) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+
     use rustix::fs::{Mode, OFlags};
-    let file = rustix::fs::open(path, OFlags::NOFOLLOW | OFlags::CLOEXEC, Mode::empty())?;
-    let stat = rustix::fs::fstat(&file)?;
-    Ok(stat.st_uid == rustix::process::geteuid().as_raw())
+
+    match rustix::fs::open(path, OFlags::NOFOLLOW | OFlags::CLOEXEC, Mode::empty()) {
+        Ok(file) => Ok(accepted_uid(rustix::fs::fstat(&file)?.st_uid)),
+        Err(e) if e == rustix::io::Errno::ACCESS || e == rustix::io::Errno::PERM => {
+            // The folder cannot be opened, and the owner is what decides whether that refusal is
+            // "another user's" or a broken file system. lstat needs no access to the entry.
+            Ok(accepted_uid(fs::symlink_metadata(path)?.uid()))
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Root can already do anything to every file, so a folder it owns is as good as this user's, and
+/// a home a backup tool restored as root still opens.
+#[cfg(unix)]
+fn accepted_uid(uid: u32) -> bool {
+    uid == rustix::process::geteuid().as_raw() || uid == 0
 }
 
 #[cfg(windows)]
-fn owned_by_this_user(path: &Path) -> io::Result<bool> {
+pub(in crate::home) fn owned_by_this_user(path: &Path) -> io::Result<bool> {
     super::private_windows::is_owned_by_this_user(path)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn owned_by_this_user(_path: &Path) -> io::Result<bool> {
+pub(in crate::home) fn owned_by_this_user(_path: &Path) -> io::Result<bool> {
     Ok(true)
 }
 

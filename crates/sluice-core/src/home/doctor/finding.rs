@@ -27,6 +27,9 @@ pub enum Finding {
     /// One of the home's folders is a link. `Home::open` refuses a link there, since it would put
     /// the store's files wherever it leads, so doctor fails it too. Carries the folder's name.
     HomeFolderIsLink(Location, &'static str),
+    /// One of the home's folders belongs to another user, who can change what sluice made in it.
+    /// `Home::open` refuses it on every open. Carries the folder's name.
+    HomeFolderOwnedByOther(Location, &'static str),
     /// The home's path cannot be looked at. Carries why.
     HomeUnreadable(Location, String),
     /// There is no `$SLUICE_HOME`, and this user has no data folder to put a home in.
@@ -65,6 +68,17 @@ pub enum Finding {
     KeyPrivate,
     /// There is no key yet. `sluice id` makes one.
     KeyMissing,
+    /// `identity.key` is a link. `Home::identity` opens it without following a link and refuses it,
+    /// so doctor fails it too.
+    KeyIsLink,
+    /// `identity.key` is not a regular file. `Home::identity` refuses it.
+    KeyNotAFile,
+    /// `identity.key` has more than one name, so it can be changed through another one.
+    /// `Home::identity` refuses a key with more than one link. Carries the count.
+    KeyHasLinks(u64),
+    /// Another user owns `identity.key`, who can change it whatever sluice sets. `Home::identity`
+    /// refuses it.
+    KeyOwnedByOther,
     /// The key is not 32 bytes long. Carries its length.
     KeyWrongSize(u64),
     /// On Unix, group or other has access to the key. Carries its mode.

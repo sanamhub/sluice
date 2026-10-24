@@ -13,7 +13,7 @@ use crate::Error;
 
 /// The one message for a home another user owns, the same on both platforms because the fix is the
 /// same: the owner can change what sluice sets, so the folder has to be this user's.
-fn owned_by_other(home: &Path) -> Error {
+pub(super) fn owned_by_other(home: &Path) -> Error {
     Error::Policy(format!(
         "{} belongs to another user, who could change its access whatever sluice sets. Use a \
          folder of your own as the home, or take ownership of this one",

@@ -108,6 +108,13 @@ fn words(finding: &Finding) -> (String, Option<String>) {
             ),
             Some("remove it, and run `sluice id`, which makes the folder".to_string()),
         ),
+        F::HomeFolderOwnedByOther(at, folder) => (
+            format!(
+                "{} belongs to another user, who could change it whatever sluice sets",
+                at.path.join(folder).display()
+            ),
+            Some("take ownership of it, or set SLUICE_HOME to another folder".to_string()),
+        ),
         F::HomeUnreadable(at, why) => (
             format!("{} cannot be looked at: {why}", at.path.display()),
             Some(format!(
@@ -186,17 +193,70 @@ fn pid_text(pid: Option<u32>) -> String {
 }
 
 fn access_key_or_space(finding: &Finding) -> (String, Option<String>) {
+    access_words(finding)
+        .or_else(|| key_words(finding))
+        .or_else(|| space_words(finding))
+        .unwrap_or_default()
+}
+
+fn access_words(finding: &Finding) -> Option<(String, Option<String>)> {
     use Finding as F;
-    match finding {
+    Some(match finding {
         F::AccessPrivate => ("only this user can reach the home".to_string(), None),
         F::AccessUnreadable(why) => (
             format!("the home folder's access cannot be read: {why}"),
             Some("check the permissions of the home folder and the folders above it".to_string()),
         ),
+        F::AccessOpenToOthers(mode) => (
+            format!("the home has mode {mode:04o}, so other users can reach the key"),
+            Some("run `chmod 700` on the home".to_string()),
+        ),
+        F::AccessOwnedByOther => (
+            "another user owns the home, so they can change who can reach it".to_string(),
+            Some(owned_by_other_fix().to_string()),
+        ),
+        F::AccessAclNotPrivate => (
+            "the home's access list lets in more than this user, SYSTEM and Administrators"
+                .to_string(),
+            Some(
+                "in the Properties of the home folder, under Security > Advanced, disable \
+                 inheritance and remove every entry but yours, SYSTEM and Administrators"
+                    .to_string(),
+            ),
+        ),
+        _ => return None,
+    })
+}
+
+fn key_words(finding: &Finding) -> Option<(String, Option<String>)> {
+    use Finding as F;
+    Some(match finding {
         F::KeyPrivate => ("32 bytes, readable only by this user".to_string(), None),
         F::KeyMissing => (
             "no identity key yet".to_string(),
             Some("run `sluice id`, which creates it".to_string()),
+        ),
+        F::KeyIsLink => (
+            "identity.key is a link, not the key".to_string(),
+            Some(
+                "remove it, and run `sluice id` for a new identity if the key is gone".to_string(),
+            ),
+        ),
+        F::KeyNotAFile => (
+            "identity.key is not a regular file".to_string(),
+            Some("move it elsewhere, and run `sluice id` for a new identity".to_string()),
+        ),
+        F::KeyHasLinks(links) => (
+            format!("it has {links} links, and the identity key must have one"),
+            Some(
+                "remove the other names, or move it elsewhere and run `sluice id` for a new \
+                 identity"
+                    .to_string(),
+            ),
+        ),
+        F::KeyOwnedByOther => (
+            "another user owns it, who could change it whatever sluice sets".to_string(),
+            Some(key_owned_by_other_fix().to_string()),
         ),
         F::KeyWrongSize(size) => (
             format!("{size} bytes, and an identity key is 32"),
@@ -210,14 +270,6 @@ fn access_key_or_space(finding: &Finding) -> (String, Option<String>) {
             format!("mode {mode:04o}, so other users may be able to read it"),
             Some("run `chmod 600` on identity.key in the home".to_string()),
         ),
-        F::AccessOpenToOthers(mode) => (
-            format!("the home has mode {mode:04o}, so other users can reach the key"),
-            Some("run `chmod 700` on the home".to_string()),
-        ),
-        F::AccessOwnedByOther => (
-            "another user owns the home, so they can change who can reach it".to_string(),
-            Some(owned_by_other_fix().to_string()),
-        ),
         F::KeyAclNotPrivate => (
             "its access list lets in more than this user, SYSTEM and Administrators".to_string(),
             Some(
@@ -226,26 +278,24 @@ fn access_key_or_space(finding: &Finding) -> (String, Option<String>) {
                     .to_string(),
             ),
         ),
-        F::AccessAclNotPrivate => (
-            "the home's access list lets in more than this user, SYSTEM and Administrators"
-                .to_string(),
-            Some(
-                "in the Properties of the home folder, under Security > Advanced, disable \
-                 inheritance and remove every entry but yours, SYSTEM and Administrators"
-                    .to_string(),
-            ),
-        ),
         F::KeyUnreadable(why) => (
             format!("cannot be checked: {why}"),
             Some("check the permissions of identity.key in the home".to_string()),
         ),
+        _ => return None,
+    })
+}
+
+fn space_words(finding: &Finding) -> Option<(String, Option<String>)> {
+    use Finding as F;
+    Some(match finding {
         F::SpaceFree(free) => space(*free),
         F::SpaceUnreadable(why) => (
             format!("cannot be read: {why}"),
             Some("check that the home is on a mounted volume".to_string()),
         ),
-        _ => (String::new(), None),
-    }
+        _ => return None,
+    })
 }
 
 /// The fix for a home that another user owns, which only the platform's own tools can change.
@@ -256,6 +306,17 @@ fn owned_by_other_fix() -> &'static str {
     } else {
         "run `chown` on the home to make this user its owner, or point SLUICE_HOME at a folder of \
          your own"
+    }
+}
+
+/// The fix for a key that another user owns: the same tools, on the key itself.
+fn key_owned_by_other_fix() -> &'static str {
+    if cfg!(windows) {
+        "take ownership of identity.key with `takeown`, set its access list with `icacls`, or \
+         move it elsewhere and run `sluice id` for a new identity"
+    } else {
+        "run `chown` on identity.key to make this user its owner, or move it elsewhere and run \
+         `sluice id` for a new identity"
     }
 }
 

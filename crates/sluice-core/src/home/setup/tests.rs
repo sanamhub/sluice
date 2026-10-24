@@ -3,6 +3,7 @@
 
 #[cfg(unix)]
 mod mode;
+mod owners;
 #[cfg(unix)]
 mod unix;
 #[cfg(windows)]

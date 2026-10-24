@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod keys;
 mod links;
 
 use super::checks::classify_layout;
@@ -291,7 +292,12 @@ fn every_failure_has_a_kind_and_nothing_else_has_one() {
     let policy = [
         Finding::LayoutNewer { found: 2, known: 1 },
         Finding::HomeFolderIsLink(location.clone(), "blobs"),
+        Finding::HomeFolderOwnedByOther(location.clone(), "blobs"),
         Finding::KeyOpenToOthers(0o644),
+        Finding::KeyIsLink,
+        Finding::KeyNotAFile,
+        Finding::KeyHasLinks(2),
+        Finding::KeyOwnedByOther,
         Finding::AccessOpenToOthers(0o755),
         Finding::AccessOwnedByOther,
         Finding::KeyAclNotPrivate,

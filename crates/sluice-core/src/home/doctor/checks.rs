@@ -23,6 +23,16 @@ pub(super) fn without_home(home: Finding) -> Vec<Check> {
 }
 
 pub(super) fn home(location: Location) -> Finding {
+    home_checked(location, setup::owned_by_this_user)
+}
+
+/// [`home`] with the owner check as a parameter, so a test can be a folder another user made.
+#[cfg(test)]
+pub(super) fn home_with_owner(location: Location, owner: fn(&Path) -> io::Result<bool>) -> Finding {
+    home_checked(location, owner)
+}
+
+fn home_checked(location: Location, owner: fn(&Path) -> io::Result<bool>) -> Finding {
     // The home itself may be a link, which `Home::open` follows once, so its own metadata follows
     // it. The folders inside are different: `open` refuses a link there, so doctor reads each with
     // `symlink_metadata` and reports the link instead of following it.
@@ -38,7 +48,16 @@ pub(super) fn home(location: Location) -> Finding {
                     Ok(meta) if meta.file_type().is_symlink() => {
                         return Finding::HomeFolderIsLink(location, name);
                     }
-                    Ok(meta) if meta.is_dir() => {}
+                    Ok(meta) if meta.is_dir() => match owner(&folder) {
+                        Ok(true) => {}
+                        Ok(false) => return Finding::HomeFolderOwnedByOther(location, name),
+                        Err(e) => {
+                            return Finding::HomeUnreadable(
+                                location,
+                                format!("{}: {e}", folder.display()),
+                            );
+                        }
+                    },
                     Ok(_) => missing.push(name),
                     Err(e) if e.kind() == io::ErrorKind::NotFound => missing.push(name),
                     Err(e) => return Finding::HomeUnreadable(location, e.to_string()),
@@ -125,14 +144,50 @@ pub(super) fn access(home: &Path, given: &Path) -> Finding {
     home_not_private(home, given).unwrap_or(Finding::AccessPrivate)
 }
 
-/// The key's length and access, from its metadata and access list. Its bytes are never read.
+/// The key's owner, kind, link count, length and access, from the key's own metadata and access
+/// list. Its bytes are never read. A key another user owns is not this user's to use, and one with
+/// two names can be changed through the other one, so both fail here as `Home::identity` fails
+/// them.
 pub(super) fn key(home: &Path, given: &Path) -> Finding {
+    key_checked(home, given, setup::owned_by_this_user)
+}
+
+/// [`key`] with the owner check as a parameter, so a test can be a key another user made.
+#[cfg(test)]
+pub(super) fn key_with_owner(
+    home: &Path,
+    given: &Path,
+    owner: fn(&Path) -> io::Result<bool>,
+) -> Finding {
+    key_checked(home, given, owner)
+}
+
+fn key_checked(home: &Path, given: &Path, owner: fn(&Path) -> io::Result<bool>) -> Finding {
     let path = home.join("identity.key");
-    let meta = match fs::metadata(&path) {
+    // `symlink_metadata`, so a link at the key's name is reported as a link and not followed.
+    let meta = match fs::symlink_metadata(&path) {
         Ok(meta) => meta,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Finding::KeyMissing,
         Err(e) => return Finding::KeyUnreadable(named(given, "identity.key", &e)),
     };
+    if meta.file_type().is_symlink() {
+        return Finding::KeyIsLink;
+    }
+    if !meta.is_file() {
+        return Finding::KeyNotAFile;
+    }
+    match owner(&path) {
+        Ok(true) => {}
+        Ok(false) => return Finding::KeyOwnedByOther,
+        Err(e) => return Finding::KeyUnreadable(named(given, "identity.key", &e)),
+    }
+    let links = match links(&path, &meta) {
+        Ok(links) => links,
+        Err(e) => return Finding::KeyUnreadable(named(given, "identity.key", &e)),
+    };
+    if links != 1 {
+        return Finding::KeyHasLinks(links);
+    }
     if let Some(open) = key_open_to_others(&path, given, &meta) {
         return open;
     }
@@ -140,6 +195,24 @@ pub(super) fn key(home: &Path, given: &Path) -> Finding {
         return Finding::KeyWrongSize(meta.len());
     }
     Finding::KeyPrivate
+}
+
+/// How many names the key has. A hard link is another name for the same file, so its owner is the
+/// same user, but whoever can write through the other name can change this key.
+#[cfg(unix)]
+fn links(_path: &Path, meta: &fs::Metadata) -> io::Result<u64> {
+    use std::os::unix::fs::MetadataExt;
+    Ok(meta.nlink())
+}
+
+#[cfg(windows)]
+fn links(path: &Path, _meta: &fs::Metadata) -> io::Result<u64> {
+    super::super::private_windows::links_of_path(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn links(_path: &Path, _meta: &fs::Metadata) -> io::Result<u64> {
+    Ok(1)
 }
 
 /// An error of a file in the home, told with the path the user gave and not where its links lead.
@@ -180,8 +253,8 @@ fn unreadable(home: &Path, error: io::Error) -> Finding {
 /// first: an owner can rewrite the list.
 #[cfg(windows)]
 fn home_not_private(home: &Path, given: &Path) -> Option<Finding> {
-    use super::super::private_windows::{is_owned_by_us, is_private_dir};
-    match is_owned_by_us(home) {
+    use super::super::private_windows::{is_owned_by_this_user, is_private_dir};
+    match is_owned_by_this_user(home) {
         Ok(true) => {}
         Ok(false) => return Some(Finding::AccessOwnedByOther),
         Err(e) => return Some(unreadable(given, e)),

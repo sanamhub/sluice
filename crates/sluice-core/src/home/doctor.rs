@@ -136,6 +136,7 @@ impl Check {
             | F::HomeNotAFolder(_)
             | F::HomeFoldersMissing(..)
             | F::HomeFolderIsLink(..)
+            | F::HomeFolderOwnedByOther(..)
             | F::HomeUnreadable(..)
             | F::HomeNowhere => Name::Home,
             F::AccessPrivate
@@ -151,6 +152,10 @@ impl Check {
             F::LockFree | F::LockHeld(_) | F::LockStale(_) | F::LockUnreadable(_) => Name::Lock,
             F::KeyPrivate
             | F::KeyMissing
+            | F::KeyIsLink
+            | F::KeyNotAFile
+            | F::KeyHasLinks(_)
+            | F::KeyOwnedByOther
             | F::KeyWrongSize(_)
             | F::KeyOpenToOthers(_)
             | F::KeyAclNotPrivate
@@ -215,9 +220,14 @@ impl Check {
             | F::KeyUnreadable(_) => Some(ErrorKind::Storage),
             F::LayoutNewer { .. }
             | F::KeyOpenToOthers(_)
+            | F::KeyIsLink
+            | F::KeyNotAFile
+            | F::KeyHasLinks(_)
+            | F::KeyOwnedByOther
             | F::AccessOpenToOthers(_)
             | F::AccessOwnedByOther
             | F::HomeFolderIsLink(..)
+            | F::HomeFolderOwnedByOther(..)
             | F::KeyAclNotPrivate
             | F::AccessAclNotPrivate => Some(ErrorKind::Policy),
             _ => None,

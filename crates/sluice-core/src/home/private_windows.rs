@@ -42,11 +42,15 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
+mod links;
 mod lists;
 mod owner;
+mod space;
 
+pub(in crate::home) use links::{links_of, links_of_path};
 pub(in crate::home) use lists::{is_private_dir, is_private_file};
-pub(in crate::home) use owner::{is_owned_by_this_user, is_owned_by_us, is_owned_by_us_handle};
+pub(in crate::home) use owner::{is_owned_by_this_user, is_owned_by_us_handle};
+pub(in crate::home) use space::free_bytes;
 
 /// Object and container inherit: a folder's entries reach the files and folders made inside it.
 const INHERIT: &str = "OICI";
@@ -367,29 +371,9 @@ fn dacl_sddl_of(file: &File) -> io::Result<String> {
 /// The well-known SID of `Administrators`, which owns what a process that runs elevated creates.
 const ADMINISTRATORS: &str = "S-1-5-32-544";
 
-/// Bytes free to this user on the volume of `path`. That is less than free on the volume when a
-/// quota applies.
-pub(super) fn free_bytes(path: &Path) -> io::Result<u64> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-    let mut available = 0u64;
-    // SAFETY: `wide` is NUL terminated and outlives the call. `available` is a valid place for the
-    // u64 the call writes. The total and total-free out parameters are optional and null.
-    let done = unsafe {
-        GetDiskFreeSpaceExW(
-            wide.as_ptr(),
-            &mut available,
-            ptr::null_mut(),
-            ptr::null_mut(),
-        )
-    };
-    if done == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(available)
-}
+/// The well-known SID of `SYSTEM`, which owns what the system itself makes and what some backup
+/// tools restore.
+const SYSTEM: &str = "S-1-5-18";
 
 #[cfg(test)]
 mod tests;

@@ -99,8 +99,10 @@ impl Home {
     ///   [`Error::Policy`] naming the home unless sluice makes it and this user made it. A key or
     ///   its temporary file is never accepted, even this user's, and neither is a `blobs`, `db` or
     ///   `logs` that is a link.
-    /// - A home that is new to sluice and not owned by this user fails with [`Error::Policy`]: its
-    ///   owner could change whatever sluice sets.
+    /// - A home, or a `blobs`, `db` or `logs` folder, that another user owns fails with
+    ///   [`Error::Policy`] naming it, on every open: its owner could change whatever sluice sets.
+    ///   Root on Unix, and `Administrators` and `SYSTEM` on Windows, count as this user, since they
+    ///   can already do anything to the files, and a home a backup tool restored still opens.
     /// - A home with a newer layout version than this build reads fails with [`Error::Policy`]
     ///   naming both versions, before anything is created or written.
     /// - A `VERSION` file that does not hold a version fails with [`Error::Storage`].
@@ -158,6 +160,10 @@ impl Home {
     /// is opened, and never replaced after that except by [`Home::rotate_identity`]. A key file
     /// of the wrong length is an [`Error::Storage`] and is left alone.
     ///
+    /// An existing key is opened without following a link, and refused with [`Error::Policy`] if
+    /// it is a link, is not a regular file, has more than one name, or belongs to another user.
+    /// The message names the file and, for another user's key, the command that takes it back.
+    ///
     /// On Unix, an existing key that group or other has any access to is refused with
     /// [`Error::Policy`] that names the path and its mode and says to run `chmod 600`. The file is
     /// not changed. [`Home::rotate_identity`] does not read the old key, so it works on one like
@@ -182,6 +188,10 @@ impl Home {
 
     /// Replaces the identity with a new one and returns it. Every pairing and every unexpired
     /// ticket that names the old endpoint id stops working, so a caller asks first.
+    ///
+    /// The key that is there is checked the way [`Home::identity`] checks it before anything is
+    /// written: a link, a file that is not regular, one with more than one name, or one another
+    /// user owns is [`Error::Policy`] and is left as it is.
     ///
     /// # Examples
     ///
