@@ -57,31 +57,26 @@ jobs:
       # more than it says, so a guard that lets a mistake through fails here (ADR 0019, ADR 0020).
       - run: bash docker/smoke-test.sh "$IMAGE" "sluice-$IMAGE:ci"
       # The shape of a release's image artifacts: one per architecture, each holding that
-      # architecture's tarball and the sha256 recorded beside it. The push test below downloads
-      # them the way image-publish does, then replaces them with stand-ins.
+      # architecture's tarball. The push test below downloads them the way image-publish does,
+      # then replaces them with stand-ins.
       - name: Save for the push test
         run: |
           mkdir -p "$RUNNER_TEMP/image"
           for arch in amd64 arm64; do
             docker tag "sluice-$IMAGE:ci" "sluice-$IMAGE:$arch"
             docker save "sluice-$IMAGE:$arch" | gzip > "$RUNNER_TEMP/image/$arch.tar.gz"
-            ( cd "$RUNNER_TEMP/image" && sha256sum "$arch.tar.gz" > "$arch.tar.gz.sha256" )
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-${{ matrix.image }}-amd64
-          path: |
-            ${{ runner.temp }}/image/amd64.tar.gz
-            ${{ runner.temp }}/image/amd64.tar.gz.sha256
+          path: ${{ runner.temp }}/image/amd64.tar.gz
           if-no-files-found: error
           # Only the push job below reads it, minutes later.
           retention-days: 1
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-${{ matrix.image }}-arm64
-          path: |
-            ${{ runner.temp }}/image/arm64.tar.gz
-            ${{ runner.temp }}/image/arm64.tar.gz.sha256
+          path: ${{ runner.temp }}/image/arm64.tar.gz
           if-no-files-found: error
           retention-days: 1
 
@@ -131,20 +126,48 @@ jobs:
         run: |
           for arch in amd64 arm64; do
             test -s "$RUNNER_TEMP/image/$arch.tar.gz"
-            test -s "$RUNNER_TEMP/image/$arch.tar.gz.sha256"
           done
       # The two platforms the architecture check reads, built here and not from the image, so the
-      # test needs no arm64 host. Their sha256 is recorded as the release records it.
-      - name: Build the stand-ins
+      # test needs no arm64 host. Their IDs are what the release's build job records.
+      - id: standins
+        name: Build the stand-ins
         run: |
           for arch in amd64 arm64; do
             docker buildx build --platform "linux/$arch" --tag "sluice-$IMAGE:$arch" --load \
               --file docker/push-test/Dockerfile docker/push-test
             docker save "sluice-$IMAGE:$arch" | gzip > "$RUNNER_TEMP/image/$arch.tar.gz"
-            ( cd "$RUNNER_TEMP/image" && sha256sum "$arch.tar.gz" > "$arch.tar.gz.sha256" )
+            id="$(docker image inspect "sluice-$IMAGE:$arch" --format '{{.Id}}')"
+            echo "$arch=$id" >> "$GITHUB_OUTPUT"
           done
+      # The image's ID is an output of the build job, recorded before syft ran, so `arch` compares
+      # the loaded image with it and refuses a tarball that holds another one. A well-formed ID
+      # that no image has is enough: the check must fail before anything is tagged or pushed.
+      - name: An image whose ID is not the expected one is refused
+        env:
+          GITHUB_OUTPUT: ${{ runner.temp }}/refusal-output
+          AMD64_ID: ${{ steps.standins.outputs.amd64 }}
+          ARM64_ID: ${{ steps.standins.outputs.arm64 }}
+        run: |
+          : > "$GITHUB_OUTPUT"
+          wrong="sha256:$(printf '0%.0s' {1..64})"
+          set +e
+          message="$(bash .github/release/push-image.sh localhost:5000 arch \
+            "$wrong" "$ARM64_ID" 2>&1)"
+          code=$?
+          set -e
+          printf '%s\n' "$message"
+          test "$code" = 1
+          grep -q 'is not the image its SBOM describes' <<< "$message"
+          if docker buildx imagetools inspect \
+            "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test-amd64" > /dev/null 2>&1; then
+            echo "::error::push-image.sh pushed a tag before it checked the image's ID"
+            exit 1
+          fi
       - id: push-arch
-        run: bash .github/release/push-image.sh localhost:5000 arch
+        env:
+          AMD64_ID: ${{ steps.standins.outputs.amd64 }}
+          ARM64_ID: ${{ steps.standins.outputs.arm64 }}
+        run: bash .github/release/push-image.sh localhost:5000 arch "$AMD64_ID" "$ARM64_ID"
       - id: push-index
         run: bash .github/release/push-image.sh localhost:5000 index
       # The script wrote a digest for each architecture and the index. Each must answer in the
@@ -170,10 +193,13 @@ jobs:
         env:
           GITHUB_REF: refs/tags/v0.0.0-test
           GITHUB_OUTPUT: ${{ runner.temp }}/refusal-output
+          AMD64_ID: ${{ steps.standins.outputs.amd64 }}
+          ARM64_ID: ${{ steps.standins.outputs.arm64 }}
         run: |
           : > "$GITHUB_OUTPUT"
           set +e
-          message="$(bash .github/release/push-image.sh localhost:5000 arch 2>&1)"
+          message="$(bash .github/release/push-image.sh localhost:5000 arch \
+            "$AMD64_ID" "$ARM64_ID" 2>&1)"
           code=$?
           set -e
           printf '%s\n' "$message"

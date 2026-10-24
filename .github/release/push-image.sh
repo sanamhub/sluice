@@ -2,9 +2,11 @@
 # Pushes one image of a release to a registry, in two calls, so that each public tag is attested
 # before the next is written:
 #
-#   push-image.sh <registry> arch    each architecture under `<version>-<arch>`, after checking it
-#   push-image.sh <registry> index   the version tag as the index of those two digests, after
-#                                     checking it
+#   push-image.sh <registry> arch <amd64-id> <arm64-id>
+#       each architecture under `<version>-<arch>`, after checking the loaded image's ID and
+#       platform against what the build recorded
+#   push-image.sh <registry> index
+#       the version tag as the index of both architectures, after checking it
 #
 # release.yml's image-publish job runs `arch`, attests both architectures, then runs `index` and
 # attests the index. A failure in between leaves public tags without their attestation, which a
@@ -15,13 +17,13 @@
 # wrote to GITHUB_ENV cannot change it, and on a tag any registry but ghcr.io is refused.
 #
 # IMAGE is `rendezvous` or `relay`, OWNER the repository owner and TAG the checked `v<version>`
-# tag. The image-build jobs left `<arch>.tar.gz` and its recorded `.sha256` for each architecture
-# in RUNNER_TEMP/image.
+# tag. The image-build jobs left `<arch>.tar.gz` and `<arch>.spdx.json` for each architecture in
+# RUNNER_TEMP/image.
 set -euo pipefail
 # A failed command inside `$(...)` stops the script too, and not only the line that reads it.
 shopt -s inherit_errexit
 
-usage="usage: push-image.sh <registry> arch|index"
+usage="usage: push-image.sh <registry> arch <amd64-id> <arm64-id> | index"
 registry="${1:?$usage}"
 step="${2:?$usage}"
 case "$step" in
@@ -39,6 +41,21 @@ fi
 
 : "${IMAGE:?}" "${OWNER:?}" "${TAG:?}" "${GITHUB_TOKEN:?}" "${GITHUB_ACTOR:?}"
 : "${RUNNER_TEMP:?}" "${GITHUB_OUTPUT:?}"
+
+# An image ID is `sha256:` and 64 lower-case hex digits. The IDs come from a build job's outputs,
+# so they are checked before anything is loaded or pushed.
+check_sha256() {
+  if [[ ! "$1" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "the $2 '$1' is not sha256: and 64 lower-case hex digits" >&2
+    exit 2
+  fi
+}
+if [ "$step" = arch ]; then
+  amd64="${3:?$usage}"
+  arm64="${4:?$usage}"
+  check_sha256 "$amd64" "amd64 image ID"
+  check_sha256 "$arm64" "arm64 image ID"
+fi
 
 # GitHub's documentation says a step's `env` overrides a job's or the workflow's, and says nothing
 # of a value an earlier step wrote to GITHUB_ENV. On a tag, which is a release, the only registry
@@ -82,22 +99,31 @@ login() {
     | docker login "$registry" --username "$GITHUB_ACTOR" --password-stdin
 }
 
-# The architecture each image is, before it is pushed under that architecture's name. A tarball
-# saved under the wrong tag, or a stand-in built for another platform, would otherwise put an
-# amd64 image behind `<version>-arm64`, and an attestation would then sign it as arm64.
+# The architecture each image is, and that it is the image the build job recorded, before it is
+# pushed under that architecture's name. A tarball saved under the wrong tag, or one swapped in the
+# artifact store, would otherwise put another image behind `<version>-arm64`, and an attestation
+# would then sign it as arm64. The ID is the config digest, which covers every layer, and it comes
+# from an output of the build job, recorded before syft ran.
 push_architectures() {
-  local arch image platform digest loaded
+  local arch image platform digest loaded id expected
   for arch in amd64 arm64; do
+    case "$arch" in
+      amd64) expected="$amd64" ;;
+      arm64) expected="$arm64" ;;
+    esac
     image="sluice-$IMAGE:$arch"
-    # The sha256 recorded beside the tarball when the image was saved, before anything reads the
-    # tarball: one swapped in the artifact store is not the image the SBOM describes.
-    ( cd "$RUNNER_TEMP/image" && sha256sum --check --strict "$arch.tar.gz.sha256" )
     loaded="$(docker load --input "$RUNNER_TEMP/image/$arch.tar.gz")"
     # The tag inside the tarball, and not whatever the runner had under this name before, is what
-    # the platform below is read from.
+    # the checks below are read from.
     if ! grep -qxF "Loaded image: $image" <<< "$loaded"; then
       echo "the $arch tarball does not hold $image:" >&2
       printf '%s\n' "$loaded" >&2
+      return 1
+    fi
+    id="$(docker image inspect "$image" --format '{{.Id}}')"
+    if [ "$id" != "$expected" ]; then
+      echo "$image is $id, and the build recorded $expected: this is not the image its SBOM \
+describes, so nothing was pushed" >&2
       return 1
     fi
     platform="$(docker image inspect "$image" --format '{{.Os}}/{{.Architecture}}')"
@@ -109,6 +135,14 @@ push_architectures() {
     docker push "$repo:$version-$arch"
     # Assigned before it is written, so a failed lookup stops the script with nothing written.
     digest="$(checked_digest "$repo:$version-$arch" image)"
+    # The registry must be serving the manifest this push wrote, and not one another push put
+    # behind the same tag since: `docker push` records the digest it wrote in RepoDigests.
+    if ! docker image inspect "$image" --format '{{json .RepoDigests}}' \
+      | grep -qF "\"$repo@$digest\""; then
+      echo "$repo:$version-$arch is $digest in the registry, and not the manifest just pushed for \
+$image: nothing was attested" >&2
+      return 1
+    fi
     echo "$arch=$digest" >> "$GITHUB_OUTPUT"
   done
   echo "name=$repo" >> "$GITHUB_OUTPUT"
@@ -137,8 +171,7 @@ create_index() {
   local amd64 arm64 index
   amd64="$(checked_digest "$repo:$version-amd64" image)"
   arm64="$(checked_digest "$repo:$version-arm64" image)"
-  docker buildx imagetools create --tag "$repo:$version" \
-    "$repo@$amd64" "$repo@$arm64"
+  docker buildx imagetools create --tag "$repo:$version" "$repo@$amd64" "$repo@$arm64"
   index="$(checked_digest "$repo:$version" index)"
   check_index "$repo:$version" "$amd64" "$arm64"
   {
