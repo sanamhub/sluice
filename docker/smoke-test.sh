@@ -190,24 +190,41 @@ handover() {
     docker rm -f "$container" > /dev/null
     return
   fi
-  if [ ! -r "/proc/$pid/cmdline" ] || [ ! -r "/proc/$pid/fd/0" ]; then
-    echo "SKIP  handover: the container runs, and /proc/$pid is not readable from here"
+  # Reading another process's descriptors needs ptrace access, which rootless Docker and a userns
+  # remap deny. Only a missing /proc entry is the non-native case: any other unreadable file is a
+  # failure, because the handover is the only end-to-end proof and a run that skipped it would
+  # pass without one.
+  if [ ! -d "/proc/$pid" ]; then
+    echo "SKIP  handover: the container runs, and /proc/$pid is not there"
     docker rm -f "$container" > /dev/null
     return
   fi
   want="/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0 "
   [ "$kind" = rendezvous ] && want="/usr/local/bin/iroh-relay --dev --config-path=/proc/self/fd/0 "
-  cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline")"
+  if ! cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2> "$work/stderr")"; then
+    fail "handover: /proc/$pid/cmdline cannot be read: $(head -n 1 "$work/stderr")"
+    docker rm -f "$container" > /dev/null
+    return
+  fi
+  copy="$(readlink "/proc/$pid/fd/0" 2> "$work/stderr")" \
+    || {
+      fail "handover: /proc/$pid/fd/0 cannot be read: $(head -n 1 "$work/stderr")"
+      docker rm -f "$container" > /dev/null
+      return
+    }
   local shipped="$here/$kind/manual.toml"
   [ "$kind" = relay ] && shipped="$here/relay/relay.toml"
-  local copy
-  copy="$(readlink "/proc/$pid/fd/0")"
-  if [ "$cmdline" = "$want" ] && [[ "$copy" == *"memfd:"* ]] \
-    && cmp -s "/proc/$pid/fd/0" "$shipped"; then
-    pass "handover: PID 1 is '${cmdline% }', and its descriptor 0 is the sealed copy of the config"
-  else
+  if [ "$cmdline" != "$want" ] || [[ "$copy" != *"memfd:"* ]]; then
     fail "handover: PID 1 is '$cmdline', descriptor 0: $copy"
+    docker rm -f "$container" > /dev/null
+    return
   fi
+  if ! cmp -s "/proc/$pid/fd/0" "$shipped" 2> "$work/stderr"; then
+    fail "handover: /proc/$pid/fd/0 does not hold $shipped: $(head -n 1 "$work/stderr")"
+    docker rm -f "$container" > /dev/null
+    return
+  fi
+  pass "handover: PID 1 is '${cmdline% }', and its descriptor 0 is the sealed copy of the config"
   docker rm -f "$container" > /dev/null
 }
 
