@@ -89,9 +89,10 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let text = String::from_utf8_lossy(rest);
-    // 0: unset, 1: set to a token, 2: set but empty. A set value replaces the list (main.rs:236-240),
-    // and an empty one leaves a list of one empty token, which iroh-relay refuses to start on
-    // (main.rs:241, `bail_any!`). The guard refuses it first, with exit 64 and a clear line.
+    // 0: unset, 1: set to a token, 2: set but empty. A set value replaces the list
+    // (main.rs:236-240), and an empty one leaves a list of one empty token, which iroh-relay
+    // refuses to start on (main.rs:241, `bail_any!`). The guard refuses it first, with exit 64
+    // and a clear line.
     let token = match choice % 3 {
         0 => None,
         1 => Some("t"),
