@@ -34,7 +34,7 @@ jobs:
       matrix:
         image: [rendezvous, relay]
     runs-on: ubuntu-latest
-    # Compiling iroh-relay is most of it. As in release.yml's image-build, 60 minutes leaves room
+    # Compiling iroh-relay is most of it. As in release.yml's image builds, 60 minutes leaves room
     # without letting a hung build run for GitHub's default of 6 hours.
     timeout-minutes: 60
     env:
