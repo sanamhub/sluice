@@ -82,8 +82,8 @@ jobs:
           sudo chown 0:0 "$dir"
           sudo chmod 755 "$dir"
           echo "SLUICE_ROOT_OWNED_DIR=$dir" >> "$GITHUB_ENV"
-      # nextest does not run doctests.
-      - run: cargo nextest run
+      # nextest does not run doctests, and one failing test must not hide the rest.
+      - run: cargo nextest run --no-fail-fast
       - run: cargo test --doc --workspace
 
   msrv:
