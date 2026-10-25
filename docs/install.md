@@ -31,13 +31,13 @@ The attestation says where the file was built and from which commit. It is prove
 statement that the file is safe. The CycloneDX SBOM is a file of the release, covered by the same
 attestation; only the images carry SBOM attestations, one per architecture.
 
-**The installers are a convenience, and check less.** The release also has
-`sluice-cli-installer.sh` and `sluice-cli-installer.ps1`, which download the archive for the machine
-and unpack it. The shell one compares the archive's SHA-256 with a value written into the script,
-and skips that on a machine without `sha256sum`. The PowerShell one checks nothing. Neither checks a
-signature or an attestation, so each is only as good as the copy of the script that was run. Prefer
-the archive, and use an installer where those limits are acceptable. What `dist` 0.33.1 writes into
-them is in the [threat model](threat-model.md#supply-chain).
+**The installers are a convenience, and check less.** The release also has `sluice-cli-installer.sh`
+and `sluice-cli-installer.ps1`, which download the archive for the machine and unpack it. The shell
+one compares the archive's SHA-256 with a value written into the script, and skips that on a machine
+without `sha256sum`. The PowerShell one checks nothing. Neither checks a signature or an
+attestation, so each is only as good as the copy of the script that was run. Prefer the archive, and
+use an installer where those limits are acceptable. What `dist` 0.33.1 writes into them is in the
+[threat model](threat-model.md#supply-chain).
 
 If you are asked to pipe an unsigned binary into a shell from anywhere claiming to be this project,
 it is not this project.

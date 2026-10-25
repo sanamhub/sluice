@@ -1,10 +1,11 @@
-# The scenarios the benchmark runs (docs/performance.md, "Scenarios"). `bench run` reads this file, and
+# The scenarios the benchmark runs (docs/performance.md, "Scenarios"). `bench run` reads this
+# file, and
 # `bench run --scenario S3` runs one of them.
 #
 # netem shapes egress, so it is applied on both hosts. The sender's interface carries what the data
 # sees: half of delay_ms, loss_percent, rate and limit_packets. The receiver's carries what the
-# acknowledgements see: the other half of delay_ms and half of jitter_ms. The round trip gets the full
-# delay, and loss and rate act on the data. Both hosts need `interface` in the hosts file and
+# acknowledgements see: the other half of delay_ms and half of jitter_ms. The round trip gets the
+# full delay, and loss and rate act on the data. Both hosts need `interface` in the hosts file and
 # passwordless `sudo -n tc`, and they must be two hosts. bench/README.md says what that leaves out.
 #
 # Every `probe` row runs once per workload, five times by default. `timeout_s` bounds a run, and

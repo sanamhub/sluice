@@ -1,4 +1,5 @@
-//! `bench`: drives `probe` on a pair of hosts for the measurements and writes results anyone can rerun.
+//! `bench`: drives `probe` on a pair of hosts for the measurements and writes results anyone can
+//! rerun.
 
 mod ceilings;
 mod check;

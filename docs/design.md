@@ -9,14 +9,14 @@ than repeating the argument.
 ## Goals
 
 Move files between two machines as fast as the path allows, with no account and no service in the
-middle that we or anyone else runs for you. Concretely:
+middle that we or anyone else runs for you.
 
-- Fill the link. On 10 GbE with NVMe at both ends, within 10% of `iperf3`.
+- Fill the link: on 10 GbE with NVMe at both ends, within 10% of `iperf3`.
 - Verify every byte against a BLAKE3 root before anything sees it.
 - Resume after any interruption, including `kill -9`, without re-sending verified data.
 - Read a file while it is still being written, and read any byte range of any file.
-- Work on a LAN with zero infrastructure, and on the internet with infrastructure you can run on the
-  smallest VPS available.
+- Work on a LAN with no infrastructure, and on the internet with infrastructure you can run on the
+  smallest VPS.
 
 Not goals: folder sync (Syncthing does it well), a hosted service, accounts, telemetry.
 
@@ -48,9 +48,9 @@ Four rules hold everywhere:
 2. **The browser is a peer.** No HTTP endpoint accepts file bytes.
 3. **One control contract.** `proto/sluice/v1` is the only API definition, linted and checked for
    breaking changes with `buf`.
-4. **No daemon for one-shot transfers.** `sluice send` is a process that exits. A daemon runs only
-   for receive-while-idle, paired devices and mount, and socket activation keeps it at zero cost
-   until used.
+4. **No daemon for one-shot transfers.** `sluice send` exits. A daemon runs only for
+   receive-while-idle, paired devices and mount, and socket activation keeps it at zero cost until
+   used.
 
 ## Reuse and build
 
@@ -71,9 +71,8 @@ would put the parts where transfer tools corrupt data into new code. ADR 0001.
 | Parallel data path, TCP bulk path | **ours** |
 | Session layer, control API, CLI, mount, bindings, UI | **ours** |
 
-Live transfer has prior art: Hypercore and Hyperdrive have shipped signed append-only logs with live
-reads and verified ranges for years. Ours carries plain files as BLAKE3 segments and closes into an
-ordinary static root. ADR 0004 covers the differences.
+Live transfer has prior art in Hypercore's signed append-only logs. Ours carries plain files as
+BLAKE3 segments and closes into an ordinary static root; ADR 0004 covers the differences.
 
 ### Dependencies
 
@@ -107,7 +106,7 @@ blob.
 ### Live content
 
 A growing file has no stable BLAKE3 root, because a bao tree's shape depends on total length. Live
-content is therefore a signed chain of fixed-size segments on ALPN `sluice/1`:
+content is a signed chain of fixed-size segments on ALPN `sluice/1`:
 
 ```
 Segment  = 8 MiB, hashed as its own complete BLAKE3 tree
@@ -124,8 +123,8 @@ static content. ADR 0004, and `SPEC.md` section 6 for the exact rules.
 
 A FastCDC index used only as a hint. The provider sends chunk signatures for content the requester
 may already read; the requester matches locally and fetches the rest. The result is verified against
-the real root, so a wrong match costs a refetch, never a corrupt file. Signatures flow provider to
-requester only, so the requester discloses nothing about its disk. ADR 0005.
+the real root, so a wrong match costs a refetch. The requester discloses nothing about its disk. ADR
+0005.
 
 ### Directory manifest
 
@@ -159,9 +158,9 @@ broken one.
 
 ### Transfer queue
 
-Three active transfers by default, the rest queued in order. Per-transfer priority
-(`--priority high|normal|low`). Global and per-peer bandwidth caps, shared fairly. Pause, resume and
-cancel survive a daemon restart, since resume is content-addressed.
+Three active transfers by default, the rest queued in order. Per-transfer priority (`--priority
+high|normal|low`). Global and per-peer bandwidth caps, shared fairly. Pause, resume and cancel
+survive a daemon restart, since resume is content-addressed.
 
 ## Storage
 
@@ -229,24 +228,22 @@ screen name the relay in use, or say there is none and what that rules out.
 relaying. The `rendezvous` image runs only the first and moves no transfer bytes. The `relay` image
 runs both and carries the bandwidth bill. ADR 0013.
 
-**Relays run closed.** A relay URL that leaks is free bandwidth for anyone. Our relay image ships
-with authorization on. `open` mode needs a flag and gets a per-client byte rate limit. `iroh-relay`
-has no working connection-accept limit (`accept_conn_limit` is documented upstream as not
-implemented), so we document byte limits only until we build one in front of it. Both images start
-through [`sluice-relay-guard`](../docker/guard/README.md), which refuses a config that would open
-more than it says, and starts an open relay only with `--open` and a byte limit set. ADR 0019, ADR
-0020.
+**Relays run closed.** A leaked relay URL is free bandwidth for anyone, so our relay image ships
+with authorization on. `open` mode needs a flag and a per-client byte rate limit; `iroh-relay` has
+no working connection-accept limit, so byte limits are all we document. Both images start through
+[`sluice-relay-guard`](../docker/guard/README.md), which refuses a config that would open more than
+it says. ADR 0019, ADR 0020.
 
 **Every transfer says how it is connected.** The progress line and `--json` output show direct or
 relayed, and through which relay. `sluice doctor` is to report NAT type, port mapping result, MTU,
 UDP egress, the chosen path, and the relay's reachability and authorization mode, in one block that
 can be pasted into an issue. Today it checks the local home only, and reports its `transport` check
-as skipped until the transport is measured; the [CLI README](../crates/sluice-cli/README.md) lists what
-it checks.
+as skipped until the transport is measured; the [CLI README](../crates/sluice-cli/README.md) lists
+what it checks.
 
-**The browser is always relayed.** iroh in a tab has no UDP socket and no WebRTC transport, so it
-reaches peers over a WebSocket relay for the whole session. Browser throughput is relay throughput.
-The traffic stays end-to-end encrypted. ADR 0011 and ADR 0014.
+**The browser is always relayed.** iroh in a tab has no UDP socket, so it reaches peers over a
+WebSocket relay for the whole session. Browser throughput is relay throughput, and the web UI needs
+a relay you run. The traffic stays end-to-end encrypted. ADR 0011, ADR 0014.
 
 ## Data path
 
@@ -270,8 +267,8 @@ NVMe outruns the packet path at 10 Gbit/s, so io_uring waits until a profile say
 0007). `sendfile` does not apply, because QUIC encrypts in userspace.
 
 BLAKE3 hashes at several GB/s per core with SIMD, and the outboard is cached so a repeat send never
-rehashes. zstd (levels 1 to 3) runs only when a 64 KB sample compresses below 0.9, and never above
-2 Gbit/s.
+rehashes. zstd (levels 1 to 3) runs only when a 64 KB sample compresses below 0.9, and never above 2
+Gbit/s.
 
 ## Durability
 
@@ -338,8 +335,8 @@ crates/
 ```
 
 Later phases add `sluice-delta` (sans-IO), `sluice-api` (the control service), `sluice-mount`
-(fuse3, WinFsp, FSKit), `sluice-ffi`, `sluice-uniffi`, `sluice-node` and `sluice-wasm`. Each crate
-arrives with the phase that needs it, along with its README.
+(fuse3, WinFsp, FSKit), `sluice-ffi`, `sluice-uniffi`, `sluice-node` and `sluice-wasm`. Each arrives
+with the phase that needs it, along with its README.
 
 The protocol crates take bytes and timer ticks in and return actions, with no IO of their own. That
 makes them testable as plain functions, fuzzable from a byte slice, and reusable in the WASM build

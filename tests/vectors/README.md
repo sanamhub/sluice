@@ -4,6 +4,9 @@ These files say what a Sluice implementation must accept and reject. `SPEC.md` s
 kinds. An implementation that passes every vector here follows the same rules as ours at the points
 the vectors cover. They do not cover the whole wire.
 
+The vectors were written from `SPEC.md`, not from the Rust code, so they check the spec and the
+implementation against each other.
+
 Run them against this repository with `cargo xtask conformance`. It exits non-zero if one case
 disagrees, and `cargo nextest run` runs the same check.
 
@@ -141,9 +144,9 @@ fails. The files split them by where the fault is:
   bytes after the body or missing from it, an empty `relay_url`, a tag that is neither value, text
   that is not UTF-8, and a varint with a zero byte too many.
 - `invalid-keys.json`: an `endpoint_id` or a `sender_key` that breaks rule 8, each in a Live ticket.
-  A second spelling of a point (`y` of `p + 3`, `2^255 - 1` and `p + 1`, and the sign bit set on
-  the neutral point, whose `x` is 0), a point of order 1, 4 and 8, and 32 bytes that are no point.
-  A ZIP-215 decoder, such as `ed25519-dalek`'s, reads the second spellings as points, and the first
+  A second spelling of a point (`y` of `p + 3`, `2^255 - 1` and `p + 1`, and the sign bit set on the
+  neutral point, whose `x` is 0), a point of order 1, 4 and 8, and 32 bytes that are no point. A
+  ZIP-215 decoder, such as `ed25519-dalek`'s, reads the second spellings as points, and the first
   two are of large order, so rule 8 is the only reason they fail.
 - `invalid-relay.json`: a `relay_url` that breaks rule 7. A scheme that is not `https` or `http`, a
   relative URL, no scheme, a user name, a password, a query, a fragment, an upper-case scheme or
@@ -159,9 +162,6 @@ repeated as its `root`.
 `valid-relay.json` is the other side of rule 7: an `https` URL with a port, an `http` URL, an IPv6
 and an IPv4 host, a path, a percent-encoded path and a URL of 2048 bytes. Its `canonical` is its
 `ticket`, because a `relay_url` has one spelling. A `relay_url` that is present is always ASCII.
-
-The bytes were written by a second encoder, built from the table in `SPEC.md` and not from the Rust
-code, so the vectors check the spec and the implementation against each other.
 
 ## `manifests/`
 
@@ -224,9 +224,8 @@ Some points a reader cannot see from the rules alone:
   breaks pack layout rule 5, even when the files in it are all of no bytes.
 
 The files are `valid.json`, `limits.json`, `invalid-wire.json` (rules 3 to 6) and
-`invalid-entries.json` (rules 7 to 16). The bytes and the roots were written by a second encoder in
-Python, built from the table in `SPEC.md` section 8 with its own varints and its own BLAKE3, and not
-from the Rust code, so the vectors check the spec and the implementation against each other.
+`invalid-entries.json` (rules 7 to 16). The bytes and roots come from a second encoder in Python,
+built from the table in `SPEC.md` section 8 with its own varints and its own BLAKE3.
 
 ## `packs/`
 
@@ -265,11 +264,10 @@ and compare every `loc` and every pack `size`. For a case with content, compare 
 runner in this repository also splits each pack back into files and compares each one with its
 content.
 
-The files are `boundaries.json` (the threshold, the target, empty files and no files),
-`mixed.json` (small, large and empty files together, nested folders, and layouts of two and three
-packs) and `content.json`. They were written by a second planner in Python, built from the steps
-in section 9 with the manifest encoder and the BLAKE3 of the `manifests/` vectors, and not from the
-Rust code.
+The files are `boundaries.json` (the threshold, the target, empty files and no files), `mixed.json`
+(small, large and empty files together, nested folders, and layouts of two and three packs) and
+`content.json`. They were written by a second planner in Python, built from the steps in section 9
+with the manifest encoder and the BLAKE3 of the `manifests/` vectors, and not from the Rust code.
 
 ## `live/`
 
@@ -347,6 +345,6 @@ Some points a reader cannot see from the rules alone:
 
 The files are `clean.json` (whole chains), `open.json` (the opening record and every bound of
 `segment_bytes`), `refused.json`, `aborted.json`, `repeats.json` and `lengths.json` (every record
-one byte short and one byte long). They were written by a second implementation in Python, built
-from section 6 with its own Ed25519 from RFC 8032, checked against the test vectors of its section
-7.1, and the BLAKE3 of the `manifests/` vectors, and not from the Rust code.
+one byte short and one byte long). A second implementation in Python wrote them, from section 6 with
+its own Ed25519 from RFC 8032, checked against the test vectors of its section 7.1, and the BLAKE3
+of the `manifests/` vectors.
