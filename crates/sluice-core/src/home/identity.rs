@@ -258,13 +258,16 @@ fn owner_is_accepted(_file: &File) -> std::io::Result<bool> {
     Ok(true)
 }
 
-/// The key, open for reading, or `None` when there is none. On Unix the open does not follow a
-/// link, and a link is refused by name: a link at the key's name would put the store's identity
-/// wherever it points. Windows opens the reparse point itself, and [`check_key`] refuses it.
+/// The key, open for reading, or `None` when there is none. On Unix the open neither follows a
+/// link nor waits for a writer, and a link is refused by name: a link at the key's name would put
+/// the store's identity wherever it points. A FIFO there would otherwise keep `sluice id` waiting
+/// for a writer that never comes, so the open does not block and [`check_key`] refuses it as not a
+/// regular file. Windows opens the reparse point itself, and [`check_key`] refuses it.
 #[cfg(unix)]
 fn open_key(path: &Path) -> Result<Option<File>, Error> {
     use rustix::fs::{Mode, OFlags};
-    match rustix::fs::open(path, OFlags::NOFOLLOW | OFlags::CLOEXEC, Mode::empty()) {
+    let flags = OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
+    match rustix::fs::open(path, flags, Mode::empty()) {
         Ok(fd) => Ok(Some(File::from(fd))),
         Err(e) if e == rustix::io::Errno::LOOP => Err(Error::Policy(is_a_link(path))),
         Err(e) if e == rustix::io::Errno::NOENT => Ok(None),

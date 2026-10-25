@@ -82,6 +82,42 @@ fn a_key_that_is_a_link_is_refused() {
     assert!(message.contains("is a link"), "{message}");
 }
 
+/// A FIFO at the key's name would keep `sluice id` waiting for a writer that never comes, so the
+/// key is opened without blocking and refused by its kind. Nothing is written to the FIFO. The
+/// write end is held open here so that a lost non-blocking flag fails the assertion instead of
+/// hanging the test, the way the guard's FIFO test does it.
+#[cfg(unix)]
+#[test]
+fn a_fifo_at_the_key_is_refused_without_waiting() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(dir.path()).unwrap();
+    let key = dir.path().join("identity.key");
+    let made = std::process::Command::new("mkfifo").arg(&key).status();
+    if !made.is_ok_and(|status| status.success()) {
+        eprintln!("SKIPPED: mkfifo is not available");
+        return;
+    }
+    // O_RDWR on a FIFO does not wait, so there is a writer for the whole test.
+    let _writer = rustix::fs::open(&key, rustix::fs::OFlags::RDWR, rustix::fs::Mode::empty())
+        .expect("a FIFO with a writer");
+    for refused in [home.identity(), home.rotate_identity()] {
+        let Err(Error::Policy(message)) = refused else {
+            panic!("a FIFO at the key was accepted");
+        };
+        assert!(message.contains("not a regular file"), "{message}");
+        assert!(message.contains("identity.key"), "{message}");
+    }
+    // Doctor refused the same FIFO before this change, from the path's metadata, so the two
+    // answers agree.
+    let reported = crate::doctor::examine_at(dir.path(), true)
+        .into_iter()
+        .find(|check| check.name() == crate::doctor::Name::Key)
+        .expect("a key check")
+        .finding()
+        .clone();
+    assert_eq!(reported, crate::doctor::Finding::KeyNotAFile);
+}
+
 /// A hard link is a second name for the same file. Whoever can write through that name can change
 /// this user's key, so a key with two names is refused even though its owner is this user.
 #[cfg(unix)]
