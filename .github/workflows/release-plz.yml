@@ -3,7 +3,7 @@ name: release-plz
 # On every push to main, opens or updates one pull request that bumps the workspace version from the
 # Conventional Commits since the last tag and adds the new section to CHANGELOG.md. It publishes
 # nothing, tags nothing and makes no GitHub release: the maintainer tags the merge by hand, and that
-# tag starts release.yml (RELEASING.md).
+# tag starts release.yml (docs/runbooks/releasing.md).
 on:
   push:
     branches: [main]

@@ -5,40 +5,10 @@ installer, checksums, a CycloneDX SBOM and GitHub artifact attestations, on a Gi
 `rendezvous` and `relay` images go to ghcr.io from the same run, after the GitHub release exists,
 each with its provenance and an SBOM per architecture attested. Nothing goes to crates.io.
 
-## Install a release
+## Install and verify
 
-Nothing has been released yet. When something is, this is how to install it: download the archive
-for the machine, check where it came from, and only then run anything from it.
-
-| Machine | Archive |
-|---|---|
-| Linux, x86-64 | `sluice-cli-x86_64-unknown-linux-gnu.tar.xz` |
-| Linux, ARM64 | `sluice-cli-aarch64-unknown-linux-gnu.tar.xz` |
-| macOS, Apple silicon | `sluice-cli-aarch64-apple-darwin.tar.xz` |
-| macOS, Intel | `sluice-cli-x86_64-apple-darwin.tar.xz` |
-| Windows, x86-64 | `sluice-cli-x86_64-pc-windows-msvc.zip` |
-| Windows, ARM64 | `sluice-cli-aarch64-pc-windows-msvc.zip` |
-
-```
-gh release download v0.2.0 --repo sanamhub/sluice \
-  --pattern 'sluice-cli-x86_64-unknown-linux-gnu.tar.xz'
-gh attestation verify sluice-cli-x86_64-unknown-linux-gnu.tar.xz --repo sanamhub/sluice \
-  --signer-workflow sanamhub/sluice/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.2.0
-```
-
-`Verification succeeded!` means the file was built by `release.yml` in that repository, from the
-commit of tag `v0.2.0`. Without `--signer-workflow`, any workflow of the repository that holds
-`id-token: write` could have signed it, and without `--source-ref`, a run on any branch or tag.
-Unpack the archive after that, and run `sluice`.
-
-**The installers are a convenience, and check less.** The release also has `sluice-cli-installer.sh`
-and `sluice-cli-installer.ps1`, which download the archive for the machine and unpack it. The shell
-one compares the archive's SHA-256 with a value written into the script, and skips that on a
-machine without `sha256sum`. The PowerShell one checks nothing. Neither checks a signature or an
-attestation, so each is only as good as the copy of the script that was run. Prefer the archive,
-and use an installer where those limits are acceptable. What `dist` 0.33.1 writes into them is in
-the [threat model][threat-model].
+Installing a release and checking where it came from is in [`docs/install.md`](../install.md). This
+runbook covers making one.
 
 ## The pipeline
 
@@ -49,7 +19,9 @@ Two workflows do it:
 | `release-plz.yml` | every push to `main` | opens or updates the release pull request: the version bump and the new `CHANGELOG.md` section |
 | `release.yml` | a tag `v<version>` | runs all of `ci.yml`, checks the tag, builds the binaries with `dist` and both images for amd64 and arm64, waits for every build and then for approval, publishes the GitHub release as a draft and then publishes it, then waits again and pushes and attests the images: each architecture first, then the version index |
 
-**Who can release.** The tag ruleset's bypass list names **Repository admin**, and in a repository
+### Who can release
+
+The tag ruleset's bypass list names **Repository admin**, and in a repository
 owned by a user that is the owner alone. GitHub's ruleset page lists "Repository admins" as
 eligible for bypass access, and its permissions page says a repository owned by a personal account
 "has a single owner who has full control of the repository"
@@ -77,8 +49,8 @@ alone.
 ## What the maintainer approves, and where
 
 1. **The release pull request.** Run its checks, review the version and the changelog section,
-   and edit the changelog until each entry says what a user notices (the writing-style skill).
-   Merging it is the first approval.
+   and edit the changelog until each entry says what a user notices. Merging it is the first
+   approval.
 2. **The tag.** You push it by hand, and it is the one event that starts a release.
 3. **The `release` environment, for the binaries.** The `host` job waits in it for a required
    reviewer: Actions > the run > **Review deployments** > tick `release` > **Approve and deploy**.
@@ -293,48 +265,7 @@ release never skips the checks, even if the pull request merged without them.
    | `sluice-cli.cdx.xml`, the SBOM | 1 |
    | `dist-manifest.json`, what dist built and where | 1 |
 
-   Then verify one archive as in [Install a release][install], and one image as below.
-
-## Verify an image, and what a binary carries
-
-Every file of the release has a provenance attestation signed through Sigstore, and
-[the first section][install] shows how to check an archive.
-
-An image is checked the same way, by its name in the registry. The version tag is the index of both
-architectures, and `-amd64` and `-arm64` name each one:
-
-```
-gh attestation verify oci://ghcr.io/sanamhub/sluice-relay:0.2.0 --repo sanamhub/sluice \
-  --signer-workflow sanamhub/sluice/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.2.0
-gh attestation verify oci://ghcr.io/sanamhub/sluice-relay:0.2.0-arm64 --repo sanamhub/sluice \
-  --signer-workflow sanamhub/sluice/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.2.0 \
-  --predicate-type https://spdx.dev/Document/v2.3
-```
-
-The first checks the provenance of the index, and the second the SBOM of the arm64 image. The
-index, `-amd64` and `-arm64` each have a provenance attestation, and each architecture has an SBOM.
-The SPDX version in the predicate type is the one syft writes into the SBOM, which `actions/attest`
-copies (`src/sbom.ts:85`).
-
-**A tag is not the image.** `gh attestation verify` proves that `release.yml`, on that tag, built
-the digest it is given. It does not say what the tag names now: [no package can name one
-workflow][settings], so any workflow in a repository with access to
-the package and `packages: write` can move a tag. An image is trusted only after its attestation
-passes and it is pulled by that digest:
-
-```
-digest="$(docker buildx imagetools inspect ghcr.io/sanamhub/sluice-relay:0.2.0 \
-  --format '{{json .Manifest}}' | jq --raw-output .digest)"
-gh attestation verify "oci://ghcr.io/sanamhub/sluice-relay@$digest" --repo sanamhub/sluice \
-  --signer-workflow sanamhub/sluice/.github/workflows/release.yml \
-  --source-ref refs/tags/v0.2.0
-docker pull "ghcr.io/sanamhub/sluice-relay@$digest"
-```
-
-Each binary also carries its dependency tree from `cargo auditable`, which `cargo audit bin sluice`
-checks against the RustSec database.
+   Then verify one archive and one image as in [`docs/install.md`](../install.md).
 
 ## Roll back
 
@@ -412,8 +343,8 @@ A release cannot be edited into a good one. Take it down and go back to the one 
   ([Configuring a package's access control][package-access]).
   There is no per-workflow switch in those docs, so any workflow in a repository with that access
   and `packages: write` can push to the package. A package's source label and the `release`
-  environment say which jobs are meant to push, not which ones can. See [Verify an image, and what
-  a binary carries][verify-image].
+  environment say which jobs are meant to push, not which ones can. See
+  [`docs/install.md`](../install.md#verify-an-image).
 - **Actions may open pull requests**: Settings > Actions > General > Workflow permissions > tick
   **Allow GitHub Actions to create and approve pull requests**. Without it release-plz cannot open
   the pull request, and its job fails.
@@ -461,12 +392,9 @@ that a download hashes to the same value.
 
 [checks]: #checks-before-approving-host
 [cut-a-release]: #cut-a-release
-[install]: #install-a-release
 [settings]: #repository-settings-the-pipeline-needs
 [pr-checks]: #the-release-pull-requests-checks
-[verify-image]: #verify-an-image-and-what-a-binary-carries
 [who-can-release]: #who-can-release
-[threat-model]: docs/threat-model.md#supply-chain
 [github-token]: https://docs.github.com/en/actions/concepts/security/github_token
 [managing-environments]: https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments
 [reviewing-deployments]: https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments

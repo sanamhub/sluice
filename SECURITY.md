@@ -34,8 +34,8 @@ gh attestation verify sluice-cli-x86_64-unknown-linux-gnu.tar.xz --repo <owner>/
   --source-ref refs/tags/v<version>
 ```
 
-[RELEASING.md](RELEASING.md#install-a-release) says what the two flags add, and what the installers
-check and do not.
+[`docs/install.md`](docs/install.md#download-and-verify-an-archive) says what the two flags add, and
+what the installers check and do not.
 
 If you are asked to pipe an unsigned binary into a shell from anywhere claiming to be this project,
 it is not this project.

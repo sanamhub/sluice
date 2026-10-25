@@ -42,7 +42,7 @@ yet.
 Nothing has been released yet. A release is built in CI from a tag, and the way to install one is to
 download the archive for the machine from the release page, run `gh attestation verify` on it with
 `--signer-workflow` and `--source-ref`, and only then run `sluice`.
-[RELEASING.md](RELEASING.md#install-a-release) has the six archive names and the exact commands.
+[`docs/install.md`](docs/install.md) has the six archive names and the exact commands.
 
 The release also has a shell and a PowerShell installer, as a convenience. They check less than the
 command above: the shell one compares a SHA-256 written into the script, and the PowerShell one
@@ -111,7 +111,7 @@ files; ADR 0004 explains the differences.
 | [`docs/roadmap.md`](docs/roadmap.md) | Phases, open questions, what won't be built |
 | [`docs/adr/`](docs/adr/README.md) | Decision records |
 | [`crates/sluice-cli/README.md`](crates/sluice-cli/README.md) | The commands, their exit codes and their JSON |
-| [`RELEASING.md`](RELEASING.md) | How a release is made, and how to verify one |
+| [`docs/runbooks/releasing.md`](docs/runbooks/releasing.md) | How a release is made |
 | [`docker/`](docker/relay/README.md) | The `relay` and `rendezvous` images, and the guard they start through |
 
 ## Contributing and security

@@ -11,7 +11,8 @@
 # release.yml's image-publish job runs `arch`, attests both architectures, then runs `index` with
 # the digests it just attested, and attests the index. The index is built from the digests and
 # never from a tag, so a tag moved in between cannot put an unattested manifest in it. A failure in
-# between leaves public tags without their attestation, which a re-run overwrites (RELEASING.md).
+# between leaves public tags without their attestation, which a re-run overwrites
+# (docs/runbooks/releasing.md).
 #
 # The registry is the first argument and never comes from the environment: release.yml writes the
 # literal `ghcr.io`, and images.yml's push test writes `localhost:5000`. A value an earlier step

@@ -5,7 +5,7 @@
 # broken download, not a swapped one.
 #
 # To move dist on: change DIST_VERSION in release.yml, paste the new release's hashes below, and
-# regenerate release.yml as RELEASING.md says.
+# regenerate release.yml as docs/runbooks/releasing.md says.
 set -euo pipefail
 
 version="${DIST_VERSION:?DIST_VERSION is not set}"

@@ -1,8 +1,9 @@
 [workspace]
 members = ["cargo:."]
 
-# How a tag `v<version>` becomes a GitHub release with installers (RELEASING.md). Only the `sluice`
-# binary of sluice-cli is released: every other package sets `dist = false` in its manifest.
+# How a tag `v<version>` becomes a GitHub release with installers
+# (docs/runbooks/releasing.md). Only the `sluice` binary of sluice-cli is released: every other
+# package sets `dist = false` in its manifest.
 [dist]
 cargo-dist-version = "0.33.1"
 ci = "github"
@@ -30,7 +31,8 @@ install-updater = false
 pr-run-mode = "plan"
 # release.yml is pinned by hand: every action at a commit SHA, dist and the tools it runs at exact
 # versions, and the ci.yml checks before any build. `dist generate` would undo that, so it is told
-# to leave the file alone. RELEASING.md says how to regenerate it and what to put back.
+# to leave the file alone. docs/runbooks/releasing.md says how to regenerate it and what to put
+# back.
 allow-dirty = ["ci"]
 
 # The commits a regenerated release.yml pins its actions to, the same as the rest of the workflows.

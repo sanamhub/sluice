@@ -77,19 +77,22 @@ no environment, and the owner can change the settings that make the review real:
 back on, remove the second approver, or untick prevent self-review. The approval protects against a
 release started by anyone else and against an owner's mistake, a tag off `main` or a `.github/`
 changed on the tag, and nothing more. The approver has two commands for the second case, in
-[RELEASING.md](../RELEASING.md), and they run only when a review is asked for. Releases are
-immutable, so the assets and the tag cannot change after publication. The workflow creates the
+[the release runbook](runbooks/releasing.md), and they run only when a review is asked
+for. Releases are immutable, so the assets and the tag cannot change after publication. The
+workflow creates the
 release as a draft, adds every file and publishes last; `gh release create` already does that itself
 at 2.102.0, and the workflow writes the steps out so a failure leaves a draft it names, which `host`
 refuses to start over until it is deleted. A failed build publishes nothing, but a failed image push
-leaves the tags [RELEASING.md](../RELEASING.md) names for each step until the job is re-run. Each
-image is checked by the ID its build job recorded in a job output before syft ran, so a tarball
+leaves the tags [the release runbook](runbooks/releasing.md) names for each step until the job is
+re-run. Each image is checked by the ID its build job recorded in a job output before syft ran, so a
+tarball
 swapped in after the build is refused before a tag or a push, and the version index is built from
 the two digests that were attested, never from a tag another push can move. **ghcr.io cannot limit
 which workflow pushes to a package:** it grants Actions access per repository, not per workflow
 file, so any workflow in a repository with access and `packages: write` can push. An image is
 trusted only after its attestation passes `gh attestation verify` and it is pulled by that digest.
-[RELEASING.md](../RELEASING.md) lists every file and says how to check one. What a release has:
+[the release runbook](runbooks/releasing.md) lists every file and says how to check one. What a
+release has:
 
 - **Build provenance attestations,** signed through Sigstore into its public transparency log, for
   every file of the GitHub release, for each image's index, and for each image's amd64 and arm64
@@ -117,8 +120,8 @@ trusted only after its attestation passes `gh attestation verify` and it is pull
 
 - **The binaries are not signed.** There is no Authenticode signature on Windows and no
   notarization on macOS, so SmartScreen and Gatekeeper warn on the first run. Both need accounts
-  the maintainer does not have yet: Azure Artifact Signing, and an Apple Developer ID. RELEASING.md
-  says the same under **Not done yet**.
+  the maintainer does not have yet: Azure Artifact Signing, and an Apple Developer ID. The release
+  runbook says the same under **Not done yet**.
 - **The installers verify no signature,** and the PowerShell one no checksum either. Until they do,
-  the way to check a download is `gh attestation verify` on the archive, as RELEASING.md shows,
-  before running anything from it.
+  the way to check a download is `gh attestation verify` on the archive, as
+  [`docs/install.md`](install.md) shows, before running anything from it.

@@ -72,9 +72,9 @@ a body that says why the change was needed. The diff already says what changed.
 
 ## Decisions
 
-A decision that is not obvious from the code gets an ADR in `docs/adr/`. If a pull request discussion
-is about something an ADR already settled, link the ADR. If the ADR is wrong, propose one that
-supersedes it.
+A decision that is not obvious from the code gets an ADR in `docs/adr/`. If a pull request
+discussion is about something an ADR already settled, link the ADR. If the ADR is wrong, propose a
+new one that supersedes it.
 
 Open a discussion before working on anything on the ["not built"
 list](docs/roadmap.md#not-built), or on anything larger than a few hundred lines.

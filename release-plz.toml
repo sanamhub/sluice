@@ -1,6 +1,6 @@
-# release-plz opens the release pull request and does nothing more (RELEASING.md). The crates are
-# not on crates.io, so versions come from the `v<version>` tags the maintainer pushes, and nothing
-# needs a registry token.
+# release-plz opens the release pull request and does nothing more
+# (docs/runbooks/releasing.md). The crates are not on crates.io, so versions come from the
+# `v<version>` tags the maintainer pushes, and nothing needs a registry token.
 [workspace]
 git_only = true
 git_tag_name = "v{{ version }}"

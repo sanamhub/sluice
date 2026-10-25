@@ -372,8 +372,8 @@ The QUIC stack is tested by its own project, so we don't simulate QUIC.
 | Proto | Planned, no workflow runs them: `buf lint`, `buf breaking` |
 | Dependencies | `cargo-deny` in `ci.yml`. `cargo-udeps` and Renovate are planned |
 | API compatibility | Planned, no workflow runs it: `cargo-semver-checks` on published crates and `sluice-ffi` |
-| Releases | `release-plz` for the version and the changelog pull request, `dist` 0.33.1 for the six archives and the two installers, from one tag through `release.yml`. The steps, the approvals and how to verify a release are in [RELEASING.md](../RELEASING.md) |
-| Signing | GitHub artifact attestations: build provenance for every release file and image, and SBOMs. Azure Artifact Signing on Windows and notarization on macOS are planned and not done ([RELEASING.md](../RELEASING.md#not-done-yet)) |
+| Releases | `release-plz` for the version and the changelog pull request, `dist` 0.33.1 for the six archives and the two installers, from one tag through `release.yml`. The steps, the approvals and how to verify a release are in [the release runbook](runbooks/releasing.md) |
+| Signing | GitHub artifact attestations: build provenance for every release file and image, and SBOMs. Azure Artifact Signing on Windows and notarization on macOS are planned and not done ([the release runbook](runbooks/releasing.md#not-done-yet)) |
 | Containers | distroless, amd64 and arm64 built on native runners, each image starting through [`sluice-relay-guard`](../docker/guard/README.md) |
 | Observability | Planned, no workflow runs it: `tracing`, optional OTLP export and Prometheus endpoint, both off by default. Today the log lines are there and neither export is built |
 | CLI | `clap` with completions and man pages, `indicatif`, `NO_COLOR`, `--json` on every command |
