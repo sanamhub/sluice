@@ -1,26 +1,46 @@
-# Sluice
+<p align="center">
+  <img src="assets/logo/sluice-128.png" width="128" alt="Sluice logo">
+</p>
 
-Peer-to-peer file transfer built to fill the link. Files go directly from one machine to another
-over QUIC, verified chunk by chunk, with no account and no service in the middle that you don't run
-yourself.
+<h1 align="center">Sluice</h1>
 
-**Status:** before 1.0, which [`docs/roadmap.md`](docs/roadmap.md) describes. The `sluice` binary
-has three commands today:
+<p align="center">
+  <a href="https://github.com/sanamhub/sluice/actions/workflows/ci.yml">
+    <img src="https://github.com/sanamhub/sluice/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/sanamhub/sluice/blob/main/LICENSE-MIT">
+    <img src="https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue"
+      alt="License: Apache-2.0 or MIT"></a>
+  <img src="https://img.shields.io/badge/status-pre--1.0-orange" alt="Status: pre-1.0">
+</p>
+
+Peer-to-peer file transfer over QUIC, with every 16 KiB block checked against a BLAKE3 root before
+it is written. On a 10 GbE LAN the target is 8 Gbit/s, within 10% of `iperf3`, for one 100 GB file.
+That is a target, not a measurement: [`docs/performance.md`](docs/performance.md) says how each
+number will be measured and published. No account, no hosted service, and no relay you did not
+configure.
+
+> **Status:** pre-1.0. `sluice id`, `sluice doctor` and `sluice completions` work today. The 1.0
+> commands below are planned and do not exist yet.
+
+## What works today
 
 ```
-sluice id                               # print this machine's endpoint id
-sluice id --rotate                      # replace the identity, after asking
-sluice doctor                           # check the home, who can reach it, its lock, key and space
-sluice completions bash                 # print a shell's completion script
+sluice id                      # print this machine's endpoint id
+sluice id --rotate             # replace the identity, after asking
+sluice doctor                  # check the home, its lock, key and free space
+sluice completions bash        # print a shell's completion script
 ```
 
 `sluice doctor` changes nothing. It prints one line per check, `ok`, `warning`, `failed` or
 `skipped`, with the step that fixes a problem under it, and `--json` gives the same as one object.
-Its exit code is 0 unless a check failed. The `transport` check, of NAT type, path and relay, is
-skipped until the transport is measured. The [CLI README](crates/sluice-cli/README.md) lists every check,
-the exit codes and the JSON, which scripts may rely on.
+Its exit code is 0 unless a check failed, and the `transport` check is skipped until the transport
+is measured. The [CLI README](crates/sluice-cli/README.md) lists every check, the exit codes and the
+JSON, which scripts may rely on.
 
-What 1.0 adds, and does not exist yet:
+## Planned for 1.0
+
+These commands do not exist yet. The parser behind `--range` does; it is tested and fuzzed, and
+lives in `sluice-core`.
 
 ```
 sluice send ./bigfile.mkv               # prints a ticket
@@ -33,37 +53,29 @@ sluice recv <ticket> --range 4G:4.1G    # fetch and verify one byte range
 
 `--range` takes a half-open range, `start:end`, `start:+length`, `start:` or `:end`, in bytes or
 with a unit: `K`, `M`, `G`, `T` and `P` (and `KiB` and the like) count in 1024s, `KB`, `MB` and the
-like in 1000s, and a decimal such as `4.1G` is rounded down to a whole byte. The parser is in
-`sluice-core` (`range`) and is tested and fuzzed; `sluice recv`, which will take it, is not built
-yet.
+like in 1000s, and a decimal such as `4.1G` is rounded down to a whole byte.
 
 ## Install
 
-Nothing has been released yet. A release is built in CI from a tag, and the way to install one is to
-download the archive for the machine from the release page, run `gh attestation verify` on it with
-`--signer-workflow` and `--source-ref`, and only then run `sluice`.
-[`docs/install.md`](docs/install.md) has the six archive names and the exact commands.
+There is no release yet. When there is one, [`docs/install.md`](docs/install.md) lists the six
+archive names and the commands that check where an archive came from before it is run. The
+installers in a release check less than that, and the same page says what each one does.
 
-The release also has a shell and a PowerShell installer, as a convenience. They check less than the
-command above: the shell one compares a SHA-256 written into the script, and the PowerShell one
-checks nothing. What each does is in the [threat model](docs/threat-model.md#supply-chain).
+## What sets it apart
 
-## What 1.0 does
+The speed claim comes with a method. Every number is published with the hardware, the network
+conditions and a script to rerun it. The 10 GbE target, the lossy-path target and the resume budget
+are in [`docs/performance.md`](docs/performance.md); none has been measured yet.
 
-- **Fills fast links.** The 10 GbE target is within 10% of `iperf3`. Large transfers spread across
-  several connections, and BBRv3 handles lossy long-distance paths. Every number is published with
-  the hardware, the network conditions and a script to rerun it. See
-  [`docs/performance.md`](docs/performance.md).
-- **Verifies everything.** Content is addressed by BLAKE3, and every 16 KiB is checked before it is
-  written or returned.
-- **Resumes anywhere.** Kill it, unplug the cable, fill the disk. The next run picks up after the
-  last verified range.
-- **Sends files that are still growing.** A recording or a dump can be read on the other side while
-  it is being written, verified segment by segment.
-- **Reads any range.** Fetch and verify bytes 4G to 4.1G of a 200 GB file without the rest.
-- **Leaves your files where they are.** Sending a 100 GB file doesn't copy it anywhere first.
-- **Embeds.** Apache-2.0 or MIT. Bindings for Python, Node, Swift, Kotlin, Go, C# and C are planned
-  in this repository, with a local API and an MCP server for everything else.
+A recording or a database dump is readable on the other side while it is still being written,
+verified segment by segment. A single byte range can be fetched and verified without the rest.
+A transfer that is killed, unplugged or runs out of disk resumes after its last verified range, and
+at most one 64 MB barrier is checked twice.
+
+Files are hashed where they are. Sending a 100 GB file stores about 0.4% of its size in outboard
+data rather than copying it; `--copy` imports it instead. The engine is a library as well as a
+binary, under Apache-2.0 or MIT. Bindings for Python, Node, Swift, Kotlin, Go, C# and C, a local
+control API and an MCP server are planned in this repository.
 
 ## Connectivity
 
@@ -77,28 +89,19 @@ Two machines behind NATs need help to find each other.
 | Internet, when hole punching fails | A relay you run, which does carry the data |
 
 Sluice never falls back to someone else's relay. When no relay is configured, the cases that need
-one fail and say why. Once its transport check is built, after the measurements, `sluice doctor` will tell you
-which case you are in, and every transfer will show whether it went direct or through a relay.
+one fail and say why. The browser build is always relayed, because iroh in a tab has no UDP socket,
+so it needs a relay you run as well. ADR 0011 and ADR 0013.
 
-**The browser version is always relayed.** iroh in a browser tab has no UDP socket, so it reaches
-peers only through a relay. The relay can't read the traffic, but it does carry every byte, so the
-web UI needs a relay you run.
+## Run your own
 
-## Built on
+The `rendezvous` image answers address discovery and moves no transfer bytes. The `relay` image
+carries the traffic and ships with an allowlist, so nobody relays until you add an endpoint id. Both
+run through a guard that refuses a config that would open them by mistake.
 
-[iroh](https://github.com/n0-computer/iroh) for connectivity and QUIC, and
-[iroh-blobs](https://github.com/n0-computer/iroh-blobs) for content-addressed, verified streaming.
-Sluice adds:
-
-- live transfer of growing files
-- delta transfers
-- directory manifests and small-file packing
-- the parallel data path
-- the CLI, the bindings and the UI
-
-How it fits together is in [`docs/design.md`](docs/design.md). Live transfer works on the same
-principle as [Hypercore](https://github.com/holepunchto/hypercore)'s signed logs, applied to plain
-files; ADR 0004 explains the differences.
+- [`docker/rendezvous/README.md`](docker/rendezvous/README.md) has the certificate, the build and
+  the `docker run`.
+- [`docker/relay/README.md`](docker/relay/README.md) has the same, plus the allowlist and open mode.
+- [`docker/guard/README.md`](docker/guard/README.md) lists every rule the guard enforces.
 
 ## Documentation
 
@@ -107,12 +110,21 @@ files; ADR 0004 explains the differences.
 | [`docs/design.md`](docs/design.md) | Architecture, data model, storage, connectivity |
 | [`SPEC.md`](SPEC.md) | Wire protocol, with test vectors, for anyone writing a compatible implementation |
 | [`docs/performance.md`](docs/performance.md) | Targets and how they are measured |
-| [`docs/threat-model.md`](docs/threat-model.md) | What is and isn't protected |
-| [`docs/roadmap.md`](docs/roadmap.md) | Phases, open questions, what won't be built |
+| [`docs/threat-model.md`](docs/threat-model.md) | What is and is not protected |
+| [`docs/roadmap.md`](docs/roadmap.md) | 1.0, what comes after, and what will not be built |
 | [`docs/adr/`](docs/adr/README.md) | Decision records |
 | [`crates/sluice-cli/README.md`](crates/sluice-cli/README.md) | The commands, their exit codes and their JSON |
+| [`docs/install.md`](docs/install.md) | How to install and verify a release |
 | [`docs/runbooks/releasing.md`](docs/runbooks/releasing.md) | How a release is made |
-| [`docker/`](docker/relay/README.md) | The `relay` and `rendezvous` images, and the guard they start through |
+
+## Built on
+
+[iroh](https://github.com/n0-computer/iroh) for connectivity and QUIC, and
+[iroh-blobs](https://github.com/n0-computer/iroh-blobs) for content-addressed, verified streaming.
+Sluice adds live transfer, delta hints, directory manifests and packing, the parallel data path, and
+the CLI, bindings and UI. Live transfer works on the same principle as
+[Hypercore](https://github.com/holepunchto/hypercore)'s signed logs, applied to plain files. ADR 0004
+covers the differences.
 
 ## Contributing and security
 
