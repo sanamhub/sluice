@@ -125,6 +125,43 @@ mod resolve {
         );
         assert!(message.contains("is a link"), "{message}");
     }
+
+    /// Every component below the ancestor the file system can resolve is part of the home, two
+    /// levels down and three. A tail dropped here would make sluice create its folders in the
+    /// ancestor instead of in the home.
+    #[test]
+    fn every_component_below_the_resolved_ancestor_is_kept() {
+        let parent = tempfile::tempdir().unwrap();
+        let base = fs::canonicalize(parent.path()).unwrap();
+        BASE.with(|cell| *cell.borrow_mut() = Some(base.clone()));
+        let two = base.join("a").join("b");
+        fs::create_dir_all(&two).unwrap();
+        assert_eq!(resolve_with(&two, fails_below_base).unwrap(), two);
+        let three = two.join("c");
+        fs::create_dir(&three).unwrap();
+        assert_eq!(resolve_with(&three, fails_below_base).unwrap(), three);
+    }
+
+    /// A link two levels below the resolved ancestor is refused by the path the user gave. A walk
+    /// that stopped at the level above it would take the link for a folder and follow it.
+    #[test]
+    fn a_link_two_levels_below_the_resolved_ancestor_is_refused() {
+        let parent = tempfile::tempdir().unwrap();
+        let base = fs::canonicalize(parent.path()).unwrap();
+        let real = base.join("a").join("real");
+        fs::create_dir_all(real.join("home")).unwrap();
+        let link = base.join("a").join("link");
+        link_folder(&real, &link);
+        BASE.with(|cell| *cell.borrow_mut() = Some(base.clone()));
+        let Err(Error::Policy(message)) = resolve_with(&link.join("home"), fails_below_base) else {
+            panic!("a link two levels below the resolved ancestor was accepted");
+        };
+        assert!(
+            message.contains(&link.display().to_string()),
+            "the link is named: {message}"
+        );
+        assert!(message.contains("is a link"), "{message}");
+    }
 }
 
 mod as_given {
