@@ -118,6 +118,56 @@ fn a_fifo_at_the_key_is_refused_without_waiting() {
     assert_eq!(reported, crate::doctor::Finding::KeyNotAFile);
 }
 
+/// A key this user cannot read, as mode 0000 makes it, is rotated rather than refused: the new key
+/// goes to a temporary file and is renamed over the name, so nothing is written through the old
+/// file. `Home::identity` still refuses it, because it reads the seed.
+#[cfg(unix)]
+#[test]
+fn a_key_this_user_cannot_read_is_rotated_and_the_new_key_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = open_home();
+    let key = dir.path().join("identity.key");
+    fs::set_permissions(&key, fs::Permissions::from_mode(0o000)).unwrap();
+    let home = Home::open(dir.path()).unwrap();
+    let Err(Error::Storage(message)) = home.identity() else {
+        panic!("a key this user cannot read was loaded");
+    };
+    assert!(message.contains("cannot open"), "{message}");
+    let rotated = home.rotate_identity().unwrap();
+    assert_eq!(
+        fs::metadata(&key).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        home.identity().unwrap().endpoint_id(),
+        rotated.endpoint_id()
+    );
+}
+
+/// The same key with a second name is still refused: the count is read from the entry and checked
+/// before the owner, so rotate does not take over a key another name can change.
+#[cfg(unix)]
+#[test]
+fn a_key_this_user_cannot_read_with_two_names_is_still_refused() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = open_home();
+    let key = dir.path().join("identity.key");
+    fs::hard_link(&key, dir.path().join("second-name")).unwrap();
+    fs::set_permissions(&key, fs::Permissions::from_mode(0o000)).unwrap();
+    let home = Home::open(dir.path()).unwrap();
+    let Err(Error::Policy(message)) = home.rotate_identity() else {
+        panic!("a key this user cannot read with two names was rotated");
+    };
+    assert!(message.contains("2 links"), "{message}");
+    assert_eq!(
+        fs::metadata(&key).unwrap().permissions().mode() & 0o777,
+        0o000,
+        "the key is left as it was"
+    );
+}
+
 /// A hard link is a second name for the same file. Whoever can write through that name can change
 /// this user's key, so a key with two names is refused even though its owner is this user. A hard
 /// link needs no privilege on NTFS, so this runs on every platform.

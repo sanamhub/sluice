@@ -2,7 +2,7 @@
 
 use std::fmt;
 use std::fs::File;
-use std::io::{ErrorKind, Read};
+use std::io::{self, ErrorKind, Read};
 use std::path::Path;
 
 use ed25519_dalek::SigningKey;
@@ -11,6 +11,8 @@ use zeroize::Zeroizing;
 use super::atomic::write_atomic_secret;
 use super::storage;
 use crate::Error;
+
+mod checks;
 
 const KEY_FILE: &str = "identity.key";
 /// The secret seed of an Ed25519 key. It is the same 32 bytes `iroh::SecretKey` holds, so the
@@ -110,17 +112,25 @@ pub(super) fn load_or_create_with(
 ) -> Result<Identity, Error> {
     let path = dir.join(KEY_FILE);
     match open_key(&path)? {
-        Some(file) => {
-            check_key(&file, &path, owner)?;
-            refuse_readable_by_others(&file, &path)?;
+        Opened::Key(file) => {
+            checks::check_key(&file, &path, owner)?;
+            checks::refuse_readable_by_others(&file, &path)?;
             read_seed(file, &path).map(|seed| Identity::from_seed(&seed))
         }
-        None => create(dir),
+        Opened::Missing => create(dir),
+        // The key is there and this user may not read it. Loading refuses it; only rotate writes
+        // over a key like that.
+        Opened::Denied(e) => Err(storage("open", &path, e)),
     }
 }
 
 /// Writes a new key over the old one and returns it. An existing key is checked as
 /// [`load_or_create`] checks it first, so rotating never takes over a key another user owns.
+///
+/// A key this user may not read, as one at mode 0000 is, is rotated rather than refused: the new
+/// key goes to a temporary file and is renamed over the name, so nothing is written through the old
+/// file. The entry is checked by name before that, and a link, another kind, a second name or
+/// another owner is refused in the same words as when the key can be opened.
 pub(super) fn rotate(dir: &Path) -> Result<Identity, Error> {
     rotate_with(dir, owner_is_accepted)
 }
@@ -131,111 +141,24 @@ pub(super) fn rotate_with(
     owner: fn(&File) -> std::io::Result<bool>,
 ) -> Result<Identity, Error> {
     let path = dir.join(KEY_FILE);
-    if let Some(file) = open_key(&path)? {
-        check_key(&file, &path, owner)?;
+    match open_key(&path)? {
+        Opened::Key(file) => checks::check_key(&file, &path, owner)?,
+        Opened::Missing => {}
+        // Checked by name, because the handle that would check it is the one that was refused.
+        Opened::Denied(_) => checks::check_unopened(&path)?,
     }
     create(dir)
 }
 
-/// The key's owner, its kind and its link count, read from the handle it is read through. A name
-/// is not proof of what it holds: the key is opened once, without following a link, and every
-/// check and the read after them are of that one object.
-fn check_key(
-    file: &File,
-    path: &Path,
-    owner: fn(&File) -> std::io::Result<bool>,
-) -> Result<(), Error> {
-    let meta = file.metadata().map_err(|e| storage("inspect", path, e))?;
-    if meta.file_type().is_symlink() {
-        return Err(Error::Policy(is_a_link(path)));
-    }
-    if !meta.is_file() {
-        return Err(Error::Policy(not_a_regular_file(path)));
-    }
-    let links = links(file, &meta).map_err(|e| storage("inspect", path, e))?;
-    if links != 1 {
-        return Err(Error::Policy(too_many_links(path, links)));
-    }
-    match owner(file) {
-        Ok(true) => Ok(()),
-        Ok(false) => Err(Error::Policy(owned_by_other(path))),
-        Err(e) => Err(storage("read the owner of", path, e)),
-    }
-}
-
-/// The message for a key another user owns, which says how to take it back. Doctor says the same
-/// thing about the same key.
-fn owned_by_other(path: &Path) -> String {
-    format!(
-        "{} belongs to another user, who could change it whatever sluice sets. {}, or move it \
-         elsewhere and run `sluice id` for a new identity",
-        path.display(),
-        take_back(path)
-    )
-}
-
-/// The platform's own commands for taking a file back from another user.
-#[cfg(unix)]
-fn take_back(path: &Path) -> String {
-    format!(
-        "Run `sudo chown $(id -un) {}` to take it back",
-        path.display()
-    )
-}
-
-/// The platform's own commands for taking a file back from another user.
-#[cfg(windows)]
-fn take_back(path: &Path) -> String {
-    let shown = path.display();
-    format!(
-        "Run `takeown /f {shown}` and `icacls {shown} /inheritance:r /grant:r %USERNAME%:F` to \
-         take it back"
-    )
-}
-
-#[cfg(not(any(unix, windows)))]
-fn take_back(_path: &Path) -> String {
-    "Take ownership of it back".to_string()
-}
-
-fn is_a_link(path: &Path) -> String {
-    format!(
-        "{} is a link and not the identity key: remove it, and run `sluice id` for a new identity",
-        path.display()
-    )
-}
-
-fn not_a_regular_file(path: &Path) -> String {
-    format!(
-        "{} is not a regular file, and the identity key must be one: move it elsewhere, and run \
-         `sluice id` for a new identity",
-        path.display()
-    )
-}
-
-fn too_many_links(path: &Path, links: u64) -> String {
-    format!(
-        "{} has {links} links, and the identity key must have one: remove the other names, or \
-         move it elsewhere and run `sluice id` for a new identity",
-        path.display()
-    )
-}
-
-/// The number of names the key has, from the handle it was opened through.
-#[cfg(unix)]
-fn links(_file: &File, meta: &std::fs::Metadata) -> std::io::Result<u64> {
-    use std::os::unix::fs::MetadataExt;
-    Ok(meta.nlink())
-}
-
-#[cfg(windows)]
-fn links(file: &File, _meta: &std::fs::Metadata) -> std::io::Result<u64> {
-    super::private_windows::links_of(file)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn links(_file: &File, _meta: &std::fs::Metadata) -> std::io::Result<u64> {
-    Ok(1)
+/// What the open of `identity.key` found.
+enum Opened {
+    /// The key, open for reading.
+    Key(File),
+    /// There is no file at the name.
+    Missing,
+    /// The open was refused for access. The key is there, and rotate may write over the name
+    /// without reading through it; `Home::identity` refuses it.
+    Denied(io::Error),
 }
 
 /// Whether the owner of the key `file` is a handle to is this user, or root on Unix, or `SYSTEM`
@@ -258,25 +181,28 @@ fn owner_is_accepted(_file: &File) -> std::io::Result<bool> {
     Ok(true)
 }
 
-/// The key, open for reading, or `None` when there is none. On Unix the open neither follows a
+/// The key, open for reading, or nothing when there is none. On Unix the open neither follows a
 /// link nor waits for a writer, and a link is refused by name: a link at the key's name would put
 /// the store's identity wherever it points. A FIFO there would otherwise keep `sluice id` waiting
-/// for a writer that never comes, so the open does not block and [`check_key`] refuses it as not a
-/// regular file. Windows opens the reparse point itself, and [`check_key`] refuses it.
+/// for a writer that never comes, so the open does not block and [`checks::check_key`] refuses it
+/// as not a regular file. Windows opens the reparse point itself, and the same check refuses it.
 #[cfg(unix)]
-fn open_key(path: &Path) -> Result<Option<File>, Error> {
+fn open_key(path: &Path) -> Result<Opened, Error> {
     use rustix::fs::{Mode, OFlags};
     let flags = OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
     match rustix::fs::open(path, flags, Mode::empty()) {
-        Ok(fd) => Ok(Some(File::from(fd))),
-        Err(e) if e == rustix::io::Errno::LOOP => Err(Error::Policy(is_a_link(path))),
-        Err(e) if e == rustix::io::Errno::NOENT => Ok(None),
+        Ok(fd) => Ok(Opened::Key(File::from(fd))),
+        Err(e) if e == rustix::io::Errno::LOOP => Err(Error::Policy(checks::is_a_link(path))),
+        Err(e) if e == rustix::io::Errno::NOENT => Ok(Opened::Missing),
+        Err(e) if e == rustix::io::Errno::ACCESS || e == rustix::io::Errno::PERM => {
+            Ok(Opened::Denied(e.into()))
+        }
         Err(e) => Err(storage("open", path, e.into())),
     }
 }
 
 #[cfg(windows)]
-fn open_key(path: &Path) -> Result<Option<File>, Error> {
+fn open_key(path: &Path) -> Result<Opened, Error> {
     use std::fs::OpenOptions;
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::{
@@ -288,8 +214,9 @@ fn open_key(path: &Path) -> Result<Option<File>, Error> {
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
     {
-        Ok(file) => Ok(Some(file)),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+        Ok(file) => Ok(Opened::Key(file)),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(Opened::Missing),
+        Err(e) if e.kind() == ErrorKind::PermissionDenied => Ok(Opened::Denied(e)),
         Err(e) => Err(storage("open", path, e)),
     }
 }
@@ -312,39 +239,6 @@ fn create(dir: &Path) -> Result<Identity, Error> {
     })?;
     write_atomic_secret(dir, KEY_FILE, &seed[..])?;
     Ok(Identity::from_seed(&seed))
-}
-
-/// Refuses a key that group or other can read, write or run. The mode comes from the handle that
-/// the key will be read through, so the file checked is the file read, even if the path is
-/// swapped in between. It only reads: loosening it was somebody's choice, and a file that sluice
-/// changed would hide that the key may have been exposed. [`rotate`] never reads the old key, so it
-/// is the way out that does not need the file fixed first.
-#[cfg(unix)]
-fn refuse_readable_by_others(file: &File, path: &Path) -> Result<(), Error> {
-    use std::os::unix::fs::PermissionsExt;
-    let mode = file
-        .metadata()
-        .map_err(|e| storage("inspect", path, e))?
-        .permissions()
-        .mode()
-        & 0o7777;
-    if mode & 0o077 == 0 {
-        return Ok(());
-    }
-    Err(Error::Policy(format!(
-        "{} has mode {mode:04o}, so other users may be able to read the identity key. \
-         Run `chmod 600 {}` and try again",
-        path.display(),
-        path.display()
-    )))
-}
-
-/// Windows has no mode bits. A new key gets its own access list when it is made, and one that
-/// was loosened afterwards is not looked for, because that would need a security call on every
-/// load.
-#[cfg(not(unix))]
-fn refuse_readable_by_others(_file: &File, _path: &Path) -> Result<(), Error> {
-    Ok(())
 }
 
 /// The 32 bytes of the file. It reads one byte more than a key holds, to tell a file that is too
