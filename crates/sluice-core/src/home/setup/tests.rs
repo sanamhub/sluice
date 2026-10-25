@@ -204,6 +204,36 @@ fn what_sluice_makes_appearing_while_the_home_is_made_private_is_accepted() {
     ));
 }
 
+/// Another sluice renames its temporary files while this one lists the home. A name that was in
+/// the listing and is gone when it is looked at is not evidence of something else: the listing is
+/// read again, and the files that are there are the ones sluice makes.
+#[test]
+fn a_temporary_name_that_is_renamed_while_the_home_is_listed_is_accepted() {
+    fn restrict_while_two_temporaries_arrive(home: &Path) -> Result<(), Error> {
+        fs::create_dir(home.join("blobs")).unwrap();
+        fs::write(home.join("VERSION.tmp"), "1\n").unwrap();
+        fs::write(home.join("lock.pid.tmp"), "{}\n").unwrap();
+        Ok(())
+    }
+    fn rename_them_on_the_first_look(home: &Path) -> io::Result<bool> {
+        let parent = home.parent().expect("a home below the temporary folder");
+        let lock = parent.join("lock.pid.tmp");
+        if lock.exists() {
+            fs::rename(&lock, parent.join("lock.pid")).unwrap();
+            fs::rename(parent.join("VERSION.tmp"), parent.join("VERSION")).unwrap();
+        }
+        Ok(true)
+    }
+    let dir = tempfile::tempdir().unwrap();
+    prepare_with(
+        dir.path(),
+        true,
+        restrict_while_two_temporaries_arrive,
+        rename_them_on_the_first_look,
+    )
+    .unwrap();
+}
+
 /// Two opens of one new home at once, which is two `sluice` commands started together. Each gets
 /// through making it private, and neither is told that something appeared in it. The lock then goes
 /// to one of them, and the other is refused for that, which is a different and expected answer.

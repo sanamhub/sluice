@@ -10,7 +10,7 @@
 use std::fs::{self, DirBuilder};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::storage;
 use crate::Error;
@@ -38,9 +38,16 @@ pub(super) const FOLDERS: [&str; 3] = ["blobs", "db", "logs"];
 /// making an identity can be the one whose key is refused; the operator runs the command again.
 const FILES: [&str; 5] = ["VERSION", "VERSION.tmp", "lock", "lock.pid", "lock.pid.tmp"];
 
-/// How long a second look waits, so a process that is half way through making a home has finished
-/// its files. Long next to a few file creations, and short next to a command.
-const SETTLE: Duration = Duration::from_millis(50);
+/// How long a second look waits before looking again while a temporary name is being renamed. A
+/// few file creations take milliseconds; this is short next to a command and long enough for a
+/// thread the runner preempted.
+const SETTLE: Duration = Duration::from_millis(25);
+
+/// How long the second look keeps looking when a name disappeared between the listing and the
+/// look. A process making a home renames a few files, and a listing that keeps changing for longer
+/// than this is not making progress. Two seconds is long next to those renames and short next to a
+/// command.
+const SETTLE_DEADLINE: Duration = Duration::from_secs(2);
 
 /// Creates the home and its folders if they are missing, and returns the home with every link
 /// followed. On Unix they get mode 0700, so the identity key is not readable through the folder
@@ -117,20 +124,30 @@ pub(super) fn prepare_with(
 /// Makes an empty home private, then lists it again. Anything that appeared in between was made
 /// with the access the folder had before, possibly by another user, so the open stops and names
 /// the home, unless it is only what sluice itself makes. Another sluice opening the same new home
-/// at the same moment is the usual cause: it is given a moment to finish, and listed once more.
-/// `restrict` is a parameter so a test can put a file in the gap.
+/// at the same moment is the usual cause: its temporary files are renamed while the listing runs,
+/// so a name that disappeared is looked for again. An entry that is not sluice's, or not this
+/// user's, is refused at once. `restrict` is a parameter so a test can put a file in the gap.
 fn private_while_empty(
     home: &Path,
     restrict: fn(&Path) -> Result<(), Error>,
     owner: fn(&Path) -> io::Result<bool>,
 ) -> Result<(), Error> {
     restrict(home)?;
-    if is_empty(home)? {
-        return Ok(());
-    }
-    std::thread::sleep(SETTLE);
-    if holds_only_what_sluice_makes(home, owner)? {
-        return Ok(());
+    let deadline = Instant::now() + SETTLE_DEADLINE;
+    loop {
+        if is_empty(home)? {
+            return Ok(());
+        }
+        match holds_only_what_sluice_makes(home, owner)? {
+            Look::Complete => return Ok(()),
+            Look::Other => break,
+            Look::Changed => {
+                if Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(SETTLE);
+            }
+        }
     }
     Err(Error::Policy(format!(
         "{} was empty, and something appeared in it while sluice made it private. Look at what \
@@ -138,6 +155,17 @@ fn private_while_empty(
          run the command again",
         home.display()
     )))
+}
+
+/// What a listing of a home that is being made private found.
+enum Look {
+    /// Every entry is one sluice makes, owned by this user, and none changed under the listing.
+    Complete,
+    /// An entry disappeared between the listing and the look: another sluice renamed a temporary
+    /// file. The listing is read again.
+    Changed,
+    /// An entry is not what sluice makes, or is not this user's. No later look can accept it.
+    Other,
 }
 
 /// Whether every entry is a file or folder of the names sluice makes, and is what it should be: a
@@ -148,12 +176,14 @@ fn private_while_empty(
 fn holds_only_what_sluice_makes(
     home: &Path,
     owner: fn(&Path) -> io::Result<bool>,
-) -> Result<bool, Error> {
+) -> Result<Look, Error> {
     for entry in fs::read_dir(home).map_err(|e| storage("list", home, e))? {
         let entry = entry.map_err(|e| storage("list", home, e))?;
         let path = entry.path();
-        let Ok(meta) = fs::symlink_metadata(&path) else {
-            return Ok(false);
+        let meta = match fs::symlink_metadata(&path) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Look::Changed),
+            Err(e) => return Err(storage("read", &path, e)),
         };
         let made = match entry.file_name().to_str() {
             Some(name) if FOLDERS.contains(&name) => {
@@ -163,14 +193,16 @@ fn holds_only_what_sluice_makes(
             _ => false,
         };
         if !made {
-            return Ok(false);
+            return Ok(Look::Other);
         }
-        let ours = owner(&path).map_err(|e| storage("read the owner of", &path, e))?;
-        if !ours {
-            return Ok(false);
+        match owner(&path) {
+            Ok(true) => {}
+            Ok(false) => return Ok(Look::Other),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Look::Changed),
+            Err(e) => return Err(storage("read the owner of", &path, e)),
         }
     }
-    Ok(true)
+    Ok(Look::Complete)
 }
 
 /// Makes the parents of the home, then the home, and says whether the home was new. The home is
