@@ -1,4 +1,5 @@
 mod big;
+mod collide;
 mod common;
 mod disk;
 mod files;

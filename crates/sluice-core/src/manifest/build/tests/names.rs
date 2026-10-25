@@ -1,6 +1,6 @@
 //! Names a receiver would reject: every one is listed with its rule, nothing is hashed, and the
-//! folder is refused. Names that Windows cannot create are in the `cfg(unix)` tests, which run in
-//! WSL.
+//! folder is refused. Names that Windows cannot create are in the `cfg(unix)` tests, which run on
+//! the Unix runners.
 
 use super::common::*;
 use crate::Error;
@@ -25,6 +25,9 @@ fn a_name_in_nfd_is_sent_in_nfc() {
     );
 }
 
+// The default APFS volume is normalization-insensitive, so these two spellings are one entry
+// there. `manifest::tests::entry_rules` checks the collision without a file system.
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn two_names_that_become_one_path_after_nfc_refuse_the_build() {
     let dir = tempfile::tempdir().expect("a temporary folder");
@@ -205,6 +208,10 @@ mod unix {
         );
     }
 
+    // The next four tests need names that differ only in case to be two entries. The default macOS
+    // volume is case-insensitive, so they wait for a case-sensitive one; `build::tests::collide`
+    // checks the same pairs without a file system.
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn two_names_that_differ_only_in_case_refuse_the_build() {
         let dir = tempfile::tempdir().expect("a temporary folder");
@@ -221,6 +228,7 @@ mod unix {
         );
     }
 
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn sharp_s_against_ss_collides_through_full_folding() {
         let dir = tempfile::tempdir().expect("a temporary folder");
@@ -236,6 +244,7 @@ mod unix {
         );
     }
 
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn two_folders_that_differ_in_case_collide_whatever_is_inside() {
         let dir = tempfile::tempdir().expect("a temporary folder");
@@ -248,6 +257,7 @@ mod unix {
         );
     }
 
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn a_collision_of_two_and_a_twin_are_told_apart() {
         let dir = tempfile::tempdir().expect("a temporary folder");

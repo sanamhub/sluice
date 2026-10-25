@@ -77,7 +77,9 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           dir="$(mktemp -d)"
-          sudo chown root:root "$dir"
+          # macOS has no group named root: root's group there is wheel, but its gid is 0 as on
+          # Linux, so the numeric form is the one both systems accept.
+          sudo chown 0:0 "$dir"
           sudo chmod 755 "$dir"
           echo "SLUICE_ROOT_OWNED_DIR=$dir" >> "$GITHUB_ENV"
       # nextest does not run doctests.
