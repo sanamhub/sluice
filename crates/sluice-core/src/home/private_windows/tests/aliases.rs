@@ -2,16 +2,15 @@
 //! for the machine's own RID-500 account, `SYSTEM` is `SY`, and `Administrators` is `BA`, so a list
 //! built from full SIDs has to be compared after the same conversion that reads it back.
 
+use super::super::admin::built_in_administrator_sid;
 use super::super::lists::has_private_list_for;
-use super::super::{INHERIT, canonical_sddl, private_sddl, user_sid};
+use super::super::{INHERIT, canonical_sddl, private_sddl};
 
 /// The SID of this machine's built-in Administrator, which every Windows has even when the account
-/// is disabled. It is the current account's domain with RID 500; the account the runner runs as is
-/// that one, which is why a list built from its full SID never equaled the `LA` read back.
+/// is disabled. It is the machine's account domain with RID 500, read from the local security
+/// authority, so a domain account or a Microsoft Entra account does not change it.
 fn built_in_administrator() -> String {
-    let me = user_sid().unwrap();
-    let (domain, _) = me.rsplit_once('-').expect("a SID has at least two parts");
-    format!("{domain}-500")
+    built_in_administrator_sid().expect("the machine's account domain and its RID 500")
 }
 
 /// A list that is protected from inheritance, as one sluice set on a home is.

@@ -54,6 +54,9 @@ mod lists;
 mod owner;
 mod space;
 
+#[cfg(test)]
+mod admin;
+
 pub(in crate::home) use links::{links_of, links_of_path};
 pub(in crate::home) use lists::{is_private_dir, is_private_file};
 pub(in crate::home) use owner::{is_owned_by_this_user, is_owned_by_us_handle};
