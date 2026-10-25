@@ -115,15 +115,17 @@ fn a_closed_stdout_is_not_an_error() {
     }
 }
 
-/// The same, as a shell pipeline. `pipefail` makes the status that of sluice and not of `head`.
+/// The same, as a shell pipeline, with a reader that takes one byte and closes the pipe. The rest
+/// of the output has nowhere to go, and `pipefail` makes the status that of sluice and not of
+/// `head`.
 #[cfg(unix)]
 #[test]
-fn id_piped_to_head_c_0_exits_0_and_says_nothing() {
+fn id_piped_to_a_head_that_reads_one_byte_exits_0_and_says_nothing() {
     let dir = tempfile::tempdir().unwrap();
     sluice(dir.path()).arg("id").assert().success();
     let program = assert_cmd::cargo::cargo_bin("sluice");
     let output = std::process::Command::new("bash")
-        .args(["-c", "set -o pipefail; \"$0\" id | head -c 0"])
+        .args(["-c", "set -o pipefail; \"$0\" id | head -c 1 >/dev/null"])
         .arg(&program)
         .env("SLUICE_HOME", dir.path())
         .output()
