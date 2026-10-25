@@ -22,7 +22,7 @@ throughput, not the tab's hash rate.
 `sluice-wasm` uses `blake3/wasm32_simd` without `rayon`. The PWA sets no COOP or COEP headers and can be
 served from any static host.
 
-This holds only if single-threaded hashing outpaces the relay. M0 measures BLAKE3 WASM throughput in
+This holds only if single-threaded hashing outpaces the relay. BLAKE3 WASM throughput is measured in
 Chrome, Firefox and Safari, on desktop and on iOS. If the slowest supported browser hashes slower than
 a relay an operator would plausibly run, a new ADR replaces this one.
 
@@ -30,4 +30,4 @@ a relay an operator would plausibly run, a new ADR replaces this one.
 
 - The PWA can be hosted on GitHub Pages, any CDN, or the rendezvous VPS itself.
 - If threads become necessary later, the cost is a hosting requirement and a docs change, not code.
-- No public per-browser BLAKE3 WASM figures exist, so the M0 numbers are published with the rest.
+- No public per-browser BLAKE3 WASM figures exist, so the per-browser numbers are published with the rest.

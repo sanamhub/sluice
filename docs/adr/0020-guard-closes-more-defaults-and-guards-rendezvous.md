@@ -7,8 +7,8 @@
 
 ## Context
 
-Review of the guard of ADR 0019 found no config it accepts that iroh-relay 1.4.0 runs open. It
-did find four more places where a config or a deployment ends up less closed than it reads. Line
+The guard of ADR 0019 accepts no config that iroh-relay 1.4.0 runs open. Four more places end up
+less closed than a config or a deployment reads, though. Line
 numbers are in `iroh-relay-1.4.0/src/main.rs`.
 
 - **HTTPS can be turned off in the file.** `[tls] dangerous_http_only = true` drops HTTPS

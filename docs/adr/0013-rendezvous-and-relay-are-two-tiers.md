@@ -28,7 +28,7 @@ Two container images:
 Rejected: one image with a flag. The two differ in operating cost by an order of magnitude, and a flag
 hides that.
 
-M0 measures the direct-connection rate with `rendezvous` alone and publishes it next to the
+The direct-connection rate with `rendezvous` alone is measured and published next to the
 connectivity table in `docs/design.md`.
 
 ## Consequences

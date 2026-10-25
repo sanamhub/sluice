@@ -20,7 +20,7 @@ older `noq`, but no measurement shows Cubic doing well on this stack.
 Sluice configures BBRv3 on every connection it opens. `--congestion cubic` remains available for
 comparison and for networks where BBR misbehaves.
 
-M0 measures both on every scenario, so this default is confirmed or reversed by numbers.
+Both are measured on every scenario, so this default is confirmed or reversed by numbers.
 
 ## Consequences
 

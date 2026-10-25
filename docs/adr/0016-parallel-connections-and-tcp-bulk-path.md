@@ -18,8 +18,8 @@ streams at once.
 ## Decision
 
 1. **Sharding is the normal data path.** A transfer above a size threshold splits its ranges across
-   `min(cores / 2, 4)` QUIC connections to the same peer. The threshold is set by M0.
-2. **A TCP bulk path is built if M0 asks for it.** When a direct route to the peer exists, data moves
+   `min(cores / 2, 4)` QUIC connections to the same peer. The threshold is set by the measurement.
+2. **A TCP bulk path is built if the measurement asks for it.** When a direct route to the peer exists, data moves
    over several TCP streams with TLS 1.3 (kTLS on Linux), plugged in through iroh's custom transport
    hook. QUIC keeps discovery, hole punching, relay and control. A relayed path never uses it.
 
@@ -35,7 +35,7 @@ limited.
 
 - The 10 GbE target becomes reachable without waiting for upstream QUIC performance work.
 - The TCP path needs its own handshake bound to the QUIC session's identity, and its own tests. That
-  is real work, and the M0 result decides whether it lands in 1.0 or 1.1.
+  is real work, and the measurement decides whether it lands in 1.0 or 1.1.
 - Verification is unchanged: bytes arriving over TCP are checked against the same BLAKE3 tree.
 - Revisit the TCP path if `noq` reaches the target on its own, through ACK frequency and receive-side
   batching.

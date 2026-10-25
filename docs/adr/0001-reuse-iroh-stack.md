@@ -36,6 +36,6 @@ store.
   a month.
 - `iroh-blobs` is pre-1.0 and may change its protocol again. Our ticket envelope turns that into a
   version bump instead of broken tickets, and the interop matrix catches it.
-- `noq` has no published throughput numbers. ADR 0010 measures it before anything depends on it.
-- Revisit if n0 stops maintaining `iroh-blobs`, or if M0 shows the stack cannot reach the targets even
+- `noq` has no published throughput numbers. ADR 0010 measures the transport before anything depends on it.
+- Revisit if n0 stops maintaining `iroh-blobs`, or if the measurement shows the stack cannot reach the targets even
   with ADR 0016.

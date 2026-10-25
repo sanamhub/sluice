@@ -20,7 +20,7 @@ speed, and every later phase sits on this layer.
 
 ## Decision
 
-M0 measures before any product code exists, on Linux 10 GbE and on macOS:
+The transport is measured before any product code exists, on Linux 10 GbE and on macOS:
 
 1. `iroh` plus `iroh-blobs` with one connection and with several.
 2. Each with default and tuned windows, under Cubic and BBRv3.
