@@ -130,3 +130,27 @@ fn a_key_that_is_a_folder_is_not_a_regular_file() {
     };
     assert!(message.contains("not a regular file"), "{message}");
 }
+
+/// A key with two faults at once, a second name and another owner, gets one answer: the link count
+/// is read before the owner, in doctor and in `Home::identity` alike, so the pair of refusals does
+/// not depend on which check asked first.
+#[test]
+fn a_key_with_two_names_and_another_owner_gets_the_link_count_from_both() {
+    use crate::home::doctor::checks::key_with_owner;
+
+    let dir = ready_home();
+    fs::hard_link(
+        dir.path().join("identity.key"),
+        dir.path().join("second-name"),
+    )
+    .expect("hard link");
+    let reported = key_with_owner(dir.path(), dir.path(), |_| Ok(false));
+    assert_eq!(reported, Finding::KeyHasLinks(2));
+    let Err(Error::Policy(message)) =
+        crate::home::identity::load_or_create_with(dir.path(), |_| Ok(false))
+    else {
+        panic!("a key with two names and another owner loaded");
+    };
+    assert!(message.contains("2 links"), "{message}");
+    assert!(!message.contains("belongs to another user"), "{message}");
+}

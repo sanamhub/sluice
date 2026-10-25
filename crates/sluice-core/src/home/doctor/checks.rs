@@ -144,10 +144,11 @@ pub(super) fn access(home: &Path, given: &Path) -> Finding {
     home_not_private(home, given).unwrap_or(Finding::AccessPrivate)
 }
 
-/// The key's owner, kind, link count, length and access, from the key's own metadata and access
-/// list. Its bytes are never read. A key another user owns is not this user's to use, and one with
-/// two names can be changed through the other one, so both fail here as `Home::identity` fails
-/// them.
+/// The key's kind, link count, owner, length and access, from the key's own metadata and access
+/// list. Its bytes are never read. The order is `check_key`'s, link, kind, link count, owner, so a
+/// key with two faults gets one answer here and in the message `Home::identity` gives. A key
+/// another user owns is not this user's to use, and one with two names can be changed through the
+/// other one, so both fail here as `Home::identity` fails them.
 pub(super) fn key(home: &Path, given: &Path) -> Finding {
     key_checked(home, given, setup::owned_by_this_user)
 }
@@ -176,17 +177,17 @@ fn key_checked(home: &Path, given: &Path, owner: fn(&Path) -> io::Result<bool>) 
     if !meta.is_file() {
         return Finding::KeyNotAFile;
     }
-    match owner(&path) {
-        Ok(true) => {}
-        Ok(false) => return Finding::KeyOwnedByOther,
-        Err(e) => return Finding::KeyUnreadable(named(given, "identity.key", &e)),
-    }
     let links = match links(&path, &meta) {
         Ok(links) => links,
         Err(e) => return Finding::KeyUnreadable(named(given, "identity.key", &e)),
     };
     if links != 1 {
         return Finding::KeyHasLinks(links);
+    }
+    match owner(&path) {
+        Ok(true) => {}
+        Ok(false) => return Finding::KeyOwnedByOther,
+        Err(e) => return Finding::KeyUnreadable(named(given, "identity.key", &e)),
     }
     if let Some(open) = key_open_to_others(&path, given, &meta) {
         return open;
