@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description = "Tickets, manifests, packing, ranges and the home layout for Sluice"
+homepage.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["p2p", "file-transfer", "blake3", "quic", "iroh"]
+categories = ["network-programming", "filesystem", "cryptography"]
 
 [dependencies]
 blake3.workspace = true

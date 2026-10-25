@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description = "The signed segmented log behind Sluice's live transfer of growing files"
+homepage.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["p2p", "file-transfer", "streaming", "blake3", "iroh"]
+categories = ["network-programming", "cryptography"]
 
 # No sluice-core: it brings getrandom and filesystem code, and the browser build of this crate must
 # need neither.

@@ -15,8 +15,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.90"
 license = "Apache-2.0 OR MIT"
-# The installers dist writes download from this repository's GitHub releases.
+# The installers dist writes download from this repository's GitHub releases. The homepage points at
+# the same place until the project has a domain.
 repository = "https://github.com/sanamhub/sluice"
+homepage = "https://github.com/sanamhub/sluice"
 
 [workspace.dependencies]
 anyhow = "1"

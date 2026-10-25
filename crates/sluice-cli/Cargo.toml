@@ -4,7 +4,12 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+description = "The sluice command-line tool for peer-to-peer file transfer"
+homepage.workspace = true
 repository.workspace = true
+readme = "README.md"
+keywords = ["p2p", "file-transfer", "cli", "quic", "iroh"]
+categories = ["command-line-utilities", "network-programming"]
 
 [lib]
 name = "sluice_cli"
