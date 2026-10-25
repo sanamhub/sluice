@@ -171,9 +171,6 @@ fn a_name_that_is_not_utf8_has_no_manifest_text() {
 
 #[cfg(unix)]
 mod unix {
-    use std::ffi::OsStr;
-    use std::os::unix::ffi::OsStrExt;
-
     use super::super::common::*;
     use crate::manifest::Reason;
 
@@ -190,6 +187,9 @@ mod unix {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn a_name_that_is_not_utf8_refuses_the_build_and_is_shown_lossily() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
         let dir = tempfile::tempdir().expect("a temporary folder");
         let name = OsStr::from_bytes(b"bad-\xff-name");
         std::fs::write(dir.path().join(name), b"x").expect("write");
