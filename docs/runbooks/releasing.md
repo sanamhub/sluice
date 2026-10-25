@@ -121,7 +121,7 @@ The version in the tag must be the one in `Cargo.toml`: `dist` refuses a tag tha
 version.
 4. Watch the `release` run. The `ci` jobs come first, then `plan`, which refuses a tag with anything
    but letters, digits, `.` and `-` after the `v`. Then the six binary builds, the four image builds
-   and the installers. `host` waits for all of them, and the reviewer approves it when they are
+   and the installers. `host` waits for all of them, and the approver approves it when they are
    green, then the two `image-publish` jobs once the release is up.
 
 **A failed build publishes nothing.** If either image fails on either architecture, `host` does not
@@ -132,7 +132,7 @@ fix it on `main`, and tag the next patch version.
 
 If `host` fails after creating the draft, the draft remains and the next `host` refuses to start
 while a release or draft for the tag exists. It names the command: `gh release delete <tag> --yes`.
-Then **Re-run failed jobs**, and the reviewer approves again.
+Then **Re-run failed jobs**, and the approver approves again.
 
 A failed push after `host` is different: the release is already public. This is the order, and what
 a failure leaves:
