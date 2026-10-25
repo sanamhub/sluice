@@ -168,18 +168,22 @@ jobs:
           AMD64_ID: ${{ steps.standins.outputs.amd64 }}
           ARM64_ID: ${{ steps.standins.outputs.arm64 }}
         run: bash .github/release/push-image.sh localhost:5000 arch "$AMD64_ID" "$ARM64_ID"
-      # A third digest under the version tag, after the two architecture pushes. `index` must build
-      # the index from the digests it is given, which are the ones attested, and not from this tag.
+      # A third digest pushed over the amd64 tag, after `push-arch` and before `push-index`. `index`
+      # must build the index from the digests it is given, which are the ones attested. An `index`
+      # that read `<version>-amd64` back from the registry instead would list this digest, and the
+      # check below fails on that. Under the version tag the old script read the two architecture
+      # tags and passed, so that case proved nothing.
       - id: moved
-        name: Move the version tag to a third digest
+        name: Move the amd64 tag to a third digest
         run: |
           docker buildx build --platform linux/amd64 --tag "sluice-$IMAGE:moved" --load \
             --file docker/push-test/Dockerfile \
             --label "org.opencontainers.image.version=moved" docker/push-test
-          docker tag "sluice-$IMAGE:moved" "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test"
-          docker push "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test"
+          docker tag "sluice-$IMAGE:moved" \
+            "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test-amd64"
+          docker push "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test-amd64"
           moved="$(docker buildx imagetools inspect \
-            "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test" \
+            "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test-amd64" \
             --format '{{json .Manifest}}' | jq --raw-output .digest)"
           echo "moved=$moved" >> "$GITHUB_OUTPUT"
       - id: push-index
@@ -189,7 +193,7 @@ jobs:
         run: bash .github/release/push-image.sh localhost:5000 index "$AMD64_DIGEST" "$ARM64_DIGEST"
       # The script wrote a digest for each architecture and the index. Each must answer in the
       # registry as the manifest the script checked, the version tag must be the index, and the
-      # index must list the two digests it was given and not the moved tag's.
+      # index must list the two digests it was given and not the moved amd64 tag's.
       - name: Check what was pushed
         env:
           NAME: ${{ steps.push-index.outputs.name }}
@@ -210,6 +214,10 @@ jobs:
           listed="$(docker buildx imagetools inspect "$NAME:0.0.0-test" --raw \
             | jq --raw-output '.manifests[].digest' | sort)"
           want="$(printf '%s\n%s\n' "$AMD64" "$ARM64" | sort)"
+          if grep -qxF "$MOVED" <<< "$listed"; then
+            echo "::error::the index lists the moved amd64 tag, not the digest push-arch pushed"
+            exit 1
+          fi
           [ "$listed" = "$want" ]
       # A registry that starts with a dash would make the repository name below mean something
       # else, so it is refused before a token is sent.
