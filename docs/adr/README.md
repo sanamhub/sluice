@@ -1,11 +1,11 @@
 # Architecture decision records
 
 One file per decision that is not obvious from the code. Each has a status, a date and an approver.
-An ADR is edited freely while it is Proposed. Once Accepted it is frozen, and a change of mind is a new
-ADR that supersedes it, with both linking to each other.
+An ADR is edited freely while it is Proposed. Once Accepted it is frozen, and a change of mind is a
+new ADR that supersedes it, with both linking to each other.
 
-Format: Context, Decision, Consequences. Context gives the forces with numbers. Decision is short and
-testable. Consequences include what it costs and what would make us revisit it.
+Format: Context, Decision, Consequences. Context gives the forces with numbers. Decision is short
+and testable. Consequences include what it costs and what would make us revisit it.
 
 | ADR | Decision | Status |
 |---|---|---|

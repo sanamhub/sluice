@@ -1,8 +1,6 @@
 # 0002. Rust for the engine, TypeScript for the UI, nothing else in the product
 
-**Status:** Accepted
-**Date:** 2026-10-19
-**Approved by:** @sanamhub
+**Status:** Accepted **Date:** 2026-10-19 **Approved by:** @sanamhub
 
 ## Context
 
@@ -25,8 +23,8 @@ code a maintainer writes by hand.
 
 The multi-user service is not scheduled. It can return as its own proposal once there is demand.
 
-Rejected: Go for the engine. quic-go has no equivalent of iroh's traversal and verified store, and every
-Go transfer tool we compared sits below the speed tier we are aiming for.
+Rejected: Go for the engine. quic-go has no equivalent of iroh's traversal and verified store, and
+every Go transfer tool we compared sits below the speed tier we are aiming for.
 
 ## Consequences
 

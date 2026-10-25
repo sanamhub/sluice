@@ -1,21 +1,21 @@
 # Roadmap
 
-What 1.0 includes, what comes after, and what Sluice does not build. Dates are deliberately absent: a
-release ships when its exit criteria pass.
+What 1.0 includes, what comes after, and what Sluice does not build. Dates are deliberately absent:
+a release ships when its exit criteria pass.
 
 ## Before 1.0: measure the transport
 
 `noq` has no published throughput numbers, and two open iroh issues report it well below link speed:
-[#4286](https://github.com/n0-computer/iroh/issues/4286) (about 40% of a LAN link with BBR, far worse
-with Cubic, on macOS) and [#1943](https://github.com/n0-computer/iroh/issues/1943) (about 300 Mbit/s
-where netcat reached 700). The transport is measured on Linux 10 GbE and on macOS before anything
-depends on it:
+[#4286](https://github.com/n0-computer/iroh/issues/4286) (about 40% of a LAN link with BBR, far
+worse with Cubic, on macOS) and [#1943](https://github.com/n0-computer/iroh/issues/1943) (about 300
+Mbit/s where netcat reached 700). The transport is measured on Linux 10 GbE and on macOS before
+anything depends on it:
 
 - `iroh` plus `iroh-blobs` with one connection and with N connections
 - each with default and with tuned windows, and with Cubic and BBRv3
 - against `iperf3`, single and parallel, and a parallel-TCP tool (rclone or mscp) as the bar to beat
-- on S1, S3 and S6 from [`performance.md`](performance.md#scenarios), with the one-file workload. The
-  small-file and mixed-tree workloads need the engine, so they start in 1.0
+- on S1, S3 and S6 from [`performance.md`](performance.md#scenarios), with the one-file workload.
+  The small-file and mixed-tree workloads need the engine, so they start in 1.0
 
 It also measures:
 
@@ -25,9 +25,9 @@ It also measures:
 
 The bench harness in `bench/` runs all of it.
 
-**Exit:** the numbers are published, and they settle one question. Either 1.0 ships QUIC only, or 1.0
-also ships the TCP bulk path (ADR 0016). If even that cannot reach the 10 GbE target, the target is
-revised in [`performance.md`](performance.md) with the measurement attached.
+**Exit:** the numbers are published, and they settle one question. Either 1.0 ships QUIC only, or
+1.0 also ships the TCP bulk path (ADR 0016). If even that cannot reach the 10 GbE target, the target
+is revised in [`performance.md`](performance.md) with the measurement attached.
 
 ## 1.0: the engine and the CLI
 
@@ -43,9 +43,9 @@ revised in [`performance.md`](performance.md) with the measurement attached.
 - `SPEC.md` with test vectors and a conformance runner
 - the benchmark page with S1 to S9 results
 
-**Exit:** the [`performance.md`](performance.md) targets for LAN, WAN, small files and resume are met
-or revised in public. A 100 GB transfer completes between two NATs with only a self-hosted rendezvous.
-Every at-rest budget is enforced in CI.
+**Exit:** the [`performance.md`](performance.md) targets for LAN, WAN, small files and resume are
+met or revised in public. A 100 GB transfer completes between two NATs with only a self-hosted
+rendezvous. Every at-rest budget is enforced in CI.
 
 ## 1.1: programmable
 
@@ -79,7 +79,8 @@ relay, published with each browser's ceiling and the relay's specification.
 - Mobile apps through Tauri, stating iOS background limits up front.
 - Parking a transfer for when both sides are offline.
 - Post-quantum signatures (ML-DSA) once the ecosystem supports them.
-- A multi-user control service with policy and audit, as its own proposal, once there is demand for it.
+- A multi-user control service with policy and audit, as its own proposal, once there is demand for
+  it.
 
 ## Not built
 
@@ -98,15 +99,15 @@ needs a discussion first.
 2. The direct-connection rate with a rendezvous only, from the same measurement.
 3. Live segment size and pack size. 8 MiB and 64 MiB are unmeasured. Both must be multiples of the
    16 KiB block, and they are (512 and 4096 blocks), so keeping them until measured costs nothing.
-4. The 64 KiB chunk group rule in `SPEC.md` section 5. It would cut outboard overhead from about 0.4%
-   to 0.1% for blobs over 8 GiB, but `IROH_BLOCK_SIZE` is a constant in `iroh-blobs`, so there is no
-   seam for it while static content goes through that crate. The options are:
+4. The 64 KiB chunk group rule in `SPEC.md` section 5. It would cut outboard overhead from about
+   0.4% to 0.1% for blobs over 8 GiB, but `IROH_BLOCK_SIZE` is a constant in `iroh-blobs`, so there
+   is no seam for it while static content goes through that crate. The options are:
    - make the block size a store parameter upstream
    - fork `iroh-blobs`
    - bypass it for large blobs
    - drop the rule and accept 0.4%, which is about 800 MB on a 200 GB file
 
-   It has to be settled before the spec gets test vectors for it.
+It has to be settled before the spec gets test vectors for it.
 5. Three `SPEC.md` rules that still need writing, each with test vectors:
    - push disabled, and the `get`, `get_many` and `observe` access modes set together
    - the order ALPNs are registered in, which iroh negotiates by

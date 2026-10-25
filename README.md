@@ -123,8 +123,8 @@ run through a guard that refuses a config that would open them by mistake.
 [iroh-blobs](https://github.com/n0-computer/iroh-blobs) for content-addressed, verified streaming.
 Sluice adds live transfer, delta hints, directory manifests and packing, the parallel data path, and
 the CLI, bindings and UI. Live transfer works on the same principle as
-[Hypercore](https://github.com/holepunchto/hypercore)'s signed logs, applied to plain files. ADR 0004
-covers the differences.
+[Hypercore](https://github.com/holepunchto/hypercore)'s signed logs, applied to plain files. ADR
+0004 covers the differences.
 
 ## Contributing and security
 

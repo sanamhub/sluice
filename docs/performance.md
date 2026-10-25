@@ -1,16 +1,16 @@
 # Performance
 
-Sluice aims to be the fastest way to move a file between two machines. This page says what that means
-in numbers, how it is measured, and what each number is allowed to depend on. The design choices behind
-the numbers are in [`design.md`](design.md#data-path).
+Sluice aims to be the fastest way to move a file between two machines. This page says what that
+means in numbers, how it is measured, and what each number is allowed to depend on. The design
+choices behind the numbers are in [`design.md`](design.md#data-path).
 
 A speed claim here is always scoped to a scenario below. There is no single "fastest" number.
 
 ## Targets
 
 None of these has been measured yet. The transport is measured before any product code
-([`roadmap.md`](roadmap.md)). If
-the stack cannot reach a target, the target is revised here with the measurement attached.
+([`roadmap.md`](roadmap.md)). If the stack cannot reach a target, the target is revised here with
+the measurement attached.
 
 | Scenario | Target |
 |---|---|
@@ -28,14 +28,14 @@ the stack cannot reach a target, the target is revised here with the measurement
 
 ### Why the 10 GbE target needs more than one connection
 
-Published measurements put userspace QUIC behind TCP at 10 Gbit/s, and the cost is receive-side packet
-processing, not the kernel or the disk:
+Published measurements put userspace QUIC behind TCP at 10 Gbit/s, and the cost is receive-side
+packet processing, not the kernel or the disk:
 
-- TCP beat six QUIC implementations on 10 GbE by 16% to 297% ([KIT, IETF 118](https://datatracker.ietf.org/meeting/118/materials/slides-118-maprg-sustained-throughput-performance-of-quic-implementations)).
-- Of four stacks, only the one using both GSO and GRO reached 8.3 Gbit/s ([TUM, NOMS 2026](https://www.net.in.tum.de/fileadmin/bibtex/publications/papers/spaethj-noms2026.pdf)).
+- TCP beat six QUIC implementations on 10 GbE by 16% to 297% ([KIT, IETF 118][kit]).
+- Of four stacks, only the one using both GSO and GRO reached 8.3 Gbit/s ([TUM, NOMS 2026][tum]).
 
-So the 8 Gbit/s target assumes several QUIC connections across cores, or the TCP bulk path (ADR 0016),
-and the single-connection target is set at 4 Gbit/s.
+So the 8 Gbit/s target assumes several QUIC connections across cores, or the TCP bulk path (ADR
+0016), and the single-connection target is set at 4 Gbit/s.
 
 ## At rest
 
@@ -56,11 +56,11 @@ Each of these is checked in CI on every pull request.
 
 ## How it is measured
 
-CPU work (hashing, framing, manifests, packing, range sets) runs under `divan` on CodSpeed, which counts
-instructions, so a 5% regression gate holds on shared CI runners.
+CPU work (hashing, framing, manifests, packing, range sets) runs under `divan` on CodSpeed, which
+counts instructions, so a 5% regression gate holds on shared CI runners.
 
-Throughput cannot be measured that way. It runs on a self-hosted pair of bare-metal machines, nightly
-and before every release. netem emulates the paths, because it misbehaves under nested
+Throughput cannot be measured that way. It runs on a self-hosted pair of bare-metal machines,
+nightly and before every release. netem emulates the paths, because it misbehaves under nested
 virtualization. Every published result carries:
 
 - the `iperf3` ceiling on the same path, one stream and parallel
@@ -69,12 +69,12 @@ virtualization. Every published result carries:
 - five runs, reported as median and spread
 - the result as a percentage of the lower ceiling
 
-Test data is generated from a seed, so no large files live in git. The harness and raw results are in
-`bench/`, and anyone can rerun them.
+Test data is generated from a seed, so no large files live in git. The harness and raw results are
+in `bench/`, and anyone can rerun them.
 
 The harness also asserts its own setup. iroh does not expose segment counts, but it counts the GRO
-batches the socket received. If a Linux bench host counts none during a run, GRO did not run, and the
-harness fails the run instead of publishing a number produced by a silent fallback.
+batches the socket received. If a Linux bench host counts none during a run, GRO did not run, and
+the harness fails the run instead of publishing a number produced by a silent fallback.
 
 ### Scenarios
 
@@ -95,10 +95,14 @@ tree.
 
 ### Compared against
 
-- **Peer-to-peer tools:** croc, magic-wormhole on its own relay, sendme, DashBeam, LocalSend, Syncthing.
+- **Peer-to-peer tools:** croc, magic-wormhole on its own relay, sendme, DashBeam, LocalSend,
+  Syncthing.
 - **Bulk tools:** rclone, mscp, HPN-SSH, WDT, with rsync as the baseline.
-- **Commercial tools** (Aspera, FileCatalyst) are not run. Their published S3 and S4 numbers are quoted
-  with the conditions they state.
+- **Commercial tools** (Aspera, FileCatalyst) are not run. Their published S3 and S4 numbers are
+  quoted with the conditions they state.
 
 Every competitor runs its current release at its own recommended tuning. A comparison against an
 untuned competitor is not published.
+
+[kit]: https://datatracker.ietf.org/meeting/118/materials/slides-118-maprg-sustained-throughput-performance-of-quic-implementations
+[tum]: https://www.net.in.tum.de/fileadmin/bibtex/publications/papers/spaethj-noms2026.pdf

@@ -1,22 +1,21 @@
 # 0010. Measure the transport before building on it
 
-**Status:** Accepted
-**Date:** 2026-10-19
-**Approved by:** @sanamhub
-**Relates to:** ADR 0015, ADR 0016
+**Status:** Accepted **Date:** 2026-10-19 **Approved by:** @sanamhub **Relates to:** ADR 0015, ADR
+0016
 
 ## Context
 
-`noq` is n0's fork of quinn and carries iroh's QUIC. It has no published throughput numbers. Two open
-iroh issues report it well below link speed:
+`noq` is n0's fork of quinn and carries iroh's QUIC. It has no published throughput numbers. Two
+open iroh issues report it well below link speed:
 
 - [#4286](https://github.com/n0-computer/iroh/issues/4286): single-stream `iroh-blobs` between two
-  Macs reached 42.65 MB/s with BBR against a 110 MB/s `iperf3` baseline, and 1.3 to 1.7 MB/s with Cubic.
-- [#1943](https://github.com/n0-computer/iroh/issues/1943): about 300 Mbit/s where netcat reached 700,
-  with tuned windows.
+  Macs reached 42.65 MB/s with BBR against a 110 MB/s `iperf3` baseline, and 1.3 to 1.7 MB/s with
+  Cubic.
+- [#1943](https://github.com/n0-computer/iroh/issues/1943): about 300 Mbit/s where netcat reached
+  700, with tuned windows.
 
-Published research puts userspace QUIC 16% to 297% behind TCP at 10 Gbit/s. Sluice's headline claim is
-speed, and every later phase sits on this layer.
+Published research puts userspace QUIC 16% to 297% behind TCP at 10 Gbit/s. Sluice's headline claim
+is speed, and every later phase sits on this layer.
 
 ## Decision
 

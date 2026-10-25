@@ -1,15 +1,12 @@
 # 0017. Bindings for every language, generated, in this repository
 
-**Status:** Accepted
-**Date:** 2026-10-19
-**Approved by:** @sanamhub
-**Relates to:** ADR 0003
+**Status:** Accepted **Date:** 2026-10-19 **Approved by:** @sanamhub **Relates to:** ADR 0003
 
 ## Context
 
-Sluice should be usable from most languages people write applications in. Hand-writing and maintaining
-a binding per language is out of reach for a small team. Separate repositories per language split the
-issue tracker, the CI and the release process.
+Sluice should be usable from most languages people write applications in. Hand-writing and
+maintaining a binding per language is out of reach for a small team. Separate repositories per
+language split the issue tracker, the CI and the release process.
 
 The tools differ in what they cover:
 
@@ -33,8 +30,8 @@ Two binding surfaces, both under `sdk/` in this repository:
    - `sluice-uniffi`, a UniFFI facade over it, for Python, Kotlin, Swift, Ruby, Go and C#.
    - `sluice-node` with napi-rs.
    - `sluice-wasm` with wasm-bindgen.
-2. **Out of process.** Clients generated from `proto/sluice/v1` for every other language, talking to a
-   running daemon.
+2. **Out of process.** Clients generated from `proto/sluice/v1` for every other language, talking to
+   a running daemon.
 
 Following ADR 0003, every binding passes paths, tickets and events, never file content.
 

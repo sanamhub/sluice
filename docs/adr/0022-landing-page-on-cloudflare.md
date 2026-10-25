@@ -1,9 +1,6 @@
 # 0022. The landing page lives in `site/`, on Cloudflare Workers
 
-**Status:** Accepted
-**Date:** 2026-10-25
-**Approved by:** @sanamhub
-**Relates to:** ADR 0002
+**Status:** Accepted **Date:** 2026-10-25 **Approved by:** @sanamhub **Relates to:** ADR 0002
 
 ## Context
 

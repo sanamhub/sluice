@@ -1,9 +1,7 @@
 # 0021. The guard hands iroh-relay a sealed copy, and a relay without TLS needs a flag
 
-**Status:** Accepted
-**Date:** 2026-10-23
-**Approved by:** @sanamhub
-**Relates to:** ADR 0019, ADR 0020 (this ADR extends it and replaces its decision 4)
+**Status:** Accepted **Date:** 2026-10-23 **Approved by:** @sanamhub **Relates to:** ADR 0019, ADR
+0020 (this ADR extends it and replaces its decision 4)
 
 ## Context
 
@@ -13,19 +11,19 @@ ADR 0020 decision 4 hands iroh-relay the open config file as standard input, wit
 
 - **A path that does not resolve runs open.** iroh-relay tests the path with `exists()`, which is
   false on any error, and then runs `Config::default()` (lines 548-552): relay on, access for
-  everyone, no limit. `/dev/stdin` is a link the container runtime makes, and some runtimes do
-  not. The guard now passes `/proc/self/fd/0` and checks, before exec, that it names the checked
-  file by device and inode.
-- **An edit in place gets in, and an empty file is open.** iroh-relay opens the path again and
-  reads it from the start (lines 559-567). That reaches the same inode, with whatever it holds at
-  that moment. ADR 0020 accepted that an edit in place could get in. It did not see the worst
-  case: a write that truncates the file first, as `cat >` or a generator script does, leaves
-  iroh-relay an empty file, and `toml::from_str("")` is `Config::default()`. A host file
-  bind-mounted into the container is edited this way, because a rename would break the mount.
+  everyone, no limit. `/dev/stdin` is a link the container runtime makes, and some runtimes do not.
+  The guard now passes `/proc/self/fd/0` and checks, before exec, that it names the checked file by
+  device and inode.
+- **An edit in place gets in, and an empty file is open.** iroh-relay opens the path again and reads
+  it from the start (lines 559-567). That reaches the same inode, with whatever it holds at that
+  moment. ADR 0020 accepted that an edit in place could get in. It did not see the worst case: a
+  write that truncates the file first, as `cat >` or a generator script does, leaves iroh-relay an
+  empty file, and `toml::from_str("")` is `Config::default()`. A host file bind-mounted into the
+  container is edited this way, because a rename would break the mount.
 
 ADR 0020 also kept a config with no `[tls]` allowed, for a relay behind a reverse proxy that ends
-TLS. The guard cannot tell that relay from one where TLS was forgotten. In both, a shared token
-or a bearer token crosses the network in clear text.
+TLS. The guard cannot tell that relay from one where TLS was forgotten. In both, a shared token or a
+bearer token crosses the network in clear text.
 
 ## Decision
 
@@ -48,14 +46,13 @@ Two alternatives were rejected:
 
 ## Consequences
 
-- iroh-relay reads exactly the bytes the guard checked. ADR 0020's consequence that an edit in
-  place can still get in no longer holds.
-- The guard needs `memfd_create` and its seals, in Linux since 3.17. A runtime whose seccomp
-  profile blocks them gets exit 69, not an open relay. A sealed `memfd` reopened through
-  `/proc/self/fd` was checked in WSL on 2026-10-23: it is a regular file, reads back the bytes,
-  and refuses a write and a truncate. Inside Docker's default seccomp profile it is not yet
-  checked.
+- iroh-relay reads exactly the bytes the guard checked. ADR 0020's consequence that an edit in place
+  can still get in no longer holds.
+- The guard needs `memfd_create` and its seals, in Linux since 3.17. A runtime whose seccomp profile
+  blocks them gets exit 69, not an open relay. A sealed `memfd` reopened through `/proc/self/fd` was
+  checked in WSL on 2026-10-23: it is a regular file, reads back the bytes, and refuses a write and
+  a truncate. Inside Docker's default seccomp profile it is not yet checked.
 - An operator behind a proxy adds one flag. The shipped configs all have `[tls]`, so the images'
   default commands do not change.
-- Revisit together with ADR 0019 and ADR 0020, if iroh-relay reads its config from a descriptor
-  it is given, or refuses an empty config.
+- Revisit together with ADR 0019 and ADR 0020, if iroh-relay reads its config from a descriptor it
+  is given, or refuses an empty config.

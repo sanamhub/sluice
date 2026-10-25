@@ -1,30 +1,29 @@
 # 0004. Live content is a signed log of fixed-size segments
 
-**Status:** Accepted
-**Date:** 2026-10-19
-**Approved by:** @sanamhub
+**Status:** Accepted **Date:** 2026-10-19 **Approved by:** @sanamhub
 
 ## Context
 
 Sending a file while it is still being written (a recording, a database dump, a long-running export)
 needs verification before the file is finished. A bao tree's shape depends on the total length, so a
-growing file has no stable BLAKE3 root to verify against. Publishing a "partial root" as the file grows
-does not work for the same reason.
+growing file has no stable BLAKE3 root to verify against. Publishing a "partial root" as the file
+grows does not work for the same reason.
 
-Hypercore solves a similar problem with a signed append-only Merkle log, and has done so in production
-for years. It defines its own block format, though, while we want live content to become an ordinary
-BLAKE3 blob once it is complete.
+Hypercore solves a similar problem with a signed append-only Merkle log, and has done so in
+production for years. It defines its own block format, though, while we want live content to become
+an ordinary BLAKE3 blob once it is complete.
 
 ## Decision
 
 Live content is a chain of fixed-size segments, 8 MiB by default:
 
 - Each segment is hashed as its own complete BLAKE3 tree.
-- Each log entry records its sequence number, segment root, length and the hash of the previous entry,
-  and is signed with the sender's key.
-- The unsealed tail may be served at its current length. Receivers treat it as provisional and verify
-  it again when its entry arrives.
-- On close, the sender publishes the whole-file root, and the content becomes ordinary static content.
+- Each log entry records its sequence number, segment root, length and the hash of the previous
+  entry, and is signed with the sender's key.
+- The unsealed tail may be served at its current length. Receivers treat it as provisional and
+  verify it again when its entry arrives.
+- On close, the sender publishes the whole-file root, and the content becomes ordinary static
+  content.
 
 The exact rules are in `SPEC.md` section 6.
 

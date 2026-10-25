@@ -1,15 +1,12 @@
 # 0013. Rendezvous and relay ship as two separate images
 
-**Status:** Accepted
-**Date:** 2026-10-19
-**Approved by:** @sanamhub
-**Relates to:** ADR 0011
+**Status:** Accepted **Date:** 2026-10-19 **Approved by:** @sanamhub **Relates to:** ADR 0011
 
 ## Context
 
 Two peers behind NATs need something reachable to learn their mapped addresses (rendezvous). When
-hole punching fails, they need something to carry the traffic (relay). The first costs almost nothing
-to run. The second costs whatever the transfers weigh.
+hole punching fails, they need something to carry the traffic (relay). The first costs almost
+nothing to run. The second costs whatever the transfers weigh.
 
 `iroh-relay`'s `ServerConfig` has two independent optional halves: `quic`, the address discovery
 server, and `relay`, the WebSocket service that carries relayed traffic and the coordination side
@@ -21,12 +18,13 @@ What is not known is how much hole punching depends on that side channel.
 
 Two container images:
 
-- `rendezvous`: address discovery only. Fits the smallest VPS. The default recommendation in the docs.
-- `relay`: both halves, authorization on (ADR 0011). The image with a bandwidth bill, and the docs say
-  so next to its name.
+- `rendezvous`: address discovery only. Fits the smallest VPS. The default recommendation in the
+  docs.
+- `relay`: both halves, authorization on (ADR 0011). The image with a bandwidth bill, and the docs
+  say so next to its name.
 
-Rejected: one image with a flag. The two differ in operating cost by an order of magnitude, and a flag
-hides that.
+Rejected: one image with a flag. The two differ in operating cost by an order of magnitude, and a
+flag hides that.
 
 The direct-connection rate with `rendezvous` alone is measured and published next to the
 connectivity table in `docs/design.md`.
