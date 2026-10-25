@@ -158,8 +158,8 @@ fn a_clean_folder_is_not_refused() {
 fn a_name_that_is_not_utf8_has_no_manifest_text() {
     #[cfg(unix)]
     let name = {
-        use std::os::unix::ffi::OsStrExt;
-        std::ffi::OsStr::from_bytes(b"bad-\xff-name")
+        use std::os::unix::ffi::OsStringExt;
+        std::ffi::OsString::from_vec(b"bad-\xff-name".to_vec())
     };
     #[cfg(windows)]
     let name = {
