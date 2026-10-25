@@ -6,6 +6,7 @@ use tempfile::TempDir;
 mod aliases;
 mod junction;
 mod owner;
+mod restricted;
 
 use super::{INHERIT, canonical_sddl, dacl_sddl, open_dir, private_sddl, set_dacl, user_sid};
 use crate::Home;
@@ -182,6 +183,16 @@ fn a_fresh_home_whose_list_cannot_be_changed_is_a_storage_error() {
     let sddl = format!("D:P(D;;WD;;;OW)(D;;WD;;;{user})(A;OICI;FA;;;{user})");
     set_dacl(&open_dir(&path).unwrap(), &sddl).unwrap();
     let before = dacl_sddl(&path).unwrap();
+    // A token with the restore right asks for `WRITE_DAC` through the backup semantics whatever
+    // the list says, so no list can build this refusal under it. The no-list case for every token
+    // is in `restricted.rs`.
+    if open_dir(&path).is_ok() {
+        eprintln!(
+            "SKIPPED: this token can change the list whatever it says, so the list cannot refuse \
+             the open"
+        );
+        return;
+    }
     let Err(crate::Error::Storage(message)) = Home::open(&path) else {
         panic!("expected a storage error");
     };
