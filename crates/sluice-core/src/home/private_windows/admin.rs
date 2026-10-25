@@ -53,8 +53,10 @@ impl Drop for LsaBlock {
 }
 
 fn open_policy() -> io::Result<Policy> {
-    let mut attributes = LSA_OBJECT_ATTRIBUTES::default();
-    attributes.Length = size_of::<LSA_OBJECT_ATTRIBUTES>() as u32;
+    let attributes = LSA_OBJECT_ATTRIBUTES {
+        Length: size_of::<LSA_OBJECT_ATTRIBUTES>() as u32,
+        ..Default::default()
+    };
     let mut policy: LSA_HANDLE = 0;
     // SAFETY: a null system name asks for the local machine's policy, `attributes` is a zeroed
     // structure with its length set, and `policy` is a valid place for the handle.
