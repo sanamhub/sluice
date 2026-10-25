@@ -87,7 +87,7 @@ impl Fault {
     }
 }
 
-/// The errors of this crate. Two of the six names in `AGENTS.md`, and nothing else.
+/// The errors of this crate. Two of the six error variants in `docs/design.md`, and nothing else.
 ///
 /// # Examples
 ///

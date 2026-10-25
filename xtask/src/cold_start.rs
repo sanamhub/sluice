@@ -1,5 +1,5 @@
 //! `cargo xtask cold-start`: times how long `sluice` takes to start and finish, against the 30 ms
-//! budget in AGENTS.md.
+//! budget in `docs/performance.md`.
 //!
 //! The commands are `sluice id` with a key that already exists, and `sluice --version`, which does
 //! no work of ours. The second is the floor: on Windows most of the time is the system starting a
@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, bail};
 use serde_json::Value;
 
-/// The budget for a median, from AGENTS.md: cold start to a printed result.
+/// The budget for a median: cold start to a printed result.
 const BUDGET: Duration = Duration::from_millis(30);
 /// Runs that are timed and runs that are thrown away first, so the files are in the cache.
 const RUNS: usize = 30;

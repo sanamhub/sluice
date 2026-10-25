@@ -30,6 +30,3 @@ bench/results/local/
 .vscode/
 .idea/
 .DS_Store
-
-# maintainer notes, never published
-notes/

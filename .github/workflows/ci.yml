@@ -166,9 +166,9 @@ jobs:
           find .github -name '*.sh' -print0 | xargs -0 shellcheck
           find docker -name smoke-test.sh -print0 | xargs -0 shellcheck
 
-  # AGENTS.md sets 30 ms from a cold start to a printed result. The command builds sluice in release
-  # and fails if the median of `sluice id` or `sluice --version` is over it. Linux and Windows are
-  # the two systems it is measured on.
+  # docs/performance.md sets 30 ms from a cold start to a printed result. The command builds sluice
+  # in release and fails if the median of `sluice id` or `sluice --version` is over it. Linux and
+  # Windows are the two systems it is measured on.
   cold-start:
     strategy:
       fail-fast: false
