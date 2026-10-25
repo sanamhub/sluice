@@ -119,8 +119,8 @@ fn a_fifo_at_the_key_is_refused_without_waiting() {
 }
 
 /// A hard link is a second name for the same file. Whoever can write through that name can change
-/// this user's key, so a key with two names is refused even though its owner is this user.
-#[cfg(unix)]
+/// this user's key, so a key with two names is refused even though its owner is this user. A hard
+/// link needs no privilege on NTFS, so this runs on every platform.
 #[test]
 fn a_key_with_two_names_is_refused_by_load_and_by_rotate() {
     let dir = open_home();
