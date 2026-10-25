@@ -160,9 +160,12 @@ impl Home {
     /// is opened, and never replaced after that except by [`Home::rotate_identity`]. A key file
     /// of the wrong length is an [`Error::Storage`] and is left alone.
     ///
-    /// An existing key is opened without following a link, and refused with [`Error::Policy`] if
-    /// it is a link, is not a regular file, has more than one name, or belongs to another user.
-    /// The message names the file and, for another user's key, the command that takes it back.
+    /// An existing key is opened without following a link and without waiting for a writer, and
+    /// refused with [`Error::Policy`] if it is a link, is not a regular file, has more than one
+    /// name, or belongs to another user. A FIFO at the name is refused as not a regular file rather
+    /// than waited on. The message names the file and, for another user's key, the command that
+    /// takes it back. A key this user cannot open at all is an [`Error::Storage`] that names what
+    /// could not be opened.
     ///
     /// On Unix, an existing key that group or other has any access to is refused with
     /// [`Error::Policy`] that names the path and its mode and says to run `chmod 600`. The file is
@@ -192,6 +195,11 @@ impl Home {
     /// The key that is there is checked the way [`Home::identity`] checks it before anything is
     /// written: a link, a file that is not regular, one with more than one name, or one another
     /// user owns is [`Error::Policy`] and is left as it is.
+    ///
+    /// A key this user cannot open, as mode 0000 on Unix makes it, is replaced rather than refused:
+    /// the new key is written to a temporary file and renamed over the name, so nothing is written
+    /// through the old file. The entry is checked by name for the same four refusals, and a key
+    /// that fails one is still left as it is.
     ///
     /// # Examples
     ///
