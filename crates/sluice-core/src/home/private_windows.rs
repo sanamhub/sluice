@@ -16,6 +16,12 @@
 //! object that was created, so a path swapped for another object between the create and the call
 //! changes nothing. The handle needs `WRITE_DAC`, which the callers ask for when they open it.
 //!
+//! The text Windows gives back is not always the text it was given: the built-in Administrator
+//! (the account with RID 500) reads back as `LA`, and `SYSTEM` as `SY`. A list that was set with
+//! the user's full SID would then look different from the one that is there. Both texts go through
+//! the same conversion before they are compared, so a list that is right is not refused for the
+//! spelling of a trustee.
+//!
 //! This is the only module in the crate with `unsafe`. Every block says why its pointers are valid.
 
 #![deny(clippy::undocumented_unsafe_blocks)]
@@ -30,8 +36,9 @@ use std::ptr;
 
 use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, HANDLE, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
-    SE_FILE_OBJECT, SetSecurityInfo,
+    ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW,
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1, SE_FILE_OBJECT,
+    SetSecurityInfo,
 };
 use windows_sys::Win32::Security::{
     DACL_SECURITY_INFORMATION, GetSecurityDescriptorDacl, GetTokenInformation,
@@ -124,9 +131,8 @@ impl Drop for LocalBlock {
     }
 }
 
-/// Makes the descriptor of `sddl` and sets its DACL on the object `file` is a handle to, with
-/// inheritance from the parent stopped.
-fn set_dacl(file: &File, sddl: &str) -> io::Result<()> {
+/// The descriptor of `sddl`, allocated by the system and freed when the guard drops.
+fn descriptor_of(sddl: &str) -> io::Result<LocalBlock> {
     let wide: Vec<u16> = sddl.encode_utf16().chain(Some(0)).collect();
     let mut descriptor = ptr::null_mut();
     // SAFETY: `wide` is NUL terminated and outlives the call. `descriptor` is a valid place for
@@ -142,8 +148,45 @@ fn set_dacl(file: &File, sddl: &str) -> io::Result<()> {
     if made == 0 {
         return Err(io::Error::last_os_error());
     }
-    let descriptor = LocalBlock::new(descriptor)?;
+    LocalBlock::new(descriptor)
+}
 
+/// The text of `descriptor`, with only the access list written.
+fn sddl_of(descriptor: &LocalBlock) -> io::Result<String> {
+    let mut text: *mut u16 = ptr::null_mut();
+    // SAFETY: `descriptor` is a descriptor the system made and the guard keeps alive. `text` is a
+    // valid place for the string pointer, and the length out parameter is null.
+    let converted = unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor.0,
+            SDDL_REVISION_1,
+            DACL_SECURITY_INFORMATION,
+            &mut text,
+            ptr::null_mut(),
+        )
+    };
+    if converted == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let text = LocalBlock::new(text.cast())?;
+    // SAFETY: on success `text` is a NUL terminated UTF-16 string in a LocalAlloc block that the
+    // guard keeps alive for the call.
+    unsafe { wide_to_string(text.0.cast()) }
+}
+
+/// `sddl` as Windows writes the same list back. Windows shortens a trustee to its two-letter alias
+/// when the system has one: the built-in Administrator (the account with RID 500) becomes `LA`,
+/// `SYSTEM` becomes `SY`, and `Administrators` becomes `BA`. A list built from full SIDs and a list
+/// read back with aliases name the same access, but only after both have been through this
+/// conversion.
+pub(super) fn canonical_sddl(sddl: &str) -> io::Result<String> {
+    sddl_of(&descriptor_of(sddl)?)
+}
+
+/// Makes the descriptor of `sddl` and sets its DACL on the object `file` is a handle to, with
+/// inheritance from the parent stopped.
+fn set_dacl(file: &File, sddl: &str) -> io::Result<()> {
+    let descriptor = descriptor_of(sddl)?;
     let (mut present, mut acl, mut defaulted) = (0, ptr::null_mut(), 0);
     // SAFETY: `descriptor` is the valid descriptor made above and stays alive to the end of the
     // function. The three out parameters are valid places for a BOOL, a pointer and a BOOL.
@@ -270,9 +313,7 @@ unsafe fn wide_to_string(text: *const u16) -> io::Result<String> {
 /// Reads by path, which is a different route from the one that set it.
 fn dacl_sddl(path: &Path) -> io::Result<String> {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Security::Authorization::{
-        ConvertSecurityDescriptorToStringSecurityDescriptorW, GetNamedSecurityInfoW,
-    };
+    use windows_sys::Win32::Security::Authorization::GetNamedSecurityInfoW;
 
     let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     let mut descriptor = ptr::null_mut();
@@ -294,36 +335,13 @@ fn dacl_sddl(path: &Path) -> io::Result<String> {
     if status != 0 {
         return Err(io::Error::from_raw_os_error(status as i32));
     }
-    let descriptor = LocalBlock::new(descriptor)?;
-
-    let mut text: *mut u16 = ptr::null_mut();
-    // SAFETY: `descriptor` is the valid descriptor the call above returned and it is alive until
-    // the end of the function. `text` is a valid place for the string pointer, and the length out
-    // parameter is optional and null.
-    let converted = unsafe {
-        ConvertSecurityDescriptorToStringSecurityDescriptorW(
-            descriptor.0,
-            SDDL_REVISION_1,
-            DACL_SECURITY_INFORMATION,
-            &mut text,
-            ptr::null_mut(),
-        )
-    };
-    if converted == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let text = LocalBlock::new(text.cast())?;
-    // SAFETY: on success `text` is a NUL terminated UTF-16 string in a LocalAlloc block that the
-    // guard keeps alive for the call.
-    unsafe { wide_to_string(text.0.cast()) }
+    sddl_of(&LocalBlock::new(descriptor)?)
 }
 
 /// The access list of the object `file` is a handle to, as SDDL. The handle is the one the list
 /// was set through, so the read-back cannot be of another object behind a swapped link.
 fn dacl_sddl_of(file: &File) -> io::Result<String> {
-    use windows_sys::Win32::Security::Authorization::{
-        ConvertSecurityDescriptorToStringSecurityDescriptorW, GetSecurityInfo,
-    };
+    use windows_sys::Win32::Security::Authorization::GetSecurityInfo;
 
     let mut descriptor = ptr::null_mut();
     // SAFETY: the handle is open for as long as the borrow of `file` lasts, which covers the call.
@@ -344,28 +362,7 @@ fn dacl_sddl_of(file: &File) -> io::Result<String> {
     if status != 0 {
         return Err(io::Error::from_raw_os_error(status as i32));
     }
-    let descriptor = LocalBlock::new(descriptor)?;
-
-    let mut text: *mut u16 = ptr::null_mut();
-    // SAFETY: `descriptor` is the valid descriptor the call above returned and it is alive until
-    // the end of the function. `text` is a valid place for the string pointer, and the length out
-    // parameter is optional and null.
-    let converted = unsafe {
-        ConvertSecurityDescriptorToStringSecurityDescriptorW(
-            descriptor.0,
-            SDDL_REVISION_1,
-            DACL_SECURITY_INFORMATION,
-            &mut text,
-            ptr::null_mut(),
-        )
-    };
-    if converted == 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let text = LocalBlock::new(text.cast())?;
-    // SAFETY: on success `text` is a NUL terminated UTF-16 string in a LocalAlloc block that the
-    // guard keeps alive for the call.
-    unsafe { wide_to_string(text.0.cast()) }
+    sddl_of(&LocalBlock::new(descriptor)?)
 }
 
 /// The well-known SID of `Administrators`, which owns what a process that runs elevated creates.

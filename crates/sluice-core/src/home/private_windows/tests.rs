@@ -3,6 +3,7 @@ use std::path::Path;
 
 use tempfile::TempDir;
 
+mod aliases;
 mod junction;
 mod owner;
 
