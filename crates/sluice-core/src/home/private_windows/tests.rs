@@ -137,9 +137,12 @@ fn a_fresh_home_whose_list_cannot_be_changed_is_a_storage_error() {
     let path = parent.path().join("home");
     fs::create_dir(&path).unwrap();
     // `OW` is OWNER RIGHTS: denying it WRITE_DAC takes away the right to change the list that an
-    // owner otherwise always has, so no administrator is needed to build this case. The user keeps
-    // full control otherwise, so the folder can still be deleted.
-    let sddl = format!("D:P(D;;WD;;;OW)(A;OICI;FA;;;{})", user_sid().unwrap());
+    // owner otherwise always has, so no administrator is needed to build this case. An elevated
+    // token makes `Administrators` the owner of a folder it creates, and `OW` then names a group
+    // and not this user, so the user's own SID is denied as well. The user keeps full control
+    // otherwise, so the folder can still be deleted.
+    let user = user_sid().unwrap();
+    let sddl = format!("D:P(D;;WD;;;OW)(D;;WD;;;{user})(A;OICI;FA;;;{user})");
     set_dacl(&open_dir(&path).unwrap(), &sddl).unwrap();
     let before = dacl_sddl(&path).unwrap();
     let Err(crate::Error::Storage(message)) = Home::open(&path) else {
