@@ -229,18 +229,24 @@ const NEAR_MISSES: [&str; 6] = [
     "enable_metrics = false\n[access]\nshared_token = []\n",
 ];
 
+/// The UTF-8 name of a vector file, or the error that says it is not. Split from [`vector_files`]
+/// so the rule is checked on a name without a file system.
+fn vector_name(name: std::ffi::OsString, dir: &Path) -> anyhow::Result<String> {
+    name.into_string().map_err(|name| {
+        anyhow::anyhow!(
+            "{} holds a file whose name is not UTF-8: {name:?}",
+            dir.display()
+        )
+    })
+}
+
 /// The `cases` of every `.json` file in `dir`, by file name, in name order. A name that is not
 /// UTF-8 is an error and not a skip, because a vector file left out would quietly seed less.
 pub fn vector_files(dir: &Path) -> anyhow::Result<Vec<(String, Vec<Value>)>> {
     let mut names = Vec::new();
     for entry in fs::read_dir(dir).with_context(|| format!("cannot list {}", dir.display()))? {
         let entry = entry.with_context(|| format!("cannot list {}", dir.display()))?;
-        let name = entry.file_name().into_string().map_err(|name| {
-            anyhow::anyhow!(
-                "{} holds a file whose name is not UTF-8: {name:?}",
-                dir.display()
-            )
-        })?;
+        let name = vector_name(entry.file_name(), dir)?;
         if name.ends_with(".json") {
             names.push(name);
         }

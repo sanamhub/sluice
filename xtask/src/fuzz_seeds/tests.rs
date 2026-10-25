@@ -3,7 +3,7 @@ use std::fs;
 
 use serde_json::{Value, json};
 
-use super::{Target, framing, log, run, seeds, vector_files};
+use super::{Target, framing, log, run, seeds, vector_files, vector_name};
 use crate::conformance::{hex_bytes, vectors_dir};
 
 const WITH_VECTORS: [(Target, &str); 4] = [
@@ -167,6 +167,29 @@ fn a_log_record_over_255_bytes_is_an_error_that_names_the_case_and_not_a_cut() {
     );
 }
 
+/// The rule on the name itself, without a file system, so it runs where APFS cannot hold such a
+/// name.
+#[test]
+fn a_vector_file_name_that_is_not_utf8_is_an_error_and_not_a_skip() {
+    #[cfg(unix)]
+    let name = {
+        use std::os::unix::ffi::OsStringExt;
+        std::ffi::OsString::from_vec(b"bad\xff.json".to_vec())
+    };
+    #[cfg(windows)]
+    let name = {
+        use std::os::windows::ffi::OsStringExt;
+        // A lone surrogate: a name NTFS keeps and UTF-8 cannot hold.
+        let units: Vec<u16> = [0xd800].into_iter().chain(".json".encode_utf16()).collect();
+        std::ffi::OsString::from_wide(&units)
+    };
+    let error = vector_name(name, std::path::Path::new("vectors")).unwrap_err();
+    assert!(error.to_string().contains("not UTF-8"), "{error}");
+}
+
+// APFS refuses to create a name that is not valid UTF-8, so this case cannot be built there. The
+// rule itself is checked on the name above.
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn a_vector_file_whose_name_is_not_utf8_is_an_error_and_not_a_skip() {
     let dir = tempfile::tempdir().unwrap();

@@ -15,6 +15,13 @@ use crate::Error;
 use crate::manifest::link::LinkTarget;
 use crate::manifest::path::{ManifestPath, component_rule};
 
+/// The text a manifest carries for `name`, or [`Reason::NotUtf8`] when the file system holds a
+/// name that UTF-8 cannot. Split from [`Walker::path_of`] so the rule is checked without a file
+/// system, which APFS cannot build for such a name.
+pub(super) fn manifest_name(name: &OsStr) -> Result<&str, Reason> {
+    name.to_str().ok_or(Reason::NotUtf8)
+}
+
 /// What the walk found that goes into the manifest, in no order.
 pub(super) struct Item {
     pub path: ManifestPath,
@@ -141,9 +148,12 @@ impl Walker {
     /// normalized to NFC here, because a receiver does not normalize and the manifest has to
     /// carry the form it accepts.
     fn path_of(&mut self, folder: &Folder, name: &OsStr, shown: &str) -> Option<ManifestPath> {
-        let Some(text) = name.to_str() else {
-            self.problem(shown.to_string(), Reason::NotUtf8);
-            return None;
+        let text = match manifest_name(name) {
+            Ok(text) => text,
+            Err(reason) => {
+                self.problem(shown.to_string(), reason);
+                return None;
+            }
         };
         let nfc: String = text.nfc().collect();
         if let Some(rule) = component_rule(&nfc) {

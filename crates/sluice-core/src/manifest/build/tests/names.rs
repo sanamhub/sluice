@@ -5,6 +5,7 @@
 use super::common::*;
 use crate::Error;
 use crate::manifest::build::build;
+use crate::manifest::build::walk::manifest_name;
 use crate::manifest::{Build, Kind, Limits, Manifest, Reason};
 
 /// The decomposed spelling of `é`: `e` and a combining acute accent.
@@ -151,6 +152,23 @@ fn a_clean_folder_is_not_refused() {
     ));
 }
 
+/// APFS refuses to create a name that is not valid UTF-8, so the file-system case below is not
+/// built there. The rule itself is checked on the `OsStr` here, on every platform.
+#[test]
+fn a_name_that_is_not_utf8_has_no_manifest_text() {
+    #[cfg(unix)]
+    let name = {
+        use std::os::unix::ffi::OsStrExt;
+        std::ffi::OsStr::from_bytes(b"bad-\xff-name")
+    };
+    #[cfg(windows)]
+    let name = {
+        use std::os::windows::ffi::OsStringExt;
+        std::ffi::OsString::from_wide(&[0xd800])
+    };
+    assert_eq!(manifest_name(&name), Err(Reason::NotUtf8));
+}
+
 #[cfg(unix)]
 mod unix {
     use std::ffi::OsStr;
@@ -167,6 +185,9 @@ mod unix {
             .collect()
     }
 
+    // APFS refuses to create a name that is not valid UTF-8, so this case waits for a file system
+    // that can. The rule itself is checked without a file system above.
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn a_name_that_is_not_utf8_refuses_the_build_and_is_shown_lossily() {
         let dir = tempfile::tempdir().expect("a temporary folder");
