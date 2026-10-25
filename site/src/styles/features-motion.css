@@ -1,0 +1,359 @@
+/* The five feature drawings. Each box is 120 by 64 and keeps its size, so nothing around it moves.
+   The still frame under reduced motion is at the bottom of this file. */
+
+.art {
+  position: relative;
+  width: 120px;
+  height: 64px;
+}
+
+/* Verified blocks */
+.art-blocks {
+  display: grid;
+  grid-template-columns: repeat(6, 12px);
+  gap: 4px;
+  align-content: center;
+  justify-content: center;
+}
+
+.art-blocks .block {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--rule-strong);
+  background: transparent;
+  animation: block-fill 4.8s linear infinite;
+  animation-delay: calc(var(--i) * 0.11s);
+}
+
+@keyframes block-fill {
+  0%,
+  10% {
+    background: transparent;
+    border-color: var(--rule-strong);
+  }
+  34%,
+  80% {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  94%,
+  100% {
+    background: transparent;
+    border-color: var(--rule-strong);
+  }
+}
+
+/* Read while it is written */
+.art-live .track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 31px;
+  height: 1px;
+  background: var(--rule);
+}
+
+.art-live .write {
+  position: absolute;
+  left: 0;
+  top: 24px;
+  width: 100%;
+  height: 16px;
+  background: var(--accent-soft);
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: live-write 4.8s linear infinite;
+}
+
+.art-live .head {
+  position: absolute;
+  left: 0;
+  top: 20px;
+  width: 1px;
+  height: 24px;
+  background: var(--accent);
+  animation: live-head 4.8s linear infinite;
+}
+
+.art-live .read {
+  position: absolute;
+  left: 0;
+  top: 24px;
+  width: 1px;
+  height: 16px;
+  background: var(--muted);
+  animation: live-read 4.8s linear infinite;
+}
+
+@keyframes live-write {
+  0% {
+    transform: scaleX(0);
+  }
+  62%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes live-head {
+  0% {
+    transform: translateX(0);
+  }
+  62%,
+  100% {
+    transform: translateX(118px);
+  }
+}
+
+@keyframes live-read {
+  0%,
+  6% {
+    transform: translateX(0);
+  }
+  58%,
+  100% {
+    transform: translateX(94px);
+  }
+}
+
+/* One range out of a long file */
+.art-range {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.art-range .cell {
+  width: 5px;
+  height: 24px;
+  background: var(--rule);
+}
+
+.art-range .cell:nth-child(n + 7):nth-child(-n + 9) {
+  background: var(--accent);
+  animation: range-lift 4s ease-in-out infinite;
+}
+
+@keyframes range-lift {
+  0%,
+  55% {
+    transform: translateY(0);
+  }
+  70%,
+  90% {
+    transform: translateY(-7px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+/* Resume from the last verified range */
+.art-resume .track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 31px;
+  height: 4px;
+  background: var(--rule);
+}
+
+.art-resume .fill {
+  position: absolute;
+  top: 31px;
+  height: 4px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.art-resume .first {
+  left: 0;
+  width: 55%;
+  animation: resume-first 5s linear infinite;
+}
+
+.art-resume .second {
+  left: 55%;
+  width: 45%;
+  animation: resume-second 5s linear infinite;
+}
+
+.art-resume .cut {
+  position: absolute;
+  left: 55%;
+  top: 24px;
+  width: 1px;
+  height: 18px;
+  background: var(--text);
+  opacity: 0;
+  animation: resume-cut 5s linear infinite;
+}
+
+@keyframes resume-first {
+  0% {
+    transform: scaleX(0);
+  }
+  38%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes resume-second {
+  0%,
+  52% {
+    transform: scaleX(0);
+  }
+  88%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes resume-cut {
+  0%,
+  40% {
+    opacity: 0;
+  }
+  45%,
+  50% {
+    opacity: 1;
+  }
+  56%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* No second copy */
+.art-copy .disk {
+  position: absolute;
+  left: 0;
+  top: 18px;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--accent);
+}
+
+.art-copy .wire {
+  position: absolute;
+  left: 28px;
+  top: 32px;
+  width: 64px;
+  height: 1px;
+  background: var(--rule-strong);
+}
+
+.art-copy .peer-dot {
+  position: absolute;
+  right: 0;
+  top: 24px;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--rule-strong);
+}
+
+.art-copy .ghost {
+  position: absolute;
+  left: 36px;
+  top: 18px;
+  width: 28px;
+  height: 28px;
+  border: 1px dashed var(--rule-strong);
+  background: var(--bg);
+  opacity: 0;
+  animation: copy-ghost 5s linear infinite;
+}
+
+.art-copy .strike {
+  position: absolute;
+  left: 34px;
+  top: 31px;
+  width: 32px;
+  height: 1px;
+  background: var(--text);
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: copy-strike 5s linear infinite;
+}
+
+@keyframes copy-ghost {
+  0%,
+  12% {
+    opacity: 0;
+  }
+  28%,
+  56% {
+    opacity: 1;
+  }
+  72%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes copy-strike {
+  0%,
+  44% {
+    transform: scaleX(0);
+  }
+  58%,
+  82% {
+    transform: scaleX(1);
+  }
+  92%,
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .art-blocks .block {
+    animation: none;
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .art-live .write {
+    animation: none;
+    transform: scaleX(1);
+  }
+
+  .art-live .head {
+    animation: none;
+    transform: translateX(118px);
+  }
+
+  .art-live .read {
+    animation: none;
+    transform: translateX(94px);
+  }
+
+  .art-range .cell:nth-child(n + 7):nth-child(-n + 9) {
+    animation: none;
+    transform: translateY(-7px);
+  }
+
+  .art-resume .first,
+  .art-resume .second {
+    animation: none;
+    transform: scaleX(1);
+  }
+
+  .art-resume .cut {
+    animation: none;
+    opacity: 0;
+  }
+
+  .art-copy .ghost {
+    animation: none;
+    opacity: 0;
+  }
+
+  .art-copy .strike {
+    animation: none;
+    transform: scaleX(1);
+  }
+}

@@ -1,0 +1,72 @@
+---
+import { ADRS, INSTALL, PERFORMANCE, SPEC, THREAT_MODEL } from "../data/links";
+
+const documents = [
+    {
+        href: SPEC,
+        title: "Specification",
+        body: "The wire format, the ticket, the live log and the test vectors.",
+    },
+    {
+        href: THREAT_MODEL,
+        title: "Threat model",
+        body: "What Sluice defends against, and what it does not.",
+    },
+    {
+        href: ADRS,
+        title: "Architecture decisions",
+        body: "One record per decision that is not obvious from the code.",
+    },
+    {
+        href: PERFORMANCE,
+        title: "Performance",
+        body: "The method, the scenarios, and what each number is allowed to depend on.",
+    },
+    {
+        href: INSTALL,
+        title: "Install and verify",
+        body: "The archive names, and the attestation check to run before you do.",
+    },
+];
+---
+
+<section class="section" id="open" aria-labelledby="open-title">
+    <div class="wrap">
+        <div class="plate">
+            <div class="section-grid">
+                <div class="section-side">
+                    <h2 id="open-title">Built in the open</h2>
+                </div>
+                <div class="section-main">
+                    <p class="section-lede">
+                        The wire format, the threats, the decisions and the way performance is
+                        measured are in the repository, not on this page.
+                    </p>
+
+                    <ul class="docs">
+                        {documents.map((document) => (
+                            <li class="doc">
+                                <a class="doc-link" href={document.href}>
+                                    {document.title}
+                                </a>
+                                <span class="doc-body">{document.body}</span>
+                            </li>
+                        ))}
+                    </ul>
+
+                    <div class="targets">
+                        <h3>Targets, not measurements</h3>
+                        <p>
+                            8 Gbit/s on a 10 GbE LAN, within 10% of iperf3. Under 250 MB RSS during
+                            any transfer. None of these has been measured yet.
+                        </p>
+                        <p>
+                            Cold start to a printed result is under 30 ms, and it is checked on
+                            every pull request. There is no telemetry: no code sends any.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>

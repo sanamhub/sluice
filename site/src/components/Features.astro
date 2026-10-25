@@ -1,0 +1,71 @@
+---
+import { PERFORMANCE } from "../data/links";
+import FeatureArt from "./FeatureArt.astro";
+
+const features = [
+    {
+        kind: "blocks" as const,
+        title: "Verified blocks",
+        body: "Each 16 KiB block is checked against the file's BLAKE3 tree before it is written, so a damaged block does not reach the output.",
+        code: null,
+    },
+    {
+        kind: "live" as const,
+        title: "Read while it is written",
+        body: "Send a file that is still growing. The sender appends each segment to a signed log, and the receiver reads up to the last segment that verifies.",
+        code: null,
+    },
+    {
+        kind: "range" as const,
+        title: "One range, not the file",
+        body: "Ask for a byte range and only that range is transferred. The rest of the file is not fetched.",
+        code: "sluice recv <ticket> --range 4G:4.1G",
+    },
+    {
+        kind: "resume" as const,
+        title: "Resume where it stopped",
+        body: "After a dropped link the next attempt starts at the last verified range. The target is the first new byte within 2 s.",
+        code: null,
+    },
+    {
+        kind: "copy" as const,
+        title: "No second copy",
+        body: "The file is read where it is. The store keeps a reference, not a duplicate, so a 100 GB file needs no second copy of its data.",
+        code: null,
+    },
+];
+---
+
+<section class="section" id="features" aria-labelledby="features-title">
+    <div class="wrap">
+        <div class="plate">
+            <div class="section-grid">
+                <div class="section-side">
+                    <h2 id="features-title">What 1.0 adds</h2>
+                </div>
+                <div class="section-main">
+                    <p class="section-lede">
+                        None of these is in the binary today. They are what 1.0 is being built to
+                        do; the <a href={PERFORMANCE}>performance method</a> says which numbers are
+                        targets and which are measured.
+                    </p>
+                    <ul class="features">
+                        {features.map((feature) => (
+                            <li class="feature">
+                                <FeatureArt kind={feature.kind} />
+                                <div class="feature-copy">
+                                    <h3>{feature.title}</h3>
+                                    <p>{feature.body}</p>
+                                    {feature.code && (
+                                        <code class="feature-code">{feature.code}</code>
+                                    )}
+                                </div>
+                                <p class="feature-status mono">1.0</p>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>

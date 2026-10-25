@@ -1,0 +1,55 @@
+---
+// Four terms, four rows. The facts are design.md's: a direct path first, rendezvous for signalling
+// only, a relay you run for the rest, and no fallback to a relay nobody named.
+---
+
+<section class="section" id="how" aria-labelledby="how-title">
+    <div class="wrap">
+        <div class="plate">
+            <div class="section-grid">
+                <div class="section-side">
+                    <h2 id="how-title">How it works</h2>
+                </div>
+                <div class="section-main">
+                    <p class="section-lede">
+                        Two peers, one path, and two servers that only help them meet. A transfer
+                        that gets a direct path sends no bytes through a relay.
+                    </p>
+
+                    <dl class="how">
+                        <div class="how-row">
+                            <dt>Direct path</dt>
+                            <dd>
+                                Tried first: LAN discovery, port mapping and hole punching over
+                                QUIC. Only the two endpoints hold the file.
+                            </dd>
+                        </div>
+                        <div class="how-row">
+                            <dt>Rendezvous</dt>
+                            <dd>
+                                Answers one question, what this machine's public address is. It is
+                                signalling only and carries no transfer bytes, so the smallest VPS
+                                will do.
+                            </dd>
+                        </div>
+                        <div class="how-row">
+                            <dt>Relay</dt>
+                            <dd>
+                                Carries the whole transfer when hole punching fails. It is yours:
+                                the image runs closed and relays only the endpoint ids you list.
+                            </dd>
+                        </div>
+                        <div class="how-row">
+                            <dt>No relay, no fallback</dt>
+                            <dd>
+                                n0's public relays and DNS discovery are off. Until you name a
+                                relay, Sluice has none, and a transfer that cannot go direct fails
+                                instead of going somewhere else.
+                            </dd>
+                        </div>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>

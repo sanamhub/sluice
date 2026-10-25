@@ -1,0 +1,21 @@
+---
+import BuiltInTheOpen from "../components/BuiltInTheOpen.astro";
+import Features from "../components/Features.astro";
+import Hero from "../components/Hero.astro";
+import HowItWorks from "../components/HowItWorks.astro";
+import RunYourOwn from "../components/RunYourOwn.astro";
+import Terminals from "../components/Terminals.astro";
+import Base from "../layouts/Base.astro";
+---
+
+<Base
+    title="Sluice: peer-to-peer file transfer over QUIC"
+    description="Sluice sends a file from one machine to another over QUIC. Every 16 KiB block is checked as it lands, and a relay is used only when you run one and a direct path fails."
+>
+    <Hero />
+    <Terminals />
+    <Features />
+    <HowItWorks />
+    <RunYourOwn />
+    <BuiltInTheOpen />
+</Base>

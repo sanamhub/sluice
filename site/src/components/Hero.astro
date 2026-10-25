@@ -1,0 +1,33 @@
+---
+import { REPO, SPEC } from "../data/links";
+import HeroArt from "./HeroArt.astro";
+---
+
+<section class="hero" aria-labelledby="hero-title">
+    <div class="wrap hero-grid">
+        <div class="hero-copy">
+            <h1 id="hero-title">
+                The file goes from one machine to the other, and the middle keeps nothing.
+            </h1>
+            <p class="lede">
+                Sluice sends over QUIC, checks every 16 KiB block as it lands, and uses a relay only
+                when you run one and a direct path fails.
+            </p>
+            <p class="status">
+                <span class="status-mark" aria-hidden="true"></span>
+                In development, pre-1.0
+            </p>
+            <div class="actions">
+                <a class="button primary" href={REPO}>
+                    GitHub
+                </a>
+                <a class="button" href={SPEC}>
+                    Read the spec
+                </a>
+            </div>
+        </div>
+        <div class="hero-art">
+            <HeroArt />
+        </div>
+    </div>
+</section>

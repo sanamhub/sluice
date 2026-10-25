@@ -1,0 +1,218 @@
+/* Header, hero, section frame, footer: the page's structure and type. Tokens are in global.css. */
+
+/* Header */
+.top {
+  border-bottom: 1px solid var(--rule);
+}
+
+.top-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 4.5rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.brand img {
+  width: 26px;
+  height: 26px;
+}
+
+.top-nav {
+  display: flex;
+  gap: 1.5rem;
+  font-size: 0.9375rem;
+}
+
+.top-nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.top-nav a:hover {
+  color: var(--text);
+}
+
+/* Hero */
+.hero {
+  padding-block: clamp(3.5rem, 8vw, 6.5rem) clamp(2.5rem, 5vw, 4.5rem);
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(0, 1fr);
+  gap: clamp(2rem, 5vw, 4rem);
+  align-items: center;
+}
+
+.hero-copy {
+  display: grid;
+  gap: 1.4rem;
+  justify-items: start;
+}
+
+.hero h1 {
+  max-width: 24ch;
+}
+
+.lede {
+  max-width: 46ch;
+  color: var(--muted);
+  font-size: 1.1875rem;
+  line-height: 1.55;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--rule-strong);
+  color: var(--muted);
+  font-family: var(--font-code);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.status-mark {
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.7rem 1.15rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.button:hover {
+  border-color: var(--accent);
+}
+
+.button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.button.primary:hover {
+  border-color: var(--accent);
+}
+
+/* Figures */
+.figure {
+  margin: 0;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.hero-frame {
+  border: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.hero-svg {
+  width: 100%;
+  height: auto;
+}
+
+.caption {
+  max-width: 52ch;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+/* Sections */
+.section-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 9fr);
+  gap: clamp(1.5rem, 4vw, 3.5rem);
+  padding-block: clamp(3rem, 6vw, 5rem);
+}
+
+.section-side h2 {
+  font-size: clamp(1.35rem, 1.15rem + 0.8vw, 1.75rem);
+}
+
+.section-main {
+  display: grid;
+  gap: clamp(1.5rem, 3vw, 2.25rem);
+}
+
+.section-lede {
+  max-width: 62ch;
+  color: var(--muted);
+}
+
+/* 404 */
+.notfound {
+  display: grid;
+  gap: 1.4rem;
+  justify-items: start;
+  padding-block: clamp(4rem, 12vw, 9rem);
+}
+
+/* Footer */
+.foot {
+  margin-top: clamp(2rem, 5vw, 4rem);
+  border-top: 1px solid var(--rule);
+}
+
+.foot-inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 1.5rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.foot-note {
+  max-width: 60ch;
+}
+
+.foot-nav {
+  display: flex;
+  gap: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  .hero-grid,
+  .section-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hero h1 {
+    max-width: 26ch;
+  }
+}
+
+@media (max-width: 420px) {
+  .top-nav {
+    gap: 1rem;
+  }
+}

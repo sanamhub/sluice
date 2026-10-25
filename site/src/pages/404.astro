@@ -1,0 +1,22 @@
+---
+import { REPO } from "../data/links";
+import Base from "../layouts/Base.astro";
+---
+
+<Base title="Sluice: page not found" description="No page at this address." noindex>
+    <section class="notfound" aria-labelledby="notfound-title">
+        <div class="wrap">
+            <p class="mono muted">404</p>
+            <h1 id="notfound-title">No page here.</h1>
+            <p class="lede">The link may be old, or the page may have moved.</p>
+            <div class="actions">
+                <a class="button primary" href="/">
+                    The landing page
+                </a>
+                <a class="button" href={REPO}>
+                    GitHub
+                </a>
+            </div>
+        </div>
+    </section>
+</Base>

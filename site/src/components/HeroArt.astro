@@ -1,0 +1,97 @@
+---
+// The hero diagram, drawn to the same plate rules as the page: the flow runs down the gate, as the
+// mark's stream does. Every moving part is CSS; the whole drawing is aria-hidden and the caption
+// below says what it shows, so nothing depends on it.
+const verticals = Array.from({ length: 8 }, (_, i) => 60 + i * 60);
+const horizontals = Array.from({ length: 7 }, (_, i) => 40 + i * 60);
+const cells = Array.from({ length: 9 }, (_, i) => i);
+const cellX = (i: number) => 226 + (i % 3) * 25;
+const cellY = (i: number) => 44 + Math.floor(i / 3) * 25;
+---
+
+<figure class="figure">
+    <div class="hero-frame">
+        <svg
+            class="hero-svg"
+            viewBox="0 0 520 460"
+            aria-hidden="true"
+            focusable="false"
+            preserveAspectRatio="xMidYMid meet"
+        >
+            <defs>
+                <clipPath id="gap">
+                    <rect x="244" y="126" width="32" height="208" />
+                </clipPath>
+            </defs>
+
+            <g class="grid">
+                {verticals.map((x) => (
+                    <line x1={x} y1="24" x2={x} y2="436" />
+                ))}
+                {horizontals.map((y) => (
+                    <line x1="24" y1={y} x2="496" y2={y} />
+                ))}
+            </g>
+
+            <path class="relay" d="M212 78 C 80 78, 80 382, 212 382" />
+            <rect class="relay-node" x="86" y="223" width="14" height="14" />
+            <text class="relay-label" x="93" y="254">
+                relay
+            </text>
+
+            <g class="peer">
+                <rect class="peer-box" x="212" y="30" width="96" height="96" />
+                {cells.map((i) => (
+                    <rect class="cell sent" x={cellX(i)} y={cellY(i)} width="18" height="18" />
+                ))}
+                <text class="peer-label" x="326" y="72">
+                    you
+                </text>
+                <text class="peer-id" x="326" y="90">
+                    bba3 9c8f
+                </text>
+            </g>
+
+            <g class="peer">
+                <rect class="peer-box" x="212" y="334" width="96" height="96" />
+                {cells.map((i) => (
+                    <rect
+                        class="cell verify"
+                        style={`--i: ${i}`}
+                        x={cellX(i)}
+                        y={cellY(i) + 304}
+                        width="18"
+                        height="18"
+                    />
+                ))}
+                <text class="peer-label" x="326" y="376">
+                    peer
+                </text>
+                <text class="peer-id" x="326" y="394">
+                    052e 8cd5
+                </text>
+            </g>
+
+            <g class="wires">
+                <line class="path solid" x1="260" y1="126" x2="260" y2="334" />
+                <line class="path broken" x1="260" y1="126" x2="260" y2="334" />
+                <g class="drop-mark">
+                    <path d="M252 232 l16 16 M268 232 l-16 16" />
+                </g>
+            </g>
+
+            <g clip-path="url(#gap)">
+                <g class="stream">
+                    {cells.map((i) => (
+                        <rect class="chunk" x="252" y={126 + i * 24} width="16" height="16" />
+                    ))}
+                </g>
+            </g>
+        </svg>
+    </div>
+    <figcaption class="caption">
+        Chunks cross a direct QUIC path and are checked as they land. The link drops once, and the
+        transfer resumes at the last verified block. The relay path stays dim: it carries the
+        transfer only when you run one and a direct path fails.
+    </figcaption>
+</figure>

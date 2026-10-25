@@ -1,0 +1,53 @@
+---
+// The five small drawings beside the features. Each is CSS only, 120 by 64, and aria-hidden: the
+// feature text says what it shows. A kind is one of the five, and the page passes it as a prop.
+interface Props {
+    kind: "blocks" | "live" | "range" | "resume" | "copy";
+}
+
+const { kind } = Astro.props;
+const blocks = Array.from({ length: 18 }, (_, i) => i);
+const cells = Array.from({ length: 16 }, (_, i) => i);
+---
+
+<div class={`art art-${kind}`} aria-hidden="true">
+    {kind === "blocks" && (
+        <>
+            {blocks.map((i) => (
+                <span class="block" style={`--i: ${i}`} />
+            ))}
+        </>
+    )}
+    {kind === "live" && (
+        <>
+            <span class="track" />
+            <span class="write" />
+            <span class="head" />
+            <span class="read" />
+        </>
+    )}
+    {kind === "range" && (
+        <>
+            {cells.map((i) => (
+                <span class="cell" style={`--i: ${i}`} />
+            ))}
+        </>
+    )}
+    {kind === "resume" && (
+        <>
+            <span class="track" />
+            <span class="fill first" />
+            <span class="fill second" />
+            <span class="cut" />
+        </>
+    )}
+    {kind === "copy" && (
+        <>
+            <span class="disk" />
+            <span class="wire" />
+            <span class="peer-dot" />
+            <span class="ghost" />
+            <span class="strike" />
+        </>
+    )}
+</div>

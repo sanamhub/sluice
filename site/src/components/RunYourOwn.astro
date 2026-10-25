@@ -1,0 +1,62 @@
+---
+import { RELAY_README, RENDEZVOUS_README } from "../data/links";
+---
+
+<section class="section" id="run" aria-labelledby="run-title">
+    <div class="wrap">
+        <div class="plate">
+            <div class="section-grid">
+                <div class="section-side">
+                    <h2 id="run-title">Run your own</h2>
+                </div>
+                <div class="section-main">
+                    <p class="section-lede">
+                        Two containers, built from this repository. The relay carries the transfer
+                        and its bandwidth bill; the rendezvous carries none.
+                    </p>
+
+                    <div class="run">
+                        <div class="panel">
+                            <div class="panel-head">
+                                <span class="panel-label">relay</span>
+                                <a class="panel-link" href={RELAY_README}>
+                                    README
+                                </a>
+                            </div>
+                            <pre class="term"><code>docker build -f docker/relay/Dockerfile -t sluice-relay docker
+docker run -d --name relay -p 443:443 -p 80:80 -p 7842:7842/udp \
+  -v "$PWD/certs:/etc/relay/certs:ro" sluice-relay</code></pre>
+                        </div>
+
+                        <div class="panel">
+                            <div class="panel-head">
+                                <span class="panel-label">rendezvous</span>
+                                <a class="panel-link" href={RENDEZVOUS_README}>
+                                    README
+                                </a>
+                            </div>
+                            <pre class="term"><code>docker build -f docker/rendezvous/Dockerfile -t sluice-rendezvous docker
+docker run -d --name rendezvous -p 7842:7842/udp \
+  -v "$PWD/certs:/etc/rendezvous/certs:ro" sluice-rendezvous</code></pre>
+                        </div>
+                    </div>
+
+                    <ul class="run-notes">
+                        <li>
+                            The relay runs closed. Its allowlist starts empty, so add the endpoint
+                            ids that may relay through it before a transfer will.
+                        </li>
+                        <li>
+                            Both use UDP 7842. Give each its own host, or map a different port and
+                            put that address in the ticket.
+                        </li>
+                        <li>
+                            Both need a certificate. Each README lists the two files the image
+                            mounts and the commands that make them.
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
