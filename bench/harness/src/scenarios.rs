@@ -1,4 +1,4 @@
-//! `scenarios.toml`: the scenarios M0 runs, from docs/performance.md.
+//! `scenarios.toml`: the scenarios the benchmark runs, from docs/performance.md.
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};

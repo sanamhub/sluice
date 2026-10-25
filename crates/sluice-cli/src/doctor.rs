@@ -40,7 +40,7 @@ pub fn run(_args: &Args) -> Result<Outcome, Error> {
     lines.push(Line {
         name: "transport",
         status: Status::Skipped,
-        detail: "the transport checks come after the M0 measurements".to_string(),
+        detail: "the transport checks are not built yet".to_string(),
         fix: None,
     });
     Ok(Outcome::Doctor {

@@ -1,15 +1,15 @@
 # Roadmap
 
-What gets built, in what order, and what does not get built at all. The phases are ordered so the
-riskiest assumption is tested before anything depends on it. Dates are deliberately absent; each phase
-ends when its exit criteria pass.
+What 1.0 includes, what comes after, and what Sluice does not build. Dates are deliberately absent: a
+release ships when its exit criteria pass.
 
-## M0: measure the transport
+## Before 1.0: measure the transport
 
 `noq` has no published throughput numbers, and two open iroh issues report it well below link speed:
 [#4286](https://github.com/n0-computer/iroh/issues/4286) (about 40% of a LAN link with BBR, far worse
 with Cubic, on macOS) and [#1943](https://github.com/n0-computer/iroh/issues/1943) (about 300 Mbit/s
-where netcat reached 700). Before any product code, M0 measures on Linux 10 GbE and on macOS:
+where netcat reached 700). The transport is measured on Linux 10 GbE and on macOS before anything
+depends on it:
 
 - `iroh` plus `iroh-blobs` with one connection and with N connections
 - each with default and with tuned windows, and with Cubic and BBRv3
@@ -23,16 +23,13 @@ It also measures:
 - BLAKE3 WASM throughput in Chrome, Firefox and Safari, desktop and iOS (ADR 0014)
 - the negotiated key exchange group, asserted to be `X25519MLKEM768` (ADR 0018)
 
-The repository gets its skeleton in the same phase: the three 1.0 crates, CI with every gate from
-[`design.md`](design.md#tooling), and the bench harness.
+The bench harness in `bench/` runs all of it.
 
-**Exit:** the numbers are published, and they settle one question. Either 1.0 ships QUIC only, or
-1.0 also ships the TCP bulk path (ADR 0016). If even that cannot reach the 10 GbE target, the target
-is revised in [`performance.md`](performance.md) with the measurement attached.
+**Exit:** the numbers are published, and they settle one question. Either 1.0 ships QUIC only, or 1.0
+also ships the TCP bulk path (ADR 0016). If even that cannot reach the 10 GbE target, the target is
+revised in [`performance.md`](performance.md) with the measurement attached.
 
 ## 1.0: the engine and the CLI
-
-This is the release that makes the repository public.
 
 - `sluice send` and `sluice recv` for files, folders and pipes
 - resume after any interruption
@@ -58,7 +55,7 @@ Every at-rest budget is enforced in CI.
 - Mount on Linux and Windows, and on macOS through FSKit if it is ready.
 - Short codes, QR codes, paired devices, signed receipts.
 - Fan-out to several receivers, and fetching from several providers at once.
-- The TCP bulk path, if M0 left it out of 1.0.
+- The TCP bulk path, if the transport measurement left it out of 1.0.
 
 **Exit:**
 
@@ -97,8 +94,8 @@ needs a discussion first.
 
 ## Open questions
 
-1. The `noq` throughput numbers, M0.
-2. Direct-connection rate with a rendezvous only, M0.
+1. The `noq` throughput numbers, from the transport measurement.
+2. The direct-connection rate with a rendezvous only, from the same measurement.
 3. Live segment size and pack size. 8 MiB and 64 MiB are unmeasured. Both must be multiples of the
    16 KiB block, and they are (512 and 4096 blocks), so keeping them until measured costs nothing.
 4. The 64 KiB chunk group rule in `SPEC.md` section 5. It would cut outboard overhead from about 0.4%
@@ -119,7 +116,7 @@ needs a discussion first.
 
 | Risk | Mitigation |
 |---|---|
-| `noq` cannot reach the targets | M0 first; then upstream patches (ACK frequency is the likely one); then the TCP bulk path |
+| `noq` cannot reach the targets | Measure the transport first; then upstream patches (ACK frequency is the likely one); then the TCP bulk path |
 | `iroh-blobs` changes its protocol before 1.0 | Pinned versions, our ticket envelope, the interop matrix, spec vectors |
 | Six dependencies from one company | Permissive licenses, a stable wire, small crates vendorable in days |
 | A dependency changes a default under us | Access modes and the crypto provider are set explicitly and asserted in tests |

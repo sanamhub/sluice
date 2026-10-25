@@ -8,7 +8,8 @@ A speed claim here is always scoped to a scenario below. There is no single "fas
 
 ## Targets
 
-None of these has been measured yet. M0 measures the transport first ([`roadmap.md`](roadmap.md)). If
+None of these has been measured yet. The transport is measured before any product code
+([`roadmap.md`](roadmap.md)). If
 the stack cannot reach a target, the target is revised here with the measurement attached.
 
 | Scenario | Target |

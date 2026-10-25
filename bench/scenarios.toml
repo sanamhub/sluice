@@ -1,4 +1,4 @@
-# The scenarios M0 runs (docs/performance.md, "Scenarios"). `bench run` reads this file, and
+# The scenarios the benchmark runs (docs/performance.md, "Scenarios"). `bench run` reads this file, and
 # `bench run --scenario S3` runs one of them.
 #
 # netem shapes egress, so it is applied on both hosts. The sender's interface carries what the data

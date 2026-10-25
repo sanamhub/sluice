@@ -198,7 +198,7 @@ release never skips the checks, even if the pull request merged without them.
    package version.
 4. Watch the `release` run. The `ci` jobs come first, then `plan`, which refuses a tag with
    anything but letters, digits, `.` and `-` after the `v`. Then the six binary builds, the four
-   image builds and the installers. `host` waits for all of them, and the reviewer approves it
+   image builds and the installers. `host` waits for all of them, and the approver approves it
    when they are green, then the two `image-publish` jobs once the GitHub release is up.
 
    **What a failure leaves behind.** A failed build publishes nothing: if the build of either
@@ -212,7 +212,7 @@ release never skips the checks, even if the pull request merged without them.
    `host` refuses to start while a release or draft for the tag exists. The refusal names the
    command: `gh release delete <tag> --yes`. That deletes the release or draft and leaves the tag,
    which is the one this run was started from. Then choose **Re-run failed jobs**: the tag is not
-   pushed again, and `host` waits for the reviewer again.
+   pushed again, and `host` waits for the approver again.
 
    A push that fails after `host` is different. The GitHub release is already public, so a failed
    `image-publish` leaves it without images, or with fewer than all of them. The job pushes in this

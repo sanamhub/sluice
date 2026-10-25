@@ -1,7 +1,7 @@
 # sluice-probe
 
 **Measures:** how fast `iroh` and `iroh-blobs` move bytes between two machines, with one connection or
-several, under Cubic, BBRv3 or NewReno, with default or tuned windows. It is the M0 measurement from
+several, under Cubic, BBRv3 or NewReno, with default or tuned windows. It is the measurement from
 ADR 0010 and the tool the bench harness drives. It is for the people who tune the transport, not for
 users, and its output is for machines: one ticket line from `serve`, one JSON line from `fetch`, one
 JSON line from `serve` for every connection that closes, and everything else on stderr.

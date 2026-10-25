@@ -241,7 +241,7 @@ more than it says, and starts an open relay only with `--open` and a byte limit 
 relayed, and through which relay. `sluice doctor` is to report NAT type, port mapping result, MTU,
 UDP egress, the chosen path, and the relay's reachability and authorization mode, in one block that
 can be pasted into an issue. Today it checks the local home only, and reports its `transport` check
-as skipped until the M0 measurements; the [CLI README](../crates/sluice-cli/README.md) lists what
+as skipped until the transport is measured; the [CLI README](../crates/sluice-cli/README.md) lists what
 it checks.
 
 **The browser is always relayed.** iroh in a tab has no UDP socket and no WebRTC transport, so it
@@ -263,7 +263,7 @@ that matter for throughput:
   transfers shard ranges across `min(cores / 2, 4)` connections. ADR 0016.
 - **A TCP bulk path for direct peers.** When a direct route exists, data can move over several TCP
   streams with TLS (kTLS on Linux), plugged in through iroh's custom transport hook. QUIC keeps
-  traversal and control. Whether this ships in 1.0 depends on the M0 measurements. ADR 0016.
+  traversal and control. Whether this ships in 1.0 depends on the transport measurements. ADR 0016.
 
 The disk side uses positioned reads and writes on a blocking pool, sparse files and `fallocate`.
 NVMe outruns the packet path at 10 Gbit/s, so io_uring waits until a profile says otherwise (ADR

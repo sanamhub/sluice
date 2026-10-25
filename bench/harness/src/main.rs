@@ -1,4 +1,4 @@
-//! `bench`: drives `probe` on a pair of hosts for M0 and writes results anyone can rerun.
+//! `bench`: drives `probe` on a pair of hosts for the measurements and writes results anyone can rerun.
 
 mod ceilings;
 mod check;
@@ -30,7 +30,7 @@ use clap::{Parser, Subcommand};
 
 use crate::{results::Results, session::Plan};
 
-/// The M0 transport benchmark.
+/// The transport benchmark.
 #[derive(Parser)]
 #[command(name = "bench", version)]
 struct Cli {

@@ -71,10 +71,10 @@ vulnerability, see [`SECURITY.md`](../SECURITY.md).
 ## Supply chain
 
 A release is built by `release.yml` from a tag, after every check of `ci.yml` passes, and published
-after the `release` environment's reviewer approves it. **The owner can release alone:** the tag
+after the `release` environment's approver approves it. **The owner can release alone:** the tag
 ruleset's bypass list names Repository admin, the owner can tag any commit whose `release.yml` names
 no environment, and the owner can change the settings that make the review real: tick the bypass
-back on, remove the second reviewer, or untick prevent self-review. The approval protects against a
+back on, remove the second approver, or untick prevent self-review. The approval protects against a
 release started by anyone else and against an owner's mistake, a tag off `main` or a `.github/`
 changed on the tag, and nothing more. The approver has two commands for the second case, in
 [RELEASING.md](../RELEASING.md), and they run only when a review is asked for. Releases are

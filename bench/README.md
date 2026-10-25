@@ -1,10 +1,10 @@
 # sluice-bench
 
-**Measures:** the M0 transport numbers from ADR 0010 on a pair of real hosts. For each scenario it
+**Measures:** the transport numbers in ADR 0010 on a pair of real hosts. For each scenario it
 drives [`probe`](probe/README.md) on both ends, shapes both hosts' links with netem, measures what
 the path and the disks can do (`iperf3`, `fio`) and what a parallel-TCP copy reaches (`mscp`), and
 writes the results anyone can rerun. The binary is `bench`, the package `sluice-bench`. It is for the
-people who run M0, not for users.
+people who run the measurements, not for users.
 
 **Must never:**
 
@@ -82,7 +82,7 @@ Copy [`hosts.example.toml`](hosts.example.toml) outside the repository, because 
 real machines, and fill it in:
 
 ```
-cp bench/hosts.example.toml ~/m0-hosts.toml
+cp bench/hosts.example.toml ~/sluice-hosts.toml
 ```
 
 `host` is `local` or an ssh destination. `interface` is the NIC netem shapes, and both hosts need one
@@ -93,7 +93,7 @@ for the scenarios with netem. `address` is where the other end reaches this host
 
 ```
 cargo build --release -p sluice-probe -p sluice-bench
-target/release/bench check --hosts ~/m0-hosts.toml
+target/release/bench check --hosts ~/sluice-hosts.toml
 ```
 
 It lists, for each host, its operating system, which of `probe`, `iperf3`, `fio`, `tc` and `mscp` it
@@ -109,17 +109,17 @@ round trip and a TLS handshake and not only an open port. A host that fails eith
 non-zero, because `bench connect` cannot run from it. `--rendezvous-ca <path>` names a PEM file for a
 self-signed server, and the path is opened on each host.
 
-## Run M0
+## Run the measurement
 
 ```
-target/release/bench run --hosts ~/m0-hosts.toml --label lan-10g
+target/release/bench run --hosts ~/sluice-hosts.toml --label lan-10g
 ```
 
 That runs S1, S3 and S6 from [`scenarios.toml`](scenarios.toml), five runs per configuration. One
 scenario, or fewer runs, for a first try:
 
 ```
-target/release/bench run --hosts ~/m0-hosts.toml --label try --scenario S3 --runs 2
+target/release/bench run --hosts ~/sluice-hosts.toml --label try --scenario S3 --runs 2
 ```
 
 Each scenario, in order:
@@ -166,13 +166,13 @@ kept.
 
 ## Connect
 
-M0 also has to say how often two peers connect directly when the only infrastructure is a rendezvous
+The measurement also has to say how often two peers connect directly when the only infrastructure is a rendezvous
 server and there is no relay (ADR 0013). `bench connect` measures that on two hosts behind real NATs,
 with the [`rendezvous` image](../docker/rendezvous/README.md) on a small VPS:
 
 ```
-target/release/bench check --hosts ~/m0-hosts.toml --rendezvous https://rendezvous.example.net
-target/release/bench connect --hosts ~/m0-hosts.toml --rendezvous https://rendezvous.example.net --label home-vs-office
+target/release/bench check --hosts ~/sluice-hosts.toml --rendezvous https://rendezvous.example.net
+target/release/bench connect --hosts ~/sluice-hosts.toml --rendezvous https://rendezvous.example.net --label home-vs-office
 ```
 
 Each attempt starts `serve` on the sender and `fetch` on the receiver, both with `--rendezvous` and no

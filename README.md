@@ -17,7 +17,7 @@ sluice completions bash                 # print a shell's completion script
 `sluice doctor` changes nothing. It prints one line per check, `ok`, `warning`, `failed` or
 `skipped`, with the step that fixes a problem under it, and `--json` gives the same as one object.
 Its exit code is 0 unless a check failed. The `transport` check, of NAT type, path and relay, is
-skipped until the M0 measurements. The [CLI README](crates/sluice-cli/README.md) lists every check,
+skipped until the transport is measured. The [CLI README](crates/sluice-cli/README.md) lists every check,
 the exit codes and the JSON, which scripts may rely on.
 
 What 1.0 adds, and does not exist yet:
@@ -77,7 +77,7 @@ Two machines behind NATs need help to find each other.
 | Internet, when hole punching fails | A relay you run, which does carry the data |
 
 Sluice never falls back to someone else's relay. When no relay is configured, the cases that need
-one fail and say why. Once its transport check is built, after M0, `sluice doctor` will tell you
+one fail and say why. Once its transport check is built, after the measurements, `sluice doctor` will tell you
 which case you are in, and every transfer will show whether it went direct or through a relay.
 
 **The browser version is always relayed.** iroh in a browser tab has no UDP socket, so it reaches

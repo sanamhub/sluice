@@ -2,7 +2,7 @@
 
 Measures how fast one WebAssembly thread hashes with BLAKE3 in a browser. ADR 0014 builds the browser
 engine with `blake3/wasm32_simd` and no threads, which holds only if that is faster than a relay an
-operator would run. M0 measures it in Chrome, Firefox and Safari, on desktop and on iOS. This is the
+operator would run. The measurement covers Chrome, Firefox and Safari, on desktop and on iOS. This is the
 page that does the measuring. The maintainer runs it on the devices and decides from the numbers.
 
 The page reports each rate next to 500 Mbit/s, the browser target in
