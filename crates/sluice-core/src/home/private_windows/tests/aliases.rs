@@ -5,6 +5,7 @@
 use super::super::admin::built_in_administrator_sid;
 use super::super::lists::has_private_list_for;
 use super::super::{INHERIT, canonical_sddl, private_sddl};
+use super::{aces_of, assert_aces};
 
 /// The SID of this machine's built-in Administrator, which every Windows has even when the account
 /// is disabled. It is the machine's account domain with RID 500, read from the local security
@@ -67,6 +68,16 @@ fn a_missing_entry_is_not_private_even_with_an_alias() {
     .unwrap();
     assert!(found.contains(";LA)"), "{found}");
     assert!(!has_private_list_for(&found, INHERIT, &admin).unwrap());
+}
+
+/// The test helper that checks a list goes through the same round trip: a list built from the full
+/// SID of the machine's built-in Administrator is accepted when Windows reads it back as `LA`.
+#[test]
+fn the_private_check_accepts_the_built_in_administrator_read_back_as_la() {
+    let admin = built_in_administrator();
+    let sddl = canonical_sddl(&protected(&private_sddl(&admin, INHERIT))).unwrap();
+    assert!(sddl.contains(";LA)"), "{sddl}");
+    assert_aces(&sddl, true, &aces_of(&sddl), INHERIT, true, &admin);
 }
 
 /// Only the machine's own RID-500 account is `LA`. A SID from another account domain stays in its

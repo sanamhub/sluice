@@ -7,7 +7,7 @@ mod aliases;
 mod junction;
 mod owner;
 
-use super::{INHERIT, dacl_sddl, open_dir, private_sddl, set_dacl, user_sid};
+use super::{INHERIT, canonical_sddl, dacl_sddl, open_dir, private_sddl, set_dacl, user_sid};
 use crate::Home;
 
 struct Ace {
@@ -16,11 +16,21 @@ struct Ace {
     trustee: String,
 }
 
-/// The access list of `path`: whether it is protected from inheritance, and its entries.
+/// The access list of `path` as Windows writes it back, so a trustee the system shortens to an
+/// alias and the same trustee spelled in full are one text.
 fn read(path: &Path) -> (bool, Vec<Ace>) {
-    let sddl = dacl_sddl(path).unwrap();
-    let (header, entries) = sddl.split_once('(').unwrap();
-    let aces = entries
+    let sddl = canonical_sddl(&dacl_sddl(path).unwrap()).unwrap();
+    (is_protected(&sddl), aces_of(&sddl))
+}
+
+fn is_protected(sddl: &str) -> bool {
+    let (header, _) = sddl.split_once('(').unwrap();
+    header.starts_with("D:") && header.contains('P')
+}
+
+fn aces_of(sddl: &str) -> Vec<Ace> {
+    let (_, entries) = sddl.split_once('(').unwrap();
+    entries
         .trim_end_matches(')')
         .split(")(")
         .map(|entry| {
@@ -34,8 +44,15 @@ fn read(path: &Path) -> (bool, Vec<Ace>) {
                 trustee: fields[5].to_string(),
             }
         })
-        .collect();
-    (header.starts_with("D:") && header.contains('P'), aces)
+        .collect()
+}
+
+/// The trustees of `sddl`, after the same round trip the product code compares.
+fn trustees_of(sddl: &str) -> Vec<String> {
+    aces_of(&canonical_sddl(sddl).unwrap())
+        .into_iter()
+        .map(|ace| ace.trustee)
+        .collect()
 }
 
 /// The entries are the user, SYSTEM and Administrators with full control, and nothing else.
@@ -43,18 +60,38 @@ fn read(path: &Path) -> (bool, Vec<Ace>) {
 /// itself came from the folder above. `protected` is whether inheritance from the parent is
 /// stopped, which it is on what sluice sets itself and is not on the folders made inside the home.
 fn assert_private(path: &Path, flags: &str, protected: bool) {
+    let user = user_sid().unwrap();
+    assert_private_for(path, flags, protected, &user);
+}
+
+/// [`assert_private`] for the user `user`, so a test can check a list built for another account.
+fn assert_private_for(path: &Path, flags: &str, protected: bool, user: &str) {
     let (is_protected, aces) = read(path);
     let sddl = dacl_sddl(path).unwrap();
-    assert_eq!(is_protected, protected, "{}: {sddl}", path.display());
-    let user = user_sid().unwrap();
-    let mut trustees: Vec<&str> = aces.iter().map(|ace| ace.trustee.as_str()).collect();
+    assert_aces(&sddl, is_protected, &aces, flags, protected, user);
+}
+
+/// The comparison itself, on a list already read, so the alias tests can give it text without a
+/// folder whose access nobody else may change.
+fn assert_aces(
+    sddl: &str,
+    is_protected: bool,
+    aces: &[Ace],
+    flags: &str,
+    protected: bool,
+    user: &str,
+) {
+    assert_eq!(is_protected, protected, "{sddl}");
+    let mut trustees: Vec<String> = aces.iter().map(|ace| ace.trustee.clone()).collect();
+    // The wanted list goes through the same round trip, so a user the system writes back as an
+    // alias is compared with the alias and not with the SID the list was built from.
+    let mut want = trustees_of(&private_sddl(user, ""));
     trustees.sort_unstable();
-    let mut want = vec![user.as_str(), "SY", "BA"];
     want.sort_unstable();
-    assert_eq!(trustees, want, "{}: {sddl}", path.display());
-    for ace in &aces {
-        assert_eq!(ace.rights, "FA", "{}: {sddl}", path.display());
-        assert_eq!(ace.flags, flags, "{}: {sddl}", path.display());
+    assert_eq!(trustees, want, "{sddl}");
+    for ace in aces {
+        assert_eq!(ace.rights, "FA", "{sddl}");
+        assert_eq!(ace.flags, flags, "{sddl}");
     }
 }
 
