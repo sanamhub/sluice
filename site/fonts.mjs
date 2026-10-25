@@ -57,15 +57,35 @@ export const fonts = [
     family(
         "Instrument Sans",
         "--font-sans",
-        [variant("@fontsource-variable/instrument-sans", "wght.css", "latin", "400 700", "normal")],
+        [
+            variant(
+                "@fontsource-variable/instrument-sans",
+                "wght.css",
+                "latin",
+                "400 700",
+                "normal",
+            ),
+        ],
         ["sans-serif"],
     ),
     family(
         "IBM Plex Mono",
         "--font-mono",
         [
-            variant("@fontsource/ibm-plex-mono", "400.css", "latin", "400", "normal"),
-            variant("@fontsource/ibm-plex-mono", "500.css", "latin", "500", "normal"),
+            variant(
+                "@fontsource/ibm-plex-mono",
+                "400.css",
+                "latin",
+                "400",
+                "normal",
+            ),
+            variant(
+                "@fontsource/ibm-plex-mono",
+                "500.css",
+                "latin",
+                "500",
+                "normal",
+            ),
         ],
         ["monospace"],
     ),

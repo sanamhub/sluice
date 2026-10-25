@@ -16,8 +16,20 @@
   --accent-soft: #22d3ee16;
   --shadow: none;
 
-  --font-body: var(--font-sans, "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif);
-  --font-code: var(--font-mono, "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace);
+  --font-body: var(
+    --font-sans,
+    "Instrument Sans Variable",
+    ui-sans-serif,
+    system-ui,
+    sans-serif
+  );
+  --font-code: var(
+    --font-mono,
+    "IBM Plex Mono",
+    ui-monospace,
+    "Cascadia Mono",
+    monospace
+  );
 
   --step--1: 0.8125rem;
   --step-0: 1.0625rem;
