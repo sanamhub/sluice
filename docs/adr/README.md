@@ -30,3 +30,4 @@ testable. Consequences include what it costs and what would make us revisit it.
 | [0019](0019-relay-starts-through-a-guard.md) | The relay image starts through a guard that refuses an open config | Accepted, extended by 0020 |
 | [0020](0020-guard-closes-more-defaults-and-guards-rendezvous.md) | The guard closes three more open defaults, pins the file it checked, and guards rendezvous | Accepted, extended by 0021 |
 | [0021](0021-guard-hands-over-a-sealed-copy.md) | The guard hands iroh-relay a sealed copy, and a relay without TLS needs a flag | Accepted |
+| [0022](0022-landing-page-on-cloudflare.md) | The landing page lives in `site/`, on Cloudflare Workers | Accepted |
