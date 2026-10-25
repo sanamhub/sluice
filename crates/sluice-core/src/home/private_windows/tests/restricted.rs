@@ -40,62 +40,8 @@ struct WithoutPrivileges {
 
 impl WithoutPrivileges {
     fn new() -> io::Result<Self> {
-        let mut process: HANDLE = ptr::null_mut();
-        // SAFETY: the current process pseudo handle is always valid, and `process` is a valid
-        // place for the new handle, which the guard closes.
-        if unsafe {
-            OpenProcessToken(
-                GetCurrentProcess(),
-                TOKEN_DUPLICATE | TOKEN_QUERY,
-                &mut process,
-            )
-        } == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: `process` is an open token handle. The counts are zero with null lists, and
-        // `restricted` is a valid place for the new handle.
-        let process = unsafe { OwnedHandle::from_raw_handle(process) };
-        let mut restricted: HANDLE = ptr::null_mut();
-        // SAFETY: `process` is open for the call, every count is zero with a null list, and
-        // `restricted` is a valid place for the new handle.
-        if unsafe {
-            CreateRestrictedToken(
-                process.as_raw_handle(),
-                DISABLE_MAX_PRIVILEGE,
-                0,
-                ptr::null(),
-                0,
-                ptr::null(),
-                0,
-                ptr::null(),
-                &mut restricted,
-            )
-        } == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: `restricted` is a token handle the call above made and nothing else owns, so the
-        // guard closes it once.
-        let restricted = unsafe { OwnedHandle::from_raw_handle(restricted) };
-        let mut impersonation: HANDLE = ptr::null_mut();
-        // SAFETY: `restricted` is an open token. The attributes are null with the default, and
-        // `impersonation` is a valid place for the duplicate.
-        if unsafe {
-            DuplicateTokenEx(
-                restricted.as_raw_handle(),
-                MAXIMUM_ALLOWED,
-                ptr::null(),
-                SecurityImpersonation,
-                TokenImpersonation,
-                &mut impersonation,
-            )
-        } == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        // SAFETY: `impersonation` is the duplicate the call above made and nothing else owns.
-        let token = unsafe { OwnedHandle::from_raw_handle(impersonation) };
+        let process = process_token()?;
+        let token = restricted_impersonation(process.as_raw_handle())?;
         remove_bypass_privileges(token.as_raw_handle())?;
         // SAFETY: a null thread asks for this thread, and `token` is an impersonation token that
         // stays open in the guard. Reverting in `Drop` ends the impersonation.
@@ -104,6 +50,69 @@ impl WithoutPrivileges {
         }
         Ok(Self { _token: token })
     }
+}
+
+/// This process's token, closed when the guard drops.
+fn process_token() -> io::Result<OwnedHandle> {
+    let mut process: HANDLE = ptr::null_mut();
+    // SAFETY: the current process pseudo handle is always valid, and `process` is a valid place
+    // for the new handle, which the guard closes.
+    if unsafe {
+        OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_DUPLICATE | TOKEN_QUERY,
+            &mut process,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the call succeeded, so `process` is a new open handle that nothing else owns.
+    Ok(unsafe { OwnedHandle::from_raw_handle(process) })
+}
+
+/// A restricted copy of `process` as an impersonation token, with every privilege disabled.
+fn restricted_impersonation(process: HANDLE) -> io::Result<OwnedHandle> {
+    let mut restricted: HANDLE = ptr::null_mut();
+    // SAFETY: `process` is open for the call, every count is zero with a null list, and
+    // `restricted` is a valid place for the new handle.
+    if unsafe {
+        CreateRestrictedToken(
+            process,
+            DISABLE_MAX_PRIVILEGE,
+            0,
+            ptr::null(),
+            0,
+            ptr::null(),
+            0,
+            ptr::null(),
+            &mut restricted,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `restricted` is a token handle the call above made and nothing else owns, so the
+    // guard closes it once.
+    let restricted = unsafe { OwnedHandle::from_raw_handle(restricted) };
+    let mut impersonation: HANDLE = ptr::null_mut();
+    // SAFETY: `restricted` is an open token. The attributes are null with the default, and
+    // `impersonation` is a valid place for the duplicate.
+    if unsafe {
+        DuplicateTokenEx(
+            restricted.as_raw_handle(),
+            MAXIMUM_ALLOWED,
+            ptr::null(),
+            SecurityImpersonation,
+            TokenImpersonation,
+            &mut impersonation,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the call succeeded, so `impersonation` is a new open handle nothing else owns.
+    Ok(unsafe { OwnedHandle::from_raw_handle(impersonation) })
 }
 
 /// Removes the three privileges that can override an access list from the open token `token`.
