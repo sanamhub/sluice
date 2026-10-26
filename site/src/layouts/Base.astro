@@ -1,7 +1,7 @@
 ---
 // The shell both pages share: head, header, footer. No script is loaded anywhere in the site, so
 // this layout has no client-side behaviour at all.
-import { REPO, SECURITY, SPEC, LICENSES } from "../data/links";
+import { REPO, SECURITY, LICENSES } from "../data/links";
 import { SITE_URL } from "../site";
 import Fonts from "../components/Fonts.astro";
 import "../styles/site.css";
@@ -57,7 +57,7 @@ const ogImage = new URL("/og.png", SITE_URL);
                     <span>Sluice</span>
                 </a>
                 <nav class="top-nav" aria-label="Project">
-                    <a href={SPEC}>Spec</a>
+                    <a href="/#how">How it works</a>
                     <a href={REPO}>GitHub</a>
                 </nav>
             </div>

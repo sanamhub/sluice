@@ -1,56 +1,54 @@
 ---
-// Four terms, four rows. The facts are design.md's: a direct path first, rendezvous for signalling
-// only, a relay you run for the rest, and no fallback to a relay nobody named.
+import StepArt from "./StepArt.astro";
+
+// The three steps are a real sequence, so they are numbered and ordered. Every capability they
+// name is 1.0: send and recv, the ticket, verified blocks and resume.
+const steps = [
+    {
+        kind: "send" as const,
+        title: "Send a file",
+        body: "Pick a file or a folder. Sluice reads it where it is, so a large file needs no second copy before it moves.",
+        note: "1.0: send, folders, reference in place",
+    },
+    {
+        kind: "share" as const,
+        title: "Share one code",
+        body: "Send prints a ticket: one line of text with the address and the file's fingerprint. Send it however you like. Keep it private, because anyone who has it can fetch the file.",
+        note: "1.0: the ticket",
+    },
+    {
+        kind: "receive" as const,
+        title: "Receive it",
+        body: "Paste the ticket on the other computer. Every block is checked before it is written, and a dropped link resumes at the last checked block.",
+        note: "1.0: verified blocks, resume",
+    },
+];
 ---
 
-<section class="section" id="how" aria-labelledby="how-title">
+<section class="section steps" id="how" aria-labelledby="how-title">
     <div class="wrap">
-        <div class="plate">
-            <div class="section-grid">
-                <div class="section-side">
-                    <h2 id="how-title">How it works</h2>
-                </div>
-                <div class="section-main">
-                    <p class="section-lede">
-                        Two computers, one path, and two servers that only help them meet. A direct
-                        transfer sends no bytes through a relay.
-                    </p>
-
-                    <dl class="how">
-                        <div class="how-row">
-                            <dt>Direct path</dt>
-                            <dd>
-                                Tried first: local discovery, port mapping and hole punching over
-                                QUIC. Only the two ends hold the file.
-                            </dd>
-                        </div>
-                        <div class="how-row">
-                            <dt>Rendezvous</dt>
-                            <dd>
-                                A small server you run that answers one question: what is this
-                                computer's public address? It carries no file bytes, so the smallest
-                                VPS is enough.
-                            </dd>
-                        </div>
-                        <div class="how-row">
-                            <dt>Relay</dt>
-                            <dd>
-                                A server you run that carries the whole transfer when hole punching
-                                fails. The image starts closed and relays only the endpoint ids you
-                                list.
-                            </dd>
-                        </div>
-                        <div class="how-row">
-                            <dt>No relay, no fallback</dt>
-                            <dd>
-                                n0's public relays and DNS discovery are off. Until you name a relay,
-                                Sluice has none. A transfer that cannot go direct fails instead of
-                                going somewhere else.
-                            </dd>
-                        </div>
-                    </dl>
-                </div>
-            </div>
+        <div class="section-head">
+            <h2 id="how-title">How it works</h2>
+            <p class="section-lede">
+                Three steps, one file, and no stop in the middle. All three arrive in 1.0; today you
+                can check an install with <code>sluice doctor</code>.
+            </p>
         </div>
+
+        <ol class="step-list">
+            {steps.map((step, index) => (
+                <li class="step">
+                    <div class="step-top">
+                        <span class="step-number" aria-hidden="true">
+                            {String(index + 1).padStart(2, "0")}
+                        </span>
+                        <StepArt kind={step.kind} />
+                    </div>
+                    <h3>{step.title}</h3>
+                    <p>{step.body}</p>
+                    <p class="step-note mono">{step.note}</p>
+                </li>
+            ))}
+        </ol>
     </div>
 </section>

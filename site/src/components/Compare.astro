@@ -1,0 +1,73 @@
+---
+import { PERFORMANCE } from "../data/links";
+
+// The comparison names no product. The cloud column is the generic upload-then-download flow, so
+// it says "usually" and "often" where the flow varies; the Sluice column states the design and
+// marks the one deadline that is a target.
+const rows = [
+    {
+        label: "Where the file waits",
+        sluice: "Nowhere. It lands on the other computer.",
+        cloud: "On the provider's servers.",
+    },
+    {
+        label: "Account",
+        sluice: "None.",
+        cloud: "Usually one.",
+    },
+    {
+        label: "Size limit",
+        sluice: "None from Sluice. Your disk is the limit.",
+        cloud: "Usually set by a plan.",
+    },
+    {
+        label: "Checked on arrival",
+        sluice: "Every block, against the file's fingerprint. 1.0",
+        cloud: "The provider checks its copy. Your two ends do not check each other.",
+    },
+    {
+        label: "After a dropped link",
+        sluice: "Starts at the last checked block. Target: first new byte within 2 s. 1.0",
+        cloud: "Often from the beginning, unless the service offers resume.",
+    },
+];
+---
+
+<section class="section compare" id="compare" aria-labelledby="compare-title">
+    <div class="wrap">
+        <div class="section-head">
+            <h2 id="compare-title">Compared with uploading to the cloud</h2>
+            <p class="section-lede">
+                Sluice is not a storage service. The file goes from one computer to the other, and
+                the middle keeps nothing.
+            </p>
+        </div>
+
+        <table class="compare-table">
+            <caption class="visually-hidden">
+                Sluice compared with uploading to a cloud service and downloading again
+            </caption>
+            <thead>
+                <tr>
+                    <th scope="col"><span class="visually-hidden">Question</span></th>
+                    <th scope="col">Sluice</th>
+                    <th scope="col">Upload, then download</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows.map((row) => (
+                    <tr>
+                        <th scope="row">{row.label}</th>
+                        <td data-label="Sluice">{row.sluice}</td>
+                        <td data-label="Upload, then download">{row.cloud}</td>
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+
+        <p class="section-note">
+            Sending is 1.0 and is not built yet. A target is marked; the rest describes the design.
+            The <a href={PERFORMANCE}>performance page</a> has the method and the scenarios.
+        </p>
+    </div>
+</section>

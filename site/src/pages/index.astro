@@ -1,10 +1,13 @@
 ---
 import BuiltInTheOpen from "../components/BuiltInTheOpen.astro";
+import Compare from "../components/Compare.astro";
+import Faq from "../components/Faq.astro";
 import Features from "../components/Features.astro";
 import Hero from "../components/Hero.astro";
 import HowItWorks from "../components/HowItWorks.astro";
 import RunYourOwn from "../components/RunYourOwn.astro";
 import Terminals from "../components/Terminals.astro";
+import UseCases from "../components/UseCases.astro";
 import Base from "../layouts/Base.astro";
 ---
 
@@ -13,9 +16,12 @@ import Base from "../layouts/Base.astro";
     description="Sluice sends a file straight from one computer to another, checks every block on arrival, and keeps no copy in between. No account and no size plan."
 >
     <Hero />
-    <Terminals />
-    <Features />
     <HowItWorks />
+    <Terminals />
+    <UseCases />
+    <Compare />
+    <Faq />
+    <Features />
     <RunYourOwn />
     <BuiltInTheOpen />
 </Base>

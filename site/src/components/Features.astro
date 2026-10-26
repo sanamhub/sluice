@@ -1,6 +1,55 @@
 ---
-import { PERFORMANCE } from "../data/links";
+import {
+    ADRS,
+    ADR_0013,
+    PERFORMANCE,
+    RELAY_README,
+    RENDEZVOUS_README,
+    SPEC,
+    SPEC_STATIC,
+    SPEC_TICKET,
+    THREAT_MODEL,
+} from "../data/links";
 import FeatureArt from "./FeatureArt.astro";
+
+const terms = [
+    {
+        name: "QUIC",
+        body: "An encrypted transport that runs over UDP and carries many streams at once. It keeps going when the network under it changes.",
+        href: SPEC,
+        link: "the spec",
+    },
+    {
+        name: "BLAKE3",
+        body: "A hash tree describes the file. Every 16 KiB block (16,384 bytes) is checked against it before it is written.",
+        href: SPEC_STATIC,
+        link: "static content",
+    },
+    {
+        name: "Hole punching",
+        body: "Two computers ask their routers for a path at the same time, so packets can pass without a relay.",
+        href: ADR_0013,
+        link: "ADR 0013",
+    },
+    {
+        name: "Rendezvous",
+        body: "A small server you run that tells each computer the other's public address. It carries no file data.",
+        href: RENDEZVOUS_README,
+        link: "the rendezvous README",
+    },
+    {
+        name: "Relay",
+        body: "A server you run that forwards bytes when a direct path fails. It starts closed and serves only the endpoint ids you allow.",
+        href: RELAY_README,
+        link: "the relay README",
+    },
+    {
+        name: "Endpoint id and ticket",
+        body: "An endpoint id names a computer's key. A ticket carries that id, an address and the file fingerprint. Anyone with a ticket can fetch the file, so share it privately.",
+        href: SPEC_TICKET,
+        link: "the ticket format",
+    },
+];
 
 const features = [
     {
@@ -34,19 +83,55 @@ const features = [
         code: null,
     },
 ];
+
+const path = [
+    {
+        name: "Direct path",
+        body: "Tried first: local discovery, port mapping and hole punching over QUIC. Only the two ends hold the file.",
+    },
+    {
+        name: "Rendezvous",
+        body: "Answers one question: what is this computer's public address? It is signalling only, so the smallest VPS is enough.",
+    },
+    {
+        name: "Relay",
+        body: "Carries the whole transfer when hole punching fails. It is yours: the image starts closed and relays only the endpoint ids you list.",
+    },
+    {
+        name: "No relay, no fallback",
+        body: "n0's public relays and DNS discovery are off. Until you name a relay, Sluice has none, and a transfer that cannot go direct fails instead of going somewhere else.",
+    },
+];
 ---
 
-<section class="section" id="features" aria-labelledby="features-title">
+<section class="section under" id="under-the-hood" aria-labelledby="under-title">
     <div class="wrap">
-        <div class="plate">
-            <div class="section-grid">
-                <div class="section-side">
-                    <h2 id="features-title">What 1.0 adds</h2>
-                </div>
-                <div class="section-main">
-                    <p class="section-lede">
-                        None of these is in the binary today. They are what 1.0 is being built to
-                        do. The <a href={PERFORMANCE}>performance method</a> says which numbers are
+        <div class="section-grid">
+            <div class="section-side">
+                <h2 id="under-title">Under the hood</h2>
+            </div>
+            <div class="section-main">
+                <p class="section-lede">
+                    The short version for engineers. The full detail is in the spec, the threat
+                    model and the decision records.
+                </p>
+
+                <dl class="terms">
+                    {terms.map((term) => (
+                        <div class="term">
+                            <dt>{term.name}</dt>
+                            <dd>
+                                {term.body} <a href={term.href}>{term.link}</a>
+                            </dd>
+                        </div>
+                    ))}
+                </dl>
+
+                <div class="sub">
+                    <h3>What 1.0 adds</h3>
+                    <p>
+                        None of these is in the binary today. Sending and receiving arrive in 1.0;
+                        the <a href={PERFORMANCE}>performance method</a> says which numbers are
                         targets and which are measured.
                     </p>
                     <ul class="features">
@@ -54,7 +139,7 @@ const features = [
                             <li class="feature">
                                 <FeatureArt kind={feature.kind} />
                                 <div class="feature-copy">
-                                    <h3>{feature.title}</h3>
+                                    <h4>{feature.title}</h4>
                                     <p>{feature.body}</p>
                                     {feature.code && (
                                         <code class="feature-code">{feature.code}</code>
@@ -65,6 +150,25 @@ const features = [
                         ))}
                     </ul>
                 </div>
+
+                <div class="sub">
+                    <h3>How the path is chosen</h3>
+                    <p>Direct first, a rendezvous only to meet, and a relay only if you run one.</p>
+                    <dl class="how">
+                        {path.map((row) => (
+                            <div class="how-row">
+                                <dt>{row.name}</dt>
+                                <dd>{row.body}</dd>
+                            </div>
+                        ))}
+                    </dl>
+                </div>
+
+                <p class="section-note">
+                    Read the <a href={SPEC}>specification</a>, the{" "}
+                    <a href={THREAT_MODEL}>threat model</a> and the{" "}
+                    <a href={ADRS}>decision records</a>.
+                </p>
             </div>
         </div>
     </div>

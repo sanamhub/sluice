@@ -1,0 +1,60 @@
+---
+import { CONTRIBUTING, ROADMAP, SPEC } from "../data/links";
+
+const questions = [
+    {
+        q: "Is it free?",
+        a: "Yes. The code is Apache-2.0 or MIT. You pay only for hardware and for any relay you run.",
+    },
+    {
+        q: "Does it work over the internet, or only at home?",
+        a: "Both, in 1.0. On one network it connects directly. Across the internet it tries a direct path first. If that fails, it can use a relay you run: a server that forwards the bytes.",
+    },
+    {
+        q: "Is it safe? Who can see my files?",
+        a: "Only the two computers keep the file. The connection is encrypted, and a relay you run passes bytes without storing them. A ticket is a secret: anyone who has it can fetch the file.",
+    },
+    {
+        q: "What works today?",
+        a: "sluice id, sluice doctor and sluice completions. Sending and receiving arrive in 1.0.",
+    },
+    {
+        q: "Do I need a server?",
+        a: "Not on one network. Across the internet, a small meeting server called a rendezvous helps the two computers find each other. A relay is needed only when a direct path fails. You run both, and neither keeps the file.",
+    },
+    {
+        q: "What happens if the connection drops?",
+        a: "In 1.0, the transfer resumes at the last checked block. The target is the first new byte within 2 s. Checked data is not sent again.",
+    },
+    {
+        q: "How is it different from the cloud?",
+        a: "The file goes straight to the other computer. There is no upload to a company's storage, no account and no plan limit. You keep the only copies.",
+    },
+    {
+        q: "How can I help?",
+        a: "Try doctor and say what it prints. Read the spec or the roadmap, or open an issue. Contributions and hard questions are both welcome.",
+    },
+];
+---
+
+<section class="section faq" id="questions" aria-labelledby="questions-title">
+    <div class="wrap">
+        <div class="section-head">
+            <h2 id="questions-title">Questions</h2>
+            <p class="section-lede">
+                The short answers. The <a href={SPEC}>specification</a> and the{" "}
+                <a href={ROADMAP}>roadmap</a> go further, and{" "}
+                <a href={CONTRIBUTING}>contributing</a> says how to help.
+            </p>
+        </div>
+
+        <div class="faq-list">
+            {questions.map((item) => (
+                <details class="faq-item">
+                    <summary>{item.q}</summary>
+                    <p>{item.a}</p>
+                </details>
+            ))}
+        </div>
+    </div>
+</section>
