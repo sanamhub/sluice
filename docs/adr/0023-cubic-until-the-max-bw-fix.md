@@ -19,11 +19,13 @@ Cubic is still `noq`'s default and has had more production use.
 
 1. Sluice opens every connection with Cubic until a `noq` release contains the max bandwidth fix
    from quinn-rs/quinn#2481.
-2. `--congestion bbr3` stays selectable for measurement and for paths where Cubic underperforms.
+2. BBRv3 stays available for measurement in `bench/probe` (`--congestion bbr3`). The `sluice`
+   command gets the same `--congestion` switch that ADR 0015 promised before 1.0, so a user on a
+   path where Cubic underperforms can choose BBRv3.
 3. The default returns to BBRv3 only after the release with the fix is in the tree, a loopback
    smoke run passes, and the lossy S5 path in `docs/performance.md` is measured against Cubic. The
    measurement, not the release note alone, decides.
-4. Windows stay at `noq`'s defaults in this batch. The bandwidth-delay product sizing in
+4. Flow-control windows stay at `noq`'s defaults for now. The bandwidth-delay product sizing in
    ADR 0016 waits for the transport measurement, and so do several connections.
 
 This ADR amends only the default in ADR 0015. Its other reasoning, the warning about BBR sharing a
@@ -33,7 +35,7 @@ bottleneck, and `--congestion` as the comparison switch all stand.
 
 - A transfer uses the controller with the longer production record, at the cost of the lossy-path
   throughput ADR 0015 wanted.
-- The BBRv3 code path remains compiled and tested, so switching back is a one-line default change
-  once the condition is met.
-- The switch is recorded in every result and every progress line, so a measurement says which
-  controller produced it.
+- The BBRv3 code path remains compiled and tested in `bench/probe`, so switching back is a one-line
+  default change once the condition is met.
+- Every probe result records the controller, so a measurement says which one produced it. The
+  `sluice` command's `--json` events should name it too once the switch exists.
