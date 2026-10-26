@@ -63,27 +63,76 @@ struct Folder {
     path: Option<String>,
 }
 
-/// Lists everything under `root`, which is followed if it is a symlink and is the only link that
-/// is.
-pub(super) fn walk(root: &Path) -> Result<Walk, Error> {
-    // `metadata` follows a link, and that is the one link the walk follows.
-    let meta = fs::metadata(root)
-        .map_err(|e| Error::Storage(format!("cannot read the folder to send: {}", e.kind())))?;
-    if !meta.is_dir() {
-        return Err(Error::Policy(
-            "the path to send is not a folder".to_string(),
-        ));
+/// Lists the arguments of one `send`. A single folder contributes its contents, not its own name,
+/// which is what `send DIR` means. Several arguments each contribute their own name, so
+/// `send a.mov photos/` writes `a.mov` and `photos/...` under the output.
+pub(super) fn walk_paths(paths: &[PathBuf]) -> Result<Walk, Error> {
+    if paths.is_empty() {
+        return Err(Error::Policy("there is nothing to send".to_string()));
     }
+    let named = paths.len() > 1;
     let mut walker = Walker::default();
-    walker.stack.push(Folder {
-        disk: root.to_path_buf(),
-        shown: String::new(),
-        path: Some(String::new()),
-    });
+    for path in paths {
+        let shown = path.display().to_string();
+        let before = fs::symlink_metadata(path)
+            .map_err(|e| Error::Storage(format!("cannot read the path to send: {}", e.kind())))?;
+        // `metadata` follows a link. A folder may be a link, a file may not: sending a file link
+        // would send a name whose content lives somewhere else.
+        let meta = fs::metadata(path)
+            .map_err(|e| Error::Storage(format!("cannot read the path to send: {}", e.kind())))?;
+        let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+            return Err(Error::Policy(format!("{shown} has no UTF-8 name")));
+        };
+        let name = nfc_name(name)?;
+        if meta.is_dir() {
+            let prefix = if named {
+                walker.root_dir(&name, path, &meta);
+                name.clone()
+            } else {
+                String::new()
+            };
+            walker.stack.push(Folder {
+                disk: path.clone(),
+                shown: if named { name } else { String::new() },
+                path: Some(prefix),
+            });
+        } else if meta.is_file() {
+            if before.file_type().is_symlink() {
+                return Err(Error::Policy(format!(
+                    "{shown} is a symlink; send the file it points at by its real path"
+                )));
+            }
+            let entry_path = ManifestPath::parse_rule(&name).map_err(|rule| {
+                Error::Policy(format!(
+                    "{shown} has a name a receiver would reject (rule {rule})"
+                ))
+            })?;
+            walker.out.items.push(Item {
+                path: entry_path,
+                shown: name,
+                what: What::File { disk: path.clone() },
+            });
+        } else {
+            return Err(Error::Policy(format!(
+                "{shown} is not a regular file or a folder"
+            )));
+        }
+    }
     while let Some(folder) = walker.stack.pop() {
         walker.read_folder(&folder);
     }
     Ok(walker.out)
+}
+
+/// The name as the manifest carries it, after the checks a receiver applies to every component.
+fn nfc_name(name: &str) -> Result<String, Error> {
+    let nfc: String = name.nfc().collect();
+    match component_rule(&nfc) {
+        None => Ok(nfc),
+        Some(rule) => Err(Error::Policy(format!(
+            "a path to send has a name a receiver would reject (rule {rule})"
+        ))),
+    }
 }
 
 #[derive(Default)]
@@ -93,6 +142,22 @@ struct Walker {
 }
 
 impl Walker {
+    /// The folder an argument names, as an entry, when several arguments are sent. The folder that
+    /// was sent alone contributes its contents and no entry of its own.
+    fn root_dir(&mut self, name: &str, disk: &Path, meta: &fs::Metadata) {
+        // `nfc_name` checked the component, so the path rule cannot fail here.
+        let path = ManifestPath::parse_rule(name).expect("a checked name");
+        let what = What::Dir {
+            mtime_ms: meta::mtime_ms(meta),
+            mode: meta::mode(meta),
+        };
+        self.out.items.push(Item {
+            path,
+            shown: disk.display().to_string(),
+            what,
+        });
+    }
+
     fn read_folder(&mut self, folder: &Folder) {
         // The folder that was sent has no name of its own, and a list shown to the user would
         // have a blank line for it.

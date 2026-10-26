@@ -63,9 +63,9 @@ pub enum Command {
     Id(id::Args),
     /// Print the completion script for a shell
     Completions(completions::Args),
-    /// Send a file, print its ticket, and serve until one complete download
+    /// Send files and folders, print a ticket, and serve until one complete download
     Send(send::SendArgs),
-    /// Receive the file a ticket names, writing it under the current folder by default
+    /// Receive what a ticket names, writing it under the current folder by default
     Recv(recv::RecvArgs),
     /// Check the home, who can reach it, its lock and identity key, and say how to fix a problem
     ///

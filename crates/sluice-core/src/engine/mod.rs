@@ -34,13 +34,15 @@ pub use hello::{
     Hello, MAX_FRAME_BYTES, PROTO_VERSION, SluiceProtocol, greet,
 };
 pub use recv::{ReceiveOptions, Received, receive};
-pub use send::{Outgoing, StopEnd, default_expiry, prepare as prepare_send};
+pub use send::{
+    Outgoing, StopEnd, default_expiry, prepare as prepare_send, prepare_paths as prepare_send_paths,
+};
 
 /// When `send` stops serving.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Stop {
-    /// After one request for this hash completes, which is the file the receiver asked for.
-    OneDownload([u8; 32]),
+    /// After every content root has been served and the receiver has closed its connection.
+    OneDownload(Vec<[u8; 32]>),
     /// On Ctrl+C, or at the ticket expiry.
     Keep,
 }
@@ -123,7 +125,10 @@ impl Provider {
     /// provider is not still accepting connections.
     pub async fn serve(mut self, stop: Stop) -> Result<ServeEnd, Error> {
         let end = match stop {
-            Stop::OneDownload(root) => self.one_download(Hash::from(root)).await?,
+            Stop::OneDownload(roots) => {
+                self.one_download(roots.into_iter().map(Hash::from).collect())
+                    .await?
+            }
             Stop::Keep => self.keep().await?,
         };
         self.shutdown_router().await?;
@@ -145,7 +150,13 @@ impl Provider {
         Ok(())
     }
 
-    async fn one_download(&mut self, root: Hash) -> Result<ServeEnd, Error> {
+    async fn one_download(&mut self, roots: Vec<Hash>) -> Result<ServeEnd, Error> {
+        let mut remaining: BTreeSet<Hash> = roots.into_iter().collect();
+        if remaining.is_empty() {
+            return Err(Error::Bug(
+                "a one-download send has no content to serve".to_string(),
+            ));
+        }
         let wait = match self.expiry {
             Some(expiry) => expiry.saturating_sub(now_ms()),
             None => 100 * 365 * 24 * 60 * 60 * 1000,
@@ -156,28 +167,29 @@ impl Provider {
         let deadline = tokio::time::sleep(Duration::from_millis(wait));
         tokio::pin!(deadline);
         let mut closed = BTreeSet::new();
-        let mut connection = None;
+        let mut connections = BTreeSet::new();
         loop {
             tokio::select! {
                 event = self.done.recv() => match event {
-                    Some(policy::ServeEvent::Downloaded { hash, connection: on }) if hash == root => {
-                        if closed.contains(&on) {
+                    Some(policy::ServeEvent::Downloaded { hash, connection }) => {
+                        if remaining.remove(&hash) {
+                            connections.insert(connection);
+                        }
+                        if remaining.is_empty() && connections.is_subset(&closed) {
                             return Ok(ServeEnd::Downloaded);
                         }
-                        connection = Some(on);
                     }
                     Some(policy::ServeEvent::Closed(id)) => {
                         closed.insert(id);
-                        if connection == Some(id) {
+                        if remaining.is_empty() && connections.is_subset(&closed) {
                             return Ok(ServeEnd::Downloaded);
                         }
                     }
-                    Some(_) => {}
                     None => return Err(Error::Bug("the provider event task stopped".into())),
                 },
                 // A receiver that keeps its connection open must not keep this sender alive: every
-                // byte was written, so stop after a grace period even without the close.
-                _ = tokio::time::sleep(Duration::from_secs(30)), if connection.is_some() => {
+                // content root was written, so stop after a grace period even without the close.
+                _ = tokio::time::sleep(Duration::from_secs(30)), if remaining.is_empty() => {
                     return Ok(ServeEnd::Downloaded);
                 }
                 _ = &mut deadline => return Ok(ServeEnd::Expired),

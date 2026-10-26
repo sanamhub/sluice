@@ -1,6 +1,10 @@
 //! One file from the sender's side: import it where it lives, build the one-entry manifest, and
 //! prepare the ticket. The bytes are never copied into the home.
 
+mod folder;
+
+pub use folder::prepare_paths;
+
 use std::{
     fs,
     path::Path,
@@ -30,14 +34,18 @@ pub struct Outgoing {
     pub provider: Provider,
     /// The ticket to print. Its secret is why this value is never logged.
     pub ticket: Ticket,
-    /// The file's BLAKE3 root, for the one-download stop.
-    pub root: [u8; 32],
-    /// The file name the receiver will write.
-    pub name: String,
+    /// The content roots the one-download stop waits for.
+    pub roots: Vec<[u8; 32]>,
+    /// The file name when the transfer is one file, and `None` for a folder.
+    pub name: Option<String>,
+    /// How many files the receiver will write.
+    pub files: u64,
+    /// The sum of their sizes.
+    pub bytes: u64,
     /// The congestion controller this send runs with.
     pub congestion: Congestion,
-    // Keeps the in-place import protected from garbage collection while the send runs.
-    _tag: TempTag,
+    // Keeps the in-place imports protected from garbage collection while the send runs.
+    _tags: Vec<TempTag>,
 }
 
 /// Imports `path` in place and starts a provider for it. `expiry` is UTC milliseconds or none.
@@ -133,8 +141,21 @@ pub async fn prepare(
             "the store gave the manifest a root other than its BLAKE3 hash".to_string(),
         ));
     }
+    let sequence = manifest.sequence_bytes();
+    let sequence_added = store
+        .blobs()
+        .add_bytes(sequence.clone())
+        .await
+        .map_err(|e| Error::Storage(format!("cannot keep the hash sequence: {e}")))?;
+    if sequence_added.hash != Hash::from(manifest.sequence_root()) {
+        return Err(Error::Bug(
+            "the store gave the hash sequence a root other than its BLAKE3 hash".to_string(),
+        ));
+    }
 
-    let allowed = [manifest.root(), *hash.as_bytes()].into_iter().collect();
+    let mut allowed: std::collections::BTreeSet<[u8; 32]> =
+        manifest.hash_sequence().into_iter().collect();
+    allowed.insert(manifest.sequence_root());
     let relay_url = match &relay {
         RelayModeChoice::Disabled => None,
         RelayModeChoice::Url(url) => Some(url.clone()),
@@ -153,7 +174,7 @@ pub async fn prepare(
         relay_url,
         expiry_ms,
         Body::Static {
-            root: manifest.root(),
+            root: manifest.sequence_root(),
             size: before.size,
             format: Format::HashSequence,
         },
@@ -162,11 +183,30 @@ pub async fn prepare(
     Ok(Outgoing {
         provider,
         ticket,
-        root: *hash.as_bytes(),
-        name: name.to_string(),
+        roots: content_roots(&manifest),
+        name: Some(name.to_string()),
+        files: 1,
+        bytes: before.size,
         congestion,
-        _tag: tag,
+        _tags: vec![tag],
     })
+}
+
+/// The blobs and packs a receiver must fetch. An empty file is written without a fetch, so its
+/// root is not one; a folder of empty files falls back to waiting for the sequence itself.
+pub(super) fn content_roots(manifest: &Manifest) -> Vec<[u8; 32]> {
+    let mut roots: Vec<[u8; 32]> = manifest.packs().iter().map(|pack| pack.root).collect();
+    let mut seen: std::collections::BTreeSet<[u8; 32]> = roots.iter().copied().collect();
+    for entry in manifest.entries() {
+        if entry.kind == Kind::File
+            && entry.size > 0
+            && let Loc::Blob { root } = entry.loc
+            && seen.insert(root)
+        {
+            roots.push(root);
+        }
+    }
+    roots
 }
 
 impl Outgoing {
@@ -177,22 +217,29 @@ impl Outgoing {
         keep: bool,
         events: &UnboundedSender<Event>,
     ) -> Result<StopEnd, Error> {
-        let bytes = self.ticket_size();
         emit(
             events,
             Event::Started {
-                name: Some(self.name),
-                files: 1,
-                bytes,
+                name: self.name.clone(),
+                files: self.files,
+                bytes: self.bytes,
                 congestion: self.congestion,
             },
         );
+        let roots = if self.roots.is_empty() {
+            match self.ticket.body() {
+                Body::Static { root, .. } => vec![*root],
+                Body::Live { .. } => Vec::new(),
+            }
+        } else {
+            self.roots.clone()
+        };
         let end = self
             .provider
             .serve(if keep {
                 Stop::Keep
             } else {
-                Stop::OneDownload(self.root)
+                Stop::OneDownload(roots)
             })
             .await?;
         Ok(match end {
@@ -200,13 +247,6 @@ impl Outgoing {
             super::ServeEnd::Expired => StopEnd::Expired,
             super::ServeEnd::Interrupted => StopEnd::Interrupted,
         })
-    }
-
-    fn ticket_size(&self) -> u64 {
-        match self.ticket.body() {
-            Body::Static { size, .. } => *size,
-            Body::Live { .. } => 0,
-        }
     }
 }
 

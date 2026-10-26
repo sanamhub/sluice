@@ -18,6 +18,7 @@ tests/vectors/
   tickets/      ticket text and bytes, SPEC.md section 4
   manifests/    directory manifests as bytes, SPEC.md section 8
   packs/        small-file packing, SPEC.md section 9
+  sequences/    the hash sequence of a folder ticket, SPEC.md section 8
   live/         the signed segment log, SPEC.md section 6
   delta/        not written yet
 ```
@@ -348,3 +349,26 @@ The files are `clean.json` (whole chains), `open.json` (the opening record and e
 one byte short and one byte long). A second implementation in Python wrote them, from section 6 with
 its own Ed25519 from RFC 8032, checked against the test vectors of its section 7.1, and the BLAKE3
 of the `manifests/` vectors.
+
+## `sequences/`
+
+These vectors test the hash sequence a Static ticket with `format` 1 names. A case gives a
+manifest and the bytes of its sequence blob:
+
+```json
+{ "name": "one file, one blob", "manifest": "0101...", "sequence": "2f26...abab...", "valid": true }
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | What the case is. A runner prints it next to a failure and does not compare it |
+| `manifest` | string | The manifest as lower-case hex |
+| `sequence` | string | The sequence blob as lower-case hex |
+| `valid` | boolean | `true` if the sequence is the one the manifest yields, `false` if a receiver MUST refuse it |
+| `reason` | string | Rejected cases. What is wrong with it, for people |
+
+To check an implementation, decode `manifest`, compute the sequence its rules give, and compare the
+bytes with `sequence`. A receiver must refuse the whole transfer when they differ. The rules are the
+manifest root first, the pack roots in pack order, then every distinct `Blob` root of a `File` entry
+in manifest order. The sequence is the ticket's `root`; this directory checks the bytes, not the
+ticket that carries their hash.

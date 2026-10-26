@@ -27,6 +27,9 @@ pub struct RecvArgs {
     /// Do not restore the modification time
     #[arg(long)]
     pub no_times: bool,
+    /// Create the symlinks the sender recorded (never followed outside the output)
+    #[arg(long)]
+    pub links: bool,
     /// The congestion controller: cubic (default) or bbr3 (experimental)
     #[arg(long, value_enum, default_value_t = CongestionArg::Cubic, value_name = "NAME")]
     pub congestion: CongestionArg,
@@ -44,7 +47,7 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
             out: args.out.clone(),
             force: args.force,
             no_times: args.no_times,
-            links: false,
+            links: args.links,
             limits: Limits::default(),
             free_bytes: None,
             congestion: args.congestion.into(),
@@ -57,7 +60,15 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
         printed?;
         let received = result?;
         if matches!(output.format(), crate::output::Format::Human) {
-            output.write_stderr(&format!("wrote {}\n", received.path.display()));
+            if received.files == 1 {
+                output.write_stderr(&format!("wrote {}\n", received.path.display()));
+            } else {
+                output.write_stderr(&format!(
+                    "wrote {} files under {}\n",
+                    received.files,
+                    received.path.display()
+                ));
+            }
         }
         Ok(0)
     })

@@ -84,6 +84,34 @@ fn one_file_crosses_two_processes_with_its_name() {
 }
 
 #[test]
+fn a_folder_crosses_two_processes() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let out = dir.path().join("out");
+    let tree = dir.path().join("tree");
+    std::fs::create_dir_all(tree.join("sub")).unwrap();
+    let big = data(1200 * 1024, 3);
+    std::fs::write(tree.join("big.bin"), &big).unwrap();
+    std::fs::write(tree.join("sub").join("note.txt"), b"nested").unwrap();
+    std::fs::write(tree.join("small.txt"), b"small").unwrap();
+
+    let (mut sender, ticket) = start(&home, &tree, "1h");
+    let result = recv(&home, &ticket, &out, false);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(std::fs::read(out.join("big.bin")).unwrap(), big);
+    assert_eq!(
+        std::fs::read(out.join("sub").join("note.txt")).unwrap(),
+        b"nested"
+    );
+    assert_eq!(std::fs::read(out.join("small.txt")).unwrap(), b"small");
+    wait_for_sender(&mut sender);
+}
+
+#[test]
 fn a_name_clash_refuses_before_writing_and_force_replaces() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join("home");

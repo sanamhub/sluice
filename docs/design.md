@@ -170,11 +170,13 @@ into the store for volatile or removable sources. ADR 0006.
 
 **Receiving uses a store beside the destination.** `iroh-blobs` keeps partial data in its own store,
 not in a sparse `.part` of ours, so a receive makes a hidden per-transfer store in the output folder,
-`.sluice-partial-<root prefix>`. It is on the same filesystem as the destination, which lets a
-finished blob be exported by move rather than copied. A 100 GB receive therefore peaks at about
-100 GB of payload plus the outboard and metadata, not 200 GB. The store is removed after the file is
-in place; after a failure it is kept for resume. The receiver checks free space before it fetches
-content and refuses with `Storage` when the volume cannot hold it. ADR 0006.
+`.sluice-partial-<ticket root prefix>`. It is on the same filesystem as the destination, which lets
+a finished blob be exported by move rather than copied. A 100 GB receive therefore peaks at about
+100 GB of payload plus the outboard and metadata, not 200 GB. One store holds a whole folder, so a
+resumed folder receive asks only for the ranges it still lacks. The store is removed after every
+file is in place; after a failure it is kept for resume. The receiver checks free space for the
+whole tree before it fetches content and refuses with `Storage` when the volume cannot hold it.
+ADR 0006.
 
 **The source can change underneath us.** Size, mtime and inode (file id on Windows) are recorded at
 import and checked before each range read. A mismatch fails the transfer with a `Verify` error

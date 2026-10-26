@@ -11,6 +11,7 @@ pub mod link;
 pub mod pack;
 pub mod path;
 mod rules;
+mod sequence;
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -20,6 +21,7 @@ use rules::{Fault, check_all, rule};
 
 pub use build::{Build, Built, DiskPaths, Finding, Reason, Refusal};
 pub use entry::{Entry, Kind, Loc, PackRef};
+pub use sequence::parse as parse_sequence;
 
 /// How much a receiver reads before it refuses a manifest.
 ///

@@ -13,7 +13,7 @@ mod hash;
 mod meta;
 mod walk;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub use disk::DiskPaths;
 pub use finding::{Finding, Reason};
@@ -198,15 +198,50 @@ impl Manifest {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build_with_limits(root: &Path, limits: Limits) -> Result<Build, Error> {
-        build(root, limits, |_| {})
+        let meta = std::fs::metadata(root)
+            .map_err(|e| Error::Storage(format!("cannot read the folder to send: {}", e.kind())))?;
+        if !meta.is_dir() {
+            return Err(Error::Policy(
+                "the path to send is not a folder".to_string(),
+            ));
+        }
+        build_paths(&[root.to_path_buf()], limits, |_| {})
+    }
+
+    /// Builds one manifest from several arguments, as `sluice send a.mov photos/` does.
+    ///
+    /// A single folder contributes its contents, not its own name. With more than one argument,
+    /// each folder contributes its name as a `Dir` entry and each file its own name, so the output
+    /// has the same shape the sender's arguments describe. The name checks, packing and limits are
+    /// the ones [`Manifest::build`] documents.
+    ///
+    /// # Examples
+    /// ```
+    /// use sluice_core::manifest::{Build, Manifest};
+    ///
+    /// let dir = tempfile::tempdir()?;
+    /// std::fs::write(dir.path().join("a.txt"), "a")?;
+    /// std::fs::create_dir(dir.path().join("photos"))?;
+    /// std::fs::write(dir.path().join("photos").join("b.txt"), "b")?;
+    /// let paths = [dir.path().join("a.txt"), dir.path().join("photos")];
+    ///
+    /// let Build::Ready(built) = Manifest::build_paths(&paths)? else {
+    ///     panic!("nothing is refused");
+    /// };
+    /// let names: Vec<_> = built.manifest.entries().iter().map(|e| e.path.as_str()).collect();
+    /// assert_eq!(names, ["a.txt", "photos", "photos/b.txt"]);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn build_paths(paths: &[PathBuf]) -> Result<Build, Error> {
+        build_paths(paths, Limits::default(), |_| {})
     }
 }
 
 /// [`Manifest::build_with_limits`] with a hook that runs for each file between its last byte and
 /// the second look at its size and time, so a test can change a file there, which a real run
 /// cannot do on purpose.
-fn build(root: &Path, limits: Limits, between: impl Fn(&Path)) -> Result<Build, Error> {
-    let walked = walk::walk(root)?;
+fn build_paths(paths: &[PathBuf], limits: Limits, between: impl Fn(&Path)) -> Result<Build, Error> {
+    let walked = walk::walk_paths(paths)?;
     // Before the names are compared and before any file is hashed: renaming files does not
     // bring the count down, so a list of names to fix would not help.
     check_entries(walked.items.len(), limits)?;
@@ -244,6 +279,13 @@ fn build(root: &Path, limits: Limits, between: impl Fn(&Path)) -> Result<Build, 
         disk: DiskPaths::new(assembled.disk),
         skipped,
     }))
+}
+
+/// The one-folder form of [`build_paths`], with the hook, for the tests that change a file between
+/// its last byte and the second look at it.
+#[cfg(test)]
+pub(super) fn build(root: &Path, limits: Limits, between: impl Fn(&Path)) -> Result<Build, Error> {
+    build_paths(&[root.to_path_buf()], limits, between)
 }
 
 /// Decoding rule 2 at the sender. The message gives numbers and no name.

@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {
+      "name": "an extra root after the sequence",
+      "reason": "nothing in the manifest yields the third root",
+      "sequence": "2f26438ffa6570a5098f2605c8e7477241e14062abd9eb45af24a979b9010d5eabababababababababababababababababababababababababababababababab1111111111111111111111111111111111111111111111111111111111111111",
+      "manifest": "010105612e747874000580a0f1c2b134a40300abababababababababababababababababababababababababababababababab0000",
+      "valid": false
+    },
+    {
+      "name": "a missing blob root",
+      "reason": "the file entry has no root in the sequence",
+      "sequence": "2f26438ffa6570a5098f2605c8e7477241e14062abd9eb45af24a979b9010d5e",
+      "manifest": "010105612e747874000580a0f1c2b134a40300abababababababababababababababababababababababababababababababab0000",
+      "valid": false
+    },
+    {
+      "name": "a repeated blob root",
+      "reason": "the same root appears twice",
+      "sequence": "2f26438ffa6570a5098f2605c8e7477241e14062abd9eb45af24a979b9010d5eabababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
+      "manifest": "010105612e747874000580a0f1c2b134a40300abababababababababababababababababababababababababababababababab0000",
+      "valid": false
+    },
+    {
+      "name": "a pack after a blob instead of before it",
+      "reason": "the pack root must come before the blob roots",
+      "sequence": "2ec2395e36a6ba2eff085bbc1a0575c558fe2906a53a54882042ea4c06c21458abababababababababababababababababababababababababababababababab3333333333333333333333333333333333333333333333333333333333333333",
+      "manifest": "01040164010080a0f1c2b134ed03020005642f62696700808080800480a0f1c2b134a40300abababababababababababababababababababababababababababababababab0003642f6c020080a0f1c2b1340002010362696707642f736d616c6c001480a0f1c2b134a403010000140001333333333333333333333333333333333333333333333333333333333333333314",
+      "valid": false
+    },
+    {
+      "name": "half a root at the end",
+      "reason": "the length is not a multiple of 32",
+      "sequence": "2f26438ffa6570a5098f2605c8e7477241e14062abd9eb45af24a979b9010d5eabababababababababababababababababababababababababababababababab00",
+      "manifest": "010105612e747874000580a0f1c2b134a40300abababababababababababababababababababababababababababababababab0000",
+      "valid": false
+    }
+  ],
+  "description": "Sequences a receiver must refuse: a root missing, extra, repeated, moved or cut. Every case names a manifest from `manifests/valid.json`."
+}

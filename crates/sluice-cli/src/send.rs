@@ -1,6 +1,7 @@
 //! `sluice send <file>`: import in place, print the ticket, then serve until one download.
 
 use std::{
+    fs,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -8,18 +9,21 @@ use std::{
 use clap::Args;
 use sluice_core::{
     Error, Home,
-    engine::{N0_WARNING, RelayModeChoice, StopEnd, deadline, parse_expiry, prepare_send},
+    engine::{
+        N0_WARNING, Outgoing, RelayModeChoice, StopEnd, deadline, parse_expiry, prepare_send,
+        prepare_send_paths,
+    },
 };
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::{cli::CongestionArg, events, output::Output};
 
-/// Sends one file to whoever has the ticket.
+/// Sends files and folders to whoever has the ticket.
 #[derive(Args)]
 pub struct SendArgs {
-    /// The file to send
-    #[arg(value_name = "FILE")]
-    pub file: PathBuf,
+    /// The files and folders to send
+    #[arg(value_name = "PATH", required = true)]
+    pub paths: Vec<PathBuf>,
     /// The relay that carries the transfer when a direct path fails
     #[arg(long, value_name = "URL")]
     pub relay: Option<String>,
@@ -50,8 +54,7 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
         .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
     runtime.block_on(async {
         let home = Home::open(&Home::locate()?)?;
-        let outgoing =
-            prepare_send(&home, &args.file, relay, args.congestion.into(), expiry).await?;
+        let outgoing = outgoing(&home, args, relay, expiry).await?;
         events::ticket(*output, &outgoing.ticket.encode())?;
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "sending");
@@ -69,6 +72,22 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
             }
         }
     })
+}
+
+/// One regular file keeps the single-file shape; anything else is a tree of several arguments.
+async fn outgoing(
+    home: &Home,
+    args: &SendArgs,
+    relay: RelayModeChoice,
+    expiry: Option<u64>,
+) -> Result<Outgoing, Error> {
+    let one_file =
+        args.paths.len() == 1 && fs::metadata(&args.paths[0]).is_ok_and(|meta| meta.is_file());
+    if one_file {
+        prepare_send(home, &args.paths[0], relay, args.congestion.into(), expiry).await
+    } else {
+        prepare_send_paths(home, &args.paths, relay, args.congestion.into(), expiry).await
+    }
 }
 
 fn now_ms() -> u64 {

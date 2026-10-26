@@ -307,6 +307,142 @@ async fn prepared(dir: &TempDir, body: &[u8]) -> (super::Outgoing, String) {
     (outgoing, text)
 }
 
+async fn prepared_paths(dir: &TempDir, paths: &[std::path::PathBuf]) -> (super::Outgoing, String) {
+    let home = Home::open(&dir.path().join("home")).unwrap();
+    let outgoing = super::prepare_send_paths(
+        &home,
+        paths,
+        RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+    )
+    .await
+    .unwrap();
+    let text = outgoing.ticket.encode();
+    (outgoing, text)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_folder_arrives_with_packs_and_empty_folders() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("photos");
+    fs::create_dir_all(source.join("sub")).unwrap();
+    fs::create_dir(source.join("empty")).unwrap();
+    let big: Vec<u8> = (0..(2 << 20)).map(|i| (i as u8).wrapping_mul(17)).collect();
+    fs::write(source.join("big.bin"), &big).unwrap();
+    fs::write(source.join("small.txt"), b"a small file").unwrap();
+    fs::write(source.join("sub").join("note.txt"), b"nested").unwrap();
+
+    let (outgoing, text) = prepared_paths(&dir, &[source]).await;
+    let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
+    let serve = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let out = dir.path().join("received");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let received = super::receive(&text, &options(&out), &tx).await.unwrap();
+    assert_eq!(received.files, 3);
+    assert_eq!(fs::read(out.join("big.bin")).unwrap(), big);
+    assert_eq!(fs::read(out.join("small.txt")).unwrap(), b"a small file");
+    assert_eq!(
+        fs::read(out.join("sub").join("note.txt")).unwrap(),
+        b"nested"
+    );
+    assert!(out.join("empty").is_dir());
+    assert_eq!(serve.await.unwrap().unwrap(), super::StopEnd::Downloaded);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn several_paths_keep_their_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let one = dir.path().join("a.mov");
+    let folder = dir.path().join("photos");
+    fs::write(&one, b"one file").unwrap();
+    fs::create_dir(&folder).unwrap();
+    fs::write(folder.join("b.txt"), b"in a folder").unwrap();
+
+    let (outgoing, text) = prepared_paths(&dir, &[one, folder]).await;
+    let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
+    let serve = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let out = dir.path().join("received");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let received = super::receive(&text, &options(&out), &tx).await.unwrap();
+    assert_eq!(received.files, 2);
+    assert_eq!(fs::read(out.join("a.mov")).unwrap(), b"one file");
+    assert_eq!(
+        fs::read(out.join("photos").join("b.txt")).unwrap(),
+        b"in a folder"
+    );
+    assert_eq!(serve.await.unwrap().unwrap(), super::StopEnd::Downloaded);
+}
+
+#[tokio::test]
+async fn one_clash_refuses_the_whole_folder_before_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("tree");
+    fs::create_dir(&source).unwrap();
+    fs::write(source.join("a.txt"), b"new").unwrap();
+    fs::write(source.join("b.txt"), b"new b").unwrap();
+    let (outgoing, text) = prepared_paths(&dir, &[source]).await;
+    let out = dir.path().join("out");
+    fs::create_dir(&out).unwrap();
+    fs::write(out.join("a.txt"), b"old").unwrap();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let err = super::receive(&text, &options(&out), &tx)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Policy(_)), "{err}");
+    assert_eq!(fs::read(out.join("a.txt")).unwrap(), b"old");
+    assert!(!out.join("b.txt").exists());
+    outgoing.provider.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_empty_folder_crosses_and_stops_the_sender() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("empty");
+    fs::create_dir(&source).unwrap();
+    let (outgoing, text) = prepared_paths(&dir, &[source]).await;
+    let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
+    let serve = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let out = dir.path().join("received");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let received = super::receive(&text, &options(&out), &tx).await.unwrap();
+    assert_eq!(received.files, 0);
+    assert!(out.is_dir());
+    assert_eq!(serve.await.unwrap().unwrap(), super::StopEnd::Downloaded);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn links_are_created_only_when_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("tree");
+    fs::create_dir(&source).unwrap();
+    fs::write(source.join("a.txt"), b"the target").unwrap();
+    std::os::unix::fs::symlink("a.txt", source.join("link")).unwrap();
+
+    let (outgoing, text) = prepared_paths(&dir, std::slice::from_ref(&source)).await;
+    let out = dir.path().join("without");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    super::receive(&text, &options(&out), &tx).await.unwrap();
+    assert!(fs::symlink_metadata(out.join("link")).is_err());
+    outgoing.provider.shutdown().await.unwrap();
+
+    let (outgoing, text) = prepared_paths(&dir, &[source]).await;
+    let out = dir.path().join("with");
+    let mut options = options(&out);
+    options.links = true;
+    super::receive(&text, &options, &tx).await.unwrap();
+    let link = out.join("link");
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(fs::read(&link).unwrap(), b"the target");
+    outgoing.provider.shutdown().await.unwrap();
+}
+
 async fn partial_store(out: &Path) -> FsStore {
     let entry = fs::read_dir(out)
         .unwrap()

@@ -431,6 +431,23 @@ The empty manifest is the three bytes `01 00 00`.
 gives the manifest as a blob. The `root` of a `Blob` is the BLAKE3 hash of the file's content, which
 is the root `iroh-blobs` gives it as a raw blob.
 
+**Hash sequence.** A Static ticket with `format` 1 names one more blob, the hash sequence. Its
+content is 32-byte roots, in this order:
+
+1. the manifest root
+2. the root of every pack, in pack order
+3. the root of every `Blob` `File` entry, in manifest order, each distinct root once
+
+The ticket's `root` is the BLAKE3 hash of that sequence blob, and its `size` is the sum of the
+`size` of every `File` entry. A receiver fetches the sequence, then the manifest, decodes it, and
+computes the sequence the manifest yields. It MUST reject the transfer unless the two are equal:
+no root may be missing, extra, repeated or in another place. It does this before the first content
+request. An empty sequence, or one whose length is not a multiple of 32, is refused.
+
+A sequence names the manifest before the content, so a receiver learns every path and every size
+without fetching a file. A single file is sent as a manifest with one entry, which is why its name
+travels with it. Format 0 is a raw blob for pipes and has no sequence.
+
 **Decoding.** A receiver MUST reject a manifest when:
 
 1. it is longer than the byte limit, 256 MiB unless the receiver sets another. This is checked
