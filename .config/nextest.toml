@@ -4,3 +4,9 @@
 [[profile.default.overrides]]
 filter = 'test(smoke_drives_the_probe_and_writes_results)'
 threads-required = "num-cpus"
+
+# The two-process transfer tests each bind an endpoint and move a file. Run them away from the
+# other network tests, where a busy loopback and its port mapper made a connection drop once.
+[[profile.default.overrides]]
+filter = 'binary(transfer)'
+threads-required = "num-cpus"
