@@ -58,8 +58,14 @@ const rows = [
                 {rows.map((row) => (
                     <tr>
                         <th scope="row">{row.label}</th>
-                        <td data-label="Sluice">{row.sluice}</td>
-                        <td data-label="Upload, then download">{row.cloud}</td>
+                        <td>
+                            <span class="cell-label">Sluice</span>
+                            {row.sluice}
+                        </td>
+                        <td>
+                            <span class="cell-label">Upload, then download</span>
+                            {row.cloud}
+                        </td>
                     </tr>
                 ))}
             </tbody>

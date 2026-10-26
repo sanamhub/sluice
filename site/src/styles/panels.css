@@ -100,8 +100,19 @@
 }
 
 @media (max-width: 640px) {
+  .panel-head {
+    min-height: 44px;
+  }
+
+  .panel-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
   .term {
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
+    white-space: pre;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
   }
 }

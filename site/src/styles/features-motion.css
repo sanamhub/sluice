@@ -309,6 +309,32 @@
   }
 }
 
+/* The feature drawings are quieter than the hero: slower loops, and slightly held back. */
+.art-blocks .block {
+  animation-duration: 9s;
+}
+
+.art-live .write,
+.art-live .head,
+.art-live .read {
+  animation-duration: 9s;
+}
+
+.art-range .cell:nth-child(n + 7):nth-child(-n + 9) {
+  animation-duration: 9s;
+}
+
+.art-resume .first,
+.art-resume .second,
+.art-resume .cut {
+  animation-duration: 10s;
+}
+
+.art-copy .ghost,
+.art-copy .strike {
+  animation-duration: 10s;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .art-blocks .block {
     animation: none;
@@ -336,15 +362,19 @@
     transform: translateY(-7px);
   }
 
-  .art-resume .first,
-  .art-resume .second {
+  .art-resume .first {
     animation: none;
     transform: scaleX(1);
   }
 
+  .art-resume .second {
+    animation: none;
+    transform: scaleX(0.55);
+  }
+
   .art-resume .cut {
     animation: none;
-    opacity: 0;
+    opacity: 1;
   }
 
   .art-copy .ghost {

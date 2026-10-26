@@ -1,127 +1,62 @@
-/* The hero diagram's parts and its one loop: chunks cross a direct path, the link drops once, the
-   transfer resumes, and the receiver's cells fill as each chunk is checked. The terminal preview
-   reveals line by line once. The still frame under reduced motion is at the bottom of this file. */
-
-.hero-svg .grid line {
-  stroke: var(--rule);
-  stroke-width: 1;
-  opacity: 0.7;
-}
-
-.hero-svg .peer-box {
-  fill: var(--surface-2);
-  stroke: var(--rule-strong);
-  stroke-width: 1;
-}
-
-.hero-svg .peer-label {
-  fill: var(--text);
-  font-family: var(--font-code);
-  font-size: 13px;
-  font-weight: 500;
-  text-anchor: start;
-}
-
-.hero-svg .peer-id {
-  fill: var(--muted);
-  font-family: var(--font-code);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-anchor: start;
-}
-
-.hero-svg .cell {
-  fill: none;
-  stroke: var(--rule-strong);
-  stroke-width: 1;
-}
-
-.hero-svg .cell.sent {
-  fill: var(--accent-soft);
-  stroke: var(--rule);
-}
-
-.hero-svg .path {
-  stroke: var(--rule-strong);
-  stroke-width: 1.5;
-}
-
-.hero-svg .path.broken {
-  stroke: var(--muted);
-  stroke-width: 1;
-  stroke-dasharray: 3 4;
-  opacity: 0;
-}
-
-.hero-svg .drop-mark {
-  opacity: 0;
-}
-
-.hero-svg .drop-mark path {
-  stroke: var(--muted);
-  stroke-width: 1.5;
-}
-
-.hero-svg .chunk {
-  fill: var(--accent);
-}
-
-.hero-svg .relay {
-  fill: none;
-  stroke: var(--rule-strong);
-  stroke-width: 1;
-  stroke-dasharray: 2 5;
-  opacity: 0.8;
-}
-
-.hero-svg .relay-node {
-  fill: var(--surface);
-  stroke: var(--rule-strong);
-  stroke-width: 1;
-}
-
-.hero-svg .relay-label {
-  fill: var(--muted);
-  font-family: var(--font-code);
-  font-size: 11px;
-  text-anchor: middle;
-}
+/* The hero diagram's one loop: chunks leave the top computer, cross a direct path, the link drops
+   once, the chunks resume, and the receiver's checks fill. The still frame under reduced motion is
+   at the bottom of this file. */
 
 .hero-svg .stream {
-  animation: stream 9s linear infinite;
+  animation: stream 10s linear infinite;
 }
 
 .hero-svg .path.solid {
-  animation: path-solid 9s linear infinite;
+  animation: path-solid 10s linear infinite;
 }
 
 .hero-svg .path.broken {
-  animation: path-broken 9s linear infinite;
+  animation: path-broken 10s linear infinite;
 }
 
 .hero-svg .drop-mark {
-  animation: drop-mark 9s linear infinite;
+  animation: drop-mark 10s linear infinite;
 }
 
-.hero-svg .cell.verify {
-  animation: verify 9s linear infinite;
-  animation-delay: calc(var(--i) * 0.07s);
+.hero-svg .check {
+  animation: check-fill 10s linear infinite;
+  animation-delay: calc(var(--i) * 0.05s);
 }
 
 @keyframes stream {
   0%,
-  8% {
-    transform: translateY(-320px);
+  6% {
+    transform: translateY(-24px);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
   }
   44% {
-    transform: translateY(0);
+    transform: translateY(120px);
+    opacity: 1;
+  }
+  46% {
+    opacity: 0;
+  }
+  48%,
+  56% {
+    transform: translateY(150px);
+    opacity: 0;
   }
   58% {
-    transform: translateY(0);
+    transform: translateY(-24px);
+    opacity: 1;
   }
-  88%,
+  90%,
+  94% {
+    transform: translateY(170px);
+    opacity: 1;
+  }
+  96%,
   100% {
-    transform: translateY(320px);
+    transform: translateY(170px);
+    opacity: 0;
   }
 }
 
@@ -170,13 +105,13 @@
   }
 }
 
-@keyframes verify {
+@keyframes check-fill {
   0%,
-  84% {
+  80% {
     fill: transparent;
   }
-  88%,
-  96% {
+  86%,
+  98% {
     fill: var(--accent);
   }
   100% {
@@ -201,10 +136,13 @@
   }
 }
 
+/* A still frame that explains itself: the file has arrived, the checks are full, and the one drop
+   stays marked with a note. */
 @media (prefers-reduced-motion: reduce) {
   .hero-svg .stream {
     animation: none;
-    transform: translateY(320px);
+    transform: translateY(170px);
+    opacity: 0;
   }
 
   .hero-svg .path.solid {
@@ -212,15 +150,23 @@
     opacity: 1;
   }
 
-  .hero-svg .path.broken,
-  .hero-svg .drop-mark {
+  .hero-svg .path.broken {
     animation: none;
     opacity: 0;
   }
 
-  .hero-svg .cell.verify {
+  .hero-svg .drop-mark {
+    animation: none;
+    opacity: 1;
+  }
+
+  .hero-svg .check {
     animation: none;
     fill: var(--accent);
+  }
+
+  .hero-svg .still-note {
+    opacity: 1;
   }
 
   .term .line {

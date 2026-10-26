@@ -1,5 +1,6 @@
 /* Tokens, reset and shared type for the landing page and the 404. Dark is the base; a light theme
-   follows the system. One accent, taken from the logo, used only where data moves or is checked. */
+   follows the system. One accent, taken from the logo, used only where data moves, a check passes
+   or a primary action asks to be pressed. */
 
 :root {
   color-scheme: dark;
@@ -13,8 +14,8 @@
   --muted: #93a4b8;
   --accent: #22d3ee;
   --accent-ink: #04222a;
-  --accent-soft: #22d3ee16;
-  --shadow: none;
+  --accent-soft: #22d3ee14;
+  --accent-line: #22d3ee55;
 
   --font-body: var(
     --font-sans,
@@ -31,14 +32,24 @@
     monospace
   );
 
+  --step--2: 0.75rem;
   --step--1: 0.8125rem;
-  --step-0: 1.0625rem;
-  --step-1: 1.25rem;
-  --step-2: clamp(1.5rem, 1.2rem + 1vw, 1.875rem);
-  --step-3: clamp(2.5rem, 1.8rem + 3.1vw, 3.9rem);
+  --step-0: 1.125rem;
+  --step-1: 1.375rem;
+  --step-2: clamp(1.625rem, 1.35rem + 1.1vw, 2.125rem);
+  --step-3: clamp(2.5rem, 1.7rem + 3.4vw, 4.25rem);
 
-  --gutter: clamp(1.25rem, 5vw, 2.5rem);
-  --measure: 34ch;
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 1.5rem;
+  --space-4: 2.5rem;
+  --space-5: 4rem;
+  --space-6: 6rem;
+  --section: clamp(3.5rem, 7vw, 6rem);
+
+  --gutter: clamp(1.25rem, 5vw, 3rem);
+  --measure: 66ch;
+  --measure-lede: 54ch;
   --wrap: 72rem;
 }
 
@@ -56,7 +67,7 @@
     --accent: #0e7490;
     --accent-ink: #ffffff;
     --accent-soft: #0e749014;
-    --shadow: none;
+    --accent-line: #0e749066;
   }
 }
 
@@ -91,18 +102,19 @@ body {
 
 h1,
 h2,
-h3 {
+h3,
+h4 {
   margin: 0;
   font-weight: 600;
-  line-height: 1.08;
+  line-height: 1.1;
   letter-spacing: -0.022em;
   text-wrap: balance;
 }
 
 h1 {
   font-size: var(--step-3);
-  line-height: 1.03;
-  letter-spacing: -0.028em;
+  line-height: 1.02;
+  letter-spacing: -0.03em;
 }
 
 h2 {
@@ -112,6 +124,11 @@ h2 {
 h3 {
   font-size: var(--step-1);
   letter-spacing: -0.012em;
+}
+
+h4 {
+  font-size: 1.0625rem;
+  letter-spacing: -0.008em;
 }
 
 p {
@@ -166,6 +183,10 @@ svg {
 ::selection {
   background: var(--accent);
   color: var(--accent-ink);
+}
+
+:target {
+  scroll-margin-top: 5rem;
 }
 
 .wrap {
@@ -232,4 +253,12 @@ svg {
 
 .plate::after {
   right: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto;
+  }
 }

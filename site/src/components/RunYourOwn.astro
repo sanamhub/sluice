@@ -23,7 +23,7 @@ import { RELAY_README, RENDEZVOUS_README } from "../data/links";
                                     README
                                 </a>
                             </div>
-                            <pre class="term"><code>docker build -f docker/relay/Dockerfile -t sluice-relay docker
+                            <pre class="term" tabindex="0"><code>docker build -f docker/relay/Dockerfile -t sluice-relay docker
 docker run -d --name relay -p 443:443 -p 80:80 -p 7842:7842/udp \
   -v "$PWD/certs:/etc/relay/certs:ro" sluice-relay</code></pre>
                         </div>
@@ -35,7 +35,7 @@ docker run -d --name relay -p 443:443 -p 80:80 -p 7842:7842/udp \
                                     README
                                 </a>
                             </div>
-                            <pre class="term"><code>docker build -f docker/rendezvous/Dockerfile -t sluice-rendezvous docker
+                            <pre class="term" tabindex="0"><code>docker build -f docker/rendezvous/Dockerfile -t sluice-rendezvous docker
 docker run -d --name rendezvous -p 7842:7842/udp \
   -v "$PWD/certs:/etc/rendezvous/certs:ro" sluice-rendezvous</code></pre>
                         </div>
@@ -60,3 +60,4 @@ docker run -d --name rendezvous -p 7842:7842/udp \
         </div>
     </div>
 </section>
+

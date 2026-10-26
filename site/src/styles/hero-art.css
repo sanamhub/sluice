@@ -1,0 +1,122 @@
+/* The hero drawing's static line work. Motion lives in hero-motion.css, after this file. */
+
+.hero-svg .grid line {
+  stroke: var(--rule);
+  stroke-width: 1;
+  opacity: 0.55;
+}
+
+.hero-svg .peer-box {
+  fill: var(--surface-2);
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+}
+
+.hero-svg .screen {
+  fill: none;
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+}
+
+.hero-svg .stand {
+  fill: none;
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+}
+
+.hero-svg .peer-label {
+  fill: var(--muted);
+  font-family: var(--font-code);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.hero-svg .file {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 1.1;
+}
+
+.hero-svg .file-name {
+  fill: var(--text);
+  font-family: var(--font-code);
+  font-size: 15px;
+}
+
+.hero-svg .file-meta {
+  fill: var(--muted);
+  font-family: var(--font-code);
+  font-size: 12px;
+}
+
+.hero-svg .path {
+  stroke: var(--rule-strong);
+  stroke-width: 1.5;
+}
+
+.hero-svg .path.broken {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  opacity: 0;
+}
+
+.hero-svg .drop-mark {
+  opacity: 0;
+}
+
+.hero-svg .drop-mark path {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.hero-svg .chunk {
+  fill: var(--accent);
+}
+
+.hero-svg .relay {
+  fill: none;
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+  stroke-dasharray: 2 5;
+  opacity: 0.75;
+}
+
+.hero-svg .relay-node {
+  fill: var(--surface);
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+}
+
+.hero-svg .relay-label {
+  fill: var(--muted);
+  font-family: var(--font-code);
+  font-size: 12px;
+  text-anchor: middle;
+}
+
+.hero-svg .check {
+  fill: none;
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+}
+
+.hero-svg .check-label {
+  fill: var(--muted);
+  font-family: var(--font-code);
+  font-size: 12px;
+}
+
+.hero-svg .path-label {
+  fill: var(--muted);
+  font-family: var(--font-code);
+  font-size: 12px;
+}
+
+/* The note belongs to the still frame, so it is hidden while the drawing moves. */
+.hero-svg .still-note {
+  fill: var(--muted);
+  font-family: var(--font-code);
+  font-size: 12px;
+  opacity: 0;
+}
