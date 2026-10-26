@@ -5,12 +5,12 @@ const cases = [
     {
         title: "A day of footage",
         body: "A video editor sends the day's camera files to a colourist on the same network. The files go straight across, so there is no upload to wait for.",
-        feature: "Direct path, verified blocks",
+        feature: "Direct path, checked pieces",
     },
     {
         title: "A database backup",
-        body: "A nightly dump goes to a server in another building. Every block is checked as it lands, and a dropped link picks up at the last checked block.",
-        feature: "Resume, verified blocks",
+        body: "A nightly dump goes to a server in another building. Every piece is checked as it lands, and a dropped link picks up at the last checked piece.",
+        feature: "Resume, checked pieces",
     },
     {
         title: "A recording, still growing",
@@ -20,7 +20,7 @@ const cases = [
     {
         title: "One part of a huge file",
         body: "A researcher needs one range from a large archive. Only that range crosses the network, and the rest stays where it is.",
-        feature: "Verified byte ranges",
+        feature: "One byte range",
     },
 ];
 ---

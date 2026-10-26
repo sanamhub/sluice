@@ -2,25 +2,25 @@
 import StepArt from "./StepArt.astro";
 
 // The three steps are a real sequence, so they are numbered and ordered. Every capability they
-// name is 1.0: send and recv, the ticket, verified blocks and resume.
+// name is 1.0: send and recv, the ticket, checked pieces and resume.
 const steps = [
     {
         kind: "send" as const,
         title: "Send a file",
         body: "Pick a file or a folder. Sluice reads it where it is, so a large file needs no second copy before it moves.",
-        note: "1.0: send, folders, reference in place",
+        note: "1.0: send and folders",
     },
     {
         kind: "share" as const,
         title: "Share one code",
-        body: "Send prints a ticket: one line of text with the address and the file's fingerprint. Send it however you like. Keep it private, because anyone who has it can fetch the file.",
+        body: "The sender gets a ticket: one line of text with the address and the file's fingerprint. Send it however you like. Keep it private, because anyone who has it can fetch the file.",
         note: "1.0: the ticket",
     },
     {
         kind: "receive" as const,
         title: "Receive it",
-        body: "Paste the ticket on the other computer. Every block is checked before it is written, and a dropped link resumes at the last checked block.",
-        note: "1.0: verified blocks, resume",
+        body: "Paste the ticket on the other computer. Every piece is checked before it is written, and a dropped link resumes at the last checked piece.",
+        note: "1.0: checked pieces, resume",
     },
 ];
 ---

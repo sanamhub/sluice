@@ -22,12 +22,12 @@ const rows = [
     },
     {
         label: "Checked on arrival",
-        sluice: "Every block, against the file's fingerprint. 1.0",
-        cloud: "The provider checks its copy. Your two ends do not check each other.",
+        sluice: "Every piece, against the file's fingerprint. 1.0",
+        cloud: "Usually the provider checks its copy. Your two ends do not check each other.",
     },
     {
         label: "After a dropped link",
-        sluice: "Starts at the last checked block. Target: first new byte within 2 s. 1.0",
+        sluice: "Starts at the last checked piece. Target: first new byte within 2 s. 1.0",
         cloud: "Often from the beginning, unless the service offers resume.",
     },
 ];
