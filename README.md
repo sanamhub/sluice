@@ -44,8 +44,9 @@ cargo run -p sluice-cli -- completions bash
 
 `doctor` changes nothing. It prints one line per check, `ok`, `warning`, `failed` or `skipped`, and
 the step that fixes a problem under it. Its exit code is 0 unless a check failed, and `transport` is
-skipped until the transport is measured. The [CLI README](crates/sluice-cli/README.md) lists every
-check, exit code and JSON field, which scripts may rely on.
+skipped until the transport is measured. With `--json` the same report is one object. The
+[CLI README](crates/sluice-cli/README.md) lists every check, exit code and JSON field, which scripts
+may rely on.
 
 `sluice id --rotate` replaces the identity after asking. With no terminal, or with `--json`, it
 refuses unless `--yes` is given.
