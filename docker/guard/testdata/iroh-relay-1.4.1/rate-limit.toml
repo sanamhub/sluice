@@ -1,0 +1,4 @@
+# iroh-relay 1.4.1, src/main.rs:801-805, test_rate_limit_config.
+[limits.client.rx]
+bytes_per_second = 400
+max_burst_bytes = 800

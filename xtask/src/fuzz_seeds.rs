@@ -159,7 +159,7 @@ fn with_selector(configs: Vec<Seed>) -> Vec<Seed> {
         .collect()
 }
 
-/// The three configs the images ship, iroh-relay 1.4.0's own examples that the guard's tests
+/// The three configs the images ship, iroh-relay 1.4.1's own examples that the guard's tests
 /// parse, and [`NEAR_MISSES`]. No vector holds a relay config: it is iroh-relay's format, and not
 /// the wire's.
 fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
@@ -167,7 +167,7 @@ fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
     let examples = docker
         .join("guard")
         .join("testdata")
-        .join("iroh-relay-1.4.0");
+        .join("iroh-relay-1.4.1");
     let mut paths = vec![
         docker.join("relay").join("relay.toml"),
         docker.join("relay").join("open.toml"),

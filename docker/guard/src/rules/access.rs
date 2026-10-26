@@ -15,7 +15,7 @@ pub(super) fn check(access: &AccessConfig, access_token: Option<&str>) -> Result
 }
 
 /// An id is what `sluice id` prints: an ed25519 public key in 64 lower-case hex digits.
-/// iroh-base 1.4.0 decodes a 64-character id with `HEXLOWER` and then as a curve point
+/// iroh-base 1.4.1 decodes a 64-character id with `HEXLOWER` and then as a curve point
 /// (`src/key.rs:122-127` and `475-482`), and iroh-relay refuses to start on any id it cannot read.
 /// It also takes a 52-character base32 spelling, which the README does not offer, so the guard
 /// refuses that too. An empty list lets nobody in, and is what the image ships.
@@ -26,14 +26,14 @@ fn check_ids(list: &str, ids: &[String]) -> Result<(), Refusal> {
         let paste = "paste the id that `sluice id` prints";
         let Some(bytes) = lower_hex(id) else {
             let why = match id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit()) {
-                true => "has upper-case hex digits, which iroh-relay 1.4.0 does not read",
+                true => "has upper-case hex digits, which iroh-relay 1.4.1 does not read",
                 false => "is not 64 lower-case hex digits",
             };
             return Err(Refusal::new(format!("{entry} {why}: {paste}")));
         };
         if ed25519_dalek::VerifyingKey::from_bytes(&bytes).is_err() {
             return Err(Refusal::new(format!(
-                "{entry} is 64 hex digits but not an ed25519 public key, which iroh-relay 1.4.0 \
+                "{entry} is 64 hex digits but not an ed25519 public key, which iroh-relay 1.4.1 \
                  refuses: {paste}"
             )));
         }
@@ -90,13 +90,13 @@ fn check_tokens(tokens: &[String], access_token: Option<&str>) -> Result<(), Ref
     }
     if tokens.is_empty() {
         return Err(Refusal::new(
-            "`access.shared_token` is empty, and iroh-relay 1.4.0 refuses to start without a \
+            "`access.shared_token` is empty, and iroh-relay 1.4.1 refuses to start without a \
              token: add one, or set IROH_RELAY_ACCESS_TOKEN",
         ));
     }
     match tokens.iter().position(String::is_empty) {
         Some(n) => Err(Refusal::new(format!(
-            "entry {} of `access.shared_token` is empty, and iroh-relay 1.4.0 refuses to start \
+            "entry {} of `access.shared_token` is empty, and iroh-relay 1.4.1 refuses to start \
              with one: remove it, or give it the token clients present",
             n + 1
         ))),

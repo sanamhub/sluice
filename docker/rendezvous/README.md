@@ -1,6 +1,6 @@
 # rendezvous
 
-The `rendezvous` image runs `iroh-relay` 1.4.0 with the relay half turned off. Peers behind NATs ask
+The `rendezvous` image runs `iroh-relay` 1.4.1 with the relay half turned off. Peers behind NATs ask
 it for their own public address over QUIC and it answers. It carries no transfer bytes, so the
 smallest VPS runs it (ADR 0013). `iroh-relay` is the upstream binary, built from crates.io with
 `--locked`. The version is the one `Cargo.lock` resolves for `iroh`, so the probe and the server
@@ -12,7 +12,7 @@ The `relay` image, which carries traffic and runs closed, is in [docker/relay](.
 
 The entry point is [`sluice-relay-guard`](../guard/README.md), the relay image's guard, and the
 default command is `--rendezvous --config-path /etc/rendezvous/manual.toml` (ADR 0020).
-`enable_relay` defaults to true in `iroh-relay` 1.4.0, so a config with that line deleted would
+`enable_relay` defaults to true in `iroh-relay` 1.4.1, so a config with that line deleted would
 turn this server into an open relay with no byte limit. In `--rendezvous` mode the guard refuses a
 config that does not say `enable_relay = false`, and one that sets `access` or `[limits]`, which
 only a relay reads. It applies every other rule of the relay's guard too: no unknown key, no
@@ -30,7 +30,7 @@ runs the server with whatever it is given.
 
 ## Environment variables
 
-`iroh-relay` 1.4.0 reads four variables that change what the config says (`src/main.rs`, lines
+`iroh-relay` 1.4.1 reads four variables that change what the config says (`src/main.rs`, lines
 41-47). With the relay half off, none of them changes what this server does:
 
 | Variable | What it changes | Here |
@@ -92,7 +92,7 @@ tested here, because no public certificate was available.
 
 ## Certificates
 
-The image takes `Manual` certificates only. `iroh-relay` 1.4.0 can fetch a LetsEncrypt certificate
+The image takes `Manual` certificates only. `iroh-relay` 1.4.1 can fetch a LetsEncrypt certificate
 itself, but only with the relay half on, because the challenge is answered on the relay's HTTPS
 listener (below). A rendezvous that runs a relay listener is not the server ADR 0013 describes, so
 the certificate comes from outside the container.
@@ -111,11 +111,11 @@ sudo certbot certonly --standalone -d rendezvous.example.net --deploy-hook '
 Mount `/srv/rendezvous/certs` as `/etc/rendezvous/certs`. The server reads the files once at start,
 so the hook restarts it. This recipe was not run here, because there was no public host name.
 
-## What iroh-relay 1.4.0 does with the relay half off
+## What iroh-relay 1.4.1 does with the relay half off
 
-Paths are in the `iroh-relay` 1.4.0 crate, `src/`. "Run" means it was started from this image and
-observed. The start with `--dev` and the refusal without it were run on 1.4.0. The other runs were
-made on 1.3.0, and the code they cite is the same in 1.4.0, with the line numbers moved to match.
+Paths are in the `iroh-relay` 1.4.1 crate, `src/`. "Run" means it was started from this image and
+observed. The start with `--dev` and the refusal without it were run on 1.4.1. The other runs were
+made on 1.3.0, and the code they cite is the same in 1.4.1, with the line numbers moved to match.
 
 **Ports.** One: UDP 7842, the QUIC address discovery port (`defaults.rs:7`, ALPN `/iroh-qad/0` at
 `quic.rs:10`). Run: with `manual.toml` the container's namespace has no TCP listener and one UDP

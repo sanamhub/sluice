@@ -7,7 +7,7 @@
 
 ADR 0020 decision 4 hands iroh-relay the open config file as standard input, with
 `--config-path=/dev/stdin`. The approach has two gaps. Line numbers are in
-`iroh-relay-1.4.0/src/main.rs`.
+`iroh-relay-1.4.1/src/main.rs`.
 
 - **A path that does not resolve runs open.** iroh-relay tests the path with `exists()`, which is
   false on any error, and then runs `Config::default()` (lines 548-552): relay on, access for

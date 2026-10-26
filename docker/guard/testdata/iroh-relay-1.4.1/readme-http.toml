@@ -1,4 +1,4 @@
-# iroh-relay 1.4.0, README.md:92-96.
+# iroh-relay 1.4.1, README.md:92-96.
 access.http.url = "https://your-auth-service.example.com/relay-auth"
 # Optional: authenticate the relay's outbound request to your service
 access.http.bearer_token = "service-to-service-secret"

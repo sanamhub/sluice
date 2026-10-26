@@ -1,4 +1,4 @@
-# Excerpt of the Cargo.lock inside the iroh-relay 1.4.0 crate (iroh-relay-1.4.0/Cargo.lock, from
+# Excerpt of the Cargo.lock inside the iroh-relay 1.4.0 crate (iroh-relay-1.4.1/Cargo.lock, from
 # the crates.io package), which `cargo install iroh-relay --locked` builds the server with. The
 # guard parses a config with its own toml, from its own lock, and a test fails if a major or minor
 # version here is not the guard's: the two would read the same file by different rules.

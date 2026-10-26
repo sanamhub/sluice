@@ -1,3 +1,3 @@
-# iroh-relay 1.4.0, README.md:58-59, the other half of the block above.
+# iroh-relay 1.4.1, README.md:58-59, the other half of the block above.
 # Or block specific endpoints and allow everyone else
 access.denylist = ["<endpoint-id>"]

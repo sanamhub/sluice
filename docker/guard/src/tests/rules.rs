@@ -108,7 +108,7 @@ fn each_closed_mode_starts_without_open_and_is_refused_with_it() {
 fn each_open_mode_needs_open_and_a_rate() {
     let open = ["", "access = \"everyone\"\n", "[access]\ndenylist = []\n"];
     let names = [
-        "not set, which iroh-relay 1.4.0 reads as everyone",
+        "not set, which iroh-relay 1.4.1 reads as everyone",
         "\"everyone\"",
         "a denylist",
     ];

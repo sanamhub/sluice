@@ -1,4 +1,4 @@
-//! The schema is iroh-relay 1.4.0's. Both images must build that release, and the probe must
+//! The schema is iroh-relay 1.4.1's. Both images must build that release, and the probe must
 //! resolve it, or a new release could add a key the guard does not know and the guard would
 //! refuse a good config, or worse, let a key through that it reads differently.
 
@@ -90,7 +90,7 @@ fn minor(version: &str) -> String {
 /// entries are checked in, with the file they came from, so this runs without the network.
 #[test]
 fn the_toml_and_serde_iroh_relay_builds_with_are_the_guards_to_the_minor_version() {
-    let published = read(&docker_dir().join("guard/testdata/iroh-relay-1.4.0/Cargo.lock.excerpt"));
+    let published = read(&docker_dir().join("guard/testdata/iroh-relay-1.4.1/Cargo.lock.excerpt"));
     let guard = read(&docker_dir().join("guard/Cargo.lock"));
     for name in [
         "toml",

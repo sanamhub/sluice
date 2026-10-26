@@ -1,4 +1,4 @@
-# iroh-relay 1.4.0, README.md:149-156.
+# iroh-relay 1.4.1, README.md:149-156.
 enable_quic_addr_discovery = true
 
 [tls]

@@ -79,7 +79,7 @@ BLAKE3 segments and closes into an ordinary static root; ADR 0004 covers the dif
 | Crate | Version | Notes |
 |---|---|---|
 | `iroh`, `iroh-relay` | 1.4 | Wire-stable since 1.0. Negotiates ALPNs in `Router` registration order |
-| `noq` | 1.4 | n0's fork of quinn. Cubic, BBRv3 and NewReno ship; we select BBRv3 (ADR 0015). GSO and GRO on by default, with a silent fallback |
+| `noq` | 1.4 | n0's fork of quinn. Cubic, BBRv3 and NewReno ship; we select Cubic today (ADR 0023). GSO and GRO on by default, with a silent fallback |
 | `iroh-blobs` | 0.103.1 or later | Pre-1.0. Versions 0.94.0 to 0.103.0 accept unauthenticated push and are yanked |
 | `bao-tree`, `range-collections` | 0.16, 0.4 | Small and single-author; vendorable in days |
 | `rustls` | 0.23.46 or later | Earlier releases leak session secrets through `Debug` |
@@ -250,8 +250,10 @@ a relay you run. The traffic stays end-to-end encrypted. ADR 0011, ADR 0014.
 QUIC carries discovery, hole punching, relay and control, and by default the data too. The settings
 that matter for throughput:
 
-- **BBRv3**, not the Cubic default. Loss-based control cannot meet the lossy-path targets, and Cubic
-  has measured pathologically on this stack. ADR 0015.
+- **Cubic** by default, with **BBRv3** selectable. ADR 0015 chose BBRv3, but `noq` 1.4.0's BBRv3
+  has a max bandwidth bug (noq#852, fix quinn-rs/quinn#2481) that is not in a release yet, so
+  ADR 0023 holds the default at Cubic until it is. Loss-based control cannot meet the lossy-path
+  targets, so the switch back follows a measurement on S5, not only the release.
 - **Windows sized to the bandwidth-delay product.** 1 Gbit/s at 100 ms needs 12.5 MB in flight. The
   defaults are far smaller.
 - **GSO and GRO.** On by default in `noq`, but a failed probe falls back silently to one segment per

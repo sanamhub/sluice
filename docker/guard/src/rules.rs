@@ -22,7 +22,7 @@ pub(crate) fn check(
     behind_proxy: bool,
 ) -> Result<(), Refusal> {
     let readme = readme(mode);
-    // iroh-relay 1.4.0 stops at start on an empty token: an empty value replaces the list with one
+    // iroh-relay 1.4.1 stops at start on an empty token: an empty value replaces the list with one
     // empty entry, and `bail_any!` refuses it (main.rs:236-243). The guard refuses it first so the
     // operator gets exit 64 and one line that names the variable.
     if access_token == Some("") {
@@ -70,7 +70,7 @@ fn readme(mode: Mode) -> &'static str {
 fn check_rendezvous(config: &Config) -> Result<(), Refusal> {
     if config.enable_relay != Some(false) {
         return Err(Refusal::new(
-            "--rendezvous needs `enable_relay = false` written out: iroh-relay 1.4.0 turns the \
+            "--rendezvous needs `enable_relay = false` written out: iroh-relay 1.4.1 turns the \
              relay half on without it, and a rendezvous server relays nothing",
         ));
     }
@@ -146,7 +146,7 @@ fn check_metrics(config: &Config) -> Result<(), Refusal> {
     match config.enable_metrics {
         Some(_) => Ok(()),
         None => Err(Refusal::new(
-            "`enable_metrics` is not set, and iroh-relay 1.4.0 then serves metrics on port 9090 \
+            "`enable_metrics` is not set, and iroh-relay 1.4.1 then serves metrics on port 9090 \
              with no login: write `enable_metrics = false`, or `true` to keep them on purpose",
         )),
     }
@@ -180,7 +180,7 @@ fn is_closed(config: &Config) -> bool {
 
 fn access_name(access: Option<&AccessConfig>) -> &'static str {
     match access {
-        None => "not set, which iroh-relay 1.4.0 reads as everyone",
+        None => "not set, which iroh-relay 1.4.1 reads as everyone",
         Some(AccessConfig::Everyone) => "\"everyone\", which lets anyone relay",
         Some(AccessConfig::Allowlist(_)) => "an allowlist",
         Some(AccessConfig::Denylist(_)) => "a denylist, which lets in every id not on it",

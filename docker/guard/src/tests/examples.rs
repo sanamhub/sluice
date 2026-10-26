@@ -1,12 +1,12 @@
-//! iroh-relay 1.4.0's own example configs, from its tests and README, copied into
-//! `testdata/iroh-relay-1.4.0` with the lines each came from. Every one must parse through the
+//! iroh-relay 1.4.1's own example configs, from its tests and README, copied into
+//! `testdata/iroh-relay-1.4.1` with the lines each came from. Every one must parse through the
 //! guard's schema: a config iroh-relay documents that the guard cannot read would mean the schema
 //! is missing a key.
 
 use crate::{Mode, check_config, schema};
 
 fn examples() -> Vec<(String, String)> {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/iroh-relay-1.4.0");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/iroh-relay-1.4.1");
     let mut files: Vec<_> = std::fs::read_dir(&dir)
         .unwrap()
         .map(|entry| entry.unwrap().path())

@@ -238,7 +238,7 @@ fn the_relay_config_seeds_are_the_shipped_configs_and_every_iroh_example() {
     assert!(
         files[3..]
             .iter()
-            .all(|f| f.starts_with("docker/guard/testdata/iroh-relay-1.4.0/")),
+            .all(|f| f.starts_with("docker/guard/testdata/iroh-relay-1.4.1/")),
         "{files:?}"
     );
     let relay = fs::read(vectors_dir().join("../../docker/relay/relay.toml")).unwrap();

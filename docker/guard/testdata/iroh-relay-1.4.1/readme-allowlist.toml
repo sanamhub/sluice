@@ -1,4 +1,4 @@
-# iroh-relay 1.4.0, README.md:54-56. The README shows this and the denylist as one block of
+# iroh-relay 1.4.1, README.md:54-56. The README shows this and the denylist as one block of
 # alternatives, and one config holds one of them.
 # Allow only specific endpoints
 access.allowlist = ["<endpoint-id>", "<endpoint-id>"]

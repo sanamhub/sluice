@@ -7,7 +7,7 @@
 
 The guard of ADR 0019 accepts no config that iroh-relay 1.4.0 runs open. Four more places end up
 less closed than a config or a deployment reads, though. Line numbers are in
-`iroh-relay-1.4.0/src/main.rs`.
+`iroh-relay-1.4.1/src/main.rs`.
 
 - **HTTPS can be turned off in the file.** `[tls] dangerous_http_only = true` drops HTTPS (lines
   703-721), which is what `--dev` does, and the guard refuses `--dev`. A shared token then crosses
