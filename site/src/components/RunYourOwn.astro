@@ -12,7 +12,7 @@ import { RELAY_README, RENDEZVOUS_README } from "../data/links";
                 <div class="section-main">
                     <p class="section-lede">
                         Two containers, built from this repository. The relay carries the transfer
-                        and its bandwidth bill; the rendezvous carries none.
+                        and its bandwidth bill. The rendezvous carries no file bytes.
                     </p>
 
                     <div class="run">
@@ -43,16 +43,16 @@ docker run -d --name rendezvous -p 7842:7842/udp \
 
                     <ul class="run-notes">
                         <li>
-                            The relay runs closed. Its allowlist starts empty, so add the endpoint
-                            ids that may relay through it before a transfer will.
+                            The relay starts closed. Add the endpoint ids that may relay through it
+                            before a transfer will.
                         </li>
                         <li>
                             Both use UDP 7842. Give each its own host, or map a different port and
                             put that address in the ticket.
                         </li>
                         <li>
-                            Both need a certificate. Each README lists the two files the image
-                            mounts and the commands that make them.
+                            Both need a certificate. Each README lists the two files the image mounts
+                            and the commands that make them.
                         </li>
                     </ul>
                 </div>

@@ -12,39 +12,40 @@
                 </div>
                 <div class="section-main">
                     <p class="section-lede">
-                        Two peers, one path, and two servers that only help them meet. A transfer
-                        that gets a direct path sends no bytes through a relay.
+                        Two computers, one path, and two servers that only help them meet. A direct
+                        transfer sends no bytes through a relay.
                     </p>
 
                     <dl class="how">
                         <div class="how-row">
                             <dt>Direct path</dt>
                             <dd>
-                                Tried first: LAN discovery, port mapping and hole punching over
-                                QUIC. Only the two endpoints hold the file.
+                                Tried first: local discovery, port mapping and hole punching over
+                                QUIC. Only the two ends hold the file.
                             </dd>
                         </div>
                         <div class="how-row">
                             <dt>Rendezvous</dt>
                             <dd>
-                                Answers one question, what this machine's public address is. It is
-                                signalling only and carries no transfer bytes, so the smallest VPS
-                                will do.
+                                A small server you run that answers one question: what is this
+                                computer's public address? It carries no file bytes, so the smallest
+                                VPS is enough.
                             </dd>
                         </div>
                         <div class="how-row">
                             <dt>Relay</dt>
                             <dd>
-                                Carries the whole transfer when hole punching fails. It is yours:
-                                the image runs closed and relays only the endpoint ids you list.
+                                A server you run that carries the whole transfer when hole punching
+                                fails. The image starts closed and relays only the endpoint ids you
+                                list.
                             </dd>
                         </div>
                         <div class="how-row">
                             <dt>No relay, no fallback</dt>
                             <dd>
-                                n0's public relays and DNS discovery are off. Until you name a
-                                relay, Sluice has none, and a transfer that cannot go direct fails
-                                instead of going somewhere else.
+                                n0's public relays and DNS discovery are off. Until you name a relay,
+                                Sluice has none. A transfer that cannot go direct fails instead of
+                                going somewhere else.
                             </dd>
                         </div>
                     </dl>

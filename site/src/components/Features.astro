@@ -6,31 +6,31 @@ const features = [
     {
         kind: "blocks" as const,
         title: "Verified blocks",
-        body: "Each 16 KiB block is checked against the file's BLAKE3 tree before it is written, so a damaged block does not reach the output.",
+        body: "Every 16 KiB block is checked against the file's BLAKE3 tree before it is written. A damaged block never reaches the output.",
         code: null,
     },
     {
         kind: "live" as const,
         title: "Read while it is written",
-        body: "Send a file that is still growing. The sender appends each segment to a signed log, and the receiver reads up to the last segment that verifies.",
+        body: "Send a file that is still growing. The sender adds each segment to a signed log, and the receiver reads up to the last segment that checks out.",
         code: null,
     },
     {
         kind: "range" as const,
         title: "One range, not the file",
-        body: "Ask for a byte range and only that range is transferred. The rest of the file is not fetched.",
+        body: "Ask for a byte range and only that range is transferred. The rest of the file stays where it is.",
         code: "sluice recv <ticket> --range 4G:4.1G",
     },
     {
         kind: "resume" as const,
         title: "Resume where it stopped",
-        body: "After a dropped link the next attempt starts at the last verified range. The target is the first new byte within 2 s.",
+        body: "After a dropped link, the next attempt starts at the last checked range. Target: the first new byte within 2 s.",
         code: null,
     },
     {
         kind: "copy" as const,
         title: "No second copy",
-        body: "The file is read where it is. The store keeps a reference, not a duplicate, so a 100 GB file needs no second copy of its data.",
+        body: "The file is read where it is. The store keeps a reference, not a duplicate, so large files need no second copy of their data.",
         code: null,
     },
 ];
@@ -46,7 +46,7 @@ const features = [
                 <div class="section-main">
                     <p class="section-lede">
                         None of these is in the binary today. They are what 1.0 is being built to
-                        do; the <a href={PERFORMANCE}>performance method</a> says which numbers are
+                        do. The <a href={PERFORMANCE}>performance method</a> says which numbers are
                         targets and which are measured.
                     </p>
                     <ul class="features">
