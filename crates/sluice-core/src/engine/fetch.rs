@@ -27,7 +27,7 @@ pub(super) async fn bounded_blob(
 ) -> Result<Vec<u8>, Error> {
     let size = verified_size(store, conn, hash).await?;
     limits.check_bytes(size)?;
-    fetch_blob(store, conn, hash, 0, events).await?;
+    fetch_blob(store, conn, hash, 0, 0, events).await?;
     let (bytes, got) = complete_bytes(store, hash).await?;
     if got != size {
         return Err(Error::Verify(format!(
@@ -88,11 +88,12 @@ async fn size_of(store: &FsStore, hash: Hash) -> Result<Option<u64>, Error> {
     )
 }
 
-/// Fetches a whole blob, reporting progress against `total` when it is known.
+/// Fetches a whole blob, reporting `base` plus the bytes seen against `total` when it is known.
 pub(super) async fn fetch_blob(
     store: &FsStore,
     conn: &iroh::endpoint::Connection,
     hash: Hash,
+    base: u64,
     total: u64,
     events: &UnboundedSender<Event>,
 ) -> Result<(), Error> {
@@ -106,7 +107,13 @@ pub(super) async fn fetch_blob(
         match item {
             GetProgressItem::Progress(bytes) => {
                 if total > 0 {
-                    super::emit(events, Event::Progress { bytes, total });
+                    super::emit(
+                        events,
+                        Event::Progress {
+                            bytes: base.saturating_add(bytes),
+                            total,
+                        },
+                    );
                 }
             }
             GetProgressItem::Done(_) => return Ok(()),

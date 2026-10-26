@@ -108,6 +108,7 @@ pub async fn bind(
     secret: Option<[u8; 32]>,
     relay: &RelayModeChoice,
     congestion: Congestion,
+    port: Option<u16>,
 ) -> Result<Endpoint, Error> {
     let mut builder = Endpoint::builder(presets::Empty)
         .crypto_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
@@ -125,6 +126,14 @@ pub async fn bind(
             .address_lookup(PkarrResolver::n0_dns())
             .address_lookup(DnsAddressLookup::n0_dns());
     }
+    // A saved port is tried first so a ticket printed by the last send still dials this one. If it
+    // is taken, the caller retries with `None` and any port.
+    let builder = match port {
+        Some(port) => builder
+            .bind_addr((std::net::Ipv4Addr::UNSPECIFIED, port))
+            .map_err(|e| Error::Network(format!("the saved port {port} cannot be used: {e}")))?,
+        None => builder,
+    };
     builder.bind().await.map_err(|e| {
         Error::Network(format!(
             "cannot open the local UDP socket for a transfer: {e}"

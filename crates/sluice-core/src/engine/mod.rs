@@ -88,7 +88,22 @@ impl Provider {
         expiry: Option<u64>,
     ) -> Result<Self, Error> {
         let seed = home.identity()?.secret_seed();
-        let endpoint = endpoint::bind(Some(seed), &relay, congestion).await?;
+        let saved = home.saved_port();
+        let endpoint = match endpoint::bind(Some(seed), &relay, congestion, saved).await {
+            Ok(endpoint) => endpoint,
+            // The saved port is taken or unusable; any port is better than refusing to send.
+            Err(_) if saved.is_some() => {
+                endpoint::bind(Some(seed), &relay, congestion, None).await?
+            }
+            Err(e) => return Err(e),
+        };
+        if let Some(port) = endpoint
+            .bound_sockets()
+            .first()
+            .map(std::net::SocketAddr::port)
+        {
+            home.save_port(port);
+        }
         if !matches!(relay, RelayModeChoice::Disabled) {
             endpoint::wait_for_online(&endpoint).await?;
         }
@@ -228,7 +243,7 @@ impl std::fmt::Debug for Receiver {
 impl Receiver {
     /// Binds a receiver. It takes no lock, so it runs beside a `send`.
     pub async fn open(relay: RelayModeChoice, congestion: Congestion) -> Result<Self, Error> {
-        let endpoint = endpoint::bind(None, &relay, congestion).await?;
+        let endpoint = endpoint::bind(None, &relay, congestion, None).await?;
         if !matches!(relay, RelayModeChoice::Disabled) {
             let wait = Duration::from_secs(iroh::NET_REPORT_TIMEOUT);
             tokio::time::timeout(wait, endpoint.online())

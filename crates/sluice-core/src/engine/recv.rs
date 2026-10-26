@@ -4,7 +4,12 @@
 mod plan;
 mod write;
 
-use std::{fs, path::PathBuf, time::Instant};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use iroh_blobs::{Hash, store::fs::FsStore};
 use tokio::sync::mpsc::UnboundedSender;
@@ -12,9 +17,11 @@ use tokio::sync::mpsc::UnboundedSender;
 use super::{Congestion, Event, Receiver, RelayModeChoice, emit, fetch, storage};
 use crate::{
     Error,
-    manifest::{Kind, Limits, Manifest, parse_sequence},
+    manifest::{Kind, Limits, Loc, Manifest, parse_sequence},
     ticket::{Body, Format, Ticket},
 };
+
+use plan::Plan;
 
 /// Where and how a receive writes.
 #[derive(Clone, Debug)]
@@ -77,14 +84,17 @@ pub async fn receive(
     fs::create_dir_all(&options.out)
         .map_err(|e| storage::policy_path("create", &options.out, e))?;
     let receiver = Receiver::open(relay_of(&ticket), options.congestion).await?;
-    let conn = receiver.connect(&ticket, events.clone()).await?;
     let partial = storage::partial_dir(&options.out, &hex(&root));
+    // A store that is already there means an earlier receive of this ticket was interrupted, so a
+    // file at a target may be one it already wrote. The writer checks such a file against the
+    // content instead of refusing it as a clash.
+    let resume = partial.exists();
     fs::create_dir_all(&partial).map_err(|e| storage::storage("create", &partial, e))?;
     let store = FsStore::load(&partial)
         .await
         .map_err(|e| Error::Storage(format!("cannot open the partial store: {e}")))?;
 
-    let result = fetch_all(&ticket, &store, conn, options, events).await;
+    let result = fetch_all(&receiver, &ticket, &store, options, resume, events).await;
     // Closing the endpoint tells the sender that the last bytes arrived, so it can stop without
     // cutting the response off a moment after writing it.
     let endpoint_closed = receiver.shutdown().await;
@@ -106,12 +116,14 @@ pub async fn receive(
 }
 
 async fn fetch_all(
+    receiver: &Receiver,
     ticket: &Ticket,
     store: &FsStore,
-    conn: iroh::endpoint::Connection,
     options: &ReceiveOptions,
+    resume: bool,
     events: &UnboundedSender<Event>,
 ) -> Result<Received, Error> {
+    let conn = receiver.connect(ticket, events.clone()).await?;
     let sequence_root = match ticket.body() {
         Body::Static { root, .. } => *root,
         Body::Live { .. } => return Err(Error::Policy("not a static ticket".to_string())),
@@ -142,7 +154,7 @@ async fn fetch_all(
             "the hash sequence does not match the manifest".to_string(),
         ));
     }
-    let plan = plan::check(&manifest, ticket, options)?;
+    let plan = plan::check(&manifest, ticket, options, resume)?;
     emit(
         events,
         Event::Started {
@@ -153,7 +165,8 @@ async fn fetch_all(
         },
     );
     let started = Instant::now();
-    write::write(&manifest, plan, store, &conn, options, events).await?;
+    ensure_content(receiver, ticket, store, &manifest, plan, conn, events).await?;
+    write::write(&manifest, plan, store, options, resume).await?;
     emit(events, Event::Verified { bytes: plan.bytes });
     emit(
         events,
@@ -167,6 +180,108 @@ async fn fetch_all(
         bytes: plan.bytes,
         files: plan.files,
     })
+}
+
+/// Fetches every content blob and pack before anything is written, retrying a dropped connection
+/// with the queue's backoff. Nothing in the output is touched until the whole tree is in the
+/// store, so a retry cannot meet a file it already wrote.
+async fn ensure_content(
+    receiver: &Receiver,
+    ticket: &Ticket,
+    store: &FsStore,
+    manifest: &Manifest,
+    plan: Plan,
+    mut conn: iroh::endpoint::Connection,
+    events: &UnboundedSender<Event>,
+) -> Result<(), Error> {
+    let mut attempt = 0u32;
+    loop {
+        match fetch_content(store, &conn, manifest, plan, events).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let retryable = matches!(e, Error::Network(_));
+                if !retryable || attempt + 1 >= crate::queue::MAX_NETWORK_FAILURES {
+                    return Err(e);
+                }
+                attempt += 1;
+                let wait = crate::queue::backoff_ms(attempt);
+                emit(
+                    events,
+                    Event::Retrying {
+                        attempt,
+                        seconds: wait / 1000,
+                    },
+                );
+                tokio::time::sleep(Duration::from_millis(wait)).await;
+                conn = receiver.connect(ticket, events.clone()).await?;
+            }
+        }
+    }
+}
+
+async fn fetch_content(
+    store: &FsStore,
+    conn: &iroh::endpoint::Connection,
+    manifest: &Manifest,
+    plan: Plan,
+    events: &UnboundedSender<Event>,
+) -> Result<(), Error> {
+    let mut progress = 0u64;
+    for pack in manifest.packs() {
+        let hash = Hash::from(pack.root);
+        fetch::fetch_blob(store, conn, hash, progress, plan.bytes, events).await?;
+        let (_, size) = fetch::complete_bytes(store, hash).await?;
+        if size != pack.size {
+            return Err(Error::Verify(format!(
+                "a pack has {size} bytes and the manifest says {}",
+                pack.size
+            )));
+        }
+        progress = progress.saturating_add(pack.size);
+        emit(
+            events,
+            Event::Progress {
+                bytes: progress,
+                total: plan.bytes,
+            },
+        );
+    }
+    let mut seen = BTreeSet::new();
+    for entry in manifest.entries() {
+        if entry.kind != Kind::File || entry.size == 0 {
+            continue;
+        }
+        let Loc::Blob { root } = entry.loc else {
+            continue;
+        };
+        if !seen.insert(root) {
+            continue;
+        }
+        let hash = Hash::from(root);
+        fetch::fetch_blob(store, conn, hash, progress, plan.bytes, events).await?;
+        let (_, size) = fetch::complete_bytes(store, hash).await?;
+        if size != entry.size {
+            return Err(Error::Verify(format!(
+                "a blob has {size} bytes and the manifest says {}",
+                entry.size
+            )));
+        }
+        let shared: u64 = manifest
+            .entries()
+            .iter()
+            .filter(|other| other.kind == Kind::File && other.loc == Loc::Blob { root })
+            .map(|other| other.size)
+            .sum();
+        progress = progress.saturating_add(shared);
+        emit(
+            events,
+            Event::Progress {
+                bytes: progress,
+                total: plan.bytes,
+            },
+        );
+    }
+    Ok(())
 }
 
 /// The name to put in `started` for a one-file transfer, and none for a tree.

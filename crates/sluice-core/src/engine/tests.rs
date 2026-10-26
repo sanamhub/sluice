@@ -50,9 +50,14 @@ async fn fixture(expiry: Option<u64>) -> Fixture {
     )
     .await
     .unwrap();
-    let endpoint = endpoint::bind(None, &RelayModeChoice::Disabled, super::Congestion::Cubic)
-        .await
-        .unwrap();
+    let endpoint = endpoint::bind(
+        None,
+        &RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+    )
+    .await
+    .unwrap();
     Fixture {
         _dir: dir,
         _home: home,
@@ -393,6 +398,74 @@ async fn one_clash_refuses_the_whole_folder_before_content() {
     assert_eq!(fs::read(out.join("a.txt")).unwrap(), b"old");
     assert!(!out.join("b.txt").exists());
     outgoing.provider.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_dropped_connection_is_retried() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(&dir.path().join("home")).unwrap();
+    let source = dir.path().join("large.bin");
+    let body: Vec<u8> = (0..(4 << 20)).map(|i| (i as u8).wrapping_mul(13)).collect();
+    fs::write(&source, &body).unwrap();
+    let outgoing = super::prepare_send(
+        &home,
+        &source,
+        RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+    )
+    .await
+    .unwrap();
+    let text = outgoing.ticket.encode();
+    let sequence_root = match outgoing.ticket.body() {
+        Body::Static { root, .. } => *root,
+        Body::Live { .. } => panic!("a live ticket"),
+    };
+    let sequence = outgoing
+        .provider
+        .store()
+        .blobs()
+        .get_bytes(Hash::from(sequence_root))
+        .await
+        .unwrap();
+    let allowed: BTreeSet<[u8; 32]> = crate::manifest::parse_sequence(&sequence, Limits::default())
+        .unwrap()
+        .into_iter()
+        .collect();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let out = dir.path().join("out");
+    let task = tokio::spawn(async move {
+        let received = super::receive(&text, &options(&out), &tx).await;
+        (received, out)
+    });
+    while let Some(event) = rx.recv().await {
+        if matches!(event, super::Event::Started { .. }) {
+            break;
+        }
+    }
+    let provider = outgoing.provider;
+    provider.shutdown().await.unwrap();
+    while let Some(event) = rx.recv().await {
+        if matches!(event, super::Event::Retrying { .. }) {
+            break;
+        }
+    }
+    let store = FsStore::load(home.path().join("blobs")).await.unwrap();
+    let provider = Provider::start(
+        &home,
+        store,
+        allowed,
+        RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+    )
+    .await
+    .unwrap();
+    let (received, out) = task.await.unwrap();
+    let received = received.unwrap();
+    assert_eq!(received.bytes, body.len() as u64);
+    assert_eq!(fs::read(out.join("large.bin")).unwrap(), body);
+    provider.shutdown().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

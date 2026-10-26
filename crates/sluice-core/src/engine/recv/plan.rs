@@ -25,6 +25,7 @@ pub(super) fn check(
     manifest: &Manifest,
     ticket: &Ticket,
     options: &ReceiveOptions,
+    resume: bool,
 ) -> Result<Plan, Error> {
     let files = manifest
         .entries()
@@ -42,7 +43,7 @@ pub(super) fn check(
     for entry in manifest.entries() {
         let target = options.out.join(entry.path.as_str());
         check_ancestors(&options.out, &target)?;
-        check_target(&target, entry.kind, options.force)?;
+        check_target(&target, entry.kind, options.force || resume)?;
     }
     Ok(Plan { files, bytes })
 }
@@ -106,7 +107,7 @@ fn check_ancestors(out: &Path, target: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn check_target(target: &Path, kind: Kind, force: bool) -> Result<(), Error> {
+fn check_target(target: &Path, kind: Kind, replace: bool) -> Result<(), Error> {
     let meta = match fs::symlink_metadata(target) {
         Ok(meta) => meta,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -124,7 +125,7 @@ fn check_target(target: &Path, kind: Kind, force: bool) -> Result<(), Error> {
             "{} is a folder, so --force cannot replace it with a file",
             target.display()
         ))),
-        Kind::File | Kind::Symlink if force => Ok(()),
+        Kind::File | Kind::Symlink if replace => Ok(()),
         _ => Err(super::storage::clash(target)),
     }
 }

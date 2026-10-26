@@ -69,6 +69,13 @@ pub enum Event {
         /// Bytes the transfer will move, as the ticket or manifest said.
         total: u64,
     },
+    /// The connection was lost and the transfer is about to try again.
+    Retrying {
+        /// Which retry this is, from 1.
+        attempt: u32,
+        /// How long it will wait first.
+        seconds: u64,
+    },
     /// Every byte arrived and matched its root.
     Verified {
         /// Bytes verified.

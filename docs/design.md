@@ -190,6 +190,7 @@ $SLUICE_HOME/            XDG data dir, or Known Folders on Windows
   VERSION                on-disk layout version
   blobs/                 outboards, partial files, imported copies
   db/                    tags, jobs, peer trust list
+  last-port              UDP port of the last send, so a restart keeps its ticket working
   logs/
 ```
 
@@ -232,6 +233,11 @@ relay, then `RelayMode::Custom`. `RelayMode::Default` needs a flag and prints a 
 With no relay configured, LAN and port-mapped transfers work. A pair of symmetric NATs fails instead
 of falling back, and the browser cannot connect at all. `sluice doctor` and the web UI's first
 screen name the relay in use, or say there is none and what that rules out.
+
+A sender keeps its endpoint id and remembers the UDP port it last bound in the home's `last-port`.
+A restart tries that port first, so a ticket printed before it still dials the same direct address;
+if the port is taken the sender takes any port and the ticket needs reprinting unless a relay is
+configured. The home's identity key is why the id itself survives.
 
 **Two containers.** `iroh-relay`'s server config has independent halves for address discovery and
 relaying. The `rendezvous` image runs only the first and moves no transfer bytes. The `relay` image
@@ -284,11 +290,15 @@ Gbit/s.
 ## Durability
 
 A partial download lives in the per-transfer `iroh-blobs` store, which records verified ranges in its
-own database and partial data files. The process syncs the finished file before it moves it into
-place. After a crash, the store decides what to ask for again; this release does not yet guarantee
-the 64 MB barrier the target states, which is work for the durability part. A full disk, a permission
-error or a quota error leaves the partial store and a `Storage` error, not a panic. The partial store
-is not deleted on failure, so a second receive with the same ticket and `--out` continues from it.
+own database and partial data files. A receive fetches every content blob before it writes the
+first output file, so a lost connection is retried against the ranges the store already has and an
+interrupted download leaves the output untouched. A file that a previous attempt did write is
+recognised on resume by its content and is not treated as a clash. The process syncs the finished
+file before it moves it into place. After a crash, the store decides what to ask for again; this
+release does not yet guarantee the 64 MB barrier the target states, which is work for the
+durability part. A full disk, a permission error or a quota error leaves the partial store and a
+`Storage` error, not a panic. The partial store is not deleted on failure, so a second receive with
+the same ticket and `--out` continues from it.
 
 ## Errors
 

@@ -9,25 +9,28 @@ use iroh_blobs::{
     store::fs::FsStore,
 };
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tokio::sync::mpsc::UnboundedSender;
 
 use super::{ReceiveOptions, fetch, plan::Plan, storage};
 use crate::{
     Error,
-    engine::{Event, emit},
     manifest::{Kind, Loc, Manifest},
 };
 
+/// The metadata of one entry, kept together so the write helpers have fewer arguments.
+#[derive(Clone, Copy)]
+struct Meta {
+    mtime_ms: u64,
+    mode: u32,
+}
+
 pub(super) async fn write(
     manifest: &Manifest,
-    plan: Plan,
+    _plan: Plan,
     store: &FsStore,
-    conn: &iroh::endpoint::Connection,
     options: &ReceiveOptions,
-    events: &UnboundedSender<Event>,
+    resume: bool,
 ) -> Result<(), Error> {
     let dirs = create_dirs(manifest, options)?;
-    let mut done = 0u64;
     let mut packs = BTreeSet::new();
     for entry in manifest.entries() {
         if entry.kind != Kind::File {
@@ -38,14 +41,15 @@ pub(super) async fn write(
                 let target = options.out.join(entry.path.as_str());
                 write_blob(
                     store,
-                    conn,
                     Hash::from(root),
                     &target,
                     entry.size,
-                    entry.mtime_ms,
-                    entry.mode,
+                    Meta {
+                        mtime_ms: entry.mtime_ms,
+                        mode: entry.mode,
+                    },
                     options,
-                    events,
+                    resume,
                 )
                 .await?;
             }
@@ -53,16 +57,7 @@ pub(super) async fn write(
                 if !packs.insert(pack_index) {
                     continue;
                 }
-                let pack_bytes =
-                    write_pack(manifest, pack_index as usize, store, conn, options, events).await?;
-                done = done.saturating_add(pack_bytes);
-                emit(
-                    events,
-                    Event::Progress {
-                        bytes: done,
-                        total: plan.bytes,
-                    },
-                );
+                write_pack(manifest, pack_index as usize, store, options, resume).await?;
                 continue;
             }
             Loc::None => {
@@ -71,19 +66,11 @@ pub(super) async fn write(
                 ));
             }
         }
-        done = done.saturating_add(entry.size);
-        emit(
-            events,
-            Event::Progress {
-                bytes: done,
-                total: plan.bytes,
-            },
-        );
     }
     if options.links {
         for entry in manifest.entries() {
             if entry.kind == Kind::Symlink {
-                write_link(entry, options)?;
+                write_link(entry, options, resume)?;
             }
         }
     }
@@ -111,28 +98,18 @@ fn create_dirs(
     Ok(dirs)
 }
 
-/// Writes every file of one pack and returns the bytes it wrote. The pack is fetched once.
+/// Writes every file of one pack. The pack was fetched and checked before anything was written.
 async fn write_pack(
     manifest: &Manifest,
     pack_index: usize,
     store: &FsStore,
-    conn: &iroh::endpoint::Connection,
     options: &ReceiveOptions,
-    events: &UnboundedSender<Event>,
-) -> Result<u64, Error> {
+    resume: bool,
+) -> Result<(), Error> {
     let pack = manifest.packs().get(pack_index).ok_or_else(|| {
         Error::Policy("the manifest points at a pack that is not listed".to_string())
     })?;
-    fetch::fetch_blob(store, conn, Hash::from(pack.root), 0, events).await?;
-    let (_, size) = fetch::complete_bytes(store, Hash::from(pack.root)).await?;
-    if size != pack.size {
-        return Err(Error::Verify(format!(
-            "a pack has {size} bytes and the manifest says {}",
-            pack.size
-        )));
-    }
     let mut reader = store.blobs().reader(Hash::from(pack.root));
-    let mut written = 0u64;
     for entry in manifest.entries() {
         let Loc::Packed {
             pack_index: other,
@@ -151,14 +128,16 @@ async fn write_pack(
             offset,
             len,
             &target,
-            entry.mtime_ms,
-            entry.mode,
-            options.no_times,
+            Meta {
+                mtime_ms: entry.mtime_ms,
+                mode: entry.mode,
+            },
+            options,
+            resume,
         )
         .await?;
-        written = written.saturating_add(len);
     }
-    Ok(written)
+    Ok(())
 }
 
 async fn write_from_pack(
@@ -166,10 +145,16 @@ async fn write_from_pack(
     offset: u64,
     len: u64,
     target: &Path,
-    mtime_ms: u64,
-    mode: u32,
-    no_times: bool,
+    meta: Meta,
+    options: &ReceiveOptions,
+    resume: bool,
 ) -> Result<(), Error> {
+    if target.exists() && !options.force {
+        if resume && same_packed(reader, offset, len, target).await? {
+            return finish_file(target, meta.mtime_ms, meta.mode, options.no_times);
+        }
+        return Err(storage::clash(target));
+    }
     let incoming = storage::incoming_path(target);
     let mut file = tokio::fs::File::create(&incoming)
         .await
@@ -191,26 +176,66 @@ async fn write_from_pack(
         )));
     }
     storage::install(&incoming, target, true)?;
-    finish_file(target, mtime_ms, mode, no_times)
+    finish_file(target, meta.mtime_ms, meta.mode, options.no_times)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Whether a target already holds the bytes of this pack range, which is how a receive that was
+/// killed after writing a file recognises it instead of refusing it as a clash.
+async fn same_packed(
+    reader: &mut BlobReader,
+    offset: u64,
+    len: u64,
+    target: &Path,
+) -> Result<bool, Error> {
+    let existing = fs::read(target).map_err(|e| storage::storage("read", target, e))?;
+    if existing.len() as u64 != len {
+        return Ok(false);
+    }
+    reader
+        .seek(std::io::SeekFrom::Start(offset))
+        .await
+        .map_err(|e| storage::storage("read a pack", target, e))?;
+    let mut expected = vec![0u8; existing.len()];
+    reader
+        .read_exact(&mut expected)
+        .await
+        .map_err(|e| storage::storage("read a pack", target, e))?;
+    Ok(existing == expected)
+}
+
+fn same_blob(target: &Path, hash: Hash, size: u64) -> Result<bool, Error> {
+    let meta = fs::symlink_metadata(target).map_err(|e| storage::storage("read", target, e))?;
+    if !meta.is_file() || meta.len() != size {
+        return Ok(false);
+    }
+    if size == 0 {
+        return Ok(true);
+    }
+    let mut file = fs::File::open(target).map_err(|e| storage::storage("read", target, e))?;
+    let mut hasher = blake3::Hasher::new();
+    std::io::copy(&mut file, &mut hasher).map_err(|e| storage::storage("read", target, e))?;
+    Ok(*hasher.finalize().as_bytes() == *hash.as_bytes())
+}
+
 async fn write_blob(
     store: &FsStore,
-    conn: &iroh::endpoint::Connection,
     hash: Hash,
     target: &Path,
     size: u64,
-    mtime_ms: u64,
-    mode: u32,
+    meta: Meta,
     options: &ReceiveOptions,
-    events: &UnboundedSender<Event>,
+    resume: bool,
 ) -> Result<(), Error> {
+    if target.exists() && !options.force {
+        if resume && same_blob(target, hash, size)? {
+            return finish_file(target, meta.mtime_ms, meta.mode, options.no_times);
+        }
+        return Err(storage::clash(target));
+    }
     let incoming = storage::incoming_path(target);
     if size == 0 {
         fs::write(&incoming, []).map_err(|e| storage::storage("create", target, e))?;
     } else {
-        fetch::fetch_blob(store, conn, hash, 0, events).await?;
         let (_, got) = fetch::complete_bytes(store, hash).await?;
         if got != size {
             return Err(Error::Verify(format!(
@@ -230,7 +255,7 @@ async fn write_blob(
     }
     storage::sync_file(&incoming)?;
     storage::install(&incoming, target, options.force)?;
-    finish_file(target, mtime_ms, mode, options.no_times)
+    finish_file(target, meta.mtime_ms, meta.mode, options.no_times)
 }
 
 fn finish_file(target: &Path, mtime_ms: u64, mode: u32, no_times: bool) -> Result<(), Error> {
@@ -241,7 +266,11 @@ fn finish_file(target: &Path, mtime_ms: u64, mode: u32, no_times: bool) -> Resul
 }
 
 #[cfg(unix)]
-fn write_link(entry: &crate::manifest::Entry, options: &ReceiveOptions) -> Result<(), Error> {
+fn write_link(
+    entry: &crate::manifest::Entry,
+    options: &ReceiveOptions,
+    resume: bool,
+) -> Result<(), Error> {
     let Some(target) = entry.link_target.as_ref().map(|target| target.as_str()) else {
         return Err(Error::Bug("a symlink entry has no target".to_string()));
     };
@@ -265,16 +294,44 @@ fn write_link(entry: &crate::manifest::Entry, options: &ReceiveOptions) -> Resul
             "the link points outside the output folder".to_string(),
         ));
     }
+    if let Ok(meta) = fs::symlink_metadata(&link) {
+        if options.force {
+            fs::remove_file(&link).map_err(|e| storage::policy_path("replace", &link, e))?;
+        } else if resume
+            && meta.file_type().is_symlink()
+            && fs::read_link(&link).ok().as_deref() == Some(Path::new(target))
+        {
+            return Ok(());
+        } else {
+            return Err(storage::clash(&link));
+        }
+    }
     std::os::unix::fs::symlink(target, &link)
         .map_err(|e| storage::policy_path("create a symlink at", &link, e))
 }
 
 #[cfg(windows)]
-fn write_link(entry: &crate::manifest::Entry, options: &ReceiveOptions) -> Result<(), Error> {
+fn write_link(
+    entry: &crate::manifest::Entry,
+    options: &ReceiveOptions,
+    resume: bool,
+) -> Result<(), Error> {
     let Some(target) = entry.link_target.as_ref().map(|target| target.as_str()) else {
         return Err(Error::Bug("a symlink entry has no target".to_string()));
     };
     let link = options.out.join(entry.path.as_str());
+    if let Ok(meta) = fs::symlink_metadata(&link) {
+        if options.force {
+            fs::remove_file(&link).map_err(|e| storage::policy_path("replace", &link, e))?;
+        } else if resume
+            && meta.file_type().is_symlink()
+            && fs::read_link(&link).ok().as_deref() == Some(Path::new(target))
+        {
+            return Ok(());
+        } else {
+            return Err(storage::clash(&link));
+        }
+    }
     std::os::windows::fs::symlink_file(target, &link).map_err(|e| {
         Error::Policy(format!(
             "cannot create a symlink at {}: {e}; Windows needs developer mode or an elevated \
@@ -285,7 +342,11 @@ fn write_link(entry: &crate::manifest::Entry, options: &ReceiveOptions) -> Resul
 }
 
 #[cfg(not(any(unix, windows)))]
-fn write_link(_entry: &crate::manifest::Entry, _options: &ReceiveOptions) -> Result<(), Error> {
+fn write_link(
+    _entry: &crate::manifest::Entry,
+    _options: &ReceiveOptions,
+    _resume: bool,
+) -> Result<(), Error> {
     Err(Error::Policy(
         "this platform has no symlink call".to_string(),
     ))
@@ -350,4 +411,21 @@ fn set_time(path: &Path, mtime_ms: u64) -> Result<(), Error> {
 #[cfg(not(any(unix, windows)))]
 fn set_time(_path: &Path, _mtime_ms: u64) -> Result<(), Error> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use iroh_blobs::Hash;
+
+    #[test]
+    fn an_existing_file_is_recognised_by_its_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.bin");
+        std::fs::write(&path, b"the same bytes").unwrap();
+        let hash = Hash::from(*blake3::hash(b"the same bytes").as_bytes());
+        assert!(super::same_blob(&path, hash, 14).unwrap());
+        let other = Hash::from(*blake3::hash(b"other").as_bytes());
+        assert!(!super::same_blob(&path, other, 14).unwrap());
+        assert!(!super::same_blob(&path, hash, 13).unwrap());
+    }
 }

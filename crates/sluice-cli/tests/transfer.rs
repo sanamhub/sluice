@@ -84,6 +84,81 @@ fn one_file_crosses_two_processes_with_its_name() {
 }
 
 #[test]
+fn a_restarted_sender_prints_the_same_ticket() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let file = dir.path().join("same.bin");
+    std::fs::write(&file, data(1024, 5)).unwrap();
+
+    let (sender, first) = start(&home, &file, "never");
+    drop(sender);
+    let (_sender, second) = start(&home, &file, "never");
+    let first = sluice_core::ticket::Ticket::decode(&first).unwrap();
+    let second = sluice_core::ticket::Ticket::decode(&second).unwrap();
+    assert_eq!(first.endpoint_id(), second.endpoint_id());
+    assert_eq!(first.body(), second.body());
+    assert_eq!(first.expiry_ms(), second.expiry_ms());
+    assert_eq!(first.relay_url(), second.relay_url());
+    assert!(
+        first
+            .addrs()
+            .iter()
+            .any(|addr| second.addrs().contains(addr)),
+        "no address survived the restart"
+    );
+}
+
+#[test]
+fn a_killed_receive_resumes_from_its_partial_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let out = dir.path().join("out");
+    let file = dir.path().join("large.bin");
+    let body = data(64 * 1024 * 1024, 11);
+    std::fs::write(&file, &body).unwrap();
+
+    let (mut sender, ticket) = start(&home, &file, "1h");
+    std::fs::create_dir(&out).unwrap();
+    let mut child = Command::new(EXE)
+        .env("SLUICE_HOME", &home)
+        .args(["recv", &ticket, "--out", out.to_str().unwrap()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start recv");
+    wait_for_partial(&out);
+    std::thread::sleep(Duration::from_millis(100));
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let result = recv(&home, &ticket, &out, false);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(std::fs::read(out.join("large.bin")).unwrap(), body);
+    wait_for_sender(&mut sender);
+}
+
+fn wait_for_partial(out: &Path) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let found = std::fs::read_dir(out).unwrap().flatten().any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".sluice-partial-")
+        });
+        if found {
+            return;
+        }
+        assert!(Instant::now() < deadline, "no partial store appeared");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
 fn a_folder_crosses_two_processes() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join("home");

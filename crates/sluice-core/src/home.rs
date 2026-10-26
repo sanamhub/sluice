@@ -15,7 +15,7 @@ mod setup;
 
 use std::env;
 use std::ffi::OsString;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -154,6 +154,19 @@ impl Home {
     /// ```
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// The UDP port the last send bound, if one was saved. A restarted sender tries it first so an
+    /// old ticket's direct addresses still work; a port that is taken falls back to any port.
+    pub(crate) fn saved_port(&self) -> Option<u16> {
+        let text = fs::read_to_string(self.path.join("last-port")).ok()?;
+        text.trim().parse().ok()
+    }
+
+    /// Remembers the port of this send. Best effort: the ticket is already usable, and a home
+    /// that cannot take the file is not a reason to fail the transfer.
+    pub(crate) fn save_port(&self, port: u16) {
+        let _ = atomic::write_atomic(&self.path, "last-port", format!("{port}\n").as_bytes());
     }
 
     /// The identity of this home. The key is made the first time this is called, not when the home
