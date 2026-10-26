@@ -1,7 +1,8 @@
 # sluice-cli
 
-**Owns:** the `sluice` binary: subcommands, human output, `--json` output, shell completions, man
-pages, progress display, `sluice doctor`, and `sluice mcp` (an MCP server over stdio, using `rmcp`).
+The `sluice` command is the program you run. It names this machine, checks your setup with
+`doctor`, and prints shell completions. It owns the subcommands, human and `--json` output, man
+pages, progress display and `sluice mcp` (an MCP server over stdio, using `rmcp`).
 
 **Must never:**
 

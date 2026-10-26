@@ -1,7 +1,7 @@
 # Install
 
-Nothing has been released yet. When something is, this is how to install it: download the archive
-for the machine, check where it came from, and only then run anything from it.
+Nothing has been released yet. When there is a release, download the archive for your computer,
+check where it came from, and only then run it.
 
 ## Download and verify an archive
 
