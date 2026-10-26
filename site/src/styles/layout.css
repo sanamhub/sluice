@@ -83,6 +83,7 @@
   gap: 0.5rem;
   padding: 0.3rem 0.65rem;
   border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-pill);
   color: var(--muted);
   font-family: var(--font-code);
   font-size: 0.8125rem;
@@ -92,6 +93,7 @@
 .status-mark {
   width: 6px;
   height: 6px;
+  border-radius: 50%;
   background: var(--accent);
 }
 
@@ -120,7 +122,7 @@
   min-height: 44px;
   padding: 0.65rem 1.15rem;
   border: 1px solid var(--rule-strong);
-  border-radius: 2px;
+  border-radius: var(--radius-m);
   font-size: 0.9375rem;
   font-weight: 500;
   text-decoration: none;
@@ -152,11 +154,15 @@
 }
 
 .hero-frame {
+  overflow: hidden;
   border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
   background: var(--surface);
 }
 
 .hero-svg {
+  stroke-linecap: round;
+  stroke-linejoin: round;
   width: 100%;
   height: auto;
 }
@@ -193,7 +199,7 @@
   display: grid;
   gap: 0.8rem;
   max-width: 60ch;
-  margin-bottom: clamp(2rem, 4vw, 3.5rem);
+  margin-bottom: clamp(2.5rem, 5vw, 4rem);
 }
 
 .section-lede {

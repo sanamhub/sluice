@@ -34,19 +34,19 @@ const checkY = (i: number) => 360 + Math.floor(i / 3) * 16;
             </g>
 
             <path class="relay" d="M210 150 C 96 178, 96 292, 210 320" />
-            <rect class="relay-node" x="90" y="229" width="12" height="12" />
+            <rect class="relay-node" x="90" y="229" width="12" height="12" rx="3" />
             <text class="relay-label" x="96" y="216">
                 relay
             </text>
 
             <g class="peer">
-                <rect class="peer-box" x="60" y="34" width="300" height="116" />
-                <rect class="screen" x="80" y="50" width="20" height="14" />
+                <rect class="peer-box" x="60" y="34" width="300" height="116" rx="12" />
+                <rect class="screen" x="80" y="50" width="20" height="14" rx="2.5" />
                 <path class="stand" d="M86 64v4h8v-4" />
                 <text class="peer-label" x="110" y="61">
                     this computer
                 </text>
-                <path class="file" d="M80 84h11l4 4v13H80z" />
+                <path class="file" d="M80 84h11l4 4v13H80z" stroke-linejoin="round" />
                 <text class="file-name" x="102" y="95">
                     render.mov
                 </text>
@@ -56,13 +56,13 @@ const checkY = (i: number) => 360 + Math.floor(i / 3) * 16;
             </g>
 
             <g class="peer">
-                <rect class="peer-box" x="60" y="320" width="300" height="116" />
-                <rect class="screen" x="80" y="336" width="20" height="14" />
+                <rect class="peer-box" x="60" y="320" width="300" height="116" rx="12" />
+                <rect class="screen" x="80" y="336" width="20" height="14" rx="2.5" />
                 <path class="stand" d="M86 350v4h8v-4" />
                 <text class="peer-label" x="110" y="347">
                     their computer
                 </text>
-                <path class="file" d="M80 370h11l4 4v13H80z" />
+                <path class="file" d="M80 370h11l4 4v13H80z" stroke-linejoin="round" />
                 <text class="file-name" x="102" y="381">
                     render.mov
                 </text>
@@ -80,6 +80,7 @@ const checkY = (i: number) => 360 + Math.floor(i / 3) * 16;
                         y={checkY(i)}
                         width="12"
                         height="12"
+                        rx="3"
                     />
                 ))}
             </g>
@@ -97,10 +98,10 @@ const checkY = (i: number) => 360 + Math.floor(i / 3) * 16;
 
             <g clip-path="url(#hero-path)">
                 <g class="stream">
-                    <rect class="chunk" x="201" y="150" width="18" height="18" />
-                    <rect class="chunk" x="201" y="174" width="18" height="18" />
-                    <rect class="chunk" x="201" y="198" width="18" height="18" />
-                    <rect class="chunk" x="201" y="222" width="18" height="18" />
+                    <rect class="chunk" x="201" y="150" width="18" height="18" rx="4.5" />
+                    <rect class="chunk" x="201" y="174" width="18" height="18" rx="4.5" />
+                    <rect class="chunk" x="201" y="198" width="18" height="18" rx="4.5" />
+                    <rect class="chunk" x="201" y="222" width="18" height="18" rx="4.5" />
                 </g>
             </g>
 

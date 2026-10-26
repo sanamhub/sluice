@@ -12,7 +12,9 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow: hidden;
   border: 1px solid var(--rule);
+  border-radius: var(--radius-l);
   background: var(--surface);
 }
 
@@ -39,6 +41,7 @@
 .tag {
   padding: 0.15rem 0.45rem;
   border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-pill);
   color: var(--muted);
   font-family: var(--font-code);
   font-size: 0.6875rem;

@@ -156,6 +156,7 @@
   width: 42px;
   height: 24px;
   border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-pill);
   background: var(--surface-2);
 }
 
@@ -165,6 +166,7 @@
   top: 3px;
   width: 16px;
   height: 16px;
+  border-radius: 50%;
   background: var(--muted);
 }
 
@@ -180,6 +182,7 @@
 .motion-input:focus-visible + .motion-track {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
+  border-radius: var(--radius-pill);
 }
 
 .motion-label-pause {

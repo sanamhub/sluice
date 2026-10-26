@@ -45,7 +45,12 @@
   --space-4: 2.5rem;
   --space-5: 4rem;
   --space-6: 6rem;
-  --section: clamp(3.5rem, 7vw, 6rem);
+  --section: clamp(5rem, 10vw, 8rem);
+
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 16px;
+  --radius-pill: 999px;
 
   --gutter: clamp(1.25rem, 5vw, 3rem);
   --measure: 66ch;
@@ -177,7 +182,7 @@ svg {
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
-  border-radius: 2px;
+  border-radius: var(--radius-s);
 }
 
 ::selection {

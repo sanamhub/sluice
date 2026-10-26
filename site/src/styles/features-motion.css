@@ -20,6 +20,7 @@
   width: 12px;
   height: 12px;
   border: 1px solid var(--rule-strong);
+  border-radius: 3px;
   background: transparent;
   animation: block-fill 4.8s linear infinite;
   animation-delay: calc(var(--i) * 0.11s);
@@ -235,6 +236,7 @@
   width: 28px;
   height: 28px;
   border: 1px solid var(--accent);
+  border-radius: var(--radius-s);
 }
 
 .art-copy .wire {
@@ -253,6 +255,7 @@
   width: 16px;
   height: 16px;
   border: 1px solid var(--rule-strong);
+  border-radius: 50%;
 }
 
 .art-copy .ghost {
@@ -262,6 +265,7 @@
   width: 28px;
   height: 28px;
   border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius-s);
   background: var(--bg);
   opacity: 0;
   animation: copy-ghost 5s linear infinite;
