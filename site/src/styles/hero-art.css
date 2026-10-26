@@ -120,3 +120,95 @@
   font-size: 12px;
   opacity: 0;
 }
+
+/* The switch is shown only when the system asks for less motion. It is a real checkbox, so it
+   works with the keyboard, and the label is part of the 44 px target. */
+.motion-control {
+  display: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+}
+
+.motion-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 44px;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.motion-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.motion-track {
+  position: relative;
+  flex: none;
+  width: 42px;
+  height: 24px;
+  border: 1px solid var(--rule-strong);
+  background: var(--surface-2);
+}
+
+.motion-knob {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 16px;
+  height: 16px;
+  background: var(--muted);
+}
+
+.motion-input:checked + .motion-track {
+  border-color: var(--accent);
+}
+
+.motion-input:checked + .motion-track .motion-knob {
+  background: var(--accent);
+  transform: translateX(18px);
+}
+
+.motion-input:focus-visible + .motion-track {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.motion-label-pause {
+  display: none;
+}
+
+.motion-input:checked ~ .motion-label-play {
+  display: none;
+}
+
+.motion-input:checked ~ .motion-label-pause {
+  display: inline;
+}
+
+.motion-hint {
+  max-width: 40ch;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-control {
+    display: flex;
+  }
+}
+
+@supports not selector(:has(*)) {
+  .motion-control {
+    display: none !important;
+  }
+}

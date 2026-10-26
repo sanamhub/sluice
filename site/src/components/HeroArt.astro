@@ -112,6 +112,25 @@ const checkY = (i: number) => 360 + Math.floor(i / 3) * 16;
             </text>
         </svg>
     </div>
+    <div class="motion-control">
+        <label class="motion-switch">
+            <input
+                class="motion-input"
+                type="checkbox"
+                id="play-motion"
+                aria-describedby="motion-hint"
+            />
+            <span class="motion-track" aria-hidden="true">
+                <span class="motion-knob"></span>
+            </span>
+            <span class="motion-label motion-label-play">Play animation</span>
+            <span class="motion-label motion-label-pause">Pause animation</span>
+        </label>
+        <p class="motion-hint" id="motion-hint">
+            Your system asks for less motion, so the drawing stays still. This switch plays it for
+            this visit.
+        </p>
+    </div>
     <figcaption class="caption">
         A file leaves this computer and crosses a direct encrypted path. Each block is checked on
         the other side. The relay stays dim: it carries bytes only if you run one and a direct path

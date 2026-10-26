@@ -387,3 +387,61 @@
     transform: scaleX(1);
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  @supports selector(:has(*)) {
+    body:has(#play-motion:checked) .art-blocks .block {
+      animation: block-fill 9s linear infinite;
+      animation-delay: calc(var(--i) * 0.11s);
+      background: transparent;
+      border-color: var(--rule-strong);
+    }
+
+    body:has(#play-motion:checked) .art-live .write {
+      animation: live-write 9s linear infinite;
+      transform: none;
+    }
+
+    body:has(#play-motion:checked) .art-live .head {
+      animation: live-head 9s linear infinite;
+      transform: none;
+    }
+
+    body:has(#play-motion:checked) .art-live .read {
+      animation: live-read 9s linear infinite;
+      transform: none;
+    }
+
+    body:has(#play-motion:checked)
+      .art-range
+      .cell:nth-child(n + 7):nth-child(-n + 9) {
+      animation: range-lift 9s ease-in-out infinite;
+      transform: none;
+    }
+
+    body:has(#play-motion:checked) .art-resume .first {
+      animation: resume-first 10s linear infinite;
+      transform: none;
+    }
+
+    body:has(#play-motion:checked) .art-resume .second {
+      animation: resume-second 10s linear infinite;
+      transform: none;
+    }
+
+    body:has(#play-motion:checked) .art-resume .cut {
+      animation: resume-cut 10s linear infinite;
+      opacity: 0;
+    }
+
+    body:has(#play-motion:checked) .art-copy .ghost {
+      animation: copy-ghost 10s linear infinite;
+      opacity: 0;
+    }
+
+    body:has(#play-motion:checked) .art-copy .strike {
+      animation: copy-strike 10s linear infinite;
+      transform: none;
+    }
+  }
+}

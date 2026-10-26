@@ -175,3 +175,47 @@
     transform: none;
   }
 }
+
+/* The switch is the one way back to the full animation. It is honoured only where :has() works,
+   and the switch itself is hidden where it does not, so the page simply stays still. */
+@media (prefers-reduced-motion: reduce) {
+  @supports selector(:has(*)) {
+    body:has(#play-motion:checked) .hero-svg .stream {
+      animation: stream 10s linear infinite;
+      transform: none;
+      opacity: 1;
+    }
+
+    body:has(#play-motion:checked) .hero-svg .path.solid {
+      animation: path-solid 10s linear infinite;
+      opacity: 1;
+    }
+
+    body:has(#play-motion:checked) .hero-svg .path.broken {
+      animation: path-broken 10s linear infinite;
+      opacity: 0;
+    }
+
+    body:has(#play-motion:checked) .hero-svg .drop-mark {
+      animation: drop-mark 10s linear infinite;
+      opacity: 0;
+    }
+
+    body:has(#play-motion:checked) .hero-svg .check {
+      animation: check-fill 10s linear infinite;
+      animation-delay: calc(var(--i) * 0.05s);
+      fill: transparent;
+    }
+
+    body:has(#play-motion:checked) .hero-svg .still-note {
+      opacity: 0;
+    }
+
+    body:has(#play-motion:checked) .term .line {
+      animation: line-in 0.45s ease-out both;
+      animation-delay: calc(var(--i) * 0.45s);
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
