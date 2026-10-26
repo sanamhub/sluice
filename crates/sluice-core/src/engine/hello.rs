@@ -2,7 +2,7 @@
 //! ALPN and connection, so this handler never carries a blob.
 
 use iroh::{
-    endpoint::{Connection, RecvStream, SendStream},
+    endpoint::{Connection, RecvStream, SendStream, VarInt},
     protocol::{AcceptError, ProtocolHandler},
 };
 use tokio::io::AsyncWriteExt;
@@ -171,6 +171,20 @@ fn take_varint(bytes: &[u8], at: &mut usize) -> Option<u64> {
     None
 }
 
+/// The dialer's half of the greeting. It writes `Hello` before it reads the answer, because
+/// `open_bi` is lazy: the listener is not told of the stream until the dialer writes to it. A
+/// dialer that read first would wait on a stream the listener has not seen.
+pub async fn greet(conn: &Connection) -> std::io::Result<Hello> {
+    let (mut send, mut recv) = conn.open_bi().await.map_err(std::io::Error::other)?;
+    write_hello(&mut send, Hello::ours()).await?;
+    let theirs = read_hello(&mut recv).await?;
+    send.finish()?;
+    Ok(theirs)
+}
+
+/// The close code for a `sluice/1` stream that names another protocol version.
+const CLOSE_VERSION: u32 = 1;
+
 /// The `sluice/1` listener. It reads the dialer's greeting, rejects another protocol version, and
 /// answers with its own. A later change adds the control records after this exchange.
 #[derive(Clone, Copy, Debug, Default)]
@@ -179,11 +193,25 @@ pub struct SluiceProtocol;
 impl ProtocolHandler for SluiceProtocol {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         let (mut send, mut recv) = conn.accept_bi().await?;
-        read_hello(&mut recv).await.map_err(AcceptError::from_err)?;
+        let _theirs = match read_hello(&mut recv).await {
+            Ok(hello) => hello,
+            Err(cause) => {
+                // SPEC section 3 asks for a clear reason, which a generic accept error does not
+                // carry to the peer.
+                conn.close(
+                    VarInt::from_u32(CLOSE_VERSION),
+                    cause.to_string().as_bytes(),
+                );
+                return Err(AcceptError::from_err(cause));
+            }
+        };
         write_hello(&mut send, Hello::ours())
             .await
             .map_err(AcceptError::from_err)?;
         send.finish()?;
+        // Returning from `accept` closes the connection, which can discard the greeting before the
+        // dialer reads it. The handler owns the connection until the dialer is done with it.
+        let _ = conn.closed().await;
         Ok(())
     }
 }

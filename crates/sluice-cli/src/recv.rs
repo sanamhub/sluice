@@ -6,10 +6,11 @@ use clap::Args;
 use sluice_core::{
     Error,
     engine::{ReceiveOptions, receive},
+    manifest::Limits,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
-use crate::{events, output::Output};
+use crate::{cli::CongestionArg, events, output::Output};
 
 /// Receives the file a ticket names.
 #[derive(Args)]
@@ -26,6 +27,9 @@ pub struct RecvArgs {
     /// Do not restore the modification time
     #[arg(long)]
     pub no_times: bool,
+    /// The congestion controller: cubic (default) or bbr3 (experimental)
+    #[arg(long, value_enum, default_value_t = CongestionArg::Cubic, value_name = "NAME")]
+    pub congestion: CongestionArg,
 }
 
 pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
@@ -40,6 +44,10 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
             out: args.out.clone(),
             force: args.force,
             no_times: args.no_times,
+            links: false,
+            limits: Limits::default(),
+            free_bytes: None,
+            congestion: args.congestion.into(),
         };
         let result = receive(&args.ticket, &options, &tx).await;
         drop(tx);

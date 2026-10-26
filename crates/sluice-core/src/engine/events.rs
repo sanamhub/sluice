@@ -8,6 +8,8 @@ use n0_future::StreamExt;
 use serde::Serialize;
 use tokio::{sync::mpsc::UnboundedSender, task::JoinHandle};
 
+use super::endpoint::Congestion;
+
 /// How a connection reaches the peer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -43,6 +45,8 @@ pub enum Event {
         files: u64,
         /// The sum of their sizes in bytes.
         bytes: u64,
+        /// The congestion controller the transfer runs with.
+        congestion: Congestion,
     },
     /// The connection is up, and this is the path it uses.
     Connected {
@@ -166,7 +170,7 @@ fn selected(list: &PathList<'_>) -> Option<(PathKind, Option<String>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Event, PathKind};
+    use super::{Congestion, Event, PathKind};
 
     #[test]
     fn json_names_the_variant_and_its_fields() {
@@ -189,10 +193,22 @@ mod tests {
             name: Some("a.bin".into()),
             files: 1,
             bytes: 7,
+            congestion: Congestion::Cubic,
         };
         assert_eq!(
             event.json(),
-            r#"{"event":"started","name":"a.bin","files":1,"bytes":7}"#
+            r#"{"event":"started","name":"a.bin","files":1,"bytes":7,"congestion":"cubic"}"#
         );
+    }
+
+    #[test]
+    fn a_started_event_names_the_controller_that_runs() {
+        let event = Event::Started {
+            name: Some("a.bin".into()),
+            files: 1,
+            bytes: 7,
+            congestion: Congestion::Bbr3,
+        };
+        assert!(event.json().contains(r#""congestion":"bbr3""#));
     }
 }

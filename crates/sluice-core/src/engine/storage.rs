@@ -53,13 +53,35 @@ pub fn install(from: &Path, target: &Path, force: bool) -> Result<(), Error> {
     if target.exists() && !force {
         return Err(clash(target));
     }
-    // Windows refuses a rename onto an existing name. The old file is removed only now, after the
-    // new one is complete, so a failure before this leaves it alone.
+    // Windows replaces an existing file in `rename`. A read-only destination is the one case it
+    // cannot, and then only the read-only bit is cleared before the same rename is tried again.
     #[cfg(windows)]
-    if target.exists() {
-        std::fs::remove_file(target).map_err(|e| storage("replace", target, e))?;
+    {
+        match std::fs::rename(from, target) {
+            Ok(()) => Ok(()),
+            Err(e) if target.exists() => {
+                let meta =
+                    std::fs::symlink_metadata(target).map_err(|e| storage("read", target, e))?;
+                if meta.permissions().readonly() {
+                    let mut permissions = meta.permissions();
+                    // This is Windows, where readonly is the only permission bit `set_permissions`
+                    // holds; the Unix warning the lint names does not apply.
+                    #[allow(clippy::permissions_set_readonly_false)]
+                    permissions.set_readonly(false);
+                    std::fs::set_permissions(target, permissions)
+                        .map_err(|e| storage("replace", target, e))?;
+                    std::fs::rename(from, target).map_err(|e| storage("install", target, e))
+                } else {
+                    Err(storage("install", target, e))
+                }
+            }
+            Err(e) => Err(storage("install", target, e)),
+        }
     }
-    std::fs::rename(from, target).map_err(|e| storage("install", target, e))
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(from, target).map_err(|e| storage("install", target, e))
+    }
 }
 
 /// The one clash message, naming the first path and both ways out.
@@ -139,5 +161,35 @@ mod tests {
             incoming_path(Path::new("/out/a.bin")),
             Path::new("/out/.a.bin.sluice-new")
         );
+    }
+
+    /// The install step is one rename because Windows already replaces an existing target. This
+    /// keeps the test next to the claim, so a platform that changes its mind fails here.
+    #[cfg(windows)]
+    #[test]
+    fn a_rename_replaces_a_file_that_is_already_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        let incoming = dir.path().join("incoming");
+        std::fs::write(&target, b"old").unwrap();
+        std::fs::write(&incoming, b"new").unwrap();
+        super::install(&incoming, &target, true).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        assert!(!incoming.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_read_only_target_is_replaced_by_clearing_the_bit() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target");
+        let incoming = dir.path().join("incoming");
+        std::fs::write(&target, b"old").unwrap();
+        let mut permissions = std::fs::metadata(&target).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&target, permissions).unwrap();
+        std::fs::write(&incoming, b"new").unwrap();
+        super::install(&incoming, &target, true).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
     }
 }

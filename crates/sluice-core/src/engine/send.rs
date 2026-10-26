@@ -17,7 +17,7 @@ use iroh_blobs::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::{Event, Provider, RelayModeChoice, Stop, emit, expiry, storage};
+use super::{Congestion, Event, Provider, RelayModeChoice, Stop, emit, expiry, storage};
 use crate::{
     Error, Home,
     manifest::{Entry, Kind, Loc, Manifest, PackRef, path::ManifestPath},
@@ -34,6 +34,8 @@ pub struct Outgoing {
     pub root: [u8; 32],
     /// The file name the receiver will write.
     pub name: String,
+    /// The congestion controller this send runs with.
+    pub congestion: Congestion,
     // Keeps the in-place import protected from garbage collection while the send runs.
     _tag: TempTag,
 }
@@ -46,6 +48,7 @@ pub async fn prepare(
     home: &Home,
     path: &Path,
     relay: RelayModeChoice,
+    congestion: Congestion,
     expiry_ms: Option<u64>,
 ) -> Result<Outgoing, Error> {
     let shown = path.display().to_string();
@@ -137,7 +140,7 @@ pub async fn prepare(
         RelayModeChoice::Url(url) => Some(url.clone()),
         RelayModeChoice::N0 => None,
     };
-    let provider = Provider::start(home, store, allowed, relay, expiry_ms).await?;
+    let provider = Provider::start(home, store, allowed, relay, congestion, expiry_ms).await?;
     let addr = provider.addr();
     let relay_url = relay_url.or_else(|| {
         addr.relay_urls()
@@ -161,6 +164,7 @@ pub async fn prepare(
         ticket,
         root: *hash.as_bytes(),
         name: name.to_string(),
+        congestion,
         _tag: tag,
     })
 }
@@ -180,6 +184,7 @@ impl Outgoing {
                 name: Some(self.name),
                 files: 1,
                 bytes,
+                congestion: self.congestion,
             },
         );
         let end = self

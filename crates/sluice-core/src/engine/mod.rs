@@ -4,6 +4,7 @@
 mod endpoint;
 mod events;
 mod expiry;
+mod fetch;
 mod hello;
 mod policy;
 mod recv;
@@ -25,12 +26,12 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use crate::{Error, Home, ticket::Body};
 
-pub use endpoint::{N0_WARNING, RelayModeChoice};
+pub use endpoint::{Congestion, N0_WARNING, RelayModeChoice};
 pub use events::{Event, PathKind, emit, watch_path};
 pub use expiry::{DEFAULT_SECONDS, deadline, parse as parse_expiry};
 pub use hello::{
     ALPN, CAP_DELTA, CAP_LIVE, CAP_MANIFEST_V1, CAP_PACKS, CAP_RECEIPTS, CAP_ZSTD, CAPABILITIES,
-    Hello, MAX_FRAME_BYTES, PROTO_VERSION, SluiceProtocol,
+    Hello, MAX_FRAME_BYTES, PROTO_VERSION, SluiceProtocol, greet,
 };
 pub use recv::{ReceiveOptions, Received, receive};
 pub use send::{Outgoing, StopEnd, default_expiry, prepare as prepare_send};
@@ -61,7 +62,7 @@ pub struct Provider {
     endpoint: Endpoint,
     store: FsStore,
     _policy: policy::Policy,
-    done: tokio::sync::mpsc::UnboundedReceiver<Hash>,
+    done: tokio::sync::mpsc::UnboundedReceiver<policy::ServeEvent>,
     expiry: Option<u64>,
 }
 
@@ -81,10 +82,11 @@ impl Provider {
         store: FsStore,
         allowed: BTreeSet<[u8; 32]>,
         relay: RelayModeChoice,
+        congestion: Congestion,
         expiry: Option<u64>,
     ) -> Result<Self, Error> {
         let seed = home.identity()?.secret_seed();
-        let endpoint = endpoint::bind(Some(seed), &relay).await?;
+        let endpoint = endpoint::bind(Some(seed), &relay, congestion).await?;
         if !matches!(relay, RelayModeChoice::Disabled) {
             endpoint::wait_for_online(&endpoint).await?;
         }
@@ -153,13 +155,31 @@ impl Provider {
         }
         let deadline = tokio::time::sleep(Duration::from_millis(wait));
         tokio::pin!(deadline);
+        let mut closed = BTreeSet::new();
+        let mut connection = None;
         loop {
             tokio::select! {
-                done = self.done.recv() => match done {
-                    Some(hash) if hash == root => return Ok(ServeEnd::Downloaded),
-                    Some(_) => continue,
+                event = self.done.recv() => match event {
+                    Some(policy::ServeEvent::Downloaded { hash, connection: on }) if hash == root => {
+                        if closed.contains(&on) {
+                            return Ok(ServeEnd::Downloaded);
+                        }
+                        connection = Some(on);
+                    }
+                    Some(policy::ServeEvent::Closed(id)) => {
+                        closed.insert(id);
+                        if connection == Some(id) {
+                            return Ok(ServeEnd::Downloaded);
+                        }
+                    }
+                    Some(_) => {}
                     None => return Err(Error::Bug("the provider event task stopped".into())),
                 },
+                // A receiver that keeps its connection open must not keep this sender alive: every
+                // byte was written, so stop after a grace period even without the close.
+                _ = tokio::time::sleep(Duration::from_secs(30)), if connection.is_some() => {
+                    return Ok(ServeEnd::Downloaded);
+                }
                 _ = &mut deadline => return Ok(ServeEnd::Expired),
             }
         }
@@ -195,8 +215,8 @@ impl std::fmt::Debug for Receiver {
 
 impl Receiver {
     /// Binds a receiver. It takes no lock, so it runs beside a `send`.
-    pub async fn open(relay: RelayModeChoice) -> Result<Self, Error> {
-        let endpoint = endpoint::bind(None, &relay).await?;
+    pub async fn open(relay: RelayModeChoice, congestion: Congestion) -> Result<Self, Error> {
+        let endpoint = endpoint::bind(None, &relay, congestion).await?;
         if !matches!(relay, RelayModeChoice::Disabled) {
             let wait = Duration::from_secs(iroh::NET_REPORT_TIMEOUT);
             tokio::time::timeout(wait, endpoint.online())

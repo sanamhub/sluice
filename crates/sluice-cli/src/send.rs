@@ -12,7 +12,7 @@ use sluice_core::{
 };
 use tokio::sync::mpsc::unbounded_channel;
 
-use crate::{events, output::Output};
+use crate::{cli::CongestionArg, events, output::Output};
 
 /// Sends one file to whoever has the ticket.
 #[derive(Args)]
@@ -32,6 +32,9 @@ pub struct SendArgs {
     /// Keep serving until Ctrl+C instead of stopping after one download
     #[arg(long)]
     pub keep: bool,
+    /// The congestion controller: cubic (default) or bbr3 (experimental)
+    #[arg(long, value_enum, default_value_t = CongestionArg::Cubic, value_name = "NAME")]
+    pub congestion: CongestionArg,
 }
 
 pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
@@ -47,7 +50,8 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
         .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
     runtime.block_on(async {
         let home = Home::open(&Home::locate()?)?;
-        let outgoing = prepare_send(&home, &args.file, relay, expiry).await?;
+        let outgoing =
+            prepare_send(&home, &args.file, relay, args.congestion.into(), expiry).await?;
         events::ticket(*output, &outgoing.ticket.encode())?;
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "sending");

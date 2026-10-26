@@ -52,10 +52,18 @@ pub fn ticket(output: Output, ticket: &str) -> Result<(), Error> {
 
 fn human(event: &Event, verb: &str) -> String {
     match event {
-        Event::Started { name, files, bytes } => match name {
-            Some(name) => format!("{verb} {name} ({})", bytes_text(*bytes)),
-            None => format!("{verb} {files} files ({})", bytes_text(*bytes)),
-        },
+        Event::Started {
+            name,
+            files,
+            bytes,
+            congestion,
+        } => {
+            let what = match name {
+                Some(name) => format!("{verb} {name}"),
+                None => format!("{verb} {files} files"),
+            };
+            format!("{what} ({}) with {congestion}", bytes_text(*bytes),)
+        }
         Event::Connected { path, relay } => format!("connected {}", path_text(*path, relay)),
         Event::PathChanged { path, relay } => {
             format!("path changed: {}", path_text(*path, relay))

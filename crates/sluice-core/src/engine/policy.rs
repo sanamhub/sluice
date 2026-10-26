@@ -31,11 +31,30 @@ impl std::fmt::Debug for Policy {
     }
 }
 
-/// Starts the policy. `done` receives the hash of every completed get, so a sender can stop after
-/// one download. `expiry` is UTC milliseconds; at or after it every request is refused.
-pub fn start(allowed: BTreeSet<Hash>, expiry: Option<u64>, done: UnboundedSender<Hash>) -> Policy {
+/// What the provider reports back so a sender can stop after one download.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServeEvent {
+    /// A request for this hash completed, on this connection.
+    Downloaded {
+        /// The blob the receiver asked for.
+        hash: Hash,
+        /// The connection the request arrived on.
+        connection: u64,
+    },
+    /// That connection closed, so the peer has everything that was written to it.
+    Closed(u64),
+}
+
+/// Starts the policy. `done` receives every completed get and every closed connection, so a sender
+/// can stop after one download and not cut the last bytes off. `expiry` is UTC milliseconds; at or
+/// after it every request is refused.
+pub fn start(
+    allowed: BTreeSet<Hash>,
+    expiry: Option<u64>,
+    done: UnboundedSender<ServeEvent>,
+) -> Policy {
     let mask = EventMask {
-        connected: ConnectMode::None,
+        connected: ConnectMode::Notify,
         get: RequestMode::InterceptLog,
         get_many: RequestMode::Intercept,
         push: RequestMode::Disabled,
@@ -49,13 +68,15 @@ pub fn start(allowed: BTreeSet<Hash>, expiry: Option<u64>, done: UnboundedSender
             match message {
                 ProviderMessage::GetRequestReceived(mut msg) => {
                     let hash = msg.request.hash;
-                    let ok =
-                        !expired(expiry) && msg.request.ranges.is_blob() && allowed.contains(&hash);
+                    // Any range of an allowed hash is served, including a hash sequence request
+                    // for the manifest root. The allowed set is the access rule, not the format.
+                    let ok = !expired(expiry) && allowed.contains(&hash);
                     let answer = if ok {
                         Ok(())
                     } else {
                         Err(AbortReason::Permission)
                     };
+                    let connection = msg.connection_id;
                     if msg.tx.send(answer).await.is_err() || !ok {
                         continue;
                     }
@@ -63,7 +84,7 @@ pub fn start(allowed: BTreeSet<Hash>, expiry: Option<u64>, done: UnboundedSender
                     n0_future::task::spawn(async move {
                         while let Ok(Some(update)) = msg.rx.recv().await {
                             if matches!(update, RequestUpdate::Completed(_)) {
-                                let _ = done.send(hash);
+                                let _ = done.send(ServeEvent::Downloaded { hash, connection });
                                 break;
                             }
                             if matches!(update, RequestUpdate::Aborted(_)) {
@@ -90,6 +111,9 @@ pub fn start(allowed: BTreeSet<Hash>, expiry: Option<u64>, done: UnboundedSender
                         Err(AbortReason::Permission)
                     };
                     msg.tx.send(answer).await.ok();
+                }
+                ProviderMessage::ConnectionClosed(msg) => {
+                    let _ = done.send(ServeEvent::Closed(msg.connection_id));
                 }
                 // Push is disabled in the mask, so a push is refused before this task sees it.
                 _ => {}

@@ -11,12 +11,54 @@ use iroh::{
     endpoint::{PortmapperConfig, QuicTransportConfig, presets},
 };
 use iroh_mdns_address_lookup::MdnsAddressLookup;
-use noq::congestion::CubicConfig;
+use noq::congestion::{Bbr3Config, CubicConfig};
+use serde::Serialize;
 
 use crate::Error;
 
 /// The warning printed when `--n0-relays` sends traffic to n0's public services.
 pub const N0_WARNING: &str = "warning: --n0-relays uses n0's public relays and DNS discovery, which this project does not run";
+
+/// The congestion controller of a transfer. Cubic is the default until a noq release carries the
+/// BBRv3 maximum-bandwidth fix (ADR 0023); BBRv3 stays selectable as ADR 0015 promised.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Congestion {
+    /// The default, and the one every release so far was measured with.
+    #[default]
+    Cubic,
+    /// Experimental BBRv3.
+    Bbr3,
+}
+
+impl Congestion {
+    /// The name used on the command line and in an event.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Cubic => "cubic",
+            Self::Bbr3 => "bbr3",
+        }
+    }
+
+    /// The transport config that selects this controller. Windows stay at noq's defaults on
+    /// purpose: the bandwidth-delay sizing and several connections wait for the transport
+    /// measurement (ADR 0016).
+    fn transport(self) -> QuicTransportConfig {
+        let factory: Arc<dyn noq::congestion::ControllerFactory + Send + Sync> = match self {
+            Self::Cubic => Arc::new(CubicConfig::default()),
+            Self::Bbr3 => Arc::new(Bbr3Config::default()),
+        };
+        QuicTransportConfig::builder()
+            .congestion_controller_factory(factory)
+            .build()
+    }
+}
+
+impl std::fmt::Display for Congestion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
 
 /// How the endpoint reaches peers.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -62,17 +104,16 @@ impl RelayModeChoice {
 
 /// Binds an endpoint, with the identity key `secret` when one is given and a fresh in-memory key
 /// otherwise.
-pub async fn bind(secret: Option<[u8; 32]>, relay: &RelayModeChoice) -> Result<Endpoint, Error> {
-    let transport = QuicTransportConfig::builder()
-        .congestion_controller_factory(Arc::new(CubicConfig::default()))
-        .build();
-    // Windows stay at noq's defaults on purpose: the bandwidth-delay sizing and several
-    // connections wait for the transport measurement (ADR 0016).
+pub async fn bind(
+    secret: Option<[u8; 32]>,
+    relay: &RelayModeChoice,
+    congestion: Congestion,
+) -> Result<Endpoint, Error> {
     let mut builder = Endpoint::builder(presets::Empty)
         .crypto_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
         .relay_mode(relay.iroh()?)
         .portmapper_config(PortmapperConfig::default())
-        .transport_config(transport)
+        .transport_config(congestion.transport())
         .address_lookup(MdnsAddressLookup::builder());
     if let Some(seed) = secret {
         builder = builder.secret_key(SecretKey::from_bytes(&seed));

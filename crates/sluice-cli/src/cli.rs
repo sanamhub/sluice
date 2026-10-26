@@ -1,7 +1,8 @@
 //! The command line as clap sees it. The binary, the completion scripts and the man pages are all
 //! made from this one definition.
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use sluice_core::engine::Congestion;
 
 use crate::colour::ColorWhen;
 use crate::completions;
@@ -9,6 +10,25 @@ use crate::doctor;
 use crate::id;
 use crate::output::Format;
 use crate::{recv, send};
+
+/// The congestion controller as the command line spells it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum CongestionArg {
+    /// Cubic, the default.
+    #[default]
+    Cubic,
+    /// BBRv3, experimental.
+    Bbr3,
+}
+
+impl From<CongestionArg> for Congestion {
+    fn from(value: CongestionArg) -> Self {
+        match value {
+            CongestionArg::Cubic => Self::Cubic,
+            CongestionArg::Bbr3 => Self::Bbr3,
+        }
+    }
+}
 
 #[derive(Parser)]
 // `bin_name` too: clap otherwise prints the name of the executable, which is `sluice.exe` on
@@ -53,4 +73,32 @@ pub enum Command {
     /// unless a check failed, and then that of the most serious failure: 6 for policy, 5 for
     /// storage. Warnings do not fail.
     Doctor(doctor::Args),
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Command, CongestionArg};
+
+    #[test]
+    fn the_congestion_flag_parses_and_defaults_to_cubic() {
+        let cli = Cli::try_parse_from(["sluice", "send", "a.bin"]).unwrap();
+        let Command::Send(args) = cli.command else {
+            panic!("send");
+        };
+        assert_eq!(args.congestion, CongestionArg::Cubic);
+
+        let cli =
+            Cli::try_parse_from(["sluice", "recv", "--congestion", "bbr3", "sluice1abc"]).unwrap();
+        let Command::Recv(args) = cli.command else {
+            panic!("recv");
+        };
+        assert_eq!(args.congestion, CongestionArg::Bbr3);
+    }
+
+    #[test]
+    fn an_unknown_controller_is_refused() {
+        assert!(Cli::try_parse_from(["sluice", "send", "--congestion", "vegas", "a.bin"]).is_err());
+    }
 }

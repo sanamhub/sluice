@@ -8,18 +8,13 @@ use std::{
 };
 
 use iroh_blobs::{
-    Hash, HashAndFormat,
-    api::{
-        blobs::{ExportMode, ExportOptions},
-        proto::BlobStatus,
-        remote::GetProgressItem,
-    },
+    Hash,
+    api::blobs::{ExportMode, ExportOptions},
     store::fs::FsStore,
 };
-use n0_future::StreamExt;
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::{Event, Receiver, RelayModeChoice, emit, storage};
+use super::{Congestion, Event, Receiver, RelayModeChoice, emit, fetch, storage};
 use crate::{
     Error,
     manifest::{Kind, Limits, Loc, Manifest},
@@ -35,6 +30,15 @@ pub struct ReceiveOptions {
     pub force: bool,
     /// Do not restore the modification time.
     pub no_times: bool,
+    /// Create symlinks the sender recorded. Off unless the user asked.
+    pub links: bool,
+    /// The manifest limits to apply.
+    pub limits: Limits,
+    /// Use this many free bytes instead of asking the volume. A test sets it to simulate a full
+    /// disk; a real caller leaves it as `None`.
+    pub free_bytes: Option<u64>,
+    /// The congestion controller to run.
+    pub congestion: Congestion,
 }
 
 /// What arrived.
@@ -75,7 +79,7 @@ pub async fn receive(
     };
     fs::create_dir_all(&options.out)
         .map_err(|e| storage::policy_path("create", &options.out, e))?;
-    let receiver = Receiver::open(relay_of(&ticket)).await?;
+    let receiver = Receiver::open(relay_of(&ticket), options.congestion).await?;
     let conn = receiver.connect(&ticket, events.clone()).await?;
     let partial = storage::partial_dir(&options.out, &hex(&root));
     fs::create_dir_all(&partial).map_err(|e| storage::storage("create", &partial, e))?;
@@ -84,20 +88,23 @@ pub async fn receive(
         .map_err(|e| Error::Storage(format!("cannot open the partial store: {e}")))?;
 
     let result = fetch_all(&ticket, &store, conn, options, events, &partial).await;
+    // Closing the endpoint tells the sender that the last bytes arrived, so it can stop without
+    // cutting the response off a moment after writing it.
+    let endpoint_closed = receiver.shutdown().await;
     let closed = store.shutdown().await;
-    match (result, closed) {
-        (Ok(received), Ok(())) => {
+    match (result, closed, endpoint_closed) {
+        (Ok(received), Ok(()), Ok(())) => {
             // The blob was moved out; what is left is metadata and the manifest.
             let _ = fs::remove_dir_all(&partial);
             Ok(received)
         }
-        (Err(e), _) => {
+        (Err(e), _, _) => {
             // Deliberately keep the partial store: a second receive continues from it.
             Err(e)
         }
-        (Ok(_), Err(e)) => Err(Error::Storage(format!(
-            "the file is in place but the partial store did not close: {e}"
-        ))),
+        (Ok(_), Err(_), _) | (Ok(_), _, Err(_)) => Err(Error::Storage(
+            "the file is in place but the transfer did not close cleanly".to_string(),
+        )),
     }
 }
 
@@ -113,15 +120,19 @@ async fn fetch_all(
         Body::Static { root, .. } => *root,
         Body::Live { .. } => return Err(Error::Policy("not a static ticket".to_string())),
     };
-    fetch_blob(store, &conn, Hash::from(manifest_root), 0, events).await?;
-    let (manifest_bytes, manifest_size) = complete_bytes(store, Hash::from(manifest_root)).await?;
-    let limits = Limits::default();
-    limits.check_bytes(manifest_size)?;
-    let manifest = Manifest::decode(&manifest_bytes, limits)?;
+    let manifest_bytes = fetch::bounded_blob(
+        store,
+        &conn,
+        Hash::from(manifest_root),
+        options.limits,
+        events,
+    )
+    .await?;
+    let manifest = Manifest::decode(&manifest_bytes, options.limits)?;
     let entry = only_file(&manifest)?;
     let target = options.out.join(entry.path.as_str());
     check_target(&target, options.force)?;
-    check_space(&options.out, ticket, entry.size)?;
+    check_space(options, ticket, entry.size)?;
 
     emit(
         events,
@@ -129,12 +140,13 @@ async fn fetch_all(
             name: Some(entry.path.as_str().to_string()),
             files: 1,
             bytes: entry.size,
+            congestion: options.congestion,
         },
     );
     let content = content_root(&manifest, entry.loc)?;
     let started = Instant::now();
-    fetch_blob(store, &conn, content, entry.size, events).await?;
-    let (_, size) = complete_bytes(store, content).await?;
+    fetch::fetch_blob(store, &conn, content, entry.size, events).await?;
+    let (_, size) = fetch::complete_bytes(store, content).await?;
     if size != entry.size {
         return Err(Error::Verify(format!(
             "the blob has {size} bytes and the manifest says {}",
@@ -241,13 +253,16 @@ fn check_target(target: &Path, force: bool) -> Result<(), Error> {
     }
 }
 
-fn check_space(out: &Path, ticket: &Ticket, size: u64) -> Result<(), Error> {
-    let available = storage::available_bytes(out)?;
+fn check_space(options: &ReceiveOptions, ticket: &Ticket, size: u64) -> Result<(), Error> {
+    let available = match options.free_bytes {
+        Some(bytes) => bytes,
+        None => storage::available_bytes(&options.out)?,
+    };
     let needed = storage::needed_bytes(size);
     if available < needed {
         return Err(Error::Storage(format!(
             "{} has {available} bytes free and this transfer needs about {needed}",
-            out.display()
+            options.out.display()
         )));
     }
     let promised = match ticket.body() {
@@ -260,63 +275,6 @@ fn check_space(out: &Path, ticket: &Ticket, size: u64) -> Result<(), Error> {
         )));
     }
     Ok(())
-}
-
-async fn complete_bytes(store: &FsStore, hash: Hash) -> Result<(Vec<u8>, u64), Error> {
-    let status = store
-        .blobs()
-        .status(hash)
-        .await
-        .map_err(|e| Error::Storage(format!("cannot read the partial store: {e}")))?;
-    match status {
-        BlobStatus::Complete { size } => {
-            let bytes = store
-                .blobs()
-                .get_bytes(hash)
-                .await
-                .map_err(|e| Error::Storage(format!("cannot read the received blob: {e}")))?;
-            Ok((bytes.to_vec(), size))
-        }
-        _ => Err(Error::Verify(
-            "the transfer ended without the whole blob".to_string(),
-        )),
-    }
-}
-
-async fn fetch_blob(
-    store: &FsStore,
-    conn: &iroh::endpoint::Connection,
-    hash: Hash,
-    total: u64,
-    events: &UnboundedSender<Event>,
-) -> Result<(), Error> {
-    let mut progress = std::pin::pin!(
-        store
-            .remote()
-            .fetch(conn.clone(), HashAndFormat::raw(hash))
-            .stream()
-    );
-    while let Some(item) = progress.next().await {
-        match item {
-            GetProgressItem::Progress(bytes) => {
-                if total > 0 {
-                    emit(events, Event::Progress { bytes, total });
-                }
-            }
-            GetProgressItem::Done(_) => return Ok(()),
-            GetProgressItem::Error(e) => {
-                let text = e.to_string();
-                return Err(if text.contains("hash") && text.contains("mismatch") {
-                    Error::Verify("received bytes did not match the ticket root".to_string())
-                } else {
-                    Error::Network(format!("the transfer stopped: {text}"))
-                });
-            }
-        }
-    }
-    Err(Error::Network(
-        "the connection closed before the blob completed".to_string(),
-    ))
 }
 
 #[cfg(unix)]
