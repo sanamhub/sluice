@@ -113,6 +113,15 @@ pub async fn wait_for_direct_addr(endpoint: &Endpoint) -> Result<(), Error> {
     })?
 }
 
+/// Waits until the endpoint has contacted a relay, so its home relay is in the ticket.
+pub async fn wait_for_online(endpoint: &Endpoint) -> Result<(), Error> {
+    let wait = Duration::from_secs(NET_REPORT_TIMEOUT);
+    tokio::time::timeout(wait, endpoint.online())
+        .await
+        .map_err(|_| Error::Network("the relay did not answer in time".to_string()))?;
+    Ok(())
+}
+
 /// The address to put in a ticket: the endpoint id, its direct addresses and, when one is set, its
 /// relay. iroh's own `addr` includes the home relay the endpoint learned about.
 pub fn ticket_addr(endpoint: &Endpoint) -> iroh::EndpointAddr {

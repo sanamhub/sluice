@@ -193,7 +193,10 @@ fn held(dir: &Path) -> Error {
         Some(pid) => format!("another sluice process (pid {pid})"),
         None => "another sluice process".to_string(),
     };
-    Error::Policy(format!("{who} is using the store at {}", dir.display()))
+    Error::Policy(format!(
+        "{who} is using the store at {}; send both in one command instead",
+        dir.display()
+    ))
 }
 
 #[cfg(test)]

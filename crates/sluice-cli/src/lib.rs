@@ -6,9 +6,12 @@ mod cli;
 mod colour;
 mod completions;
 mod doctor;
+mod events;
 mod exit;
 mod id;
 mod output;
+mod recv;
+mod send;
 
 use std::ffi::OsString;
 use std::process::ExitCode;
@@ -74,6 +77,8 @@ fn execute(command: Command, output: &Output) -> Result<u8, sluice_core::Error> 
     let outcome = match command {
         Command::Id(args) => id::run(&args, output.format())?,
         Command::Completions(args) => completions::run(&args)?,
+        Command::Send(args) => return send::run(&args, output),
+        Command::Recv(args) => return recv::run(&args, output),
         Command::Doctor(args) => doctor::run(&args)?,
     };
     output.print(&outcome)?;

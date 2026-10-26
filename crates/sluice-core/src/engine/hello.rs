@@ -202,7 +202,7 @@ mod tests {
     fn a_capability_needs_both_sides() {
         let ours = Hello::ours();
         let other = Hello {
-            capabilities: CAP_LIVE,
+            capabilities: CAP_LIVE | CAP_MANIFEST_V1,
             ..ours
         };
         assert!(!ours.both(&other, CAP_LIVE));

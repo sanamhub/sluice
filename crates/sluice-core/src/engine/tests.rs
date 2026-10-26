@@ -186,3 +186,38 @@ async fn a_receiver_refuses_an_expired_ticket() {
     assert!(matches!(err, crate::Error::Policy(_)));
     receiver.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn one_file_goes_out_and_arrives_with_its_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(&dir.path().join("home")).unwrap();
+    let source = dir.path().join("holiday photo.jpg");
+    let body = b"a tiny file that fits in one pack";
+    std::fs::write(&source, body).unwrap();
+
+    let outgoing = super::prepare_send(&home, &source, RelayModeChoice::Disabled, None)
+        .await
+        .unwrap();
+    let text = outgoing.ticket.encode();
+    let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
+    let serve = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+
+    let out = dir.path().join("received");
+    let (recv_tx, _recv_rx) = tokio::sync::mpsc::unbounded_channel();
+    let received = super::receive(
+        &text,
+        &super::ReceiveOptions {
+            out: out.clone(),
+            force: false,
+            no_times: false,
+        },
+        &recv_tx,
+    )
+    .await
+    .unwrap();
+    assert_eq!(received.bytes, body.len() as u64);
+    assert_eq!(received.path, out.join("holiday photo.jpg"));
+    assert_eq!(std::fs::read(&received.path).unwrap(), body);
+    let end = serve.await.unwrap().unwrap();
+    assert_eq!(end, super::StopEnd::Downloaded);
+}

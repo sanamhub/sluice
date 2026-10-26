@@ -10,7 +10,7 @@ mod lock;
 // The only unsafe code in the crate. Everything else stays under the crate's `deny`.
 #[cfg(windows)]
 #[allow(unsafe_code)]
-mod private_windows;
+pub(crate) mod private_windows;
 mod setup;
 
 use std::env;

@@ -8,6 +8,7 @@ use crate::completions;
 use crate::doctor;
 use crate::id;
 use crate::output::Format;
+use crate::{recv, send};
 
 #[derive(Parser)]
 // `bin_name` too: clap otherwise prints the name of the executable, which is `sluice.exe` on
@@ -42,6 +43,10 @@ pub enum Command {
     Id(id::Args),
     /// Print the completion script for a shell
     Completions(completions::Args),
+    /// Send a file, print its ticket, and serve until one complete download
+    Send(send::SendArgs),
+    /// Receive the file a ticket names, writing it under the current folder by default
+    Recv(recv::RecvArgs),
     /// Check the home, who can reach it, its lock and identity key, and say how to fix a problem
     ///
     /// It only reads: it never creates, locks, repairs or deletes anything. The exit code is 0

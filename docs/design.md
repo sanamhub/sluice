@@ -166,8 +166,15 @@ survive a daemon restart, since resume is content-addressed.
 
 **Reference in place.** Sending hashes the file where it lives. The store keeps only the outboard
 tree and metadata, about 0.4% of file size, so a 100 GB send costs about 400 MB. `--copy` imports
-into the store for volatile or removable sources. Receiving writes straight to the destination as a
-sparse `.part` with an outboard sidecar, then `fsync` and rename. ADR 0006.
+into the store for volatile or removable sources. ADR 0006.
+
+**Receiving uses a store beside the destination.** `iroh-blobs` keeps partial data in its own store,
+not in a sparse `.part` of ours, so a receive makes a hidden per-transfer store in the output folder,
+`.sluice-partial-<root prefix>`. It is on the same filesystem as the destination, which lets a
+finished blob be exported by move rather than copied. A 100 GB receive therefore peaks at about
+100 GB of payload plus the outboard and metadata, not 200 GB. The store is removed after the file is
+in place; after a failure it is kept for resume. The receiver checks free space before it fetches
+content and refuses with `Storage` when the volume cannot hold it. ADR 0006.
 
 **The source can change underneath us.** Size, mtime and inode (file id on Windows) are recorded at
 import and checked before each range read. A mismatch fails the transfer with a `Verify` error
@@ -274,11 +281,12 @@ Gbit/s.
 
 ## Durability
 
-A partial download is a sparse `.part` file plus a sidecar holding the verified range bitmap. Every
-64 MB, and on clean shutdown, both are `fsync`ed. After a crash, ranges up to the last barrier are
-trusted and anything after it is re-verified, so at most 64 MB is checked again. Completion is
-`fsync` then rename. A full disk, a permission error or a quota error leaves a resumable transfer,
-not a panic.
+A partial download lives in the per-transfer `iroh-blobs` store, which records verified ranges in its
+own database and partial data files. The process syncs the finished file before it moves it into
+place. After a crash, the store decides what to ask for again; this release does not yet guarantee
+the 64 MB barrier the target states, which is work for the durability part. A full disk, a permission
+error or a quota error leaves the partial store and a `Storage` error, not a panic. The partial store
+is not deleted on failure, so a second receive with the same ticket and `--out` continues from it.
 
 ## Errors
 

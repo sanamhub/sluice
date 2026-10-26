@@ -26,6 +26,7 @@ clap_complete.workspace = true
 # Only for the JSON error object, whose message needs escaping.
 serde_json.workspace = true
 sluice-core = { path = "../sluice-core" }
+tokio.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

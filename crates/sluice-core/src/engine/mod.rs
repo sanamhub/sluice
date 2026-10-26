@@ -3,8 +3,12 @@
 
 mod endpoint;
 mod events;
+mod expiry;
 mod hello;
 mod policy;
+mod recv;
+mod send;
+mod storage;
 
 use std::{
     collections::BTreeSet,
@@ -23,10 +27,13 @@ use crate::{Error, Home, ticket::Body};
 
 pub use endpoint::{N0_WARNING, RelayModeChoice};
 pub use events::{Event, PathKind, emit, watch_path};
+pub use expiry::{DEFAULT_SECONDS, deadline, parse as parse_expiry};
 pub use hello::{
     ALPN, CAP_DELTA, CAP_LIVE, CAP_MANIFEST_V1, CAP_PACKS, CAP_RECEIPTS, CAP_ZSTD, CAPABILITIES,
     Hello, MAX_FRAME_BYTES, PROTO_VERSION, SluiceProtocol,
 };
+pub use recv::{ReceiveOptions, Received, receive};
+pub use send::{Outgoing, StopEnd, default_expiry, prepare as prepare_send};
 
 /// When `send` stops serving.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +85,9 @@ impl Provider {
     ) -> Result<Self, Error> {
         let seed = home.identity()?.secret_seed();
         let endpoint = endpoint::bind(Some(seed), &relay).await?;
+        if !matches!(relay, RelayModeChoice::Disabled) {
+            endpoint::wait_for_online(&endpoint).await?;
+        }
         endpoint::wait_for_direct_addr(&endpoint).await?;
         let allowed: BTreeSet<Hash> = allowed.into_iter().map(Hash::from).collect();
         let (done, done_rx) = unbounded_channel();
