@@ -1,5 +1,6 @@
 //! The Sluice session layer: jobs, the transfer queue, tickets, the store and the data path.
 
+pub mod engine;
 mod error;
 mod home;
 pub mod manifest;

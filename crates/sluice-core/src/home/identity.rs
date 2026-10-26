@@ -82,6 +82,12 @@ impl Identity {
             .map(|b| format!("{b:02x}"))
             .collect()
     }
+
+    /// The secret seed an endpoint needs to prove this identity. Crate-private: a caller outside
+    /// the engine gets the public id, never the key.
+    pub(crate) fn secret_seed(&self) -> [u8; SEED_LEN] {
+        self.key.to_bytes()
+    }
 }
 
 impl fmt::Debug for Identity {
