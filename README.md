@@ -25,9 +25,9 @@ and no server in the middle that you did not choose.
 ## Why it is different
 
 - **The file goes where it is needed.** There is no upload to a storage service and no copy left on
-  a server. A relay is a server you run that can forward bytes when a direct path fails, and it does
+  a server. A relay is a server you run that can forward data when a direct path fails, and it does
   not keep them.
-- **Every block is checked.** A block is a small piece of the file. A damaged block is caught before
+- **Every piece is checked.** The file is split into small blocks. A damaged block is caught before
   it is written, not after the file is opened.
 - **You own the path.** No account, no plan limit, no telemetry, and no relay you did not configure.
   The relay and rendezvous images are in this repository.
