@@ -2,6 +2,7 @@
 //! results. It uses the probe only, so it runs on hosts without iperf3, fio or mscp.
 
 use std::{
+    io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     thread,
@@ -10,8 +11,10 @@ use std::{
 
 use serde_json::Value;
 
-/// The suite is allowed 60 seconds for this test.
-const DEADLINE: Duration = Duration::from_secs(60);
+/// The suite is allowed 30 seconds for this test. The 64 MiB smoke took 54.8 s and then over 60 s
+/// on a busy macOS runner; eight MiB takes an eighth of the transfer work, and nextest runs this
+/// test on its own, so the deadline is no longer a scheduler measurement.
+const DEADLINE: Duration = Duration::from_secs(30);
 
 fn probe() -> PathBuf {
     // Cargo builds the probe into the same directory when the whole workspace is built.
@@ -23,6 +26,14 @@ fn probe() -> PathBuf {
         probe.display()
     );
     probe
+}
+
+/// Reads a pipe to the end on its own thread, so a child that writes more than the pipe buffer
+/// cannot block before it exits.
+fn drain(mut pipe: impl Read) -> String {
+    let mut text = String::new();
+    let _ = pipe.read_to_string(&mut text);
+    text
 }
 
 /// Runs `bench smoke` and kills it if it outlives the deadline.
@@ -37,24 +48,36 @@ fn smoke(out: &Path) -> (bool, Duration, String) {
         .stderr(Stdio::piped())
         .spawn()
         .expect("start bench smoke");
+    let stdout = child.stdout.take().expect("stdout pipe");
+    let stderr = child.stderr.take().expect("stderr pipe");
+    let out_reader = thread::spawn(move || drain(stdout));
+    let err_reader = thread::spawn(move || drain(stderr));
+
     loop {
         if child.try_wait().expect("poll bench").is_some() {
             break;
         }
         if started.elapsed() > DEADLINE {
             let _ = child.kill();
-            panic!("bench smoke did not finish within {DEADLINE:?}");
+            let _ = child.wait();
+            let text = format!(
+                "{}{}",
+                out_reader.join().expect("stdout reader"),
+                err_reader.join().expect("stderr reader")
+            );
+            panic!("bench smoke did not finish within {DEADLINE:?}:\n{text}");
         }
-        thread::sleep(Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(25));
     }
+
     let elapsed = started.elapsed();
-    let output = child.wait_with_output().expect("collect output");
+    let status = child.wait().expect("collect status");
     let text = format!(
         "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        out_reader.join().expect("stdout reader"),
+        err_reader.join().expect("stderr reader")
     );
-    (output.status.success(), elapsed, text)
+    (status.success(), elapsed, text)
 }
 
 fn lines(out: &Path) -> Vec<Value> {

@@ -13,12 +13,14 @@ use crate::{
 };
 
 /// Runs as a scenario like any other, so a smoke run exercises the same code as `bench run`.
+/// Eight MiB is a liveness check, not a measurement: six debug-build transfers of 64 MiB took
+/// most of a minute on a busy macOS runner, which is not what a smoke test is for.
 const SCENARIO: &str = r#"
 [[scenario]]
 id = "SMOKE"
 link = "both ends on this host, loopback, no netem"
-timeout_s = 40
-workloads = [{ name = "smoke", size = "64MiB" }]
+timeout_s = 20
+workloads = [{ name = "smoke", size = "8MiB" }]
 probe = [
   { mode = "raw", congestion = "bbr3", window = "default", connections = 1, endpoints = "shared" },
   { mode = "raw", congestion = "cubic", window = "default", connections = 1, endpoints = "shared" },

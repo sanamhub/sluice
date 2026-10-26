@@ -1,0 +1,6 @@
+[profile.default]
+# The smoke test drives six probe transfers. Run beside the CPU-heavy probe tests, its wall clock
+# measures the scheduler rather than the pipeline, which is how 64 MiB took over a minute on macOS.
+[[profile.default.overrides]]
+filter = 'test(smoke_drives_the_probe_and_writes_results)'
+threads-required = "num-cpus"
