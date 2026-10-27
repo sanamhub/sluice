@@ -115,10 +115,8 @@ pub async fn receive(
     // cutting the response off a moment after writing it.
     let closed = receiver.shutdown().await;
     let received = result?;
-    if closed.is_err() {
-        return Err(Error::Storage(
-            "the tree is in place but the transfer did not close cleanly".to_string(),
-        ));
+    if let Some(message) = did_not_close(Ok::<(), Error>(()), closed) {
+        emit(events, Event::Warning { message });
     }
     Ok(received)
 }
@@ -146,10 +144,12 @@ async fn run(
     let endpoint = receiver.shutdown().await;
     match outcome {
         Ok((received, seconds)) => {
-            if closed.is_err() || endpoint.is_err() {
-                return Err(Error::Storage(
-                    "the tree is in place but the transfer did not close cleanly".to_string(),
-                ));
+            // The completion code went out before this point, so the files are in place and the
+            // sender has been told so. A store or endpoint that would not close is worth saying,
+            // and is not a reason to report a transfer that arrived as failed, or to keep a store
+            // a later run would try to resume into a tree that is already there.
+            if let Some(message) = did_not_close(closed, endpoint) {
+                emit(events, Event::Warning { message });
             }
             // Every content blob was moved or copied out; what is left is metadata.
             storage::remove_quietly(&partial);
@@ -274,6 +274,29 @@ fn single_entry(manifest: &Manifest) -> Option<&crate::manifest::Entry> {
     }
 }
 
+/// The warning a finished receive prints when a store or the endpoint would not close. A shutdown
+/// failure after the completion code does not change what is on disk, so it is one line and not a
+/// failed transfer.
+fn did_not_close(
+    store: Result<(), impl std::fmt::Display>,
+    endpoint: Result<(), impl std::fmt::Display>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Err(e) = store {
+        parts.push(format!("the partial store did not close: {e}"));
+    }
+    if let Err(e) = endpoint {
+        parts.push(format!("the connection did not close: {e}"));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "the tree is in place, but {}; the files are unaffected",
+        parts.join(", and ")
+    ))
+}
+
 fn static_root(ticket: &Ticket) -> Result<[u8; 32], Error> {
     match ticket.body() {
         Body::Static {
@@ -314,7 +337,8 @@ fn keeps_store(error: &Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::keeps_store;
+
+    use super::{did_not_close, keeps_store};
     use crate::Error;
 
     #[test]
@@ -323,5 +347,22 @@ mod tests {
         assert!(keeps_store(&Error::Storage("full".into())));
         assert!(!keeps_store(&Error::Verify("mismatch".into())));
         assert!(!keeps_store(&Error::Policy("clash".into())));
+    }
+
+    /// Once the completion code is sent the files are in place, so a shutdown that failed is a
+    /// warning. Reporting it as an error left the store behind for a resume the tree no longer
+    /// needs, and told the user a transfer that arrived had failed.
+    #[test]
+    fn a_shutdown_failure_after_the_code_is_a_warning() {
+        assert!(did_not_close(Ok::<(), Error>(()), Ok::<(), Error>(())).is_none());
+        let message =
+            did_not_close(Err(Error::Storage("the store".into())), Ok::<(), Error>(())).unwrap();
+        assert!(message.contains("in place") && message.contains("the store"));
+        let both = did_not_close(
+            Err(Error::Storage("the store".into())),
+            Err(Error::Network("the endpoint".into())),
+        )
+        .unwrap();
+        assert!(both.contains("the store") && both.contains("the endpoint"));
     }
 }
