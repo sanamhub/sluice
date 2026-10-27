@@ -1,18 +1,14 @@
 //! A ticket from the receiver's side: prove the sequence and the manifest, check every destination
 //! before the first content request, then write the tree into a per-transfer store beside it.
 
+mod content;
 mod plan;
 mod write;
 
 pub(super) use plan::check_one;
 pub(super) use write::write_range;
 
-use std::{
-    collections::BTreeSet,
-    fs,
-    path::PathBuf,
-    time::{Duration, Instant},
-};
+use std::{fs, path::PathBuf, time::Instant};
 
 use iroh_blobs::{Hash, store::fs::FsStore};
 use tokio::sync::mpsc::UnboundedSender;
@@ -20,10 +16,11 @@ use tokio::sync::mpsc::UnboundedSender;
 use super::{Congestion, Event, Receiver, RelayModeChoice, emit, fetch, storage};
 use crate::{
     Error,
-    manifest::{Kind, Limits, Loc, Manifest, parse_sequence},
+    manifest::{Kind, Limits, Manifest, parse_sequence},
     ticket::{Body, Format, Ticket},
 };
 
+use content::Session;
 use plan::Plan;
 
 /// The top-level rules of a receive, as a decision that touches no file system: whether `name` (a
@@ -164,7 +161,7 @@ pub async fn receive(
         events,
         max_failures: options.max_network_failures,
     };
-    let outcome = ensure_content(&session, conn).await;
+    let outcome = content::ensure_content(&session, conn).await;
     // Closing the endpoint tells the sender that the last bytes arrived, so it can stop without
     // cutting the response off a moment after writing it.
     let endpoint_closed = receiver.shutdown().await;
@@ -239,120 +236,6 @@ pub(super) async fn fetch_manifest(
         ));
     }
     Ok(manifest)
-}
-
-/// What a receive fetches and writes, bundled so the retry loop takes one argument.
-struct Session<'a> {
-    receiver: &'a Receiver,
-    ticket: &'a Ticket,
-    store: &'a FsStore,
-    manifest: &'a Manifest,
-    plan: Plan,
-    events: &'a UnboundedSender<Event>,
-    max_failures: u32,
-}
-
-/// Fetches every content blob and pack before anything is written, retrying a dropped connection
-/// with the queue's backoff. Nothing in the output is touched until the whole tree is in the
-/// store, so a retry cannot meet a file it already wrote.
-async fn ensure_content(
-    session: &Session<'_>,
-    mut conn: iroh::endpoint::Connection,
-) -> Result<(), Error> {
-    let mut attempt = 0u32;
-    loop {
-        match fetch_content(session, &conn).await {
-            Ok(()) => return Ok(()),
-            Err(e) => {
-                let retryable = matches!(e, Error::Network(_));
-                if !retryable || attempt + 1 >= session.max_failures {
-                    return Err(e);
-                }
-                attempt += 1;
-                let wait = crate::queue::backoff_ms(attempt);
-                emit(
-                    session.events,
-                    Event::Retrying {
-                        attempt,
-                        seconds: wait / 1000,
-                    },
-                );
-                tokio::time::sleep(Duration::from_millis(wait)).await;
-                conn = session
-                    .receiver
-                    .connect(session.ticket, session.events.clone())
-                    .await?;
-            }
-        }
-    }
-}
-
-async fn fetch_content(
-    session: &Session<'_>,
-    conn: &iroh::endpoint::Connection,
-) -> Result<(), Error> {
-    let store = session.store;
-    let manifest = session.manifest;
-    let plan = session.plan;
-    let events = session.events;
-    let mut progress = 0u64;
-    for pack in manifest.packs() {
-        fetch::content_blob(
-            store,
-            conn,
-            Hash::from(pack.root),
-            pack.size,
-            progress,
-            plan.bytes,
-            events,
-        )
-        .await?;
-        progress = progress.saturating_add(pack.size);
-        emit(
-            events,
-            Event::Progress {
-                bytes: progress.min(plan.bytes),
-                total: plan.bytes,
-            },
-        );
-    }
-    let mut seen = BTreeSet::new();
-    for entry in manifest.entries() {
-        if entry.kind != Kind::File || entry.size == 0 {
-            continue;
-        }
-        let Loc::Blob { root } = entry.loc else {
-            continue;
-        };
-        if !seen.insert(root) {
-            continue;
-        }
-        fetch::content_blob(
-            store,
-            conn,
-            Hash::from(root),
-            entry.size,
-            progress,
-            plan.bytes,
-            events,
-        )
-        .await?;
-        let shared: u64 = manifest
-            .entries()
-            .iter()
-            .filter(|other| other.kind == Kind::File && other.loc == Loc::Blob { root })
-            .map(|other| other.size)
-            .sum();
-        progress = progress.saturating_add(shared);
-        emit(
-            events,
-            Event::Progress {
-                bytes: progress.min(plan.bytes),
-                total: plan.bytes,
-            },
-        );
-    }
-    Ok(())
 }
 
 /// The name to put in `started` for a one-file transfer, and none for a tree.

@@ -28,6 +28,7 @@ use crate::{
 };
 
 mod checks;
+mod lifecycle;
 mod rules;
 mod server;
 mod transfer;
@@ -110,4 +111,65 @@ fn mtime_ms(path: &Path) -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64
+}
+
+/// A provider for a manifest that declares `declared` bytes for a blob that really has `body`.
+/// Nothing checks those two agree on the sending side, because a hostile sender need not.
+async fn provider_of_lying_manifest(
+    dir: &TempDir,
+    body: &[u8],
+    declared: u64,
+    mtime_ms: u64,
+) -> (Provider, Hash, Ticket) {
+    let home = Home::open(&dir.path().join("lying-home")).unwrap();
+    let store = FsStore::load(dir.path().join("lying-store")).await.unwrap();
+    let hash = store.add_slice(body).await.unwrap().hash;
+    let manifest = Manifest::new(
+        vec![Entry {
+            path: ManifestPath::parse("big.bin").unwrap(),
+            kind: Kind::File,
+            size: declared,
+            mtime_ms,
+            mode: 0,
+            loc: Loc::Blob {
+                root: *hash.as_bytes(),
+            },
+            link_target: None,
+        }],
+        vec![],
+    )
+    .unwrap();
+    store.blobs().add_bytes(manifest.encode()).await.unwrap();
+    store
+        .blobs()
+        .add_bytes(manifest.sequence_bytes())
+        .await
+        .unwrap();
+    let mut allowed: BTreeSet<[u8; 32]> = manifest.hash_sequence().into_iter().collect();
+    allowed.insert(manifest.sequence_root());
+    let provider = Provider::start(
+        &home,
+        store,
+        allowed,
+        RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let addr = provider.addr();
+    let ticket = Ticket::new(
+        *addr.id.as_bytes(),
+        addr.ip_addrs().copied().collect(),
+        None,
+        None,
+        Body::Static {
+            root: manifest.sequence_root(),
+            size: declared,
+            format: Format::HashSequence,
+        },
+    )
+    .unwrap();
+    (provider, hash, ticket)
 }
