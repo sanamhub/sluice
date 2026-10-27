@@ -101,6 +101,22 @@ fn assert_no_partial(out: &Path) {
     }
 }
 
+/// A client endpoint and its own store, for a test that talks to a provider by hand.
+async fn client_of(dir: &TempDir) -> (Endpoint, FsStore) {
+    let client = endpoint::bind(
+        None,
+        &RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+    )
+    .await
+    .unwrap();
+    let store = FsStore::load(dir.path().join("client-store"))
+        .await
+        .unwrap();
+    (client, store)
+}
+
 fn set_mtime(path: &Path, at: SystemTime) {
     let file = fs::File::options().write(true).open(path).unwrap();
     file.set_times(fs::FileTimes::new().set_modified(at))

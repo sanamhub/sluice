@@ -52,15 +52,7 @@ async fn a_range_request_leaves_the_sender_serving() {
     .await
     .unwrap();
     let addr = provider.addr();
-    let client_store = FsStore::load(dir.path().join("client")).await.unwrap();
-    let client = endpoint::bind(
-        None,
-        &RelayModeChoice::Disabled,
-        super::Congestion::Cubic,
-        None,
-    )
-    .await
-    .unwrap();
+    let (client, client_store) = client_of(&dir).await;
     let conn = client.connect(addr, iroh_blobs::ALPN).await.unwrap();
     crate::engine::fetch::fetch_range(
         &client_store,
@@ -149,6 +141,121 @@ async fn a_full_disk_at_write_time_keeps_the_store_for_the_next_run() {
     super::receive(&text, &options(&out), &tx).await.unwrap();
     assert_eq!(fs::read(out.join("tree").join("big.bin")).unwrap(), body);
     outgoing.provider.shutdown().await.unwrap();
+}
+
+/// A resumed receive writes into the folders a failed run made and leaves their mode and time
+/// alone: they belong to the user's output now, not to this transfer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_resume_does_not_take_over_a_folder_that_was_already_there() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("tree");
+    fs::create_dir_all(source.join("sub")).unwrap();
+    fs::write(source.join("big.bin"), vec![7u8; 900 * 1024]).unwrap();
+    fs::write(source.join("sub").join("x.txt"), b"x").unwrap();
+    let (outgoing, text) = prepared_paths(&dir, std::slice::from_ref(&source)).await;
+    let out = dir.path().join("out");
+    let mut limited = options(&out);
+    limited.write_limit = Some(256 * 1024);
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    super::receive(&text, &limited, &tx).await.unwrap_err();
+    assert!(out.join("tree").join("sub").is_dir());
+
+    // What the user did to the folders between the two runs. Windows has no folder mode to set and
+    // does not restore folder times, so there the resume only has to leave the tree alone.
+    let tree = out.join("tree");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let when = SystemTime::UNIX_EPOCH + Duration::from_millis(1_000_000_000_000);
+        set_mtime(&tree, when);
+        fs::set_permissions(&tree, fs::Permissions::from_mode(0o750)).unwrap();
+    }
+
+    super::receive(&text, &options(&out), &tx).await.unwrap();
+    assert_eq!(fs::read(tree.join("big.bin")).unwrap().len(), 900 * 1024);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(mtime_ms(&tree), 1_000_000_000_000);
+        assert_eq!(
+            fs::metadata(&tree).unwrap().permissions().mode() & 0o777,
+            0o750
+        );
+    }
+    outgoing.provider.shutdown().await.unwrap();
+}
+
+/// A provider that serves the hash sequence and refuses the manifest, so a receive fails between
+/// the two: before any check, and before it may claim a place for its partial content.
+async fn provider_of_sequence_only(
+    dir: &TempDir,
+) -> (Provider, FsStore, BTreeSet<[u8; 32]>, Ticket) {
+    let home = Home::open(&dir.path().join("sequence-home")).unwrap();
+    let store = FsStore::load(dir.path().join("sequence-store"))
+        .await
+        .unwrap();
+    let manifest = Manifest::new(
+        vec![Entry {
+            path: ManifestPath::parse("tree").unwrap(),
+            kind: Kind::Dir,
+            size: 0,
+            mtime_ms: 0,
+            mode: 0,
+            loc: Loc::None,
+            link_target: None,
+        }],
+        vec![],
+    )
+    .unwrap();
+    store.blobs().add_bytes(manifest.encode()).await.unwrap();
+    store
+        .blobs()
+        .add_bytes(manifest.sequence_bytes())
+        .await
+        .unwrap();
+    let allowed: BTreeSet<[u8; 32]> = BTreeSet::from([manifest.sequence_root()]);
+    let provider = Provider::start(
+        &home,
+        store.clone(),
+        allowed.clone(),
+        RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let addr = provider.addr();
+    let ticket = Ticket::new(
+        *addr.id.as_bytes(),
+        addr.ip_addrs().copied().collect(),
+        None,
+        None,
+        Body::Static {
+            root: manifest.sequence_root(),
+            size: 0,
+            format: Format::HashSequence,
+        },
+    )
+    .unwrap();
+    let mut full = allowed;
+    full.extend(manifest.hash_sequence());
+    (provider, store, full, ticket)
+}
+
+/// A receive that fails before its checks leaves no store for the next run to resume.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failure_before_the_checks_leaves_no_store_to_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("out");
+    let (first, _store, _allowed, ticket) = provider_of_sequence_only(&dir).await;
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let err = super::receive(&ticket.encode(), &options(&out), &tx)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Network(_)), "{err}");
+    assert_no_partial(&out);
+    first.shutdown().await.unwrap();
 }
 
 /// A client that reads the manifest and leaves has taken nothing the ticket promised, so the

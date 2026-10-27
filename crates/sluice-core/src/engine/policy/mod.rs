@@ -9,7 +9,6 @@ use std::{
 use iroh_blobs::{
     Hash,
     api::proto::BlobStatus,
-    protocol::ChunkRangesSeq,
     provider::events::{
         AbortReason, ConnectMode, EventMask, EventSender, ObserveMode, ProviderMessage,
         RequestMode, RequestUpdate,
@@ -17,17 +16,16 @@ use iroh_blobs::{
     store::fs::FsStore,
 };
 use n0_future::task::AbortOnDropHandle;
+
+mod delivery;
+use delivery::{add, clamp, covers, front, requested};
 use tokio::sync::mpsc::UnboundedSender;
 
 /// The byte ranges of one root this process has served, merged and in ascending order. A range
 /// asked for twice counts once, so two requests for the first half are not the whole file.
 type Served = BTreeMap<Hash, Vec<(u64, u64)>>;
 
-/// How many separate ranges one root may be accounted in. A client that asks for one range at a
 /// time could otherwise grow this map without bound; past the cap the root is simply never
-/// counted as delivered, which leaves the sender serving rather than stopping early.
-const MAX_SPANS: usize = 4096;
-
 /// The provider's policy and the task that answers its request events.
 pub struct Policy {
     /// Handed to `BlobsProtocol`, which uses it for every request.
@@ -172,23 +170,8 @@ impl Gate {
                         connection,
                     };
                     while let Ok(Some(update)) = msg.rx.recv().await {
-                        let covered = match update {
-                            // Everything the request asked for went out.
-                            RequestUpdate::Completed(stats) => {
-                                whole
-                                    || sent
-                                        .cover(hash, &asked, stats.stats.payload_bytes_sent, true)
-                                        .await
-                            }
-                            // A request that stopped part way still moved the bytes it sent, and a
-                            // resume asks only for the rest, so they count towards the whole.
-                            RequestUpdate::Aborted(stats) => {
-                                !whole
-                                    && sent
-                                        .cover(hash, &asked, stats.stats.payload_bytes_sent, false)
-                                        .await
-                            }
-                            _ => continue,
+                        let Some(covered) = sent.checked(hash, &asked, update, whole).await else {
+                            continue;
                         };
                         if covered {
                             let _ = done.send(ServeEvent::Downloaded { hash, connection });
@@ -245,31 +228,34 @@ struct Sent<'a> {
 }
 
 impl Sent<'_> {
-    /// Whether the ranges this process served for `hash` now reach the whole blob. `sent_bytes` is
-    /// what the request moved before it ended: a completed request sent everything it asked for,
-    /// and an aborted one sent that many bytes from the front of what it asked for, which is the
-    /// order a provider writes in. The count is per root and not per connection, so a receive that
-    /// fetches half a file, is killed and fetches the other half still finishes the root. It is a
-    /// fallback for a receiver that never says it is done, and it can only be wrong in the
-    /// direction of serving longer.
-    async fn cover(
+    /// The delivery this update decides, or `None` for one that changes nothing yet. A completed
+    /// request sent everything it asked for, and an aborted one sent the bytes it reports from the
+    /// front of what it asked for, which is the order a provider writes in.
+    async fn checked(
         &self,
         hash: Hash,
         asked: &[(u64, u64)],
-        sent_bytes: u64,
-        complete: bool,
-    ) -> bool {
+        update: RequestUpdate,
+        whole: bool,
+    ) -> Option<bool> {
+        let (stats, complete) = match update {
+            RequestUpdate::Completed(stats) => (stats.stats, true),
+            RequestUpdate::Aborted(stats) => (stats.stats, false),
+            _ => return None,
+        };
+        let sent_bytes = stats.payload_bytes_sent;
         let size = match self.store.blobs().status(hash).await {
             Ok(BlobStatus::Complete { size }) => size,
-            _ => return false,
+            _ => return Some(false),
         };
         {
             let mut totals = lock(self.totals);
             let sent = totals.entry((self.connection, hash)).or_default();
             *sent = sent.saturating_add(sent_bytes);
         }
-        if size == 0 {
-            return complete;
+        // A whole request that completed is the whole blob; one that aborted is nothing yet.
+        if whole || size == 0 {
+            return Some(complete);
         }
         let asked = clamp(asked, size);
         let asked = if complete {
@@ -282,97 +268,8 @@ impl Sent<'_> {
         for (start, end) in asked {
             add(spans, start, end);
         }
-        covers(spans, size)
+        Some(covers(spans, size))
     }
-}
-
-/// The chunk number a request uses for "the last chunk of this blob", before it knows how large the
-/// blob is. It means the blob's final chunk, which is the only part of it such a request can name.
-const LAST_CHUNK: u64 = u64::MAX;
-
-/// The size of one `iroh-blobs` chunk, which is what a chunk range counts in.
-const CHUNK_BYTES: u64 = 1024;
-
-/// The byte ranges a request asked for, as it asked them. A get names one blob, so the ranges of
-/// blob 0 are the ones it serves; a request that names another blob as well is not one a get makes
-/// and it is not counted.
-fn requested(ranges: &ChunkRangesSeq) -> Vec<(u64, u64)> {
-    use std::ops::{Bound, RangeBounds};
-
-    let mut out = Vec::new();
-    for range in ranges[0].iter() {
-        let (start, end) = match (range.start_bound(), range.end_bound()) {
-            (Bound::Included(chunk), _) if chunk.0 == LAST_CHUNK => {
-                // The last-chunk marker is the whole range, so it has no start below its end.
-                out.push((LAST_CHUNK, LAST_CHUNK));
-                continue;
-            }
-            (Bound::Included(chunk), Bound::Excluded(end)) => (chunk.to_bytes(), end.to_bytes()),
-            (Bound::Included(chunk), Bound::Unbounded) => (chunk.to_bytes(), u64::MAX),
-            (Bound::Included(chunk), Bound::Included(_)) => (
-                chunk.to_bytes(),
-                chunk.to_bytes().saturating_add(CHUNK_BYTES),
-            ),
-            _ => continue,
-        };
-        if start < end {
-            out.push((start, end));
-        }
-    }
-    out
-}
-
-/// The same ranges clamped to a blob of `size` bytes. The last-chunk marker becomes the blob's
-/// final chunk.
-fn clamp(ranges: &[(u64, u64)], size: u64) -> Vec<(u64, u64)> {
-    ranges
-        .iter()
-        .map(|(start, end)| {
-            if *start == LAST_CHUNK {
-                (size.saturating_sub(CHUNK_BYTES), size)
-            } else {
-                ((*start).min(size), (*end).min(size))
-            }
-        })
-        .filter(|(start, end)| start < end)
-        .collect()
-}
-
-/// The first `sent` bytes of `ranges`, which is what an aborted request got through.
-fn front(ranges: Vec<(u64, u64)>, sent: u64) -> Vec<(u64, u64)> {
-    let mut left = sent;
-    let mut out = Vec::new();
-    for (start, end) in ranges {
-        if left == 0 {
-            break;
-        }
-        let take = (end - start).min(left);
-        out.push((start, start + take));
-        left -= take;
-    }
-    out
-}
-
-/// Adds one range to a merged, ascending list of them.
-fn add(spans: &mut Vec<(u64, u64)>, start: u64, end: u64) {
-    if start >= end || spans.len() >= MAX_SPANS {
-        return;
-    }
-    spans.push((start, end));
-    spans.sort_unstable();
-    let mut merged: Vec<(u64, u64)> = Vec::with_capacity(spans.len());
-    for (start, end) in spans.drain(..) {
-        match merged.last_mut() {
-            Some(last) if start <= last.1 => last.1 = last.1.max(end),
-            _ => merged.push((start, end)),
-        }
-    }
-    *spans = merged;
-}
-
-/// Whether the served ranges are exactly the whole blob, in one span.
-fn covers(spans: &[(u64, u64)], size: u64) -> bool {
-    spans == [(0, size)]
 }
 
 /// The lock cannot be held across an await and every holder only edits a map, so a panic in one
@@ -395,16 +292,7 @@ fn expired_at(expiry: Option<u64>, now: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{add, clamp, covers, expired_at, front, requested};
-    use iroh_blobs::protocol::{ChunkRanges, ChunkRangesExt, ChunkRangesSeq};
-
-    fn ask(ranges: ChunkRanges) -> Vec<(u64, u64)> {
-        requested(&ChunkRangesSeq::from_ranges([ranges]))
-    }
-
-    fn whole(size: u64) -> Vec<(u64, u64)> {
-        clamp(&ask(ChunkRanges::all()), size)
-    }
+    use super::expired_at;
 
     #[test]
     fn the_boundary_is_the_ticket_boundary() {
@@ -413,43 +301,5 @@ mod tests {
         assert!(!expired_at(Some(10), 9));
         assert!(expired_at(Some(10), 10));
         assert!(expired_at(Some(10), 11));
-    }
-
-    #[test]
-    fn asking_twice_for_the_first_half_is_not_the_whole_file() {
-        let half = clamp(&ask(ChunkRanges::bytes(0..65_536)), 131_072);
-        let mut spans = Vec::new();
-        for _ in 0..2 {
-            for (start, end) in half.clone() {
-                add(&mut spans, start, end);
-            }
-        }
-        assert!(!covers(&spans, 131_072), "{spans:?}");
-    }
-
-    #[test]
-    fn the_two_halves_add_up_to_the_whole_file() {
-        let mut spans = Vec::new();
-        for (start, end) in clamp(&ask(ChunkRanges::bytes(0..65_536)), 131_072) {
-            add(&mut spans, start, end);
-        }
-        for (start, end) in clamp(&ask(ChunkRanges::bytes(65_536..131_072)), 131_072) {
-            add(&mut spans, start, end);
-        }
-        assert!(covers(&spans, 131_072), "{spans:?}");
-    }
-
-    #[test]
-    fn an_open_range_reaches_the_end_of_the_blob() {
-        assert_eq!(whole(4096), vec![(0, 4096)]);
-    }
-
-    #[test]
-    fn an_aborted_request_counts_what_it_sent() {
-        assert_eq!(
-            front(vec![(0, 1000), (2000, 3000)], 1500),
-            vec![(0, 1000), (2000, 2500)]
-        );
-        assert_eq!(front(vec![(0, 1000)], 0), Vec::new());
     }
 }

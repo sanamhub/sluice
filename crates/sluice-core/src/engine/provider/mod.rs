@@ -16,30 +16,40 @@ use super::{
     ALPN, Congestion, Rate, RelayModeChoice, SluiceProtocol, endpoint, live::LiveLog, now_ms,
     policy,
 };
+mod stop;
+
+use stop::{GRACE, wait_grace};
+pub use stop::{ServeEnd, Stop};
+
 use crate::{Error, Home};
 
-/// When `send` stops serving.
-#[derive(Clone, Debug)]
-pub enum Stop {
-    /// After every content root has been served and the receiver has closed its connection.
-    OneDownload(Vec<[u8; 32]>),
-    /// A live stream: serve until its close is signed, then until every segment is delivered.
-    Live(Arc<LiveLog>),
-    /// On Ctrl+C, or at the ticket expiry.
-    Keep,
+/// Binds the provider's endpoint, with the identity key of `home`, and the completion signal a
+/// one-download stop watches. A named port that cannot be bound is an error the user can act on; a
+/// saved port that is taken falls back to any port, because a ticket is better than a refusal.
+async fn open_endpoint(
+    home: &Home,
+    relay: &RelayModeChoice,
+    congestion: Congestion,
+    port: Option<u16>,
+    complete: tokio::sync::mpsc::UnboundedSender<()>,
+) -> Result<Endpoint, Error> {
+    let seed = home.identity()?.secret_seed();
+    let saved = home.saved_port().filter(|_| port.is_none());
+    let chosen = port.or(saved);
+    let first =
+        endpoint::bind_with_completion(Some(seed), relay, congestion, chosen, complete.clone());
+    match first.await {
+        Ok(endpoint) => Ok(endpoint),
+        Err(e) if port.is_some() => {
+            let port = port.unwrap_or_default();
+            Err(Error::Storage(format!("cannot bind UDP port {port}: {e}")))
+        }
+        Err(_) if saved.is_some() => {
+            endpoint::bind_with_completion(Some(seed), relay, congestion, None, complete).await
+        }
+        Err(e) => Err(e),
+    }
 }
-
-/// Why serving ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ServeEnd {
-    /// The one download finished.
-    Downloaded,
-    /// The ticket expired and the provider stopped serving it.
-    Expired,
-    /// Ctrl+C.
-    Interrupted,
-}
-
 /// A listening provider. It holds the store open and answers only its allowed hashes.
 pub struct Provider {
     router: Option<Router>,
@@ -169,37 +179,8 @@ impl Provider {
         port: Option<u16>,
         rate: Option<Arc<Rate>>,
     ) -> Result<Self, Error> {
-        let seed = home.identity()?.secret_seed();
-        let saved = home.saved_port().filter(|_| port.is_none());
-        let chosen = port.or(saved);
         let (complete, complete_rx) = unbounded_channel();
-        let endpoint = match endpoint::bind_with_completion(
-            Some(seed),
-            &relay,
-            congestion,
-            chosen,
-            complete.clone(),
-        )
-        .await
-        {
-            Ok(endpoint) => endpoint,
-            Err(e) if port.is_some() => {
-                let port = port.unwrap_or_default();
-                return Err(Error::Storage(format!("cannot bind UDP port {port}: {e}")));
-            }
-            // The saved port is taken or unusable; any port is better than refusing to send.
-            Err(_) if saved.is_some() => {
-                endpoint::bind_with_completion(
-                    Some(seed),
-                    &relay,
-                    congestion,
-                    None,
-                    complete.clone(),
-                )
-                .await?
-            }
-            Err(e) => return Err(e),
-        };
+        let endpoint = open_endpoint(home, &relay, congestion, port, complete.clone()).await?;
         if let Some(port) = endpoint
             .bound_sockets()
             .first()
@@ -395,18 +376,5 @@ impl Provider {
             Some(expiry) => expiry.saturating_sub(now_ms()),
             None => 100 * 365 * 24 * 60 * 60 * 1000,
         }
-    }
-}
-
-/// The grace period after the last content root is delivered while a receiver keeps its connection
-/// open. A test uses a short one so the rule can be watched without waiting half a minute.
-const GRACE: Duration = Duration::from_secs(if cfg!(test) { 2 } else { 30 });
-
-/// Waits for the grace period, or for ever when none has started. A plain `Option` cannot be
-/// selected on, and a fresh sleep would restart the period on every loop pass.
-async fn wait_grace(grace: &mut Option<std::pin::Pin<Box<tokio::time::Sleep>>>) {
-    match grace {
-        Some(sleep) => sleep.as_mut().await,
-        None => std::future::pending::<()>().await,
     }
 }

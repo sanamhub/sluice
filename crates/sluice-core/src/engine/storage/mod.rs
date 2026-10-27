@@ -1,6 +1,10 @@
 //! The disk side of one receive: the space it needs, where its partial store lives, a private
 //! temporary folder, and installing the finished file without replacing a path nobody allowed.
 
+mod meta;
+
+pub use meta::MetaStore;
+
 use std::{
     fs::{self},
     io,
@@ -52,29 +56,77 @@ pub fn ensure_space(dir: &Path, content: u64) -> Result<(), Error> {
     Ok(())
 }
 
-/// The name of the file inside a partial store that says which ticket made it. Without it a store
-/// left by a failed run cannot be told from one another ticket made under a name that happens to
-/// match, and a resume would trust bytes nobody checked.
+/// The name of the file inside a partial store that says which ticket made it and which top-level
+/// entries it made room for. Without it a store left by a failed run cannot be told from one
+/// another ticket made under a name that happens to match, and a resume would trust bytes nobody
+/// checked.
 pub const MARKER: &str = "ticket";
 
-/// Claims `dir` for the transfer `owner` names, and says whether a store for exactly that transfer
-/// was already there, which is what makes a run a resume. A folder claimed by another transfer, or
-/// one with no marker at all, is removed: no byte in it was made by this transfer.
-pub fn claim(dir: &Path, owner: &str) -> Result<bool, Error> {
+/// What a partial store's marker says: the transfer that made the folder, and the top-level names
+/// that transfer created in the output. A resume may write into those names and no others.
+pub struct Owner {
+    pub root: String,
+    pub names: std::collections::BTreeSet<String>,
+}
+
+/// Reads the marker of `dir` without changing anything. A folder with no marker, or one this user
+/// cannot read, is not a resume; [`claim`] deals with it once every check has passed.
+pub fn recorded(dir: &Path) -> Result<Option<Owner>, Error> {
     let marker = dir.join(MARKER);
-    match fs::read_to_string(&marker) {
-        Ok(found) if found.trim() == owner => return Ok(true),
-        // Another transfer's store, or a folder with no marker: neither holds bytes this run made.
-        Ok(_) => {}
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        // A marker this user cannot read still names no transfer this run can trust.
-        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {}
+    let text = match fs::read_to_string(&marker) {
+        Ok(text) => text,
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            return Ok(None);
+        }
         Err(e) => return Err(storage("read", &marker, e)),
+    };
+    Ok(parse_marker(&text))
+}
+
+/// The first line is the root; every `name ` line after it is a top-level entry of the transfer.
+fn parse_marker(text: &str) -> Option<Owner> {
+    let mut lines = text.lines();
+    let root = lines.next()?.trim();
+    if root.is_empty() {
+        return None;
     }
+    let names = lines
+        .filter_map(|line| line.strip_prefix("name "))
+        .map(str::to_string)
+        .collect();
+    Some(Owner {
+        root: root.to_string(),
+        names,
+    })
+}
+
+/// Makes `dir` an empty store of this receive, removing a folder that is not one. Called only after
+/// every check has passed, so a refusal leaves no store for a later run to resume.
+pub fn claim(dir: &Path) -> Result<(), Error> {
     remove_quietly(dir);
-    fs::create_dir_all(dir).map_err(|e| storage("create", dir, e))?;
-    fs::write(&marker, format!("{owner}\n")).map_err(|e| storage("write", &marker, e))?;
-    Ok(false)
+    fs::create_dir_all(dir).map_err(|e| storage("create", dir, e))
+}
+
+/// Writes the marker of a store this receive just made, naming the top-level entries it will
+/// create. A later run reads it to tell this receive's folders from the user's.
+pub fn remember(
+    dir: &Path,
+    root: &str,
+    names: &std::collections::BTreeSet<String>,
+) -> Result<(), Error> {
+    let marker = dir.join(MARKER);
+    let mut text = format!("{root}\n");
+    for name in names {
+        text.push_str("name ");
+        text.push_str(name);
+        text.push('\n');
+    }
+    fs::write(&marker, text).map_err(|e| storage("write", &marker, e))
 }
 
 /// A temporary folder for this write, made with one `create_dir` so it cannot follow a link that

@@ -599,7 +599,9 @@ content blob:
    top-level names. Hidden names below the top are ordinary entries.
 2. A top-level name that already exists in the output folder refuses the whole transfer unless the
    user asked to replace an existing path. The check uses the file system's own kind of each entry
-   and never follows a link. An existing folder of that name counts as a clash.
+   and never follows a link. An existing folder of that name counts as a clash. A resumed receive
+   may write into a top-level name only when its partial store records that this receive made it;
+   any other existing name is a clash like any other.
 3. When replacing is allowed, a clashing file or link is replaced after its content verifies, and an
    existing folder of the same name is written into. A link at any target is replaced as an entry
    and never followed, so no byte is ever written through it. A folder is never replaced by a file
@@ -608,6 +610,10 @@ content blob:
 4. A file already at a target whose content matches the manifest exactly is skipped, which is how a
    resumed receive recognises what it wrote. Any other existing target without rule 2's permission
    is a clash, and the error names the first one.
+
+A resume runs every check a first run runs, and the two rules above are the only differences. It
+never changes the mode or the modification time of a folder that was already there when it wrote
+into it, and it never deletes a folder it did not make.
 
 **Sender.** A sender builds the entries from the folder it is given. It MUST:
 

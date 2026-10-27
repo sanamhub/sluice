@@ -45,7 +45,12 @@ pub(super) async fn write(
     if options.links {
         link::write_all(manifest, options, resume)?;
     }
-    for (target, mtime_ms, mode) in dirs.iter().rev() {
+    for (target, mtime_ms, mode, made_here) in dirs.iter().rev() {
+        // A folder that was already there keeps the mode and time it had: a resume writes into it
+        // but does not take it over, and neither does a first run that met the user's own folder.
+        if !made_here {
+            continue;
+        }
         file::set_mode_path(target, *mode)?;
         if !options.no_times {
             file::set_time_path(target, *mtime_ms, events)?;
@@ -316,17 +321,25 @@ pub(in crate::engine) async fn write_range(
     storage::install(&incoming, target, options.force)
 }
 
+/// Every folder entry, in manifest order, and whether this write made it. Manifest order puts a
+/// parent before its children, so one `create_dir` each is enough, and a folder that was already
+/// there is known to belong to someone else.
 fn create_dirs(
     manifest: &Manifest,
     options: &ReceiveOptions,
-) -> Result<Vec<(PathBuf, u64, u32)>, Error> {
+) -> Result<Vec<(PathBuf, u64, u32, bool)>, Error> {
     let mut dirs = Vec::new();
     for entry in manifest.entries() {
-        if entry.kind == Kind::Dir {
-            let target = entry.path.under(&options.out);
-            fs::create_dir_all(&target).map_err(|e| storage::policy_path("create", &target, e))?;
-            dirs.push((target, entry.mtime_ms, entry.mode));
+        if entry.kind != Kind::Dir {
+            continue;
         }
+        let target = entry.path.under(&options.out);
+        let made_here = match fs::create_dir(&target) {
+            Ok(()) => true,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && target.is_dir() => false,
+            Err(e) => return Err(storage::policy_path("create", &target, e)),
+        };
+        dirs.push((target, entry.mtime_ms, entry.mode, made_here));
     }
     Ok(dirs)
 }

@@ -121,9 +121,9 @@ pub async fn receive(
     Ok(received)
 }
 
-/// One receive, with the partial store beside the output. A store is a resume only when its marker
-/// names this ticket; anything else found under that name was not made by this transfer and is
-/// removed before a byte is fetched.
+/// One receive, with the partial store beside the output. The manifest is read into a store of its
+/// own, because the checks come before this receive may claim a place: a refusal must not leave a
+/// store that a later run would resume, and a resume runs every check a first run does.
 async fn run(
     receiver: &Receiver,
     ticket: &Ticket,
@@ -133,19 +133,13 @@ async fn run(
 ) -> Result<Received, Error> {
     let owner = hex(&root);
     let partial = storage::partial_dir(&options.out, &owner);
-    let resume = storage::claim(&partial, &owner)?;
-    let store = match FsStore::load(&partial).await {
-        Ok(store) => store,
-        Err(e) => {
-            // A store this receive could not open is not one a later one can resume.
-            storage::remove_quietly(&partial);
-            return Err(Error::Storage(format!(
-                "cannot open the partial store: {}",
-                crate::plain(&e)
-            )));
-        }
-    };
-    let outcome = exchange(receiver, ticket, &store, &partial, options, resume, events).await;
+    let conn = receiver.connect(ticket, events.clone()).await?;
+    let manifest = read_manifest(&conn, ticket, options, events).await?;
+    let (store, resume, plan) = claim_store(&partial, &owner, &manifest, ticket, options).await?;
+    let outcome = exchange(
+        receiver, ticket, &manifest, plan, &store, &partial, options, resume, conn, events,
+    )
+    .await;
     let closed = store.shutdown().await;
     let endpoint = receiver.shutdown().await;
     match outcome {
@@ -181,23 +175,58 @@ async fn run(
     }
 }
 
-/// Fetches every content blob, closes the endpoint so the sender can stop, and then writes the
-/// checked tree.
+/// Runs every check that needs no content blob, then claims the partial store and opens it. The
+/// order is the point: a refusal leaves no store for a later run to resume, and a folder is this
+/// transfer's store only when its marker says so. The marker also names the top-level entries this
+/// receive made, so a resume may write into those and into nothing else.
+async fn claim_store(
+    partial: &std::path::Path,
+    owner: &str,
+    manifest: &Manifest,
+    ticket: &Ticket,
+    options: &ReceiveOptions,
+) -> Result<(FsStore, bool, Plan), Error> {
+    let found = storage::recorded(partial)?;
+    let resume = found.as_ref().is_some_and(|found| found.root == owner);
+    let ours = match found {
+        Some(found) if resume => found.names,
+        _ => std::collections::BTreeSet::new(),
+    };
+    let plan = plan::check(manifest, ticket, options, resume, &ours)?;
+    if !resume {
+        storage::claim(partial)?;
+        storage::remember(partial, owner, &top_names(manifest))?;
+    }
+    match FsStore::load(partial).await {
+        Ok(store) => Ok((store, resume, plan)),
+        Err(e) => {
+            // A store this receive could not open is not one a later one can resume.
+            storage::remove_quietly(partial);
+            Err(Error::Storage(format!(
+                "cannot open the partial store: {}",
+                crate::plain(&e)
+            )))
+        }
+    }
+}
+/// Fetches every content blob and then writes the checked tree.
+#[allow(clippy::too_many_arguments)]
 async fn exchange(
     receiver: &Receiver,
     ticket: &Ticket,
+    manifest: &Manifest,
+    plan: Plan,
     store: &FsStore,
     partial: &std::path::Path,
     options: &ReceiveOptions,
     resume: bool,
+    conn: iroh::endpoint::Connection,
     events: &UnboundedSender<Event>,
 ) -> Result<(Received, f64), Error> {
-    let conn = receiver.connect(ticket, events.clone()).await?;
-    let (manifest, plan) = prepare(&conn, ticket, store, options, resume, events).await?;
     emit(
         events,
         Event::Started {
-            name: single_name(&manifest),
+            name: single_name(manifest),
             files: plan.files,
             bytes: plan.bytes,
             congestion: options.congestion,
@@ -208,21 +237,21 @@ async fn exchange(
         receiver,
         ticket,
         store,
-        manifest: &manifest,
+        manifest,
         plan,
         events,
         rate: options.rate.as_deref(),
         max_failures: options.max_network_failures,
     };
     let conn = content::ensure_content(&session, conn).await?;
-    write::write(&manifest, plan, store, options, partial, resume, events).await?;
+    write::write(manifest, plan, store, options, partial, resume, events).await?;
     // Every file is verified and in place, so the whole tree arrived on this machine. Closing the
     // content connection with the completion code is how the sender learns that, and it is the
     // only moment it may: a receive that failed, or that took a range, never sends it.
     conn.close(super::COMPLETE_CLOSE.into(), b"complete");
     Ok((
         Received {
-            path: single_path(&manifest, options),
+            path: single_path(manifest, options),
             bytes: plan.bytes,
             files: plan.files,
         },
@@ -230,19 +259,28 @@ async fn exchange(
     ))
 }
 
-/// Fetches the sequence and the manifest and runs every check that needs no content blob. The
-/// store is open by now because the manifest lives in it.
-async fn prepare(
+/// Reads the hash sequence and the manifest into a store of their own, which is removed when this
+/// returns. The partial store of the transfer is not touched until every check has passed.
+async fn read_manifest(
     conn: &iroh::endpoint::Connection,
     ticket: &Ticket,
-    store: &FsStore,
     options: &ReceiveOptions,
-    resume: bool,
     events: &UnboundedSender<Event>,
-) -> Result<(Manifest, Plan), Error> {
-    let manifest = fetch_manifest(conn, ticket, store, options.limits, events).await?;
-    let plan = plan::check(&manifest, ticket, options, resume)?;
-    Ok((manifest, plan))
+) -> Result<Manifest, Error> {
+    let meta = storage::MetaStore::open().await?;
+    let manifest = fetch_manifest(conn, ticket, &meta.store, options.limits, events).await;
+    meta.close().await?;
+    manifest
+}
+
+/// The top-level names a manifest writes, which are the entries with no `/` in their path.
+fn top_names(manifest: &Manifest) -> std::collections::BTreeSet<String> {
+    manifest
+        .entries()
+        .iter()
+        .filter(|entry| !entry.path.as_str().contains('/'))
+        .map(|entry| entry.path.as_str().to_string())
+        .collect()
 }
 
 /// Fetches the hash sequence and the manifest and checks that one names the other. The store is

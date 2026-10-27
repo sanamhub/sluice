@@ -2,7 +2,7 @@
 //! manifest, the top-level names, hidden names, every target path, every clash, every ancestor that
 //! could be a symlink, and the free space for the whole tree.
 
-use std::{fs, path::Path};
+use std::{collections::BTreeSet, fs, path::Path};
 
 use super::ReceiveOptions;
 use crate::{
@@ -26,11 +26,12 @@ pub(super) fn check(
     ticket: &Ticket,
     options: &ReceiveOptions,
     resume: bool,
+    ours: &BTreeSet<String>,
 ) -> Result<Plan, Error> {
     let (files, bytes) = totals(manifest)?;
     check_promised(ticket, bytes)?;
     check_space(options, bytes)?;
-    check_top(manifest, options, resume)?;
+    check_top(manifest, options, ours)?;
     for entry in manifest.entries() {
         let target = entry.path.under(&options.out);
         check_ancestors(&options.out, &target)?;
@@ -92,7 +93,11 @@ pub(super) fn check_space(options: &ReceiveOptions, bytes: u64) -> Result<(), Er
 /// the output folder refuses the whole transfer before any content is fetched. A resumed transfer
 /// made the folder it is writing into, so it may write there again; its files are still checked
 /// against their content by the writer.
-fn check_top(manifest: &Manifest, options: &ReceiveOptions, resume: bool) -> Result<(), Error> {
+fn check_top(
+    manifest: &Manifest,
+    options: &ReceiveOptions,
+    ours: &BTreeSet<String>,
+) -> Result<(), Error> {
     for entry in manifest.entries() {
         let name = entry.path.as_str();
         if name.contains('/') {
@@ -104,7 +109,13 @@ fn check_top(manifest: &Manifest, options: &ReceiveOptions, resume: bool) -> Res
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
             Err(e) => return Err(super::storage::policy_path("check", &target, e)),
         };
-        match top_level(name, exists, options.allow_hidden, options.force, resume) {
+        match top_level(
+            name,
+            exists,
+            options.allow_hidden,
+            options.force,
+            ours.contains(name),
+        ) {
             Ok(()) => {}
             Err("hidden") => {
                 return Err(Error::Policy(format!(

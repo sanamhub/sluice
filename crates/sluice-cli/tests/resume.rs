@@ -89,7 +89,9 @@ fn two_identical_files_arrive_and_a_run_after_a_kill_finishes() {
     let owner: String = root.iter().map(|byte| format!("{byte:02x}")).collect();
     let partial = out.join(format!(".sluice-partial-{}", &owner[..16]));
     std::fs::create_dir_all(&partial).unwrap();
-    std::fs::write(partial.join("ticket"), format!("{owner}\n")).unwrap();
+    // The marker also names the top-level entry the killed run made, which is what lets a resume
+    // write into it.
+    std::fs::write(partial.join("ticket"), format!("{owner}\nname dup\n")).unwrap();
 
     let (mut sender, ticket) = start_in(dir.path(), &home, &["dup", "--expires", "1h"]);
     let result = recv(&home, &ticket, &out, false);
