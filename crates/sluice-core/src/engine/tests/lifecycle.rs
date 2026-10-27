@@ -152,6 +152,16 @@ async fn a_resume_does_not_take_over_a_folder_that_was_already_there() {
     fs::create_dir_all(source.join("sub")).unwrap();
     fs::write(source.join("big.bin"), vec![7u8; 900 * 1024]).unwrap();
     fs::write(source.join("sub").join("x.txt"), b"x").unwrap();
+    // A folder time the sender would put back, and one no clock in this test reaches. Windows
+    // does not restore folder times, and a folder cannot be opened for writing there, so this is
+    // the one platform the case is not checked on.
+    #[cfg(unix)]
+    const SENT: u64 = 1_000_000_000_000;
+    #[cfg(unix)]
+    set_mtime(
+        &source,
+        SystemTime::UNIX_EPOCH + Duration::from_millis(SENT),
+    );
     let (outgoing, text) = prepared_paths(&dir, std::slice::from_ref(&source)).await;
     let out = dir.path().join("out");
     let mut limited = options(&out);
@@ -160,14 +170,12 @@ async fn a_resume_does_not_take_over_a_folder_that_was_already_there() {
     super::receive(&text, &limited, &tx).await.unwrap_err();
     assert!(out.join("tree").join("sub").is_dir());
 
-    // What the user did to the folders between the two runs. Windows has no folder mode to set and
+    // What the user did to the folder between the two runs. Windows has no folder mode to set and
     // does not restore folder times, so there the resume only has to leave the tree alone.
     let tree = out.join("tree");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let when = SystemTime::UNIX_EPOCH + Duration::from_millis(1_000_000_000_000);
-        set_mtime(&tree, when);
         fs::set_permissions(&tree, fs::Permissions::from_mode(0o750)).unwrap();
     }
 
@@ -176,7 +184,13 @@ async fn a_resume_does_not_take_over_a_folder_that_was_already_there() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(mtime_ms(&tree), 1_000_000_000_000);
+        // Writing a child changes the folder's time to now, which is not the sender's. The mode is
+        // the user's, and neither is what a receive that took the folder over would leave.
+        assert_ne!(
+            mtime_ms(&tree),
+            SENT,
+            "the sender's folder time was applied"
+        );
         assert_eq!(
             fs::metadata(&tree).unwrap().permissions().mode() & 0o777,
             0o750
