@@ -111,21 +111,38 @@ pub(super) async fn fetch_whole(
         .map(|_| ())
         .map_err(classify)
 }
-/// Fetches a range of a blob, verified block by block against its root. The range is in bytes and
-/// is rounded up to whole blocks, which is the smallest unit `iroh-blobs` verifies.
+/// Fetches a range of a blob, verified block by block against its root, and waits under `rate`
+/// for the bytes of each step. The range is in bytes and is rounded up to whole blocks, which is
+/// the smallest unit `iroh-blobs` verifies.
 pub(super) async fn fetch_range(
     store: &FsStore,
     conn: &iroh::endpoint::Connection,
     hash: Hash,
     ranges: ChunkRanges,
+    rate: Option<&super::Rate>,
 ) -> Result<(), Error> {
-    store
-        .remote()
-        .execute_get(conn.clone(), GetRequest::blob_ranges(hash, ranges))
-        .complete()
-        .await
-        .map(|_| ())
-        .map_err(classify)
+    let mut progress = pin!(
+        store
+            .remote()
+            .execute_get(conn.clone(), GetRequest::blob_ranges(hash, ranges))
+            .stream()
+    );
+    let mut seen = 0u64;
+    while let Some(item) = progress.next().await {
+        match item {
+            GetProgressItem::Progress(bytes) => {
+                if let Some(rate) = rate {
+                    rate.acquire(bytes.saturating_sub(seen)).await;
+                }
+                seen = bytes;
+            }
+            GetProgressItem::Done(_) => return Ok(()),
+            GetProgressItem::Error(e) => return Err(classify(e)),
+        }
+    }
+    Err(Error::Network(
+        "the connection closed before the range completed".to_string(),
+    ))
 }
 /// The size a store has proved for a blob, if it has.
 async fn size_of(store: &FsStore, hash: Hash) -> Result<Option<u64>, Error> {

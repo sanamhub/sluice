@@ -152,7 +152,10 @@ fn run_many(
     }
     let out = std::path::absolute(&args.out)
         .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", args.out.display())))?;
-    let options = options(args, out, rate);
+    let mut options = options(args, out, rate);
+    // The queue owns retries for a command of several tickets: one failure comes back to it at
+    // once, and its backoff schedules the next attempt from the store the last one left.
+    options.max_network_failures = 1;
     crate::queue::run(output, tickets, args.priority.into(), options)
 }
 

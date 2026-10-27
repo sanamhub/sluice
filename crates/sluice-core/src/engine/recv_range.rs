@@ -94,7 +94,14 @@ async fn fetch_and_write(
     let plan = resolved.plan();
     let request = plan_fetch(&manifest, &entry, &plan)?;
     storage::ensure_space(store_root, request.need)?;
-    fetch::fetch_range(store, conn, request.hash, request.ranges).await?;
+    fetch::fetch_range(
+        store,
+        conn,
+        request.hash,
+        request.ranges,
+        options.rate.as_deref(),
+    )
+    .await?;
     let bytes = plan.keep();
     write_range(
         store,

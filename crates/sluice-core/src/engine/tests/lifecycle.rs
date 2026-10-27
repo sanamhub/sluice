@@ -62,9 +62,15 @@ async fn a_range_request_leaves_the_sender_serving() {
     .await
     .unwrap();
     let conn = client.connect(addr, iroh_blobs::ALPN).await.unwrap();
-    crate::engine::fetch::fetch_range(&client_store, &conn, hash, ChunkRanges::bytes(1000..2000))
-        .await
-        .unwrap();
+    crate::engine::fetch::fetch_range(
+        &client_store,
+        &conn,
+        hash,
+        ChunkRanges::bytes(1000..2000),
+        None,
+    )
+    .await
+    .unwrap();
     let mut serve = tokio::spawn(async move {
         provider
             .serve(super::Stop::OneDownload(vec![*hash.as_bytes()]))
