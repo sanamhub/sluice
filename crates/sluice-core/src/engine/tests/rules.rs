@@ -56,7 +56,7 @@ async fn links_are_created_only_when_asked() {
     let out = dir.path().join("without");
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     super::receive(&text, &options(&out), &tx).await.unwrap();
-    assert!(fs::symlink_metadata(out.join("link")).is_err());
+    assert!(fs::symlink_metadata(out.join("tree").join("link")).is_err());
     outgoing.provider.shutdown().await.unwrap();
 
     let (outgoing, text) = prepared_paths(&dir, &[source]).await;
@@ -64,7 +64,7 @@ async fn links_are_created_only_when_asked() {
     let mut options = options(&out);
     options.links = true;
     super::receive(&text, &options, &tx).await.unwrap();
-    let link = out.join("link");
+    let link = out.join("tree").join("link");
     assert!(
         fs::symlink_metadata(&link)
             .unwrap()
