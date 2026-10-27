@@ -31,6 +31,7 @@ mod checks;
 mod done;
 mod lifecycle;
 mod live;
+mod resume;
 mod rules;
 mod server;
 mod transfer;
@@ -88,6 +89,16 @@ async fn prepared_paths(dir: &TempDir, paths: &[std::path::PathBuf]) -> (super::
     .unwrap();
     let text = outgoing.ticket.encode();
     (outgoing, text)
+}
+
+/// Whether the output folder holds the partial store of a receive.
+fn partial_exists(out: &Path) -> bool {
+    fs::read_dir(out).unwrap().flatten().any(|entry| {
+        entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".sluice-partial-")
+    })
 }
 
 /// Every hidden name a receive made must be gone after a refusal, including its temporary folder.
