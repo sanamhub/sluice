@@ -189,3 +189,21 @@ fn colour_follows_the_flag_and_no_color() {
         "JSON is never coloured"
     );
 }
+/// The network checks report what they find and change no setting. Without a relay they still
+/// say what that means for two hard NATs, and the command exits as the local checks decide.
+#[test]
+fn network_checks_report_without_a_relay() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = ready_home(dir.path());
+    let result = sluice(&home)
+        .args(["doctor", "--network"])
+        .assert()
+        .success();
+    let text = stdout_text(&result);
+    assert!(text.contains("udp"), "{text}");
+    assert!(
+        text.contains("none, so two hard NATs cannot connect"),
+        "{text}"
+    );
+    assert!(text.contains("portmap"), "{text}");
+}

@@ -23,6 +23,8 @@ path = "src/main.rs"
 anstream.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
+iroh = { workspace = true, features = ["unstable-net-report"] }
+portmapper = "0.19.3"
 # Only for the JSON error object, whose message needs escaping.
 serde_json.workspace = true
 sluice-core = { path = "../sluice-core" }

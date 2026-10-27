@@ -6,12 +6,24 @@
 use serde_json::Value;
 use sluice_core::Error;
 use sluice_core::doctor::{self, Check, Finding, Location, Name, Status};
+use sluice_core::engine::RelayModeChoice;
 
 use crate::exit::code_of;
 use crate::output::Outcome;
 
 #[derive(clap::Args)]
-pub struct Args {}
+pub struct Args {
+    /// Also check the network: whether UDP can be bound, the relay, the public address, the NAT
+    /// mapping and whether a router can open a port. The plain report stays local and quick
+    #[arg(long)]
+    pub network: bool,
+    /// The relay the network checks use and ask for a net report
+    #[arg(long, value_name = "URL", requires = "network")]
+    pub relay: Option<String>,
+    /// Use n0's public relays for the network checks (not run by this project)
+    #[arg(long, requires = "network")]
+    pub n0_relays: bool,
+}
 
 /// One line of the report.
 pub struct Line {
@@ -24,7 +36,7 @@ pub struct Line {
 /// The target triple this binary was built for, which Cargo gives only to the build script.
 const TARGET: &str = env!("SLUICE_TARGET");
 
-pub fn run(_args: &Args) -> Result<Outcome, Error> {
+pub fn run(args: &Args) -> Result<Outcome, Error> {
     let checks = doctor::examine();
     let mut lines = vec![Line {
         name: "version",
@@ -37,12 +49,23 @@ pub fn run(_args: &Args) -> Result<Outcome, Error> {
         fix: None,
     }];
     lines.extend(checks.iter().map(line));
-    lines.push(Line {
-        name: "transport",
-        status: Status::Skipped,
-        detail: "the transport checks are not built yet".to_string(),
-        fix: None,
-    });
+    if args.network {
+        let relay = RelayModeChoice::from_flags(args.relay.as_deref(), args.n0_relays)?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| Error::Storage(format!("cannot start the check runtime: {e}")))?;
+        lines.extend(runtime.block_on(crate::network::lines(&relay)));
+    } else {
+        lines.push(Line {
+            name: "transport",
+            status: Status::Skipped,
+            detail:
+                "pass --network to check UDP, the relay, the public address, NAT and port mapping"
+                    .to_string(),
+            fix: None,
+        });
+    }
     Ok(Outcome::Doctor {
         lines,
         code: exit_code(&checks),

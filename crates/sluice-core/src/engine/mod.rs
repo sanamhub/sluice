@@ -7,6 +7,7 @@ mod expiry;
 mod fetch;
 mod hello;
 mod live;
+mod net;
 mod policy;
 mod rate;
 mod recv;
@@ -40,6 +41,7 @@ pub use hello::{
     encode as encode_hello, greet,
 };
 pub use live::{CLOSE_AFTER, LiveLog, LiveSend, prepare_live, receive_live};
+pub use net::{NetworkReport, report as network_report};
 pub use rate::Rate;
 pub use recv::{ReceiveOptions, Received, receive, top_level_rule};
 pub use recv_range::receive_range;
