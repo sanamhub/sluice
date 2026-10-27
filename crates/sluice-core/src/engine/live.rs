@@ -133,13 +133,13 @@ impl LiveLog {
         let mut events = self.signals.subscribe();
         let mut sent = 0;
         loop {
-            let (batch, close) = {
+            let (new_frames, close) = {
                 let frames = lock(&self.frames);
-                let batch = frames[sent..].to_vec();
+                let new_frames = frames[sent..].to_vec();
                 sent = frames.len();
-                (batch, *lock(&self.close))
+                (new_frames, *lock(&self.close))
             };
-            for frame in batch {
+            for frame in new_frames {
                 write_record(send, &frame.encode()).await?;
             }
             if let Some(close) = close {

@@ -298,7 +298,7 @@ interrupted download leaves the output untouched. A file that a previous attempt
 recognised on resume by its content and is not treated as a clash. The process syncs the finished
 file before it moves it into place. After a crash, the store decides what to ask for again from
 its own record of verified ranges. This release adds no separate 64 MB barrier: `iroh-blobs`
-commits its records in its own batches, so after a crash the store may ask again for the ranges it
+commits its records as it goes, so after a crash the store may ask again for the ranges it
 had not committed, which costs a re-read of part of the file, and no byte enters an output file
 without verifying against the root. A crash can only cost work, never trust. A full disk, a
 permission error or a quota error leaves the partial store and a `Storage` error, not a panic. A
