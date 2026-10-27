@@ -1,10 +1,12 @@
 //! A ticket from the receiver's side: prove the sequence and the manifest, check every destination
 //! before the first content request, then write the tree into a per-transfer store beside it.
 
+mod claim;
 mod content;
 mod plan;
 mod write;
 
+use claim::{claim_store, hex, read_manifest};
 pub(super) use plan::check_one;
 pub(super) use write::write_range;
 
@@ -175,40 +177,6 @@ async fn run(
     }
 }
 
-/// Runs every check that needs no content blob, then claims the partial store and opens it. The
-/// order is the point: a refusal leaves no store for a later run to resume, and a folder is this
-/// transfer's store only when its marker says so. The marker also names the top-level entries this
-/// receive made, so a resume may write into those and into nothing else.
-async fn claim_store(
-    partial: &std::path::Path,
-    owner: &str,
-    manifest: &Manifest,
-    ticket: &Ticket,
-    options: &ReceiveOptions,
-) -> Result<(FsStore, bool, Plan), Error> {
-    let found = storage::recorded(partial)?;
-    let resume = found.as_ref().is_some_and(|found| found.root == owner);
-    let ours = match found {
-        Some(found) if resume => found.names,
-        _ => std::collections::BTreeSet::new(),
-    };
-    let plan = plan::check(manifest, ticket, options, resume, &ours)?;
-    if !resume {
-        storage::claim(partial)?;
-        storage::remember(partial, owner, &top_names(manifest))?;
-    }
-    match FsStore::load(partial).await {
-        Ok(store) => Ok((store, resume, plan)),
-        Err(e) => {
-            // A store this receive could not open is not one a later one can resume.
-            storage::remove_quietly(partial);
-            Err(Error::Storage(format!(
-                "cannot open the partial store: {}",
-                crate::plain(&e)
-            )))
-        }
-    }
-}
 /// Fetches every content blob and then writes the checked tree.
 #[allow(clippy::too_many_arguments)]
 async fn exchange(
@@ -257,30 +225,6 @@ async fn exchange(
         },
         started.elapsed().as_secs_f64(),
     ))
-}
-
-/// Reads the hash sequence and the manifest into a store of their own, which is removed when this
-/// returns. The partial store of the transfer is not touched until every check has passed.
-async fn read_manifest(
-    conn: &iroh::endpoint::Connection,
-    ticket: &Ticket,
-    options: &ReceiveOptions,
-    events: &UnboundedSender<Event>,
-) -> Result<Manifest, Error> {
-    let meta = storage::MetaStore::open().await?;
-    let manifest = fetch_manifest(conn, ticket, &meta.store, options.limits, events).await;
-    meta.close().await?;
-    manifest
-}
-
-/// The top-level names a manifest writes, which are the entries with no `/` in their path.
-fn top_names(manifest: &Manifest) -> std::collections::BTreeSet<String> {
-    manifest
-        .entries()
-        .iter()
-        .filter(|entry| !entry.path.as_str().contains('/'))
-        .map(|entry| entry.path.as_str().to_string())
-        .collect()
 }
 
 /// Fetches the hash sequence and the manifest and checks that one names the other. The store is
@@ -359,10 +303,6 @@ pub(super) fn relay_of(ticket: &Ticket) -> RelayModeChoice {
     ticket.relay_url().map_or(RelayModeChoice::Disabled, |url| {
         RelayModeChoice::Url(url.to_string())
     })
-}
-
-fn hex(bytes: &[u8; 32]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// A network failure keeps the store because a second receive continues from it, and so does a

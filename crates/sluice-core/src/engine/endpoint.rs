@@ -118,13 +118,14 @@ pub async fn bind(
 }
 
 /// [`bind`] for a provider whose one-download stop waits for the receiver's completion code.
-/// `complete` receives once per connection that closed with it.
+/// `complete` receives the connection that closed with it, which the provider checks against the
+/// roots that connection asked for.
 pub(super) async fn bind_with_completion(
     secret: Option<[u8; 32]>,
     relay: &RelayModeChoice,
     congestion: Congestion,
     port: Option<u16>,
-    complete: UnboundedSender<()>,
+    complete: UnboundedSender<u64>,
 ) -> Result<Endpoint, Error> {
     bind_inner(secret, relay, congestion, port, Some(complete)).await
 }
@@ -133,12 +134,13 @@ pub(super) async fn bind_with_completion(
 /// content protocol carries the code, so a `sluice/1` connection that closes with it means
 /// nothing here.
 #[derive(Debug)]
-struct CompletionSignal(UnboundedSender<()>);
+struct CompletionSignal(UnboundedSender<u64>);
 
 impl EndpointHooks for CompletionSignal {
     async fn after_handshake<'a>(&'a self, conn: &'a Connection) -> AfterHandshakeOutcome {
         if conn.alpn() == iroh_blobs::ALPN {
             let closed = conn.weak_handle();
+            let id = conn.stable_id() as u64;
             let complete = self.0.clone();
             n0_future::task::spawn(async move {
                 if let Some(closed) = closed.closed().await
@@ -146,7 +148,7 @@ impl EndpointHooks for CompletionSignal {
                         closed.reason
                     && application.error_code.into_inner() == u64::from(super::COMPLETE_CLOSE)
                 {
-                    let _ = complete.send(());
+                    let _ = complete.send(id);
                 }
             });
         }
@@ -159,7 +161,7 @@ async fn bind_inner(
     relay: &RelayModeChoice,
     congestion: Congestion,
     port: Option<u16>,
-    complete: Option<UnboundedSender<()>>,
+    complete: Option<UnboundedSender<u64>>,
 ) -> Result<Endpoint, Error> {
     let mut builder = Endpoint::builder(presets::Empty)
         .crypto_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
