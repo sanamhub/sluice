@@ -34,7 +34,7 @@ async fn a_network_failure_keeps_the_partial_store_for_a_resume() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_range_request_does_not_count_as_a_complete_download() {
+async fn a_range_request_leaves_the_sender_serving() {
     let dir = tempfile::tempdir().unwrap();
     let home = Home::open(&dir.path().join("home")).unwrap();
     let store = FsStore::load(dir.path().join("store")).await.unwrap();
@@ -77,12 +77,16 @@ async fn a_range_request_does_not_count_as_a_complete_download() {
         "a byte range stopped the sender"
     );
     conn.close(0u32.into(), b"done");
-    let end = tokio::time::timeout(Duration::from_secs(5), serve)
-        .await
-        .expect("the sender did not stop after the client left")
-        .unwrap()
-        .unwrap();
-    assert_eq!(end, super::ServeEnd::Downloaded);
+    // Most of the blob was never served, so the client leaving is not a finished download and
+    // the sender has to stay for a receive that comes back for the rest.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(600), &mut serve)
+            .await
+            .is_err(),
+        "a partial range that left ended the sender"
+    );
+    serve.abort();
+    let _ = serve.await;
     client.close().await;
     client_store.shutdown().await.unwrap();
 }
@@ -112,4 +116,122 @@ async fn a_time_the_platform_cannot_hold_is_skipped_with_a_warning() {
     #[cfg(not(windows))]
     let _ = warned;
     provider.shutdown().await.unwrap();
+}
+
+/// A client that reads the manifest and leaves has taken nothing the ticket promised, so the
+/// sender has to stay for the transfer that follows.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_probe_only_client_leaves_the_sender_serving() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = vec![4u8; 64 << 10];
+    let (outgoing, text) = prepared(&dir, &body).await;
+    let ticket = Ticket::decode(&text).unwrap();
+    let Body::Static { root, .. } = ticket.body() else {
+        unreachable!("a file ticket is static")
+    };
+    let sequence = Hash::from(*root);
+    let probe_store = FsStore::load(dir.path().join("probe-store")).await.unwrap();
+    let probe = endpoint::bind(
+        None,
+        &RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+    )
+    .await
+    .unwrap();
+    let conn = probe
+        .connect(outgoing.provider.addr(), iroh_blobs::ALPN)
+        .await
+        .unwrap();
+    crate::engine::fetch::fetch_whole(&probe_store, &conn, sequence)
+        .await
+        .unwrap();
+    conn.close(0u32.into(), b"probe");
+    probe_store.shutdown().await.unwrap();
+    probe.close().await;
+
+    let roots = outgoing.roots.clone();
+    let mut serve = tokio::spawn(async move {
+        outgoing
+            .provider
+            .serve(super::Stop::OneDownload(roots))
+            .await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), &mut serve)
+            .await
+            .is_err(),
+        "a probe that read only the manifest ended the sender"
+    );
+    let out = dir.path().join("out");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    super::receive(&text, &options(&out), &tx).await.unwrap();
+    let end = tokio::time::timeout(Duration::from_secs(5), serve)
+        .await
+        .expect("the sender did not stop after the real receive")
+        .unwrap()
+        .unwrap();
+    assert_eq!(end, super::ServeEnd::Downloaded);
+}
+
+/// The grace after the last root is delivered is one deadline, not a timer every new connection
+/// restarts: a client that reconnects once a second cannot keep a one-download sender alive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_client_that_keeps_reconnecting_does_not_hold_the_sender_past_its_grace() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = vec![6u8; 64 << 10];
+    let (outgoing, text) = prepared(&dir, &body).await;
+    let ticket = Ticket::decode(&text).unwrap();
+    let Body::Static { root, .. } = ticket.body() else {
+        unreachable!("a file ticket is static")
+    };
+    let sequence = Hash::from(*root);
+    let addr = outgoing.provider.addr();
+    let roots = outgoing.roots.clone();
+    let serving = roots.clone();
+    let serve = tokio::spawn(async move {
+        outgoing
+            .provider
+            .serve(super::Stop::OneDownload(serving))
+            .await
+    });
+
+    // One connection takes every byte of content and stays open, which is what starts the grace.
+    let store = FsStore::load(dir.path().join("store")).await.unwrap();
+    let client = endpoint::bind(
+        None,
+        &RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+    )
+    .await
+    .unwrap();
+    let content = client
+        .connect(addr.clone(), iroh_blobs::ALPN)
+        .await
+        .unwrap();
+    for root in &roots {
+        crate::engine::fetch::fetch_whole(&store, &content, Hash::from(*root))
+            .await
+            .unwrap();
+    }
+    // Every new connection below reads only the sequence, which is not content.
+    let probe_store = FsStore::load(dir.path().join("probe-store")).await.unwrap();
+    let probes = tokio::spawn(async move {
+        for _ in 0..40 {
+            if let Ok(conn) = client.connect(addr.clone(), iroh_blobs::ALPN).await {
+                let _ = crate::engine::fetch::fetch_whole(&probe_store, &conn, sequence).await;
+                conn.close(0u32.into(), b"probe");
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+    let end = tokio::time::timeout(Duration::from_secs(4), serve)
+        .await
+        .expect("a client that reconnected held the sender past its grace")
+        .unwrap()
+        .unwrap();
+    assert_eq!(end, super::ServeEnd::Downloaded);
+    probes.abort();
+    content.close(0u32.into(), b"done");
 }

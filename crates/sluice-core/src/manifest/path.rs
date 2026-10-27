@@ -102,6 +102,25 @@ impl ManifestPath {
     pub fn components(&self) -> std::str::Split<'_, char> {
         self.0.split('/')
     }
+
+    /// This path joined under `root`, one component at a time. A single `join` of the whole text
+    /// would keep the `/` separators on Windows, which then print beside `\` in one path and make
+    /// a message hard to read and a long-path call refuse the name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::path::Path;
+    /// use sluice_core::manifest::path::ManifestPath;
+    ///
+    /// let path = ManifestPath::parse("a/b.txt")?;
+    /// assert_eq!(path.under(Path::new("out")), Path::new("out").join("a").join("b.txt"));
+    /// # Ok::<(), sluice_core::Error>(())
+    /// ```
+    pub fn under(&self, root: &std::path::Path) -> std::path::PathBuf {
+        self.components()
+            .fold(root.to_path_buf(), |at, name| at.join(name))
+    }
 }
 
 /// A rule a path breaks. Kept apart from [`Error`] so the tests and the vectors can compare the

@@ -3,6 +3,7 @@
 
 use std::{
     fs,
+    io::Read,
     path::Path,
     time::{Duration, UNIX_EPOCH},
 };
@@ -61,7 +62,7 @@ pub(super) fn touch(
     no_times: bool,
     events: &UnboundedSender<Event>,
 ) -> Result<(), Error> {
-    let file = fs::File::open(path).map_err(|e| storage::storage("open", path, e))?;
+    let file = open_for_metadata(path).map_err(|e| storage::storage("open", path, e))?;
     apply(&file, path, meta, no_times, events)
 }
 
@@ -115,7 +116,9 @@ pub(super) async fn copy_from_pack(
 }
 
 /// Whether `target` already holds the bytes of this pack range, which is how a receive that was
-/// killed after writing a file recognises it instead of refusing it as a clash.
+/// killed after writing a file recognises it instead of refusing it as a clash. The file is
+/// checked for its kind and size before anything is read, a link is never read, and the bytes are
+/// compared in bounded pieces so a target of another size cannot make this read all of it.
 pub(super) async fn same_packed(
     reader: &mut BlobReader,
     entry: &Entry,
@@ -124,23 +127,38 @@ pub(super) async fn same_packed(
     let Loc::Packed { offset, len, .. } = entry.loc else {
         return Ok(false);
     };
-    let existing = fs::read(target).map_err(|e| storage::storage("read", target, e))?;
-    if existing.len() as u64 != len {
+    let meta = fs::symlink_metadata(target).map_err(|e| storage::storage("read", target, e))?;
+    if !meta.is_file() || meta.len() != len {
         return Ok(false);
     }
+    let mut file = open_no_follow(target).map_err(|e| storage::storage("read", target, e))?;
     reader
         .seek(std::io::SeekFrom::Start(offset))
         .await
         .map_err(|e| storage::storage("read a pack", target, e))?;
-    let mut expected = vec![0u8; existing.len()];
-    reader
-        .read_exact(&mut expected)
-        .await
-        .map_err(|e| storage::storage("read a pack", target, e))?;
-    Ok(existing == expected)
+    // On the heap: a 64 KiB array in the future of this call would be copied onto the stack at
+    // every poll, and the writer nests enough calls that a debug build runs out of stack.
+    let mut expected = vec![0u8; 64 * 1024];
+    let mut found = vec![0u8; 64 * 1024];
+    let mut left = len;
+    while left > 0 {
+        let take = left.min(expected.len() as u64) as usize;
+        file.read_exact(&mut found[..take])
+            .map_err(|e| storage::storage("read", target, e))?;
+        reader
+            .read_exact(&mut expected[..take])
+            .await
+            .map_err(|e| storage::storage("read a pack", target, e))?;
+        if found[..take] != expected[..take] {
+            return Ok(false);
+        }
+        left -= take as u64;
+    }
+    Ok(true)
 }
 
-/// Whether a target already holds exactly this blob's content.
+/// Whether a target already holds exactly this blob's content. A link is already a clash to the
+/// caller, and it is never opened here either.
 pub(super) fn same_blob(target: &Path, hash: Hash, size: u64) -> Result<bool, Error> {
     let meta = fs::symlink_metadata(target).map_err(|e| storage::storage("read", target, e))?;
     if !meta.is_file() || meta.len() != size {
@@ -149,10 +167,65 @@ pub(super) fn same_blob(target: &Path, hash: Hash, size: u64) -> Result<bool, Er
     if size == 0 {
         return Ok(true);
     }
-    let mut file = fs::File::open(target).map_err(|e| storage::storage("read", target, e))?;
+    let mut file = open_no_follow(target).map_err(|e| storage::storage("read", target, e))?;
     let mut hasher = blake3::Hasher::new();
     std::io::copy(&mut file, &mut hasher).map_err(|e| storage::storage("read", target, e))?;
     Ok(*hasher.finalize().as_bytes() == *hash.as_bytes())
+}
+
+/// Opens a file without following a link at its name, so a target that became a link between the
+/// clash check and this open is refused rather than read through.
+fn open_no_follow(path: &Path) -> std::io::Result<fs::File> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{Mode, OFlags};
+        let fd = rustix::fs::open(
+            path,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
+        Ok(fs::File::from(fd))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_FLAG_OPEN_REPARSE_POINT: the name itself is opened, not what it points at.
+        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(OPEN_REPARSE_POINT)
+            .open(path)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        fs::File::open(path)
+    }
+}
+
+/// Opens a file for setting its time and mode without following a link at its name. On Windows a
+/// handle opened only for reading cannot set them, and a read-only file cannot be opened for
+/// writing, so this asks for the two attribute rights alone.
+fn open_for_metadata(path: &Path) -> std::io::Result<fs::File> {
+    #[cfg(unix)]
+    {
+        open_no_follow(path)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+        const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+        const SYNCHRONIZE: u32 = 0x0010_0000;
+        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        fs::OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE)
+            .custom_flags(OPEN_REPARSE_POINT)
+            .open(path)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        fs::File::open(path)
+    }
 }
 
 /// Restores one modification time, or says why it was skipped. A time the platform cannot hold is
@@ -254,4 +327,25 @@ pub(super) fn set_time_path(
     _events: &UnboundedSender<Event>,
 ) -> Result<(), Error> {
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::same_blob;
+    use iroh_blobs::Hash;
+    use std::fs;
+
+    /// A link at a target is a clash, not content: resolving it and reading through it would let a
+    /// link someone placed in the output stand in for a file the sender wrote.
+    #[test]
+    fn a_link_is_not_read_as_the_file_it_points_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.bin");
+        let body = b"the content";
+        fs::write(&real, body).unwrap();
+        let hash = Hash::from(*blake3::hash(body).as_bytes());
+        std::os::unix::fs::symlink(&real, dir.path().join("link.bin")).unwrap();
+        let link = dir.path().join("link.bin");
+        assert!(!same_blob(&link, hash, body.len() as u64).unwrap());
+    }
 }

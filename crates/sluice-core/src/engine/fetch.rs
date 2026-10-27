@@ -91,7 +91,7 @@ async fn request(
         .complete()
         .await
         .map(|_| ())
-        .map_err(|e| Error::Network(format!("the transfer stopped: {e}")))
+        .map_err(classify)
 }
 
 /// Fetches a whole blob with an explicit request, even when the store already holds it, so the

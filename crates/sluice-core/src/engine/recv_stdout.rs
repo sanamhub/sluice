@@ -1,7 +1,7 @@
 //! Receiving to standard output: a raw blob, or a transfer whose manifest holds one file. A folder
 //! is refused, because a stream has no names. Nothing but content bytes goes to standard output.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use iroh_blobs::{Hash, store::fs::FsStore};
 use tokio::{
@@ -20,32 +20,51 @@ use crate::{
     ticket::{Body, Format, Ticket},
 };
 
-/// Writes the bytes a ticket names to standard output and returns how many. The store is a
-/// temporary one that is removed on the way out; nothing is written beside a destination folder.
+/// Writes the bytes a ticket names to standard output and returns how many. The store is a private
+/// temporary one under `store_root` (the home's `tmp`), checked for room before its body is
+/// fetched; nothing is written beside a destination folder.
 pub async fn receive_stdout(
     text: &str,
     options: &ReceiveOptions,
+    store_root: &Path,
     events: &UnboundedSender<Event>,
 ) -> Result<u64, Error> {
     let ticket = Ticket::decode(text)?;
     refuse_expired(&ticket)?;
     let receiver = Receiver::open(relay_of(&ticket), options.congestion).await?;
-    let tmp = Temp(storage::temp_dir(&std::env::temp_dir())?);
+    let tmp = match storage::temp_dir(store_root) {
+        Ok(path) => Temp(path),
+        Err(e) => {
+            let _ = receiver.shutdown().await;
+            return Err(e);
+        }
+    };
     let store = match FsStore::load(tmp.0.join("store")).await {
         Ok(store) => store,
         Err(e) => {
             let _ = receiver.shutdown().await;
             return Err(Error::Storage(format!(
                 "cannot open a temporary store: {}",
-                crate::chain(&e)
+                crate::plain(&e)
             )));
         }
     };
-    let conn = receiver.connect(&ticket, events.clone()).await?;
-    let result = stream(&conn, &ticket, &store, options, events).await;
-    let _ = receiver.shutdown().await;
-    let _ = store.shutdown().await;
-    result
+    let result = async {
+        let conn = receiver.connect(&ticket, events.clone()).await?;
+        stream(&conn, &ticket, &store, options, store_root, events).await
+    }
+    .await;
+    let endpoint = receiver.shutdown().await;
+    let closed = store.shutdown().await;
+    // Removed before the result is returned, so no path out of this function leaves the folder.
+    drop(tmp);
+    let bytes = result?;
+    if endpoint.is_err() || closed.is_err() {
+        return Err(Error::Storage(
+            "the bytes were written but the transfer did not close cleanly".to_string(),
+        ));
+    }
+    Ok(bytes)
 }
 
 async fn stream(
@@ -53,6 +72,7 @@ async fn stream(
     ticket: &Ticket,
     store: &FsStore,
     options: &ReceiveOptions,
+    store_root: &Path,
     events: &UnboundedSender<Event>,
 ) -> Result<u64, Error> {
     match ticket.body() {
@@ -61,24 +81,15 @@ async fn stream(
             size,
             format: Format::Raw,
             ..
-        } => {
-            let hash = Hash::from(*root);
-            fetch::fetch_whole(store, conn, hash).await?;
-            let have = fetch::complete_size(store, hash).await?;
-            if have != *size {
-                return Err(Error::Verify(format!(
-                    "the blob has {have} bytes and the ticket says {size}"
-                )));
-            }
-            copy(store, hash, 0, *size).await?;
-            Ok(*size)
-        }
+        } => raw(conn, store, *root, *size, store_root).await,
         Body::Static {
             format: Format::HashSequence,
             ..
         } => {
             let manifest = fetch_manifest(conn, ticket, store, options.limits, events).await?;
             let entry = single_file(&manifest)?;
+            let needed = needed(&manifest, entry)?;
+            storage::ensure_space(store_root, needed)?;
             let bytes = entry.size;
             stream_entry(store, conn, &manifest, entry, events).await?;
             Ok(bytes)
@@ -89,12 +100,62 @@ async fn stream(
     }
 }
 
+/// A raw blob: its size is proved by its first chunk group, compared with the ticket, and checked
+/// against the room under `store_root` before the body is asked for.
+async fn raw(
+    conn: &iroh::endpoint::Connection,
+    store: &FsStore,
+    root: [u8; 32],
+    size: u64,
+    store_root: &Path,
+) -> Result<u64, Error> {
+    let hash = Hash::from(root);
+    if size > 0 {
+        let proven = fetch::verified_size(store, conn, hash).await?;
+        if proven != size {
+            return Err(Error::Verify(format!(
+                "the blob has {proven} bytes and the ticket says {size}"
+            )));
+        }
+        storage::ensure_space(store_root, proven)?;
+    }
+    // Even no bytes are asked for as a whole blob, so the sender sees a request that reached the
+    // root and can stop after one download.
+    fetch::fetch_whole(store, conn, hash).await?;
+    let have = fetch::complete_size(store, hash).await?;
+    if have != size {
+        return Err(Error::Verify(format!(
+            "the blob has {have} bytes and the ticket says {size}"
+        )));
+    }
+    copy(store, hash, 0, size).await?;
+    Ok(size)
+}
+
 /// The one file a manifest may hold for a write to standard output.
 fn single_file(manifest: &Manifest) -> Result<&crate::manifest::Entry, Error> {
     match manifest.entries() {
         [entry] if entry.kind == Kind::File => Ok(entry),
         _ => Err(Error::Policy(
             "a folder cannot be written to standard output; use --out DIR".to_string(),
+        )),
+    }
+}
+
+/// The bytes the store has to hold for this entry: the file itself, or the whole pack it is cut
+/// from. A packed file is never fetched in pieces smaller than its pack.
+fn needed(manifest: &Manifest, entry: &crate::manifest::Entry) -> Result<u64, Error> {
+    match entry.loc {
+        Loc::Blob { .. } => Ok(entry.size),
+        Loc::Packed { pack_index, .. } => manifest
+            .packs()
+            .get(pack_index as usize)
+            .map(|pack| pack.size)
+            .ok_or_else(|| {
+                Error::Policy("the manifest points at a pack that is not listed".into())
+            }),
+        Loc::None => Err(Error::Bug(
+            "a File entry has no location to write".to_string(),
         )),
     }
 }

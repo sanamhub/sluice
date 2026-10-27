@@ -114,6 +114,29 @@ pub fn chain(error: &(dyn std::error::Error + 'static)) -> String {
     text
 }
 
+/// The last cause below `error`, with none of the wrappers above it. A library that names its own
+/// variants in `Display` would otherwise put `Error::Io` in a message a person reads, and the
+/// deepest cause is the one that says what went wrong: a missing file, a full disk, a locked one.
+/// An error with no cause below it is its own message, prefix and all.
+///
+/// # Examples
+///
+/// ```
+/// use sluice_core::Error;
+///
+/// let err = Error::Storage("cannot write a file".to_string());
+/// assert_eq!(sluice_core::plain(&err), "storage error: cannot write a file");
+/// ```
+pub fn plain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text = cause.to_string();
+        source = cause.source();
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Error, ErrorKind};
@@ -144,6 +167,7 @@ mod tests {
             super::chain(&Outer(Inner)),
             "the outer call failed: the file is not there"
         );
+        assert_eq!(super::plain(&Outer(Inner)), "the file is not there");
     }
 
     #[test]

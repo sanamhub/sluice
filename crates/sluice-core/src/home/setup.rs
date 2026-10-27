@@ -254,6 +254,22 @@ fn real_folder(folder: &Path) -> Result<(), Error> {
     )))
 }
 
+/// One folder of the home made the way `prepare` makes its own: mode 0700 on Unix, a real folder
+/// that is this user's on every platform. A transfer that writes no output folder keeps its store
+/// in one of these, so the store is never in a folder another user can write in.
+pub(super) fn create_private_folder(root: &Path, name: &str) -> Result<PathBuf, Error> {
+    let folder = root.join(name);
+    folder_builder(false)
+        .create(&folder)
+        .or_else(|e| exists_as_folder(e, &folder))
+        .map_err(|e| storage("create the folder", &folder, e))?;
+    real_folder(&folder)?;
+    if !owned_by_this_user(&folder).map_err(|e| storage("read the owner of", &folder, e))? {
+        return Err(private::owned_by_other(&folder));
+    }
+    Ok(folder)
+}
+
 /// Whether this user made the entry at `path`: on Unix its uid is the effective uid or root, and on
 /// Windows its owner is this user, `Administrators` or `SYSTEM`. The owner is read from a handle
 /// opened without following a link and without waiting, so it is the owner of the object the name

@@ -223,14 +223,16 @@ async fn a_request_for_the_last_chunk_leaves_the_sender_serving() {
             .is_err(),
         "a partial get stopped the sender"
     );
-    // Leaving is the client's own end of the transfer, which is not a partial get.
+    // Leaving after part of the blob is not a finished download, so the sender stays.
     conn.close(0u32.into(), b"done");
-    let end = tokio::time::timeout(Duration::from_secs(5), serve)
-        .await
-        .expect("the sender did not stop after the client left")
-        .unwrap()
-        .unwrap();
-    assert_eq!(end, super::ServeEnd::Downloaded);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(600), &mut serve)
+            .await
+            .is_err(),
+        "a partial get that left ended the sender"
+    );
+    serve.abort();
+    let _ = serve.await;
     client.close().await;
     client_store.shutdown().await.unwrap();
 }

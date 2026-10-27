@@ -581,7 +581,9 @@ content blob:
    and never follows a link. An existing folder of that name counts as a clash.
 3. When replacing is allowed, a clashing file or link is replaced after its content verifies, and an
    existing folder of the same name is written into. A link at any target is replaced as an entry
-   and never followed, so no byte is ever written through it.
+   and never followed, so no byte is ever written through it. A folder is never replaced by a file
+   or by a link, even when replacing is allowed: a rename cannot do it, and the transfer refuses
+   that target before any content is fetched.
 4. A file already at a target whose content matches the manifest exactly is skipped, which is how a
    resumed receive recognises what it wrote. Any other existing target without rule 2's permission
    is a clash, and the error names the first one.

@@ -230,6 +230,17 @@ impl Home {
     pub fn rotate_identity(&self) -> Result<Identity, Error> {
         identity::rotate(&self.root).map_err(|e| as_given(e, &self.root, &self.path))
     }
+
+    /// A private folder for the store of a transfer that writes no output folder, such as one to
+    /// standard output or one byte range. The home and its folders are made first, so an empty
+    /// home is made private before anything is written in it, but the lock is not taken: a receive
+    /// still runs beside a send from the same home. The folder has mode 0700 on Unix and the
+    /// home's private access list on Windows.
+    pub fn temporary_store() -> Result<PathBuf, Error> {
+        let given = Self::locate()?;
+        let root = setup::create_folders(&given)?;
+        setup::create_private_folder(&root, "tmp")
+    }
 }
 
 /// Removes `lock.pid` while the lock is still held, before the file that holds it closes. A

@@ -37,6 +37,46 @@ pub fn partial_dir(out: &Path, root: &str) -> PathBuf {
     out.join(format!(".sluice-partial-{short}"))
 }
 
+/// Refuses when `dir` does not have room for a transfer of `content` bytes plus the store beside
+/// it. The store is what a receive writes before it writes the file, so this is the volume that
+/// has to hold both during the transfer.
+pub fn ensure_space(dir: &Path, content: u64) -> Result<(), Error> {
+    let available = available_bytes(dir)?;
+    let needed = needed_bytes(content);
+    if available < needed {
+        return Err(Error::Storage(format!(
+            "{} has {available} bytes free and this transfer needs about {needed}",
+            dir.display()
+        )));
+    }
+    Ok(())
+}
+
+/// The name of the file inside a partial store that says which ticket made it. Without it a store
+/// left by a failed run cannot be told from one another ticket made under a name that happens to
+/// match, and a resume would trust bytes nobody checked.
+pub const MARKER: &str = "ticket";
+
+/// Claims `dir` for the transfer `owner` names, and says whether a store for exactly that transfer
+/// was already there, which is what makes a run a resume. A folder claimed by another transfer, or
+/// one with no marker at all, is removed: no byte in it was made by this transfer.
+pub fn claim(dir: &Path, owner: &str) -> Result<bool, Error> {
+    let marker = dir.join(MARKER);
+    match fs::read_to_string(&marker) {
+        Ok(found) if found.trim() == owner => return Ok(true),
+        // Another transfer's store, or a folder with no marker: neither holds bytes this run made.
+        Ok(_) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        // A marker this user cannot read still names no transfer this run can trust.
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {}
+        Err(e) => return Err(storage("read", &marker, e)),
+    }
+    remove_quietly(dir);
+    fs::create_dir_all(dir).map_err(|e| storage("create", dir, e))?;
+    fs::write(&marker, format!("{owner}\n")).map_err(|e| storage("write", &marker, e))?;
+    Ok(false)
+}
+
 /// A temporary folder for this write, made with one `create_dir` so it cannot follow a link that
 /// someone left under a fixed name. The caller removes it when the write ends.
 pub fn temp_dir(out: &Path) -> Result<PathBuf, Error> {
@@ -70,21 +110,57 @@ pub fn temp_path(dir: &Path, index: u64) -> PathBuf {
 
 /// Moves `from` to `target`. With `force` an existing target is replaced; without it the rename
 /// itself refuses one, so a file or link that appeared after the clash check is never overwritten.
+/// A file system whose rename cannot refuse is tried with a hard link, which also refuses, and
+/// then the transfer stops and says `--force` is the way to write it with a plain rename.
 pub fn install(from: &Path, target: &Path, force: bool) -> Result<(), Error> {
-    let done = if force {
-        replace(from, target)
-    } else {
-        match fs::symlink_metadata(target) {
-            Ok(_) => Err(io::Error::from(io::ErrorKind::AlreadyExists)),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => rename_no_replace(from, target),
-            Err(e) => Err(e),
-        }
-    };
-    match done {
+    if force {
+        return replace(from, target).map_err(|e| storage("install", target, e));
+    }
+    match fs::symlink_metadata(target) {
+        Ok(_) => return Err(clash(target)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(storage("check", target, e)),
+    }
+    match rename_no_replace(from, target) {
         Ok(()) => Ok(()),
-        Err(e) if !force && e.kind() == io::ErrorKind::AlreadyExists => Err(clash(target)),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(clash(target)),
+        Err(e) if unsupported(&e) => link_no_replace(from, target),
         Err(e) => Err(storage("install", target, e)),
     }
+}
+
+/// The fallback for a rename that cannot refuse a name: a link fails when the name is taken, and
+/// the unlink leaves the same one file behind. A file system that supports neither is refused
+/// rather than checked and renamed, which would leave a moment for another process to write there.
+fn link_no_replace(from: &Path, target: &Path) -> Result<(), Error> {
+    match fs::hard_link(from, target) {
+        Ok(()) => {
+            // The target is installed either way; a temporary name that stays only makes the
+            // caller's folder removal do the unlink.
+            let _ = fs::remove_file(from);
+            Ok(())
+        }
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err(clash(target)),
+        Err(_) => Err(Error::Storage(format!(
+            "cannot install {} without replacing a path that is already there: this file system \
+             can neither rename without replacing nor link. Pass --force to write it with a plain \
+             rename",
+            target.display()
+        ))),
+    }
+}
+
+/// Errors from a rename that mean the flag itself is not supported, not that the call was refused.
+/// NFS, FUSE, some macOS volumes and old kernels answer like this, and a link still works there.
+#[cfg(unix)]
+fn unsupported(error: &io::Error) -> bool {
+    // EINVAL, ENOSYS, ENOTSUP and EOPNOTSUPP. The last two share a number on Linux.
+    matches!(error.raw_os_error(), Some(22 | 38 | 45 | 95))
+}
+
+#[cfg(not(unix))]
+fn unsupported(_error: &io::Error) -> bool {
+    false
 }
 
 /// Replaces `target` in one rename. Windows refuses a read-only destination; clearing that one bit
@@ -150,14 +226,39 @@ fn move_file(from: &Path, target: &Path, replace: bool) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MoveFileExW};
 
-    fn wide(path: &Path) -> Vec<u16> {
-        path.as_os_str()
+    /// The path as a verbatim wide string: `\\?\C:\...` or `\\?\UNC\server\share\...`, with `\`
+    /// separators. `MoveFileExW` is limited to 260 characters without it, while `std::fs` works
+    /// past that, so a deep output folder would otherwise fail only at the last step.
+    fn verbatim(path: &Path) -> Vec<u16> {
+        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let mut wide: Vec<u16> = absolute
+            .as_os_str()
             .encode_wide()
-            .chain(std::iter::once(0))
-            .collect()
+            .map(|c| {
+                if c == u16::from(b'/') {
+                    u16::from(b'\\')
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let slash = u16::from(b'\\');
+        if wide.starts_with(&[slash, slash, u16::from(b'?'), slash]) {
+            wide.push(0);
+            return wide;
+        }
+        let unc = wide.starts_with(&[slash, slash]);
+        let mut out: Vec<u16> = if unc {
+            r"\\?\UNC\".encode_utf16().collect()
+        } else {
+            r"\\?\".encode_utf16().collect()
+        };
+        out.extend_from_slice(if unc { &wide[2..] } else { &wide[..] });
+        out.push(0);
+        out
     }
-    let from = wide(from);
-    let target = wide(target);
+    let from = verbatim(from);
+    let target = verbatim(target);
     let flags = if replace {
         MOVEFILE_REPLACE_EXISTING
     } else {
@@ -223,66 +324,4 @@ mod imp {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{install, needed_bytes, partial_dir, temp_dir};
-    use std::path::Path;
-
-    #[test]
-    fn a_hundred_gigabytes_needs_about_a_hundred_and_not_two_hundred() {
-        let need = needed_bytes(100 << 30);
-        assert!(need > 100 << 30);
-        assert!(need < 101 << 30, "{need}");
-    }
-
-    #[test]
-    fn the_partial_store_is_hidden_beside_the_output() {
-        let path = partial_dir(Path::new("/out"), "0123456789abcdef0123");
-        assert_eq!(path, Path::new("/out/.sluice-partial-0123456789abcdef"));
-    }
-
-    #[test]
-    fn each_temporary_folder_has_its_own_name() {
-        let dir = tempfile::tempdir().unwrap();
-        let first = temp_dir(dir.path()).unwrap();
-        let second = temp_dir(dir.path()).unwrap();
-        assert_ne!(first, second);
-        assert!(first.is_dir() && second.is_dir());
-    }
-
-    #[test]
-    fn an_install_without_force_leaves_the_target_alone() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("target");
-        let incoming = dir.path().join("incoming");
-        std::fs::write(&target, b"old").unwrap();
-        std::fs::write(&incoming, b"new").unwrap();
-        let err = install(&incoming, &target, false).unwrap_err();
-        assert!(matches!(err, crate::Error::Policy(_)), "{err}");
-        assert_eq!(std::fs::read(&target).unwrap(), b"old");
-        assert!(incoming.exists());
-    }
-
-    #[test]
-    fn a_file_that_appears_after_the_check_is_not_replaced() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("late");
-        let incoming = dir.path().join("incoming");
-        std::fs::write(&incoming, b"new").unwrap();
-        // The plan ran while the target was absent; another process made it since.
-        std::fs::write(&target, b"theirs").unwrap();
-        assert!(install(&incoming, &target, false).is_err());
-        assert_eq!(std::fs::read(&target).unwrap(), b"theirs");
-    }
-
-    #[test]
-    fn an_install_with_force_replaces_the_target() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("target");
-        let incoming = dir.path().join("incoming");
-        std::fs::write(&target, b"old").unwrap();
-        std::fs::write(&incoming, b"new").unwrap();
-        install(&incoming, &target, true).unwrap();
-        assert_eq!(std::fs::read(&target).unwrap(), b"new");
-        assert!(!incoming.exists());
-    }
-}
+mod tests;

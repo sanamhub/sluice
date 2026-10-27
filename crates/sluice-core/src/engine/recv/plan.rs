@@ -27,26 +27,37 @@ pub(super) fn check(
     options: &ReceiveOptions,
     resume: bool,
 ) -> Result<Plan, Error> {
-    let files = manifest
-        .entries()
-        .iter()
-        .filter(|entry| entry.kind == Kind::File)
-        .count() as u64;
-    let bytes = manifest
-        .entries()
-        .iter()
-        .filter(|entry| entry.kind == Kind::File)
-        .map(|entry| entry.size)
-        .sum();
+    let (files, bytes) = totals(manifest)?;
     check_promised(ticket, bytes)?;
     check_space(options, bytes)?;
     check_top(manifest, options, resume)?;
     for entry in manifest.entries() {
-        let target = options.out.join(entry.path.as_str());
+        let target = entry.path.under(&options.out);
         check_ancestors(&options.out, &target)?;
         check_target(&target, entry.kind, options.force || resume)?;
     }
     Ok(Plan { files, bytes })
+}
+
+/// How many files there are and how many bytes they add up to. A manifest comes from a stranger,
+/// so the sum is checked: in a release build a plain `+` would wrap, and a wrapped total could be
+/// made to match a ticket's size and pass the free-space check for a tree far larger than it.
+fn totals(manifest: &Manifest) -> Result<(u64, u64), Error> {
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    for entry in manifest.entries() {
+        if entry.kind != Kind::File {
+            continue;
+        }
+        // The decoder's entry limit is far below `u64::MAX`, so this cannot pass it.
+        files += 1;
+        bytes = bytes.checked_add(entry.size).ok_or_else(size_overflow)?;
+    }
+    Ok((files, bytes))
+}
+
+pub(super) fn size_overflow() -> Error {
+    Error::Policy("the manifest's file sizes add up past u64::MAX".to_string())
 }
 
 fn check_promised(ticket: &Ticket, bytes: u64) -> Result<(), Error> {
@@ -62,7 +73,7 @@ fn check_promised(ticket: &Ticket, bytes: u64) -> Result<(), Error> {
     Ok(())
 }
 
-fn check_space(options: &ReceiveOptions, bytes: u64) -> Result<(), Error> {
+pub(super) fn check_space(options: &ReceiveOptions, bytes: u64) -> Result<(), Error> {
     let available = match options.free_bytes {
         Some(bytes) => bytes,
         None => super::storage::available_bytes(&options.out)?,
@@ -87,7 +98,7 @@ fn check_top(manifest: &Manifest, options: &ReceiveOptions, resume: bool) -> Res
         if name.contains('/') {
             continue;
         }
-        let target = options.out.join(name);
+        let target = entry.path.under(&options.out);
         let exists = match fs::symlink_metadata(&target) {
             Ok(_) => true,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
@@ -132,7 +143,7 @@ pub(in crate::engine) fn check_one<'a>(
              to accept a top-level hidden name"
         )));
     }
-    let target = options.out.join(name);
+    let target = entry.path.under(&options.out);
     if !options.force && !resume && fs::symlink_metadata(&target).is_ok() {
         return Err(super::storage::clash(&target));
     }
@@ -236,5 +247,31 @@ mod tests {
         assert!(top_level("proj", true, false, true, false).is_ok());
         assert!(top_level("proj", true, false, false, true).is_ok());
         assert!(top_level("proj/a", true, false, false, false).is_ok());
+    }
+
+    /// A release build has no overflow checks, so a hostile manifest whose sizes add past
+    /// `u64::MAX` must be refused before any sum wraps and matches a ticket's size.
+    #[test]
+    fn file_sizes_that_add_past_u64_max_are_refused() {
+        use super::totals;
+        use crate::manifest::{Entry, Kind, Loc, Manifest, path::ManifestPath};
+
+        let entry = |name: &str, root: [u8; 32], size: u64| Entry {
+            path: ManifestPath::parse(name).unwrap(),
+            kind: Kind::File,
+            size,
+            mtime_ms: 0,
+            mode: 0,
+            loc: Loc::Blob { root },
+            link_target: None,
+        };
+        let manifest = Manifest::new(
+            vec![entry("a", [1; 32], u64::MAX), entry("b", [2; 32], 1)],
+            vec![],
+        )
+        .unwrap();
+        let err = totals(&manifest).unwrap_err();
+        assert!(matches!(err, crate::Error::Policy(_)), "{err}");
+        assert!(err.to_string().contains("u64::MAX"), "{err}");
     }
 }

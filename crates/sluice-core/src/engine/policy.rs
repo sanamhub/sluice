@@ -23,7 +23,7 @@ pub struct Policy {
     /// Handed to `BlobsProtocol`, which uses it for every request.
     pub events: EventSender,
     /// Payload served per connection and blob, so a test can see what a request moved.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>>,
     /// Aborted when the provider goes away, so no event task outlives it.
     pub _task: AbortOnDropHandle<()>,
@@ -50,33 +50,30 @@ impl std::fmt::Debug for Policy {
 /// What the provider reports back so a sender can stop after one download.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ServeEvent {
-    /// A request for this hash was completed and, with what this connection asked for before, it
-    /// covered the whole blob.
+    /// Every byte of this root has now been served, across every connection that asked for it.
     Downloaded {
         /// The blob the receiver asked for.
         hash: Hash,
-        /// The connection the request arrived on.
+        /// The connection the request that finished it arrived on.
         connection: u64,
     },
-    /// That connection closed, with the set of allowed hashes it fetched anything of. A client
-    /// that fetched from every root and then left has nothing more to receive.
+    /// That connection closed. A root is not delivered because a connection that asked for part of
+    /// it went away: a receive that was killed must be able to come back for the rest.
     Closed {
         /// The connection that closed.
         connection: u64,
-        /// The roots it completed at least one request for.
-        served: BTreeSet<Hash>,
     },
 }
 
 /// What every request is answered against: the allowlist, the ticket deadline, the reporter, and
-/// the two maps that say what was served on which connection.
+/// the maps that say how much of each blob every connection has served.
 struct Gate {
     allowed: Arc<BTreeSet<Hash>>,
     expiry: Option<u64>,
     done: UnboundedSender<ServeEvent>,
     store: FsStore,
     totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>>,
-    touched: Arc<Mutex<BTreeMap<u64, BTreeSet<Hash>>>>,
+    delivered: Arc<Mutex<BTreeMap<Hash, u64>>>,
 }
 
 /// Starts the policy. `done` receives every completed get and every closed connection, so a sender
@@ -97,7 +94,7 @@ pub fn start(
         done,
         store,
         totals: Arc::clone(&totals),
-        touched: Arc::default(),
+        delivered: Arc::default(),
     };
     let task = AbortOnDropHandle::new(n0_future::task::spawn(async move {
         while let Some(message) = rx.recv().await {
@@ -106,6 +103,7 @@ pub fn start(
     }));
     Policy {
         events,
+        #[cfg(test)]
         totals,
         _task: task,
     }
@@ -146,40 +144,33 @@ impl Gate {
                 let done = self.done.clone();
                 let store = self.store.clone();
                 let totals = Arc::clone(&self.totals);
-                let touched = Arc::clone(&self.touched);
+                let delivered = Arc::clone(&self.delivered);
                 n0_future::task::spawn(async move {
                     while let Ok(Some(update)) = msg.rx.recv().await {
-                        if let RequestUpdate::Completed(stats) = update {
-                            let mut complete = whole;
-                            if !complete {
-                                complete = covered(
+                        match update {
+                            RequestUpdate::Completed(stats) => {
+                                let complete = covered(
                                     &store,
                                     hash,
                                     stats.stats.payload_bytes_sent,
                                     &totals,
+                                    &delivered,
                                     connection,
                                 )
                                 .await;
+                                if whole || complete {
+                                    let _ = done.send(ServeEvent::Downloaded { hash, connection });
+                                }
+                                break;
                             }
-                            lock(&touched).entry(connection).or_default().insert(hash);
-                            if complete {
-                                let _ = done.send(ServeEvent::Downloaded { hash, connection });
-                            }
-                            break;
-                        }
-                        if matches!(update, RequestUpdate::Aborted(_)) {
-                            break;
+                            RequestUpdate::Aborted(_) => break,
+                            _ => {}
                         }
                     }
                 });
             }
             ProviderMessage::GetManyRequestReceived(msg) => {
-                let ok = !expired(self.expiry)
-                    && msg
-                        .request
-                        .hashes
-                        .iter()
-                        .all(|hash| self.allowed.contains(hash));
+                let ok = self.may_all(&msg.request.hashes);
                 msg.tx.send(answer(ok)).await.ok();
             }
             ProviderMessage::ObserveRequestReceived(msg) => {
@@ -187,12 +178,8 @@ impl Gate {
                 msg.tx.send(answer(ok)).await.ok();
             }
             ProviderMessage::ConnectionClosed(msg) => {
-                let served = lock(&self.touched)
-                    .remove(&msg.connection_id)
-                    .unwrap_or_default();
                 let _ = self.done.send(ServeEvent::Closed {
                     connection: msg.connection_id,
-                    served,
                 });
             }
             // Push is disabled in the mask, so a push is refused before this task sees it.
@@ -204,16 +191,26 @@ impl Gate {
     fn may(&self, hash: Hash) -> bool {
         !expired(self.expiry) && self.allowed.contains(&hash)
     }
+
+    /// The same rule for a request that names several hashes at once: every one has to be allowed,
+    /// so one refused hash refuses the whole request.
+    fn may_all(&self, hashes: &[Hash]) -> bool {
+        !expired(self.expiry) && hashes.iter().all(|hash| self.allowed.contains(hash))
+    }
 }
-/// Whether the payload served for this connection and blob now adds up to the whole blob. A chunk
-/// group request for a small file covers all of it; a request for the last block of a large one
-/// does not. Asking twice for the same range could reach the size without the middle; the sender
-/// only stops serving, and a client that wants to keep it alive asks for what it needs.
+
+/// Whether the payload served for `hash` has reached the whole blob. A chunk group request for a
+/// small file covers all of it; a request for the last block of a large one does not. The count is
+/// per root and not per connection, so a receive that fetches half a file, is killed and fetches
+/// the other half from a new connection still finishes the root. Asking twice for the same range
+/// could reach the size without the middle; the sender only stops serving, and a client that wants
+/// to keep it alive asks for what it needs.
 async fn covered(
     store: &FsStore,
     hash: Hash,
     payload: u64,
     totals: &Mutex<BTreeMap<(u64, Hash), u64>>,
+    delivered: &Mutex<BTreeMap<Hash, u64>>,
     connection: u64,
 ) -> bool {
     let size = match store.blobs().status(hash).await {
@@ -221,7 +218,11 @@ async fn covered(
         _ => return false,
     };
     let mut totals = lock(totals);
-    let total = totals.entry((connection, hash)).or_default();
+    let sent = totals.entry((connection, hash)).or_default();
+    *sent = sent.saturating_add(payload);
+    drop(totals);
+    let mut delivered = lock(delivered);
+    let total = delivered.entry(hash).or_default();
     *total = total.saturating_add(payload);
     *total >= size
 }

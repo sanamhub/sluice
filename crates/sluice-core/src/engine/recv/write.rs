@@ -4,7 +4,7 @@
 mod file;
 mod link;
 
-use std::{collections::BTreeSet, fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use iroh_blobs::{Hash, api::blobs::ExportMode, store::fs::FsStore};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
@@ -23,26 +23,26 @@ pub(super) async fn write(
     _plan: Plan,
     store: &FsStore,
     options: &ReceiveOptions,
+    partial: &std::path::Path,
     resume: bool,
     events: &UnboundedSender<Event>,
 ) -> Result<(), Error> {
+    let counts = blob_counts(manifest);
     let dirs = create_dirs(manifest, options)?;
     let tmp = Temp(storage::temp_dir(&options.out)?);
     let mut writer = Writer {
         store,
         options,
+        partial,
         resume,
+        counts,
         tmp: &tmp.0,
         next: 0,
         events,
     };
     writer.files(manifest).await?;
     if options.links {
-        for entry in manifest.entries() {
-            if entry.kind == Kind::Symlink {
-                link::write(entry, options, resume)?;
-            }
-        }
+        link::write_all(manifest, options, resume)?;
     }
     for (target, mtime_ms, mode) in dirs.iter().rev() {
         file::set_mode_path(target, *mode)?;
@@ -51,6 +51,21 @@ pub(super) async fn write(
         }
     }
     Ok(())
+}
+
+/// How many File entries name each blob root. One naming it can take the store's own file, because
+/// nothing else needs it afterwards; several cannot, because the first would leave the store and
+/// the rest with no bytes to read.
+fn blob_counts(manifest: &Manifest) -> BTreeMap<[u8; 32], u64> {
+    let mut counts = BTreeMap::new();
+    for entry in manifest.entries() {
+        if entry.kind == Kind::File
+            && let Loc::Blob { root } = entry.loc
+        {
+            *counts.entry(root).or_insert(0) += 1;
+        }
+    }
+    counts
 }
 
 /// The temporary folder, removed however the write ends.
@@ -65,7 +80,10 @@ impl Drop for Temp {
 struct Writer<'a> {
     store: &'a FsStore,
     options: &'a ReceiveOptions,
+    /// The per-transfer store folder, beside the output. Its data file is the cheapest copy.
+    partial: &'a std::path::Path,
     resume: bool,
+    counts: BTreeMap<[u8; 32], u64>,
     tmp: &'a std::path::Path,
     next: u64,
     events: &'a UnboundedSender<Event>,
@@ -74,16 +92,16 @@ struct Writer<'a> {
 impl Writer<'_> {
     /// Every file, in manifest order. One pack is written the first time an entry names it.
     async fn files(&mut self, manifest: &Manifest) -> Result<(), Error> {
-        let mut packs = BTreeSet::new();
+        let mut packs = std::collections::BTreeSet::new();
         for entry in manifest.entries() {
             if entry.kind != Kind::File {
                 continue;
             }
             match entry.loc {
-                Loc::Blob { root } => self.blob(entry, Hash::from(root)).await?,
+                Loc::Blob { root } => Box::pin(self.blob(entry, Hash::from(root))).await?,
                 Loc::Packed { pack_index, .. } => {
                     if packs.insert(pack_index) {
-                        self.pack(manifest, pack_index as usize).await?;
+                        Box::pin(self.pack(manifest, pack_index as usize)).await?;
                     }
                 }
                 Loc::None => {
@@ -111,13 +129,10 @@ impl Writer<'_> {
     }
 
     async fn blob(&mut self, entry: &crate::manifest::Entry, hash: Hash) -> Result<(), Error> {
-        let target = self.options.out.join(entry.path.as_str());
+        let target = entry.path.under(&self.options.out);
         let meta = Self::meta(entry);
-        if target.exists() && !self.options.force {
-            if self.resume && file::same_blob(&target, hash, entry.size)? {
-                return file::touch(&target, meta, self.options.no_times, self.events);
-            }
-            return Err(storage::clash(&target));
+        if self.already_there(&target, hash, entry.size)? {
+            return file::touch(&target, meta, self.options.no_times, self.events);
         }
         let size = fetch::complete_size(self.store, hash).await?;
         if size != entry.size {
@@ -130,25 +145,71 @@ impl Writer<'_> {
         if size == 0 {
             file::create_empty(&incoming)?;
         } else {
-            self.store
-                .blobs()
-                .export_with_opts(iroh_blobs::api::blobs::ExportOptions {
-                    hash,
-                    mode: ExportMode::TryReference,
-                    target: incoming.clone(),
-                })
-                .finish()
-                .await
-                .map_err(|e| {
-                    Error::Storage(format!(
-                        "cannot write {}: {}",
-                        target.display(),
-                        crate::chain(&e)
-                    ))
-                })?;
+            self.export(hash, &incoming).await?;
         }
         file::finish(&incoming, meta, self.options.no_times, self.events)?;
         storage::install(&incoming, &target, self.options.force)
+    }
+
+    /// Whether this target is a file whose bytes already match, so a resumed receive skips it. A
+    /// link is never that file, however its target reads: it is a clash.
+    fn already_there(
+        &self,
+        target: &std::path::Path,
+        hash: Hash,
+        size: u64,
+    ) -> Result<bool, Error> {
+        let meta = match fs::symlink_metadata(target) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(storage::policy_path("check", target, e)),
+        };
+        if self.options.force {
+            return Ok(false);
+        }
+        if self.resume && meta.is_file() && file::same_blob(target, hash, size)? {
+            return Ok(true);
+        }
+        Err(storage::clash(target))
+    }
+
+    /// Puts the blob's bytes at `incoming`. A root that one entry names takes the store's own data
+    /// file by link, so the store keeps no second copy and one large file never needs twice its
+    /// size; a root that several entries name is copied, because each target must stand alone.
+    async fn export(&self, hash: Hash, incoming: &std::path::Path) -> Result<(), Error> {
+        let once = self
+            .counts
+            .get(hash.as_bytes())
+            .copied()
+            .unwrap_or_default()
+            == 1;
+        if once {
+            // The default store layout, which `receive` opens with `FsStore::load`.
+            let source = iroh_blobs::store::fs::options::Options::new(self.partial)
+                .path
+                .data_path(&hash);
+            // A hard link costs no space and leaves the store able to read the bytes it names.
+            if fs::hard_link(&source, incoming).is_ok() {
+                return Ok(());
+            }
+        }
+        self.store
+            .blobs()
+            .export_with_opts(iroh_blobs::api::blobs::ExportOptions {
+                hash,
+                mode: ExportMode::Copy,
+                target: incoming.to_path_buf(),
+            })
+            .finish()
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                Error::Storage(format!(
+                    "cannot write {}: {}",
+                    incoming.display(),
+                    crate::plain(&e)
+                ))
+            })
     }
 
     /// Writes every file of one pack. The pack was fetched and checked before anything was written.
@@ -164,14 +225,11 @@ impl Writer<'_> {
             if pack_index as usize != index {
                 continue;
             }
-            let target = self.options.out.join(entry.path.as_str());
+            let target = entry.path.under(&self.options.out);
             let meta = Self::meta(entry);
-            if target.exists() && !self.options.force {
-                if self.resume && file::same_packed(&mut reader, entry, &target).await? {
-                    file::touch(&target, meta, self.options.no_times, self.events)?;
-                    continue;
-                }
-                return Err(storage::clash(&target));
+            if self.packed_there(&mut reader, entry, &target).await? {
+                file::touch(&target, meta, self.options.no_times, self.events)?;
+                continue;
             }
             let incoming = self.fresh();
             let file = file::copy_from_pack(&mut reader, entry, &incoming).await?;
@@ -182,6 +240,28 @@ impl Writer<'_> {
             storage::install(&incoming, &target, self.options.force)?;
         }
         Ok(())
+    }
+
+    /// Whether a packed target is a file whose bytes already match. As in `already_there`, a link
+    /// is a clash and never read.
+    async fn packed_there(
+        &self,
+        reader: &mut iroh_blobs::api::blobs::BlobReader,
+        entry: &crate::manifest::Entry,
+        target: &std::path::Path,
+    ) -> Result<bool, Error> {
+        let meta = match fs::symlink_metadata(target) {
+            Ok(meta) => meta,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(storage::policy_path("check", target, e)),
+        };
+        if self.options.force {
+            return Ok(false);
+        }
+        if self.resume && meta.is_file() && file::same_packed(reader, entry, target).await? {
+            return Ok(true);
+        }
+        Err(storage::clash(target))
     }
 }
 
@@ -231,6 +311,7 @@ pub(in crate::engine) async fn write_range(
     drop(file);
     storage::install(&incoming, target, options.force)
 }
+
 fn create_dirs(
     manifest: &Manifest,
     options: &ReceiveOptions,
@@ -238,10 +319,13 @@ fn create_dirs(
     let mut dirs = Vec::new();
     for entry in manifest.entries() {
         if entry.kind == Kind::Dir {
-            let target = options.out.join(entry.path.as_str());
+            let target = entry.path.under(&options.out);
             fs::create_dir_all(&target).map_err(|e| storage::policy_path("create", &target, e))?;
             dirs.push((target, entry.mtime_ms, entry.mode));
         }
     }
     Ok(dirs)
 }
+
+#[cfg(test)]
+mod tests;

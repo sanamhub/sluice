@@ -22,7 +22,8 @@ pub struct RecvArgs {
     /// The folder to write into, or `-` to write a single file to standard output
     #[arg(long, default_value = ".", value_name = "DIR")]
     pub out: PathBuf,
-    /// Replace a path that is already there
+    /// Replace a path that is already there. A folder is never replaced by a file or a link, even
+    /// with this flag
     #[arg(long)]
     pub force: bool,
     /// Do not restore the modification time
@@ -102,7 +103,8 @@ fn to_stdout(args: &RecvArgs, output: &Output, ticket: &str) -> Result<u8, Error
     runtime.block_on(async {
         let (tx, _rx) = unbounded_channel();
         let options = options(args, PathBuf::from("."));
-        let bytes = receive_stdout(ticket, &options, &tx).await?;
+        let store = sluice_core::Home::temporary_store()?;
+        let bytes = receive_stdout(ticket, &options, &store, &tx).await?;
         output.write_stderr(&format!("wrote {bytes} bytes to standard output\n"));
         Ok(0)
     })
@@ -124,7 +126,8 @@ fn run_range(
     runtime.block_on(async {
         let (tx, _rx) = unbounded_channel();
         let options = options(args, out);
-        let bytes = receive_range(ticket, range, &options, &tx).await?;
+        let store = sluice_core::Home::temporary_store()?;
+        let bytes = receive_range(ticket, range, &options, &store, &tx).await?;
         output.write_stderr(&format!("wrote {bytes} bytes from the range\n"));
         Ok(0)
     })

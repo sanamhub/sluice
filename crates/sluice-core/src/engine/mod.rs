@@ -191,15 +191,14 @@ impl Provider {
                 "a one-download send has no content to serve".to_string(),
             ));
         }
-        let wait = match self.expiry {
-            Some(expiry) => expiry.saturating_sub(now_ms()),
-            None => 100 * 365 * 24 * 60 * 60 * 1000,
-        };
-        if wait == 0 {
+        let left = self.expiry_ms_left();
+        if left == 0 {
             return Ok(ServeEnd::Expired);
         }
-        let deadline = tokio::time::sleep(Duration::from_millis(wait));
-        tokio::pin!(deadline);
+        let mut deadline = Box::pin(tokio::time::sleep(Duration::from_millis(left)));
+        // Started when the last root is delivered and never restarted, so a client that keeps
+        // asking for something else cannot hold the sender open for ever.
+        let mut grace: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
         let mut closed = BTreeSet::new();
         let mut connections = BTreeSet::new();
         loop {
@@ -209,45 +208,75 @@ impl Provider {
                         if remaining.remove(&hash) {
                             connections.insert(connection);
                         }
-                        if remaining.is_empty() && connections.is_subset(&closed) {
-                            return Ok(ServeEnd::Downloaded);
+                        if remaining.is_empty() && grace.is_none() {
+                            grace = Some(Box::pin(tokio::time::sleep(GRACE)));
                         }
                     }
-                    Some(policy::ServeEvent::Closed { connection, served }) => {
+                    Some(policy::ServeEvent::Closed { connection }) => {
                         closed.insert(connection);
-                        // A client that fetched from every root and left has nothing more to
-                        // receive. A partial fetch on a connection that is still open does not
-                        // count, which is why a range request leaves this sender serving.
-                        for hash in served {
-                            remaining.remove(&hash);
-                        }
-                        if remaining.is_empty() && connections.is_subset(&closed) {
-                            return Ok(ServeEnd::Downloaded);
-                        }
                     }
                     None => return Err(Error::Bug("the provider event task stopped".into())),
                 },
                 // A receiver that keeps its connection open must not keep this sender alive: every
-                // content root was written, so stop after a grace period even without the close.
-                _ = tokio::time::sleep(Duration::from_secs(30)), if remaining.is_empty() => {
-                    return Ok(ServeEnd::Downloaded);
+                // root was delivered, so stop after the grace period even without the close.
+                _ = wait_grace(&mut grace) => return Ok(ServeEnd::Downloaded),
+                _ = deadline.as_mut() => {
+                    match self.expiry {
+                        // The sleep can wake early when the wall clock moved back, so the clock
+                        // and not the timer decides. The remainder is waited for again.
+                        Some(expiry) if now_ms() < expiry => {
+                            let left = Duration::from_millis(expiry - now_ms());
+                            deadline.as_mut().reset(tokio::time::Instant::now() + left);
+                        }
+                        _ => return Ok(ServeEnd::Expired),
+                    }
                 }
-                _ = &mut deadline => return Ok(ServeEnd::Expired),
+            }
+            if remaining.is_empty() && connections.is_subset(&closed) {
+                return Ok(ServeEnd::Downloaded);
             }
         }
     }
 
     async fn keep(&mut self) -> Result<ServeEnd, Error> {
-        let wait = match self.expiry {
-            Some(expiry) => Duration::from_millis(expiry.saturating_sub(now_ms())),
-            None => Duration::from_secs(100 * 365 * 24 * 60 * 60),
-        };
-        let deadline = tokio::time::sleep(wait);
-        tokio::pin!(deadline);
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => Ok(ServeEnd::Interrupted),
-            _ = &mut deadline => Ok(ServeEnd::Expired),
+        loop {
+            let left = self.expiry_ms_left();
+            if left == 0 && self.expiry.is_some() {
+                return Ok(ServeEnd::Expired);
+            }
+            let deadline = tokio::time::sleep(Duration::from_millis(left));
+            tokio::pin!(deadline);
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => return Ok(ServeEnd::Interrupted),
+                _ = &mut deadline => {
+                    // The timer is not the clock: a sleep can end early across a clock change.
+                    if self.expiry.is_none_or(|expiry| now_ms() >= expiry) {
+                        return Ok(ServeEnd::Expired);
+                    }
+                }
+            }
         }
+    }
+
+    /// Milliseconds until the ticket deadline, or the far future when the ticket has none.
+    fn expiry_ms_left(&self) -> u64 {
+        match self.expiry {
+            Some(expiry) => expiry.saturating_sub(now_ms()),
+            None => 100 * 365 * 24 * 60 * 60 * 1000,
+        }
+    }
+}
+
+/// The grace period after the last content root is delivered while a receiver keeps its connection
+/// open. A test uses a short one so the rule can be watched without waiting half a minute.
+const GRACE: Duration = Duration::from_secs(if cfg!(test) { 2 } else { 30 });
+
+/// Waits for the grace period, or for ever when none has started. A plain `Option` cannot be
+/// selected on, and a fresh sleep would restart the period on every loop pass.
+async fn wait_grace(grace: &mut Option<std::pin::Pin<Box<tokio::time::Sleep>>>) {
+    match grace {
+        Some(sleep) => sleep.as_mut().await,
+        None => std::future::pending::<()>().await,
     }
 }
 
@@ -321,9 +350,10 @@ impl Receiver {
         Ok(conn)
     }
 
-    /// Closes the endpoint cleanly.
-    pub async fn shutdown(mut self) -> Result<(), Error> {
-        if let Some(router) = self.router.take() {
+    /// Closes the endpoint cleanly. It takes `&self` so a caller can close it early and still run
+    /// the close again on the way out; shutting down twice is not an error.
+    pub async fn shutdown(&self) -> Result<(), Error> {
+        if let Some(router) = &self.router {
             router
                 .shutdown()
                 .await
@@ -333,7 +363,9 @@ impl Receiver {
     }
 }
 
-fn now_ms() -> u64 {
+/// The one wall clock a compare reads: UTC milliseconds since the Unix epoch. A ticket's boundary
+/// and a sender's deadline are the same instant, so they are read the same way.
+pub fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64)

@@ -96,52 +96,99 @@ pub async fn receive(
     let root = static_root(&ticket)?;
     fs::create_dir_all(&options.out)
         .map_err(|e| storage::policy_path("create", &options.out, e))?;
+    // The ticket's size is the sum of the manifest's files, and a manifest that disagrees with it
+    // is refused before any content. Checking the room here means a transfer that cannot fit never
+    // opens a store, so its refusal leaves nothing behind.
+    if let Body::Static { size, .. } = ticket.body() {
+        plan::check_space(options, *size)?;
+    }
     let receiver = Receiver::open(relay_of(&ticket), options.congestion).await?;
-    let partial = storage::partial_dir(&options.out, &hex(&root));
-    // A store that is already there means an earlier receive of this ticket was interrupted, so a
-    // file at a target may be one it already wrote. The writer checks such a file against the
-    // content instead of refusing it as a clash.
-    let resume = partial.exists();
-    fs::create_dir_all(&partial).map_err(|e| storage::storage("create", &partial, e))?;
+    let result = run(&receiver, &ticket, root, options, events).await;
+    // Closing the endpoint tells the sender that the last bytes arrived, so it can stop without
+    // cutting the response off a moment after writing it.
+    let closed = receiver.shutdown().await;
+    let received = result?;
+    if closed.is_err() {
+        return Err(Error::Storage(
+            "the tree is in place but the transfer did not close cleanly".to_string(),
+        ));
+    }
+    Ok(received)
+}
+
+/// One receive, with the partial store beside the output. A store is a resume only when its marker
+/// names this ticket; anything else found under that name was not made by this transfer and is
+/// removed before a byte is fetched.
+async fn run(
+    receiver: &Receiver,
+    ticket: &Ticket,
+    root: [u8; 32],
+    options: &ReceiveOptions,
+    events: &UnboundedSender<Event>,
+) -> Result<Received, Error> {
+    let owner = hex(&root);
+    let partial = storage::partial_dir(&options.out, &owner);
+    let resume = storage::claim(&partial, &owner)?;
     let store = match FsStore::load(&partial).await {
         Ok(store) => store,
         Err(e) => {
             // A store this receive could not open is not one a later one can resume.
-            if !resume {
-                storage::remove_quietly(&partial);
-            }
-            let _ = receiver.shutdown().await;
+            storage::remove_quietly(&partial);
             return Err(Error::Storage(format!(
                 "cannot open the partial store: {}",
-                crate::chain(&e)
+                crate::plain(&e)
             )));
         }
     };
-    let conn = match receiver.connect(&ticket, events.clone()).await {
-        Ok(conn) => conn,
+    let outcome = exchange(receiver, ticket, &store, &partial, options, resume, events).await;
+    let closed = store.shutdown().await;
+    let endpoint = receiver.shutdown().await;
+    match outcome {
+        Ok((received, seconds)) => {
+            if closed.is_err() || endpoint.is_err() {
+                return Err(Error::Storage(
+                    "the tree is in place but the transfer did not close cleanly".to_string(),
+                ));
+            }
+            // Every content blob was moved or copied out; what is left is metadata.
+            storage::remove_quietly(&partial);
+            emit(
+                events,
+                Event::Verified {
+                    bytes: received.bytes,
+                },
+            );
+            emit(
+                events,
+                Event::Done {
+                    bytes: received.bytes,
+                    seconds,
+                },
+            );
+            Ok(received)
+        }
         Err(e) => {
-            let _ = store.shutdown().await;
-            if !resume {
+            if !keeps_store(&e) {
                 storage::remove_quietly(&partial);
             }
-            let _ = receiver.shutdown().await;
-            return Err(e);
+            Err(e)
         }
-    };
-    let prepared = prepare(&conn, &ticket, &store, options, resume, events).await;
-    let (manifest, plan) = match prepared {
-        Ok(pair) => pair,
-        Err(e) => {
-            // Nothing was written, so a store made by this run is only a refusal's leftovers. One
-            // that was already there holds content a second receive can continue from.
-            let _ = store.shutdown().await;
-            if !resume {
-                storage::remove_quietly(&partial);
-            }
-            let _ = receiver.shutdown().await;
-            return Err(e);
-        }
-    };
+    }
+}
+
+/// Fetches every content blob, closes the endpoint so the sender can stop, and then writes the
+/// checked tree.
+async fn exchange(
+    receiver: &Receiver,
+    ticket: &Ticket,
+    store: &FsStore,
+    partial: &std::path::Path,
+    options: &ReceiveOptions,
+    resume: bool,
+    events: &UnboundedSender<Event>,
+) -> Result<(Received, f64), Error> {
+    let conn = receiver.connect(ticket, events.clone()).await?;
+    let (manifest, plan) = prepare(&conn, ticket, store, options, resume, events).await?;
     emit(
         events,
         Event::Started {
@@ -153,49 +200,28 @@ pub async fn receive(
     );
     let started = Instant::now();
     let session = Session {
-        receiver: &receiver,
-        ticket: &ticket,
-        store: &store,
+        receiver,
+        ticket,
+        store,
         manifest: &manifest,
         plan,
         events,
         max_failures: options.max_network_failures,
     };
-    let outcome = content::ensure_content(&session, conn).await;
-    // Closing the endpoint tells the sender that the last bytes arrived, so it can stop without
-    // cutting the response off a moment after writing it.
-    let endpoint_closed = receiver.shutdown().await;
-    if let Err(e) = outcome {
-        let _ = store.shutdown().await;
-        if !keeps_store(&e) {
-            storage::remove_quietly(&partial);
-        }
-        return Err(e);
-    }
-    let written = write::write(&manifest, plan, &store, options, resume, events).await;
-    let closed = store.shutdown().await;
-    written?;
-    if closed.is_err() || endpoint_closed.is_err() {
-        return Err(Error::Storage(
-            "the tree is in place but the transfer did not close cleanly".to_string(),
-        ));
-    }
-    // Every content blob was moved or copied out; what is left is metadata.
-    storage::remove_quietly(&partial);
-    emit(events, Event::Verified { bytes: plan.bytes });
-    emit(
-        events,
-        Event::Done {
+    content::ensure_content(&session, conn).await?;
+    // The last byte is in the store, so the sender has nothing left to serve from this transfer.
+    let _ = receiver.shutdown().await;
+    write::write(&manifest, plan, store, options, partial, resume, events).await?;
+    Ok((
+        Received {
+            path: single_path(&manifest, options),
             bytes: plan.bytes,
-            seconds: started.elapsed().as_secs_f64(),
+            files: plan.files,
         },
-    );
-    Ok(Received {
-        path: single_path(&manifest, options),
-        bytes: plan.bytes,
-        files: plan.files,
-    })
+        started.elapsed().as_secs_f64(),
+    ))
 }
+
 /// Fetches the sequence and the manifest and runs every check that needs no content blob. The
 /// store is open by now because the manifest lives in it.
 async fn prepare(
@@ -246,7 +272,7 @@ fn single_name(manifest: &Manifest) -> Option<String> {
 /// The file a one-file transfer wrote, and the output folder for a tree.
 fn single_path(manifest: &Manifest, options: &ReceiveOptions) -> PathBuf {
     match single_entry(manifest) {
-        Some(entry) => options.out.join(entry.path.as_str()),
+        Some(entry) => entry.path.under(&options.out),
         None => options.out.clone(),
     }
 }
@@ -293,10 +319,11 @@ fn hex(bytes: &[u8; 32]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// A network failure keeps the store because a second receive continues from it. A refusal or a
-/// bad byte does not: the store holds nothing a retry could trust.
+/// A network failure keeps the store because a second receive continues from it, and so does a
+/// storage failure such as a full disk: the bytes already there were verified. A refusal or a bad
+/// byte does not, because the store holds nothing a retry could trust.
 fn keeps_store(error: &Error) -> bool {
-    matches!(error, Error::Network(_))
+    matches!(error, Error::Network(_) | Error::Storage(_))
 }
 
 #[cfg(test)]
@@ -305,10 +332,10 @@ mod tests {
     use crate::Error;
 
     #[test]
-    fn only_a_network_failure_keeps_the_partial_store() {
+    fn only_a_network_or_storage_failure_keeps_the_partial_store() {
         assert!(keeps_store(&Error::Network("reset".into())));
+        assert!(keeps_store(&Error::Storage("full".into())));
         assert!(!keeps_store(&Error::Verify("mismatch".into())));
         assert!(!keeps_store(&Error::Policy("clash".into())));
-        assert!(!keeps_store(&Error::Storage("full".into())));
     }
 }

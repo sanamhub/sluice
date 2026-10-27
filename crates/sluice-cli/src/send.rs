@@ -1,17 +1,13 @@
 //! `sluice send <file>`: import in place, print the ticket, then serve until one download.
 
-use std::{
-    fs,
-    path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{fs, path::PathBuf};
 
 use clap::Args;
 use sluice_core::{
     Error, Home,
     engine::{
-        N0_WARNING, Outgoing, RelayModeChoice, StopEnd, deadline, parse_expiry, prepare_send,
-        prepare_send_paths,
+        N0_WARNING, Outgoing, RelayModeChoice, StopEnd, deadline, now_ms, parse_expiry,
+        prepare_send, prepare_send_paths,
     },
 };
 use tokio::sync::mpsc::unbounded_channel;
@@ -150,10 +146,4 @@ async fn outgoing(
         )
         .await
     }
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64)
 }
