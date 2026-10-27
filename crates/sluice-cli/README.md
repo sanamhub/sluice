@@ -1,8 +1,13 @@
 # sluice-cli
 
-The `sluice` command is the program you run. It prints this machine's id, checks your setup with
-`doctor`, and prints shell completions. It owns the subcommands, human and `--json` output, man
-pages, progress display and `sluice mcp` (an MCP server over stdio, using `rmcp`).
+The `sluice` command is the program you run. It sends and receives files, prints this machine's id,
+checks your setup with `doctor`, and prints shell completions. It owns the subcommands, human and
+`--json` output, man pages, progress display and `sluice mcp` (an MCP server over stdio, using
+`rmcp`).
+
+There is no release yet: build it with `cargo build -p sluice-cli`. A transfer between two folders
+on one machine, or two machines that can reach each other, works today. Speeds have not been
+measured on a real network, only on loopback.
 
 **Must never:**
 
@@ -74,6 +79,43 @@ A failure with `--json` is one line on stderr. `kind` is the variant in lower ca
 `sluice id --rotate` asks before it replaces the identity, and only on a terminal. With no terminal,
 or with `--json`, it refuses with code 6 unless `--yes` is given.
 
+**`sluice send`**
+
+`send PATH...` takes one file, a folder, or several paths of either, imports them where they are and
+prints one ticket. A folder arrives inside a folder of its own name; several paths keep their own
+names. `send -` reads standard input to the end and sends it as one raw blob, because its root is
+known only then. `--expires 1h|7d|never` sets the ticket's life (24 hours by default), `--keep`
+serves until Ctrl+C instead of after one complete download, `--port` names the UDP port, and
+`--relay` or `--n0-relays` choose a relay. `--limit-rate 50M` caps what the whole command offers per
+second.
+
+`send --live FILE` follows one regular file that is still being written: each segment is sealed and
+signed as it fills, and a receiver can fetch it while the writer keeps going. The stream closes
+after the file has not grown for two seconds; `--close-after SECONDS` changes that. A live ticket
+carries a stream id and the sender's key, not a file name.
+
+**`sluice recv`**
+
+`recv TICKET...` takes one or more tickets, or `-` to read one ticket from standard input.
+`--out DIR` names the folder (the current one by default), or `-` writes a single file's bytes to
+standard output; a live ticket has no name, so its `--out` is the file to write. `--force` replaces a
+file or link that is already there, `--allow-hidden` accepts a top-level name starting with `.`,
+`--links` creates the symlinks the sender recorded (never followed outside the output), and
+`--no-times` skips restoring modification times. `--range 4G:4.1G` fetches one byte range of a
+one-file transfer. `--priority high|normal|low` orders several tickets, and `--limit-rate 50M` caps
+the whole command.
+
+Several tickets run through the queue: three at once by default, high before normal before low, and
+a network failure waits the queue's backoff before the same ticket is tried again from its partial
+store. A range, `--out -` and a live ticket each take one ticket at a time.
+
+A folder arrives inside a folder of its own name. An existing top-level name refuses the whole
+transfer before any content is fetched unless `--force`; an existing folder of the same name is
+written into, and a folder is never replaced by a file or a link, even with `--force`. A link at a
+target is replaced as an entry and never followed. A receive that was killed resumes only when its
+partial store's marker names the same ticket; a file whose content already matches is skipped, and
+anything else at its target is a clash.
+
 **`sluice doctor`**
 
 `sluice doctor` checks the home, who owns it and who else can reach it, its layout version, its
@@ -85,16 +127,24 @@ failure the step that fixes it. With `--json` it prints one object:
 {"checks":[{"name":"home","status":"ok","detail":"<path>, from SLUICE_HOME","fix":null},...]}
 ```
 
-`name` is `version`, `home`, `access`, `layout`, `lock`, `key`, `space` or `transport`, in that
-order. `access` reports the home folder, whether another user owns it or others can reach it, and
-`key` the key: its owner, whether it is a link or a regular file, how many names it has, and its
-access. So a home and a key that are both open to others are two failures. `home` also fails when
-`blobs`, `db` or `logs` is a link or belongs to another user, which `sluice id` refuses to open, and
-when the lock or `lock.pid` is not a plain file. `sluice id` refuses a key that is a link, is not a
-regular file, has more than one name, or belongs to another user, and doctor reports each the same
-way. A home is read by the path the system resolves for it, so one that is a link, or longer than
-260 characters on Windows, is checked as `sluice id` opens it, and a message names the path as it
-was given. `detail` and `fix` are for people, and `fix` is `null` when there is nothing to do.
+`name` is `version`, `home`, `access`, `layout`, `lock`, `key`, `space`, then either `transport` or
+the network names `udp`, `address`, `nat`, `relay` and `portmap`, in that order. `access` reports the
+home folder, whether another user owns it or others can reach it, and `key` the key: its owner,
+whether it is a link or a regular file, how many names it has, and its access. So a home and a key
+that are both open to others are two failures. `home` also fails when `blobs`, `db` or `logs` is a
+link or belongs to another user, which `sluice id` refuses to open, and when the lock or `lock.pid`
+is not a plain file. `sluice id` refuses a key that is a link, is not a regular file, has more than
+one name, or belongs to another user, and doctor reports each the same way. A home is read by the
+path the system resolves for it, so one that is a link, or longer than 260 characters on Windows,
+is checked as `sluice id` opens it, and a message names the path as it was given. `detail` and `fix`
+are for people, and `fix` is `null` when there is nothing to do.
+
+`--network` leaves the local report as it is and adds the network lines: a UDP socket is bound, the
+relay named by `--relay` (or n0's with `--n0-relays`) is asked for a net report, and the public
+address, the NAT mapping (one address to every server, or a different one, which is a hard NAT) and
+whether a router answered a UPnP, PCP or NAT-PMP request are reported. Without a relay the line says
+`none, so two hard NATs cannot connect`. A network check never changes the exit code: it is a
+warning line, because a network is a fact to report.
 
 The report is the command's result, so it goes to stdout whatever it finds, with or without
 `--json`, and nothing goes to stderr. The exit code is 0 when no check failed: warnings do not fail.

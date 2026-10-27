@@ -20,8 +20,8 @@ dropped transfer picks up where it stopped. There is no account, no hosted servi
 and no server in the middle that you did not choose.
 
 > **Status:** pre-1.0. `sluice send`, `sluice recv`, `sluice id`, `sluice doctor` and
-> `sluice completions` work today. Live mode, the queue, `doctor --network` and the desktop and
-> browser clients do not exist yet.
+> `sluice completions` work today, including live mode, several tickets through the queue, a byte
+> range, pipes and a per-command byte cap. The desktop and browser clients do not exist yet.
 
 ## Why it is different
 
@@ -41,21 +41,31 @@ two machines that can reach each other, works today:
 ```sh
 cargo run -p sluice-cli -- send ./bigfile.mkv    # prints a ticket
 cargo run -p sluice-cli -- recv <ticket> --out ./out
+cargo run -p sluice-cli -- send --live ./recording.mkv   # a file that is still being written
+cargo run -p sluice-cli -- recv <ticket> --out recording.mkv  # a live ticket names no file
+cargo run -p sluice-cli -- recv <t1> <t2> <t3> --out ./out --priority high  # three at once
+cargo run -p sluice-cli -- recv <ticket> --limit-rate 50M --out ./out
 cat dump.sql | cargo run -p sluice-cli -- send - # a pipe is copied into the store first
 cargo run -p sluice-cli -- recv <ticket> --out - # a single file to standard output
 
 cargo run -p sluice-cli -- id
 cargo run -p sluice-cli -- doctor
+cargo run -p sluice-cli -- doctor --network           # UDP, relay, NAT and port mapping
 cargo run -p sluice-cli -- completions bash
 ```
 
 A folder arrives inside a folder of its own name, as copying it in a file manager does. A name
 already in the output folder refuses the whole transfer unless `--force`, a top-level name that
-starts with `.` needs `--allow-hidden`, and a link is replaced as an entry and never followed.
+starts with `.` needs `--allow-hidden`, and a link is replaced as an entry and never followed. A
+folder is never replaced by a file or a link, even with `--force`, and the error says so. A receive
+that was killed resumes from its partial store only when that store was made for the same ticket;
+a file whose content already matches is skipped, and anything else at its target is a clash.
 
 `doctor` changes nothing. It prints one line per check, `ok`, `warning`, `failed` or `skipped`, and
-the step that fixes a problem under it. Its exit code is 0 unless a check failed, and `transport` is
-skipped until the transport is measured. With `--json` the same report is one object. The
+the step that fixes a problem under it. Its exit code is 0 unless a check failed. With `--network`
+it also binds a UDP socket, asks the configured relay for a net report, and reports the public
+address, the NAT mapping and whether a router can open a port; without a relay it says that two
+hard NATs cannot connect. With `--json` the same report is one object. The
 [CLI README](crates/sluice-cli/README.md) lists every check, exit code and JSON field, which scripts
 may rely on.
 
@@ -70,12 +80,11 @@ installers in a release check less than that, and the same page says what each o
 
 ## More of 1.0
 
-Live mode is not supported yet. The rest works today.
+Live mode, ranges and several tickets through the queue work today.
 
 ```sh
 sluice recv <ticket> --range 4G:4.1G    # fetch and verify one byte range
-
-sluice send --live ./recording.mkv      # not supported yet
+sluice send --live ./recording.mkv      # follow a file that is still being written
 ```
 
 `--range` takes a half-open range, `start:end`, `start:+length`, `start:` or `:end`, in bytes or
@@ -83,14 +92,17 @@ with a unit: `K`, `M`, `G`, `T` and `P` (and `KiB` and the like) count in 1024s,
 like in 1000s, and a decimal such as `4.1G` is rounded down to a whole byte.
 
 A recording or a database dump is readable on the other side while it is still being written,
-verified segment by segment. A single byte range can be fetched and verified without the rest. A
-transfer that is killed, unplugged or runs out of disk resumes after its last verified range, and at
-most one 64 MB barrier is checked twice.
+verified segment by segment; the sender closes the stream after two seconds without growth, or the
+time `--close-after` names. A single byte range can be fetched and verified without the rest. A
+transfer that is killed, unplugged or runs out of disk resumes from the ranges its store committed:
+`iroh-blobs` commits them in batches, so a crash can cost a re-read of the part that was not
+committed, and no unverified byte is ever written.
 
 The speed target is 8 Gbit/s on a 10 GbE LAN, within 10% of `iperf3`, for one 100 GB file. The
 lossy-path target and the resume budget are on the [performance page](docs/performance.md). None of
-these has been measured yet. Every number will be published with the hardware, the network
-conditions and a script to rerun it.
+these has been measured on a real network yet; the loopback numbers in the engine report are a
+local check, not a network measurement. Every number will be published with the hardware, the
+network conditions and a script to rerun it.
 
 Files are hashed where they are. Sending a 100 GB file stores about 0.4% of its size in outboard
 data rather than copying it; `--copy` imports it instead. The engine is a library as well as a
