@@ -18,7 +18,8 @@ const CHUNK_BYTES: u64 = 1024;
 
 /// The byte ranges a request asked for, as it asked them. A get names one blob, so the ranges of
 /// blob 0 are the ones it serves; a request that names another blob as well is not one a get makes
-/// and it is not counted.
+/// and it is not counted. A chunk number whose byte offset does not fit is dropped: it names bytes
+/// no blob has, and wrapping it would credit the start of the blob instead.
 pub(super) fn requested(ranges: &ChunkRangesSeq) -> Vec<(u64, u64)> {
     use std::ops::{Bound, RangeBounds};
 
@@ -30,12 +31,24 @@ pub(super) fn requested(ranges: &ChunkRangesSeq) -> Vec<(u64, u64)> {
                 out.push((LAST_CHUNK, LAST_CHUNK));
                 continue;
             }
-            (Bound::Included(chunk), Bound::Excluded(end)) => (chunk.to_bytes(), end.to_bytes()),
-            (Bound::Included(chunk), Bound::Unbounded) => (chunk.to_bytes(), u64::MAX),
-            (Bound::Included(chunk), Bound::Included(_)) => (
-                chunk.to_bytes(),
-                chunk.to_bytes().saturating_add(CHUNK_BYTES),
-            ),
+            (Bound::Included(chunk), Bound::Excluded(end)) => {
+                let (Some(start), Some(end)) = (offset(chunk.0), offset(end.0)) else {
+                    continue;
+                };
+                (start, end)
+            }
+            (Bound::Included(chunk), Bound::Unbounded) => {
+                let Some(start) = offset(chunk.0) else {
+                    continue;
+                };
+                (start, u64::MAX)
+            }
+            (Bound::Included(chunk), Bound::Included(_)) => {
+                let Some(start) = offset(chunk.0) else {
+                    continue;
+                };
+                (start, start.saturating_add(CHUNK_BYTES))
+            }
             _ => continue,
         };
         if start < end {
@@ -45,20 +58,30 @@ pub(super) fn requested(ranges: &ChunkRangesSeq) -> Vec<(u64, u64)> {
     out
 }
 
-/// The same ranges clamped to a blob of `size` bytes. The last-chunk marker becomes the blob's
-/// final chunk.
+/// The byte offset of a chunk number, or `None` when it does not fit.
+fn offset(chunk: u64) -> Option<u64> {
+    chunk.checked_mul(CHUNK_BYTES)
+}
+
+/// The same ranges clamped to a blob of `size` bytes. The last-chunk marker becomes the blob's final
+/// chunk, which starts at the last whole chunk boundary and not a chunk before the end.
 pub(super) fn clamp(ranges: &[(u64, u64)], size: u64) -> Vec<(u64, u64)> {
     ranges
         .iter()
         .map(|(start, end)| {
             if *start == LAST_CHUNK {
-                (size.saturating_sub(CHUNK_BYTES), size)
+                (last_chunk_start(size), size)
             } else {
                 ((*start).min(size), (*end).min(size))
             }
         })
         .filter(|(start, end)| start < end)
         .collect()
+}
+
+/// Where the final chunk of a blob of `size` bytes begins.
+fn last_chunk_start(size: u64) -> u64 {
+    size.saturating_sub(1) / CHUNK_BYTES * CHUNK_BYTES
 }
 
 /// The first `sent` bytes of `ranges`, which is what an aborted request got through.
@@ -74,6 +97,24 @@ pub(super) fn front(ranges: Vec<(u64, u64)>, sent: u64) -> Vec<(u64, u64)> {
         left -= take;
     }
     out
+}
+
+/// The bytes one request may be credited with. A completed request accounts for everything it
+/// asked for, and an aborted one for the prefix it sent, whichever way it named the blob: a whole
+/// request that was cut off has still handed over the bytes it reports.
+pub(super) fn credited(
+    asked: &[(u64, u64)],
+    whole: bool,
+    size: u64,
+    complete: bool,
+    sent: u64,
+) -> Vec<(u64, u64)> {
+    let asked = if whole {
+        vec![(0, size)]
+    } else {
+        clamp(asked, size)
+    };
+    if complete { asked } else { front(asked, sent) }
 }
 
 /// Adds one range to a merged, ascending list of them.
@@ -100,7 +141,7 @@ pub(super) fn covers(spans: &[(u64, u64)], size: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{add, clamp, covers, front, requested};
+    use super::{add, clamp, covers, credited, front, requested};
     use iroh_blobs::protocol::{ChunkRanges, ChunkRangesExt, ChunkRangesSeq};
 
     fn ask(ranges: ChunkRanges) -> Vec<(u64, u64)> {
@@ -152,6 +193,32 @@ mod tests {
     #[test]
     fn the_last_chunk_of_a_blob_that_does_not_know_its_size_is_its_tail() {
         assert_eq!(clamp(&[requested_last()], 4096), vec![(3072, 4096)]);
+    }
+
+    /// The final chunk starts at the last whole chunk boundary, not one chunk before the end, so a
+    /// blob whose size is not a multiple of the chunk size is counted from the right place.
+    #[test]
+    fn the_last_chunk_starts_at_the_last_whole_boundary() {
+        assert_eq!(clamp(&[requested_last()], 4097), vec![(4096, 4097)]);
+        assert_eq!(clamp(&[requested_last()], 1024), vec![(0, 1024)]);
+    }
+
+    /// A chunk number near `2^54` multiplies past `u64::MAX` and wraps, which would name the start
+    /// of the blob and count it as served. A range that does not fit is dropped instead.
+    #[test]
+    fn a_chunk_number_that_does_not_fit_is_dropped() {
+        let huge = u64::MAX / 1024 + 2;
+        assert!(ask(ChunkRanges::chunk(huge)).is_empty());
+        assert!(ask(ChunkRanges::bytes(0..4096)).len() == 1);
+    }
+
+    /// A whole-blob request that was cut off still handed over the bytes it reports, so it counts
+    /// the prefix it sent instead of nothing.
+    #[test]
+    fn an_aborted_whole_request_counts_what_it_sent() {
+        assert_eq!(credited(&[], true, 1000, false, 400), vec![(0, 400)]);
+        assert_eq!(credited(&[], true, 1000, true, 1000), vec![(0, 1000)]);
+        assert_eq!(credited(&[], true, 1000, false, 0), Vec::new());
     }
 
     fn requested_last() -> (u64, u64) {

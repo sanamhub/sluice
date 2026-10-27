@@ -18,7 +18,7 @@ use iroh_blobs::{
 use n0_future::task::AbortOnDropHandle;
 
 mod delivery;
-use delivery::{add, clamp, covers, front, requested};
+use delivery::{add, covers, credited, requested};
 use tokio::sync::mpsc::UnboundedSender;
 
 /// The byte ranges of one root this process has served, merged and in ascending order. A range
@@ -289,16 +289,11 @@ impl Sent<'_> {
             let sent = totals.entry((self.connection, hash)).or_default();
             *sent = sent.saturating_add(sent_bytes);
         }
-        // A whole request that completed is the whole blob; one that aborted is nothing yet.
-        if whole || size == 0 {
+        // A blob with no bytes has no range to cover, so a completed request for it is the blob.
+        if size == 0 {
             return Some(complete);
         }
-        let asked = clamp(asked, size);
-        let asked = if complete {
-            asked
-        } else {
-            front(asked, sent_bytes)
-        };
+        let asked = credited(asked, whole, size, complete, sent_bytes);
         let mut served = lock(self.served);
         let spans = served.entry(hash).or_default();
         for (start, end) in asked {
