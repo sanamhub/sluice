@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use common::{EXE, data, recv, start, start_in, wait_for, wait_for_sender};
+use common::{EXE, data, recv, start, start_in, wait_for_sender};
 
 #[test]
 fn a_killed_receive_resumes_from_its_partial_store() {
@@ -50,9 +50,14 @@ fn a_killed_receive_resumes_from_its_partial_store() {
 }
 
 /// Both files name the same content, so the store holds one blob for two targets. Writing the
-/// first must not leave the second with nothing to read, here and after a run is killed.
+/// first must not leave the second with nothing to read, and a run that follows a kill must
+/// finish the target the kill left out.
+///
+/// The killed state is reconstructed rather than raced: on a fast virtual disk a 16 MiB write can
+/// finish before the test sees the first file, so the test removes the second target and writes
+/// the marker a killed run leaves under the same name.
 #[test]
-fn two_identical_files_arrive_and_a_killed_run_resumes() {
+fn two_identical_files_arrive_and_a_run_after_a_kill_finishes() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join("home");
     let out = dir.path().join("out");
@@ -65,22 +70,27 @@ fn two_identical_files_arrive_and_a_killed_run_resumes() {
     std::fs::write(source.join("small").join("c.txt"), &small).unwrap();
     std::fs::write(source.join("small").join("d.txt"), &small).unwrap();
 
-    let (sender, ticket) = start_in(dir.path(), &home, &["dup", "--expires", "1h"]);
-    std::fs::create_dir_all(&out).unwrap();
-    let mut child = Command::new(EXE)
-        .env("SLUICE_HOME", &home)
-        .args(["recv", &ticket, "--out", out.to_str().unwrap()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("start recv");
-    wait_for(&out.join("dup").join("a.bin"));
-    let _ = child.kill();
-    let _ = child.wait();
-    drop(sender);
+    let (mut sender, ticket) = start_in(dir.path(), &home, &["dup", "--expires", "1h"]);
+    let result = recv(&home, &ticket, &out, false);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    wait_for_sender(&mut sender);
 
-    // A restarted sender of the same folder prints the same root, so the store is still this
-    // ticket's and the second run resumes instead of starting over.
+    // What a kill after the first file would leave: that file in place, the other missing, and a
+    // partial store whose marker names this ticket.
+    std::fs::remove_file(out.join("dup").join("b.bin")).unwrap();
+    let decoded = sluice_core::ticket::Ticket::decode(&ticket).unwrap();
+    let sluice_core::ticket::Body::Static { root, .. } = decoded.body() else {
+        unreachable!("a folder ticket is static")
+    };
+    let owner: String = root.iter().map(|byte| format!("{byte:02x}")).collect();
+    let partial = out.join(format!(".sluice-partial-{}", &owner[..16]));
+    std::fs::create_dir_all(&partial).unwrap();
+    std::fs::write(partial.join("ticket"), format!("{owner}\n")).unwrap();
+
     let (mut sender, ticket) = start_in(dir.path(), &home, &["dup", "--expires", "1h"]);
     let result = recv(&home, &ticket, &out, false);
     assert!(
