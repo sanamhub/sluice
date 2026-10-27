@@ -63,6 +63,35 @@ fn an_install_with_force_replaces_the_target() {
     assert!(!incoming.exists());
 }
 
+/// A marker says which names the run created and whether it was forced, so a resume knows what it
+/// may write into and whether the run it continues was allowed to replace what was there.
+#[test]
+fn a_marker_says_which_names_were_created_and_whether_the_run_was_forced() {
+    use super::{recorded, remember};
+    let dir = tempfile::tempdir().unwrap();
+    let names = std::collections::BTreeSet::from(["made".to_string()]);
+    remember(dir.path(), "abc123", &names, true).unwrap();
+    let found = recorded(dir.path()).unwrap().unwrap();
+    assert_eq!(found.root, "abc123");
+    assert_eq!(found.names, names);
+    assert!(found.force);
+
+    // A marker from a run that created nothing and was not forced records exactly that, and a
+    // folder with no marker at all is not a resume.
+    remember(
+        dir.path(),
+        "abc123",
+        &std::collections::BTreeSet::new(),
+        false,
+    )
+    .unwrap();
+    let found = recorded(dir.path()).unwrap().unwrap();
+    assert!(found.names.is_empty());
+    assert!(!found.force);
+    let empty = tempfile::tempdir().unwrap();
+    assert!(recorded(empty.path()).unwrap().is_none());
+}
+
 /// A file system whose rename cannot refuse a name is installed with a link, and the link
 /// refuses an existing target exactly as the rename would.
 #[test]

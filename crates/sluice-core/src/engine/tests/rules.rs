@@ -285,7 +285,7 @@ async fn a_foreign_store_is_not_resumed_and_a_write_time_clash_removes_the_store
     fs::create_dir_all(&partial).unwrap();
     crate::engine::storage::claim(&partial).unwrap();
     let names = std::collections::BTreeSet::from(["tree".to_string()]);
-    crate::engine::storage::remember(&partial, &owner, &names).unwrap();
+    crate::engine::storage::remember(&partial, &owner, &names, false).unwrap();
     fs::write(out.join("tree").join("b.txt"), b"clobbered").unwrap();
     let err = super::receive(&text, &options(&out), &tx)
         .await

@@ -20,24 +20,26 @@ pub(super) struct Plan {
     pub bytes: u64,
 }
 
-/// Checks the whole manifest. Nothing here writes, so a refusal leaves the output untouched.
+/// Checks the whole manifest. Nothing here writes, so a refusal leaves the output untouched. The
+/// second value is the top-level names this receive will create, which are the only ones a resume
+/// may write into: an entry that was already in the output belongs to the user.
 pub(super) fn check(
     manifest: &Manifest,
     ticket: &Ticket,
     options: &ReceiveOptions,
     resume: bool,
     ours: &BTreeSet<String>,
-) -> Result<Plan, Error> {
+) -> Result<(Plan, BTreeSet<String>), Error> {
     let (files, bytes) = totals(manifest)?;
     check_promised(ticket, bytes)?;
     check_space(options, bytes)?;
-    check_top(manifest, options, ours)?;
+    let created = check_top(manifest, options, ours)?;
     for entry in manifest.entries() {
         let target = entry.path.under(&options.out);
         check_ancestors(&options.out, &target)?;
         check_target(&target, entry.kind, options.force || resume)?;
     }
-    Ok(Plan { files, bytes })
+    Ok((Plan { files, bytes }, created))
 }
 
 /// How many files there are and how many bytes they add up to. A manifest comes from a stranger,
@@ -92,12 +94,13 @@ pub(super) fn check_space(options: &ReceiveOptions, bytes: u64) -> Result<(), Er
 /// The top-level rules: a name that starts with a dot needs `--allow-hidden`, and a name already in
 /// the output folder refuses the whole transfer before any content is fetched. A resumed transfer
 /// made the folder it is writing into, so it may write there again; its files are still checked
-/// against their content by the writer.
+/// against their content by the writer. Returns the top-level names this receive creates.
 fn check_top(
     manifest: &Manifest,
     options: &ReceiveOptions,
     ours: &BTreeSet<String>,
-) -> Result<(), Error> {
+) -> Result<BTreeSet<String>, Error> {
+    let mut created = BTreeSet::new();
     for entry in manifest.entries() {
         let name = entry.path.as_str();
         if name.contains('/') {
@@ -116,7 +119,11 @@ fn check_top(
             options.force,
             ours.contains(name),
         ) {
-            Ok(()) => {}
+            Ok(()) => {
+                if !exists {
+                    created.insert(name.to_string());
+                }
+            }
             Err("hidden") => {
                 return Err(Error::Policy(format!(
                     "the transfer would write {name}, whose name starts with a dot; pass \
@@ -126,7 +133,7 @@ fn check_top(
             Err(_) => return Err(super::storage::clash(&target)),
         }
     }
-    Ok(())
+    Ok(created)
 }
 
 /// The checks a range download makes: a transfer of exactly one file, its top-level name and the

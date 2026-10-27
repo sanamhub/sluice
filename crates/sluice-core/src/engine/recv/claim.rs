@@ -24,14 +24,22 @@ pub(super) async fn claim_store(
 ) -> Result<(FsStore, bool, Plan), Error> {
     let found = storage::recorded(partial)?;
     let resume = found.as_ref().is_some_and(|found| found.root == owner);
+    // A run that was allowed to replace what was in the output was a deliberate choice, so the run
+    // that continues it has to make the same one.
+    if resume && !options.force && found.as_ref().is_some_and(|found| found.force) {
+        return Err(Error::Policy(format!(
+            "the store this transfer would resume was made with --force; pass --force to continue it into {}",
+            options.out.display()
+        )));
+    }
     let ours = match found {
         Some(found) if resume => found.names,
         _ => std::collections::BTreeSet::new(),
     };
-    let plan = plan::check(manifest, ticket, options, resume, &ours)?;
+    let (plan, created) = plan::check(manifest, ticket, options, resume, &ours)?;
     if !resume {
         storage::claim(partial)?;
-        storage::remember(partial, owner, &top_names(manifest))?;
+        storage::remember(partial, owner, &created, options.force)?;
     }
     match FsStore::load(partial).await {
         Ok(store) => Ok((store, resume, plan)),
@@ -58,16 +66,6 @@ pub(super) async fn read_manifest(
     let manifest = fetch_manifest(conn, ticket, &meta.store, options.limits, events).await;
     meta.close().await?;
     manifest
-}
-
-/// The top-level names a manifest writes, which are the entries with no `/` in their path.
-fn top_names(manifest: &Manifest) -> std::collections::BTreeSet<String> {
-    manifest
-        .entries()
-        .iter()
-        .filter(|entry| !entry.path.as_str().contains('/'))
-        .map(|entry| entry.path.as_str().to_string())
-        .collect()
 }
 
 pub(super) fn hex(bytes: &[u8; 32]) -> String {

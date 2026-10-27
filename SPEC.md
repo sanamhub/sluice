@@ -614,9 +614,12 @@ content blob:
    resumed receive recognises what it wrote. Any other existing target without rule 2's permission
    is a clash, and the error names the first one.
 
-A resume runs every check a first run runs, and the two rules above are the only differences. It
-never changes the mode or the modification time of a folder that was already there when it wrote
-into it, and it never deletes a folder it did not make.
+A resume runs every check a first run runs, and the two rules above are the only differences. Its
+partial store records the top-level names that run created, and no others: an entry the first run
+found in the output belongs to the user and is a clash for a resume that is not allowed to replace
+it. A store made by a run that was allowed to replace what was there records that too, and a resume
+of it needs the same permission again. It never changes the mode or the modification time of a folder
+that was already there when it wrote into it, and it never deletes a folder it did not make.
 
 **Sender.** A sender builds the entries from the folder it is given. It MUST:
 

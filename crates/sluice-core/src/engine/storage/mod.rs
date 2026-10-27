@@ -56,17 +56,19 @@ pub fn ensure_space(dir: &Path, content: u64) -> Result<(), Error> {
     Ok(())
 }
 
-/// The name of the file inside a partial store that says which ticket made it and which top-level
-/// entries it made room for. Without it a store left by a failed run cannot be told from one
-/// another ticket made under a name that happens to match, and a resume would trust bytes nobody
-/// checked.
+/// The name of the file inside a partial store that says which ticket made it, which top-level
+/// entries it made room for, and whether it ran with `--force`. Without it a store left by a failed
+/// run cannot be told from one another ticket made under a name that happens to match, and a resume
+/// would trust bytes nobody checked.
 pub const MARKER: &str = "ticket";
 
-/// What a partial store's marker says: the transfer that made the folder, and the top-level names
-/// that transfer created in the output. A resume may write into those names and no others.
+/// What a partial store's marker says: the transfer that made the folder, the top-level names that
+/// transfer created in the output, and whether it was allowed to write over what was there. A resume
+/// may write into those names and no others, and only if it is as deliberate as that run was.
 pub struct Owner {
     pub root: String,
     pub names: std::collections::BTreeSet<String>,
+    pub force: bool,
 }
 
 /// Reads the marker of `dir` without changing anything. A folder with no marker, or one this user
@@ -88,20 +90,27 @@ pub fn recorded(dir: &Path) -> Result<Option<Owner>, Error> {
     Ok(parse_marker(&text))
 }
 
-/// The first line is the root; every `name ` line after it is a top-level entry of the transfer.
+/// The first line is the root; every `name ` line after it is a top-level entry the transfer
+/// created, and a `force` line records that the run that made the store was allowed to replace what
+/// was already there.
 fn parse_marker(text: &str) -> Option<Owner> {
     let mut lines = text.lines();
     let root = lines.next()?.trim();
     if root.is_empty() {
         return None;
     }
-    let names = lines
-        .filter_map(|line| line.strip_prefix("name "))
-        .map(str::to_string)
-        .collect();
+    let mut names = std::collections::BTreeSet::new();
+    let mut force = false;
+    for line in lines {
+        if let Some(name) = line.strip_prefix("name ") {
+            names.insert(name.to_string());
+        }
+        force |= line.trim() == "force";
+    }
     Some(Owner {
         root: root.to_string(),
         names,
+        force,
     })
 }
 
@@ -112,15 +121,20 @@ pub fn claim(dir: &Path) -> Result<(), Error> {
     fs::create_dir_all(dir).map_err(|e| storage("create", dir, e))
 }
 
-/// Writes the marker of a store this receive just made, naming the top-level entries it will
-/// create. A later run reads it to tell this receive's folders from the user's.
+/// Writes the marker of a store this receive just made, naming the top-level entries it creates and
+/// whether it may replace what is there. A later run reads it to tell this receive's folders from
+/// the user's, and to refuse to continue a run that was forced when it is not forced itself.
 pub fn remember(
     dir: &Path,
     root: &str,
     names: &std::collections::BTreeSet<String>,
+    force: bool,
 ) -> Result<(), Error> {
     let marker = dir.join(MARKER);
     let mut text = format!("{root}\n");
+    if force {
+        text.push_str("force\n");
+    }
     for name in names {
         text.push_str("name ");
         text.push_str(name);
