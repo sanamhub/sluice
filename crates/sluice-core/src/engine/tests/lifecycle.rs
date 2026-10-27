@@ -118,6 +118,33 @@ async fn a_time_the_platform_cannot_hold_is_skipped_with_a_warning() {
     provider.shutdown().await.unwrap();
 }
 
+/// A disk that fills while a file is being written leaves the store and a `Storage` error, and a
+/// second receive with room finishes from that store. The write hook stands in for `ENOSPC`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_full_disk_at_write_time_keeps_the_store_for_the_next_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("tree");
+    fs::create_dir(&source).unwrap();
+    let body = vec![7u8; 900 * 1024];
+    fs::write(source.join("big.bin"), &body).unwrap();
+    let (outgoing, text) = prepared_paths(&dir, std::slice::from_ref(&source)).await;
+    let out = dir.path().join("out");
+    let mut limited = options(&out);
+    limited.write_limit = Some(256 * 1024);
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let err = super::receive(&text, &limited, &tx).await.unwrap_err();
+    assert!(matches!(err, Error::Storage(_)), "{err}");
+    assert!(
+        partial_exists(&out),
+        "a full disk removed the store a retry needs"
+    );
+    assert!(!out.join("tree").join("big.bin").exists());
+
+    super::receive(&text, &options(&out), &tx).await.unwrap();
+    assert_eq!(fs::read(out.join("tree").join("big.bin")).unwrap(), body);
+    outgoing.provider.shutdown().await.unwrap();
+}
+
 /// A client that reads the manifest and leaves has taken nothing the ticket promised, so the
 /// sender has to stay for the transfer that follows.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

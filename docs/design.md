@@ -297,10 +297,13 @@ first output file, so a lost connection is retried against the ranges the store 
 interrupted download leaves the output untouched. A file that a previous attempt did write is
 recognised on resume by its content and is not treated as a clash. The process syncs the finished
 file before it moves it into place. After a crash, the store decides what to ask for again from
-its own record of verified ranges. This release adds no separate 64 MB barrier: after a crash the
-store may ask again for ranges it had already verified, which costs a re-read of part of the
-file, and no byte enters an output file without verifying against the root. A full disk, a
-permission error or a quota error leaves the partial store and a `Storage` error, not a panic.
+its own record of verified ranges. This release adds no separate 64 MB barrier: `iroh-blobs`
+commits its records in its own batches, so after a crash the store may ask again for the ranges it
+had not committed, which costs a re-read of part of the file, and no byte enters an output file
+without verifying against the root. A crash can only cost work, never trust. A full disk, a
+permission error or a quota error leaves the partial store and a `Storage` error, not a panic. A
+test hook fails the copy of a packed file partway through, which is the same failure as a disk
+that fills while bytes arrive, and the next receive finishes from the store it left.
 The partial store is kept after a network failure, so a second receive with the same ticket and
 `--out` continues from it, and it is removed once every file is in place.
 
