@@ -70,6 +70,20 @@ use separate connections. A listener MAY close a connection that offers more tha
 
 Wire-breaking changes bump the ALPN to `sluice/2`. Additive changes take a new capability bit.
 
+**Completion close.** The application close code `0x534C0001` on a static content connection means
+"the whole transfer is here". A receiver MUST close its content connection with that code, and a
+reason it may choose, exactly when it has verified and installed every file of the transfer, and it
+MUST NOT send that code on a receive that failed, on a receive of a byte range, or on a receive that
+writes only part of a transfer to standard output. A sender MAY stop serving a one-download ticket
+when it sees the code, and it MUST NOT treat it as anything other than a finished download. The
+code is not authenticated by the transfer and a client that holds a ticket can send it without
+having downloaded anything, which grants nothing it did not have: taking every byte of the ticket's
+content ends the same sender, because delivery is counted by bytes served. A sender that stops on
+the code has the receiver's word for the receiver's disk and nothing else, so it stops without
+changing what it promised; a transfer that ended early is finished by asking the sender for a new
+ticket. A sender that never sees the code stops by counting bytes, as **Static content** and the
+provider implementation describe.
+
 ---
 
 ## 4. Ticket

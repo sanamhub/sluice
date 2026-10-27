@@ -8,11 +8,15 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 
 use iroh::{
     Endpoint, NET_REPORT_TIMEOUT, RelayMap, RelayMode, SecretKey, Watcher,
-    endpoint::{PortmapperConfig, QuicTransportConfig, presets},
+    endpoint::{
+        AfterHandshakeOutcome, Connection, EndpointHooks, PortmapperConfig, QuicTransportConfig,
+        presets,
+    },
 };
 use iroh_mdns_address_lookup::MdnsAddressLookup;
 use noq::congestion::{Bbr3Config, CubicConfig};
 use serde::Serialize;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::Error;
 
@@ -110,12 +114,62 @@ pub async fn bind(
     congestion: Congestion,
     port: Option<u16>,
 ) -> Result<Endpoint, Error> {
+    bind_inner(secret, relay, congestion, port, None).await
+}
+
+/// [`bind`] for a provider whose one-download stop waits for the receiver's completion code.
+/// `complete` receives once per connection that closed with it.
+pub(super) async fn bind_with_completion(
+    secret: Option<[u8; 32]>,
+    relay: &RelayModeChoice,
+    congestion: Congestion,
+    port: Option<u16>,
+    complete: UnboundedSender<()>,
+) -> Result<Endpoint, Error> {
+    bind_inner(secret, relay, congestion, port, Some(complete)).await
+}
+
+/// A watcher that reports a connection closed with [`super::COMPLETE_CLOSE`]. Only the static
+/// content protocol carries the code, so a `sluice/1` connection that closes with it means
+/// nothing here.
+#[derive(Debug)]
+struct CompletionSignal(UnboundedSender<()>);
+
+impl EndpointHooks for CompletionSignal {
+    async fn after_handshake<'a>(&'a self, conn: &'a Connection) -> AfterHandshakeOutcome {
+        if conn.alpn() == iroh_blobs::ALPN {
+            let closed = conn.weak_handle();
+            let complete = self.0.clone();
+            n0_future::task::spawn(async move {
+                if let Some(closed) = closed.closed().await
+                    && let iroh::endpoint::ConnectionError::ApplicationClosed(application) =
+                        closed.reason
+                    && application.error_code.into_inner() == u64::from(super::COMPLETE_CLOSE)
+                {
+                    let _ = complete.send(());
+                }
+            });
+        }
+        AfterHandshakeOutcome::accept()
+    }
+}
+
+async fn bind_inner(
+    secret: Option<[u8; 32]>,
+    relay: &RelayModeChoice,
+    congestion: Congestion,
+    port: Option<u16>,
+    complete: Option<UnboundedSender<()>>,
+) -> Result<Endpoint, Error> {
     let mut builder = Endpoint::builder(presets::Empty)
         .crypto_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
         .relay_mode(relay.iroh()?)
         .portmapper_config(PortmapperConfig::default())
         .transport_config(congestion.transport())
         .address_lookup(MdnsAddressLookup::builder());
+    if let Some(complete) = complete {
+        builder = builder.hooks(CompletionSignal(complete));
+    }
     if let Some(seed) = secret {
         builder = builder.secret_key(SecretKey::from_bytes(&seed));
     }

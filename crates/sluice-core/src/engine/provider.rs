@@ -47,6 +47,10 @@ pub struct Provider {
     store: FsStore,
     _policy: policy::Policy,
     done: tokio::sync::mpsc::UnboundedReceiver<policy::ServeEvent>,
+    /// One message per connection that a receiver closed with the completion code. The sender end
+    /// is kept so the channel never closes while this provider is alive.
+    complete: tokio::sync::mpsc::UnboundedReceiver<()>,
+    _complete: tokio::sync::mpsc::UnboundedSender<()>,
     expiry: Option<u64>,
 }
 
@@ -168,7 +172,16 @@ impl Provider {
         let seed = home.identity()?.secret_seed();
         let saved = home.saved_port().filter(|_| port.is_none());
         let chosen = port.or(saved);
-        let endpoint = match endpoint::bind(Some(seed), &relay, congestion, chosen).await {
+        let (complete, complete_rx) = unbounded_channel();
+        let endpoint = match endpoint::bind_with_completion(
+            Some(seed),
+            &relay,
+            congestion,
+            chosen,
+            complete.clone(),
+        )
+        .await
+        {
             Ok(endpoint) => endpoint,
             Err(e) if port.is_some() => {
                 let port = port.unwrap_or_default();
@@ -176,7 +189,14 @@ impl Provider {
             }
             // The saved port is taken or unusable; any port is better than refusing to send.
             Err(_) if saved.is_some() => {
-                endpoint::bind(Some(seed), &relay, congestion, None).await?
+                endpoint::bind_with_completion(
+                    Some(seed),
+                    &relay,
+                    congestion,
+                    None,
+                    complete.clone(),
+                )
+                .await?
             }
             Err(e) => return Err(e),
         };
@@ -208,6 +228,8 @@ impl Provider {
             store,
             _policy: policy,
             done: done_rx,
+            complete: complete_rx,
+            _complete: complete,
             expiry,
         })
     }
@@ -308,6 +330,10 @@ impl Provider {
         let mut connections = BTreeSet::new();
         loop {
             tokio::select! {
+                // The receiver verified and installed every file, which is the signal that says so.
+                // It ends the wait even when a byte count would not: a resumed receive takes only
+                // what the first one was missing, so this process never sees the whole blob.
+                Some(()) = self.complete.recv() => return Ok(ServeEnd::Downloaded),
                 event = self.done.recv() => match event {
                     Some(policy::ServeEvent::Downloaded { hash, connection }) => {
                         if remaining.remove(&hash) {

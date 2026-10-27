@@ -47,6 +47,12 @@ mod receiver;
 pub use provider::{Provider, ServeEnd, Stop};
 pub use receiver::Receiver;
 
+/// The QUIC application close code a receiver closes its content connection with once every file
+/// has been verified and installed. A one-download sender that sees it stops serving at once,
+/// because this is the only claim about the receiver's disk a sender can check: the byte count
+/// says what left this machine, not what arrived. SPEC section 3 defines it.
+pub const COMPLETE_CLOSE: u32 = 0x534c_0001;
+
 /// The one wall clock a compare reads: UTC milliseconds since the Unix epoch. A ticket's boundary
 /// and a sender's deadline are the same instant, so they are read the same way.
 pub fn now_ms() -> u64 {

@@ -214,10 +214,12 @@ async fn exchange(
         rate: options.rate.as_deref(),
         max_failures: options.max_network_failures,
     };
-    content::ensure_content(&session, conn).await?;
-    // The last byte is in the store, so the sender has nothing left to serve from this transfer.
-    let _ = receiver.shutdown().await;
+    let conn = content::ensure_content(&session, conn).await?;
     write::write(&manifest, plan, store, options, partial, resume, events).await?;
+    // Every file is verified and in place, so the whole tree arrived on this machine. Closing the
+    // content connection with the completion code is how the sender learns that, and it is the
+    // only moment it may: a receive that failed, or that took a range, never sends it.
+    conn.close(super::COMPLETE_CLOSE.into(), b"complete");
     Ok((
         Received {
             path: single_path(&manifest, options),

@@ -28,6 +28,7 @@ use crate::{
 };
 
 mod checks;
+mod done;
 mod lifecycle;
 mod live;
 mod rules;
