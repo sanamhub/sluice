@@ -31,9 +31,10 @@ pub use events::{Event, PathKind, emit, watch_path};
 pub use expiry::{DEFAULT_SECONDS, deadline, parse as parse_expiry};
 pub use hello::{
     ALPN, CAP_DELTA, CAP_LIVE, CAP_MANIFEST_V1, CAP_PACKS, CAP_RECEIPTS, CAP_ZSTD, CAPABILITIES,
-    Hello, MAX_FRAME_BYTES, PROTO_VERSION, SluiceProtocol, greet,
+    Hello, MAX_FRAME_BYTES, PROTO_VERSION, SluiceProtocol, decode as decode_hello,
+    encode as encode_hello, greet,
 };
-pub use recv::{ReceiveOptions, Received, receive};
+pub use recv::{ReceiveOptions, Received, receive, top_level_rule};
 pub use send::{
     Outgoing, StopEnd, default_expiry, prepare as prepare_send, prepare_paths as prepare_send_paths,
 };
@@ -78,7 +79,8 @@ impl std::fmt::Debug for Provider {
 
 impl Provider {
     /// Binds the sender's endpoint from the home's identity and starts the blob protocol with one
-    /// access policy for every request type.
+    /// access policy for every request type. `port` names the UDP port to bind, so a firewall rule
+    /// can name it; without it the port this home used last is tried first.
     pub async fn start(
         home: &Home,
         store: FsStore,
@@ -86,11 +88,17 @@ impl Provider {
         relay: RelayModeChoice,
         congestion: Congestion,
         expiry: Option<u64>,
+        port: Option<u16>,
     ) -> Result<Self, Error> {
         let seed = home.identity()?.secret_seed();
-        let saved = home.saved_port();
-        let endpoint = match endpoint::bind(Some(seed), &relay, congestion, saved).await {
+        let saved = home.saved_port().filter(|_| port.is_none());
+        let chosen = port.or(saved);
+        let endpoint = match endpoint::bind(Some(seed), &relay, congestion, chosen).await {
             Ok(endpoint) => endpoint,
+            Err(e) if port.is_some() => {
+                let port = port.unwrap_or_default();
+                return Err(Error::Storage(format!("cannot bind UDP port {port}: {e}")));
+            }
             // The saved port is taken or unusable; any port is better than refusing to send.
             Err(_) if saved.is_some() => {
                 endpoint::bind(Some(seed), &relay, congestion, None).await?
@@ -110,7 +118,7 @@ impl Provider {
         endpoint::wait_for_direct_addr(&endpoint).await?;
         let allowed: BTreeSet<Hash> = allowed.into_iter().map(Hash::from).collect();
         let (done, done_rx) = unbounded_channel();
-        let policy = policy::start(allowed, expiry, done);
+        let policy = policy::start(allowed, expiry, done, store.clone());
         let blobs = BlobsProtocol::new(store.deref(), Some(policy.events.clone()));
         let router = Router::builder(endpoint.clone())
             .accept(iroh_blobs::ALPN, blobs)
@@ -129,6 +137,12 @@ impl Provider {
     /// The address to put in a ticket.
     pub fn addr(&self) -> EndpointAddr {
         endpoint::ticket_addr(&self.endpoint)
+    }
+
+    /// Payload this provider sent of `hash`, for a test that checks what a request moved.
+    #[cfg(test)]
+    pub fn served_bytes(&self, hash: Hash) -> u64 {
+        self._policy.served(hash)
     }
 
     /// The store, for an import before or a check after serving.
@@ -194,8 +208,14 @@ impl Provider {
                             return Ok(ServeEnd::Downloaded);
                         }
                     }
-                    Some(policy::ServeEvent::Closed(id)) => {
-                        closed.insert(id);
+                    Some(policy::ServeEvent::Closed { connection, served }) => {
+                        closed.insert(connection);
+                        // A client that fetched from every root and left has nothing more to
+                        // receive. A partial fetch on a connection that is still open does not
+                        // count, which is why a range request leaves this sender serving.
+                        for hash in served {
+                            remaining.remove(&hash);
+                        }
                         if remaining.is_empty() && connections.is_subset(&closed) {
                             return Ok(ServeEnd::Downloaded);
                         }

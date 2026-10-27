@@ -31,6 +31,8 @@ pub enum Target {
     ManifestPath,
     /// `sluice-live`: the records of a live stream after its open.
     Log,
+    /// `sluice-core`: the `Hello` record of `sluice/1`.
+    Hello,
     /// `sluice-core`: byte ranges as a person writes them.
     Range,
     /// `sluice-relay-guard`: the text of an iroh-relay config.
@@ -51,7 +53,7 @@ impl Target {
             Target::Manifest => Some("manifests"),
             Target::ManifestPath => Some("paths"),
             Target::Log => Some("live"),
-            Target::Range | Target::RelayConfig | Target::RelayDifferential => None,
+            Target::Hello | Target::Range | Target::RelayConfig | Target::RelayDifferential => None,
         }
     }
 }
@@ -78,6 +80,65 @@ const RANGES: [&str; 11] = [
     "0.33333333333333333333K:2kib",
 ];
 
+/// Greetings: three that are valid and six that break one rule each. `Hello` has no vector folder
+/// because it is three varints, and these seeds are short enough to read here. The fuzzer checks
+/// that every byte string it decodes has exactly one spelling.
+fn hello_seeds() -> Vec<Seed> {
+    let mut bad = vec![
+        // proto_version 2.
+        hello(2, 0, 16 << 20),
+        // A frame limit of zero.
+        hello(1, 0, 0),
+        // A byte after the greeting.
+        {
+            let mut bytes = hello(1, 0, 16 << 20);
+            bytes.push(0);
+            bytes
+        },
+        // The version as a three-byte varint, which is not its shortest spelling.
+        vec![0x81, 0x80, 0x00, 0x00, 0x80, 0x80, 0x10],
+        // A ten-byte varint whose tenth byte carries more than the last bit of a u64.
+        vec![
+            0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02, 0x00, 0x80, 0x80, 0x10,
+        ],
+        // The greeting ends before its third varint.
+        {
+            let bytes = hello(1, 0, 16 << 20);
+            bytes[..bytes.len() - 1].to_vec()
+        },
+    ];
+    let mut seeds: Vec<Seed> = [
+        hello(1, 0, 16 << 20),
+        hello(1, (1 << 2) | (1 << 3), 16 << 20),
+        hello(1, u64::MAX, 1),
+    ]
+    .into_iter()
+    .map(|bytes| Seed { file: None, bytes })
+    .collect();
+    seeds.extend(bad.drain(..).map(|bytes| Seed { file: None, bytes }));
+    seeds
+}
+
+/// The three fields of a greeting, each as its shortest varint.
+fn hello(version: u64, capabilities: u64, limit: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    for value in [version, capabilities, limit] {
+        push_varint(&mut out, value);
+    }
+    out
+}
+
+fn push_varint(out: &mut Vec<u8>, mut value: u64) {
+    loop {
+        let low = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(low);
+            break;
+        }
+        out.push(low | 0x80);
+    }
+}
 pub fn run(target: Target, dir: &Path) -> anyhow::Result<()> {
     let seeds = seeds(target, &vectors_dir())?;
     fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
@@ -114,6 +175,9 @@ pub fn seeds(target: Target, vectors: &Path) -> anyhow::Result<Vec<Seed>> {
             Target::RelayDifferential => with_selector(configs),
             _ => configs,
         });
+    }
+    if target == Target::Hello {
+        return Ok(hello_seeds());
     }
     let Some(folder) = target.folder() else {
         return Ok(RANGES
@@ -274,7 +338,9 @@ fn from_case(target: Target, case: &Value) -> anyhow::Result<Vec<Vec<u8>>> {
         Target::ManifestPath => vec![text(case, "path")?.into_bytes()],
         Target::Manifest => manifest(case)?,
         Target::Log => log(case)?.into_iter().collect(),
-        Target::Range | Target::RelayConfig | Target::RelayDifferential => Vec::new(),
+        Target::Hello | Target::Range | Target::RelayConfig | Target::RelayDifferential => {
+            Vec::new()
+        }
     })
 }
 

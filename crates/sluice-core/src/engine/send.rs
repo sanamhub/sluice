@@ -58,7 +58,41 @@ pub async fn prepare(
     relay: RelayModeChoice,
     congestion: Congestion,
     expiry_ms: Option<u64>,
+    port: Option<u16>,
 ) -> Result<Outgoing, Error> {
+    let (shown, name, entry_path, before) = checked_file(path)?;
+    let store = FsStore::load(home.path().join("blobs"))
+        .await
+        .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
+    let tag = import(path, &shown, &store).await?;
+    let hash = tag.hash();
+    if !before.same(path)? {
+        return Err(Error::Verify(format!(
+            "{shown} changed while it was read, so its root names no version of it"
+        )));
+    }
+    let manifest = one_entry_manifest(entry_path, &before, hash)?;
+    keep_metadata(&store, &manifest).await?;
+    let relay_text = relay_text(&relay);
+    let allowed = allowed_roots(&manifest);
+    let provider =
+        Provider::start(home, store, allowed, relay, congestion, expiry_ms, port).await?;
+    let ticket = ticket_of(&provider, &manifest, before.size, expiry_ms, relay_text)?;
+    // The ticket is readable by anyone who has it, so it is printed and never traced.
+    Ok(Outgoing {
+        provider,
+        ticket,
+        roots: content_roots(&manifest),
+        name: Some(name),
+        files: 1,
+        bytes: before.size,
+        congestion,
+        _tags: vec![tag],
+    })
+}
+
+/// The name, path and metadata of the one file a single-file send carries.
+fn checked_file(path: &Path) -> Result<(String, String, ManifestPath, Stamp), Error> {
     let shown = path.display().to_string();
     let meta = fs::symlink_metadata(path).map_err(|e| storage::policy_path("read", path, e))?;
     if meta.file_type().is_symlink() {
@@ -68,7 +102,7 @@ pub async fn prepare(
     }
     if !meta.is_file() {
         return Err(Error::Policy(format!(
-            "{shown} is not a regular file; folders are added in a later change"
+            "{shown} is not a regular file; send it as one path of a transfer with send"
         )));
     }
     let name = path
@@ -76,12 +110,11 @@ pub async fn prepare(
         .and_then(|name| name.to_str())
         .ok_or_else(|| Error::Policy(format!("{shown} has no UTF-8 file name")))?;
     let entry_path = ManifestPath::parse(name)?;
-    let before = Stamp::of(path)?;
+    Ok((shown, name.to_string(), entry_path, Stamp::of(path)?))
+}
 
-    let store = FsStore::load(home.path().join("blobs"))
-        .await
-        .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
-    let tag = store
+async fn import(path: &Path, shown: &str, store: &FsStore) -> Result<TempTag, Error> {
+    store
         .blobs()
         .add_path_with_opts(AddPathOptions {
             path: path.to_path_buf(),
@@ -90,14 +123,16 @@ pub async fn prepare(
         })
         .temp_tag()
         .await
-        .map_err(|e| Error::Storage(format!("cannot import {shown}: {e}")))?;
-    let hash = tag.hash();
-    if !before.same(path)? {
-        return Err(Error::Verify(format!(
-            "{shown} changed while it was read, so its root names no version of it"
-        )));
-    }
+        .map_err(|e| Error::Storage(format!("cannot import {shown}: {}", crate::chain(&e))))
+}
 
+/// A file of 1 byte to under `PACK_THRESHOLD` is a pack of its own, so the receiver reads it the
+/// same way it reads a file inside a folder. Any other file is a blob with its BLAKE3 root.
+fn one_entry_manifest(
+    entry_path: ManifestPath,
+    before: &Stamp,
+    hash: Hash,
+) -> Result<Manifest, Error> {
     let (packs, loc) = if before.size > 0 && before.size < crate::manifest::pack::PACK_THRESHOLD {
         (
             vec![PackRef {
@@ -118,7 +153,7 @@ pub async fn prepare(
             },
         )
     };
-    let manifest = Manifest::new(
+    Manifest::new(
         vec![Entry {
             path: entry_path,
             kind: Kind::File,
@@ -129,69 +164,80 @@ pub async fn prepare(
             link_target: None,
         }],
         packs,
-    )?;
-    let bytes = manifest.encode();
+    )
+}
+
+/// Keeps the manifest and the hash sequence, and checks the store gave each the root its bytes
+/// hash to, which is what the ticket and the receiver will name.
+async fn keep_metadata(store: &FsStore, manifest: &Manifest) -> Result<(), Error> {
     let added = store
         .blobs()
-        .add_bytes(bytes)
+        .add_bytes(manifest.encode())
         .await
-        .map_err(|e| Error::Storage(format!("cannot keep the manifest: {e}")))?;
+        .map_err(|e| Error::Storage(format!("cannot keep the manifest: {}", crate::chain(&e))))?;
     if added.hash != Hash::from(manifest.root()) {
         return Err(Error::Bug(
             "the store gave the manifest a root other than its BLAKE3 hash".to_string(),
         ));
     }
-    let sequence = manifest.sequence_bytes();
-    let sequence_added = store
+    let added = store
         .blobs()
-        .add_bytes(sequence.clone())
+        .add_bytes(manifest.sequence_bytes())
         .await
-        .map_err(|e| Error::Storage(format!("cannot keep the hash sequence: {e}")))?;
-    if sequence_added.hash != Hash::from(manifest.sequence_root()) {
+        .map_err(|e| {
+            Error::Storage(format!(
+                "cannot keep the hash sequence: {}",
+                crate::chain(&e)
+            ))
+        })?;
+    if added.hash != Hash::from(manifest.sequence_root()) {
         return Err(Error::Bug(
             "the store gave the hash sequence a root other than its BLAKE3 hash".to_string(),
         ));
     }
+    Ok(())
+}
 
+/// The roots the provider answers for: every content blob and pack, and the sequence itself.
+fn allowed_roots(manifest: &Manifest) -> std::collections::BTreeSet<[u8; 32]> {
     let mut allowed: std::collections::BTreeSet<[u8; 32]> =
         manifest.hash_sequence().into_iter().collect();
     allowed.insert(manifest.sequence_root());
-    let relay_url = match &relay {
-        RelayModeChoice::Disabled => None,
+    allowed
+}
+
+fn relay_text(relay: &RelayModeChoice) -> Option<String> {
+    match relay {
+        RelayModeChoice::Disabled | RelayModeChoice::N0 => None,
         RelayModeChoice::Url(url) => Some(url.clone()),
-        RelayModeChoice::N0 => None,
-    };
-    let provider = Provider::start(home, store, allowed, relay, congestion, expiry_ms).await?;
+    }
+}
+
+fn ticket_of(
+    provider: &Provider,
+    manifest: &Manifest,
+    size: u64,
+    expiry_ms: Option<u64>,
+    relay_text: Option<String>,
+) -> Result<Ticket, Error> {
     let addr = provider.addr();
-    let relay_url = relay_url.or_else(|| {
+    let relay_url = relay_text.or_else(|| {
         addr.relay_urls()
             .next()
             .map(std::string::ToString::to_string)
     });
-    let ticket = Ticket::new(
+    Ticket::new(
         *addr.id.as_bytes(),
         addr.ip_addrs().copied().collect(),
         relay_url,
         expiry_ms,
         Body::Static {
             root: manifest.sequence_root(),
-            size: before.size,
+            size,
             format: Format::HashSequence,
         },
-    )?;
-    // The ticket is readable by anyone who has it, so it is printed and never traced.
-    Ok(Outgoing {
-        provider,
-        ticket,
-        roots: content_roots(&manifest),
-        name: Some(name.to_string()),
-        files: 1,
-        bytes: before.size,
-        congestion,
-        _tags: vec![tag],
-    })
+    )
 }
-
 /// The blobs and packs a receiver must fetch. An empty file is written without a fetch, so its
 /// root is not one; a folder of empty files falls back to waiting for the sequence itself.
 pub(super) fn content_roots(manifest: &Manifest) -> Vec<[u8; 32]> {
@@ -298,10 +344,12 @@ impl Stamp {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // Only the constructors of the current platform run.
 enum FileId {
+    #[cfg(unix)]
     Unix(u64, u64),
+    #[cfg(windows)]
     Windows(u64, u64),
+    #[cfg(not(any(unix, windows)))]
     Unknown,
 }
 

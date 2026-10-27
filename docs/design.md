@@ -142,8 +142,9 @@ root. Hard links are not preserved.
 
 Files under 1 MiB are concatenated into pack blobs of at most 64 MiB, in path order, so identical
 trees produce identical packs. The sizes are fixed constants, not settings, and empty files are
-never packed. Large files stay standalone so ranges and mount work on them. The receiver unpacks
-while streaming. Without this, 100k small files spend more time on per-file overhead than on data.
+never packed. Large files stay standalone so ranges and mount work on them. A receiver may fetch a
+whole pack and unpack it from its store, or unpack it while streaming; it never holds a whole pack
+in memory. Without this, 100k small files spend more time on per-file overhead than on data.
 
 ### Tickets
 
@@ -179,8 +180,9 @@ whole tree before it fetches content and refuses with `Storage` when the volume 
 ADR 0006.
 
 **The source can change underneath us.** Size, mtime and inode (file id on Windows) are recorded at
-import and checked before each range read. A mismatch fails the transfer with a `Verify` error
-naming the file. `--rehash-on-change` restarts instead.
+import and checked again before serving starts. A change after that is caught by the receiver: the
+ticket's root names the version that was hashed, so bytes read from the changed file do not verify
+and the transfer fails with a `Verify` error. `--rehash-on-change` is not supported yet.
 
 **Layout.**
 
@@ -294,11 +296,13 @@ own database and partial data files. A receive fetches every content blob before
 first output file, so a lost connection is retried against the ranges the store already has and an
 interrupted download leaves the output untouched. A file that a previous attempt did write is
 recognised on resume by its content and is not treated as a clash. The process syncs the finished
-file before it moves it into place. After a crash, the store decides what to ask for again; this
-release does not yet guarantee the 64 MB barrier the target states, which is work for the
-durability part. A full disk, a permission error or a quota error leaves the partial store and a
-`Storage` error, not a panic. The partial store is not deleted on failure, so a second receive with
-the same ticket and `--out` continues from it.
+file before it moves it into place. After a crash, the store decides what to ask for again from
+its own record of verified ranges. This release adds no separate 64 MB barrier: after a crash the
+store may ask again for ranges it had already verified, which costs a re-read of part of the
+file, and no byte enters an output file without verifying against the root. A full disk, a
+permission error or a quota error leaves the partial store and a `Storage` error, not a panic.
+The partial store is kept after a network failure, so a second receive with the same ticket and
+`--out` continues from it, and it is removed once every file is in place.
 
 ## Errors
 

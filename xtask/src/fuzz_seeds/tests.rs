@@ -306,3 +306,13 @@ fn a_vector_folder_that_is_not_there_is_an_error() {
     let dir = tempfile::tempdir().unwrap();
     assert!(seeds(Target::Log, dir.path()).is_err());
 }
+
+#[test]
+fn the_hello_seeds_are_three_valid_greetings_and_six_broken_ones() {
+    let seeds = seeds(Target::Hello, &vectors_dir()).unwrap();
+    assert_eq!(seeds.len(), 9);
+    assert!(seeds.iter().all(|seed| seed.file.is_none()));
+    // The first is this release's own greeting, and it is six bytes: three short varints.
+    assert_eq!(seeds[0].bytes.len(), 6);
+    assert_eq!(seeds[0].bytes[0], 1);
+}

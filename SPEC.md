@@ -464,8 +464,7 @@ travels with it. Format 0 is a raw blob for pipes and has no sequence.
 7. the paths are not in strictly ascending order, compared byte by byte. A repeated path is not in
    order, so the sort has no ties
 8. an entry has a parent folder and no earlier entry has that path with `kind` Dir. The parent is
-   the path up to its last `/`. An entry with no `/` has none, because the folder that was sent is
-   not an entry
+   the path up to its last `/`. A top-level entry, which has no `/`, has none
 9. a `path` breaks a path rule below
 10. `link_target` is absent on a Symlink or present on another kind
 11. a `link_target` breaks a link target rule below
@@ -553,9 +552,8 @@ new vectors.
 
 - Entries MUST be sorted by `path`, byte by byte and strictly, so a manifest is deterministic and
   dedupable.
-- Every folder under the one that was sent has a `Dir` entry, empty or not, so its `mode` and
-  `mtime_ms` are kept. An entry comes after the `Dir` entry of its parent. The folder that was sent
-  is not an entry.
+- Every folder under a top-level entry has a `Dir` entry, empty or not, so its `mode` and
+  `mtime_ms` are kept. An entry comes after the `Dir` entry of its parent.
 - `mtime_ms` is restored by default. Implementations MUST offer a way to skip it.
 - `mode` holds permission bits only, at most `0o7777`: the nine bits of owner, group and others, and
   the setuid, setgid and sticky bits. It is applied on Unix. A receiver MUST NOT apply the setuid or
@@ -566,6 +564,27 @@ new vectors.
   unless explicitly enabled.
 - `link_target` is present exactly when `kind` is Symlink, which is rule 10.
 - Hard links are not preserved. Implementations MUST document this.
+
+**Top-level entries.** Every path given to `send` is one top-level entry: a file is a `File` entry
+and a folder is a `Dir` entry with its contents beneath it, so `sluice send proj/` writes
+`OUT/proj/...` and `sluice send a.mov photos/` writes `a.mov` and `photos/...`. A folder given on
+its own therefore arrives inside a folder of its own name, as copying it in a file manager does.
+Two arguments with the same final name are refused by the sender, which names both.
+
+**Receiver writer rules.** A receiver MUST apply these to the manifest before it requests any
+content blob:
+
+1. A top-level entry whose name starts with `.` is refused unless the user explicitly allows hidden
+   top-level names. Hidden names below the top are ordinary entries.
+2. A top-level name that already exists in the output folder refuses the whole transfer unless the
+   user asked to replace an existing path. The check uses the file system's own kind of each entry
+   and never follows a link. An existing folder of that name counts as a clash.
+3. When replacing is allowed, a clashing file or link is replaced after its content verifies, and an
+   existing folder of the same name is written into. A link at any target is replaced as an entry
+   and never followed, so no byte is ever written through it.
+4. A file already at a target whose content matches the manifest exactly is skipped, which is how a
+   resumed receive recognises what it wrote. Any other existing target without rule 2's permission
+   is a clash, and the error names the first one.
 
 **Sender.** A sender builds the entries from the folder it is given. It MUST:
 
@@ -646,8 +665,9 @@ disk or holding it in memory.
 **Receiver.** Rule 16 of section 8 means every byte of a pack belongs to exactly one file, so a
 receiver knows from the manifest which file each byte goes to.
 
-- A receiver MUST stream out of a pack while it fetches it, writing each run of bytes to its file,
-  and MUST NOT stage a whole pack in memory.
+- A receiver MAY fetch a whole pack into its per-transfer store and then copy each file's bytes
+  out of it, or stream out of a pack while it fetches it. It MUST NOT stage a whole pack in memory,
+  and MUST NOT write any file from a pack before that pack has verified.
 - A pack that gives more bytes than its `size`, or ends before it, MUST fail.
 - A file of 0 bytes needs no fetch, whether it is a `Blob` or a `Packed` entry.
 - A receiver does not check that the sender followed the algorithm above, as section 8 says after
@@ -708,9 +728,11 @@ the lock is held by a live process it MUST connect to that process instead of op
 | `tickets/` | Encoded tickets with expected decoded fields, including malformed ones that MUST be rejected |
 | `manifests/` | Encoded manifests with expected fields and root, including ones that MUST be rejected |
 | `packs/` | Files in manifest order with their sizes, and the `loc` of each and the size of each pack that section 9 gives. Some also give the contents, the pack roots and the manifest root |
+| `sequences/` | A manifest and the hash sequence a ticket for it must name |
 | `live/` | A ticket's `stream_id` and `sender_key`, the records of section 6 in the order a receiver gets them, the receiver's answer to each, and the state of the stream at the end, including streams that MUST be refused or aborted |
 | `delta/` | File pairs with expected chunk boundaries and resulting need-ranges |
 | `paths/` | Hostile paths that MUST be rejected by a receiver |
+| `writer/` | Top-level names a receiver must accept, refuse as hidden, or refuse as a clash, with the flags and the output state that decide it |
 
 `cargo xtask conformance` runs every vector against the local implementation. A third-party
 implementation that passes these vectors is compatible with ours.

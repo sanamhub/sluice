@@ -63,15 +63,16 @@ struct Folder {
     path: Option<String>,
 }
 
-/// Lists the arguments of one `send`. A single folder contributes its contents, not its own name,
-/// which is what `send DIR` means. Several arguments each contribute their own name, so
-/// `send a.mov photos/` writes `a.mov` and `photos/...` under the output.
-pub(super) fn walk_paths(paths: &[PathBuf]) -> Result<Walk, Error> {
+/// Lists the arguments of one `send`. Each argument contributes its own name as a top-level entry,
+/// so `send DIR` writes `DIR/...` in the output and `send a.mov photos/` writes `a.mov` and
+/// `photos/...`. With `name_roots` false the folder is treated as a tree whose own name the caller
+/// already carries, which is what [`crate::manifest::Manifest::build`] does.
+pub(super) fn walk_paths(paths: &[PathBuf], name_roots: bool) -> Result<Walk, Error> {
     if paths.is_empty() {
         return Err(Error::Policy("there is nothing to send".to_string()));
     }
-    let named = paths.len() > 1;
     let mut walker = Walker::default();
+    let mut names: Vec<(String, String)> = Vec::new();
     for path in paths {
         let shown = path.display().to_string();
         let before = fs::symlink_metadata(path)
@@ -84,8 +85,15 @@ pub(super) fn walk_paths(paths: &[PathBuf]) -> Result<Walk, Error> {
             return Err(Error::Policy(format!("{shown} has no UTF-8 name")));
         };
         let name = nfc_name(name)?;
+        if let Some((_, other)) = names.iter().find(|(existing, _)| existing == &name) {
+            return Err(Error::Policy(format!(
+                "{other} and {shown} would both arrive as {name}; rename one of them or send \
+                 them in separate transfers"
+            )));
+        }
+        names.push((name.clone(), shown.clone()));
         if meta.is_dir() {
-            let prefix = if named {
+            let prefix = if name_roots {
                 walker.root_dir(&name, path, &meta);
                 name.clone()
             } else {
@@ -93,7 +101,7 @@ pub(super) fn walk_paths(paths: &[PathBuf]) -> Result<Walk, Error> {
             };
             walker.stack.push(Folder {
                 disk: path.clone(),
-                shown: if named { name } else { String::new() },
+                shown: if name_roots { name } else { String::new() },
                 path: Some(prefix),
             });
         } else if meta.is_file() {
@@ -142,8 +150,8 @@ struct Walker {
 }
 
 impl Walker {
-    /// The folder an argument names, as an entry, when several arguments are sent. The folder that
-    /// was sent alone contributes its contents and no entry of its own.
+    /// The folder an argument names, as its top-level entry. A caller that is given a tree whose
+    /// own name it already carries passes `name_roots` false and gets no entry here.
     fn root_dir(&mut self, name: &str, disk: &Path, meta: &fs::Metadata) {
         // `nfc_name` checked the component, so the path rule cannot fail here.
         let path = ManifestPath::parse_rule(name).expect("a checked name");

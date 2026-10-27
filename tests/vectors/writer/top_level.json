@@ -1,0 +1,15 @@
+{
+  "description": "The top-level rules a receive applies to a manifest path before it fetches any content: a hidden name needs --allow-hidden, and a name already in the output needs --force or a resumed transfer.",
+  "cases": [
+    {"name": "proj", "exists": false, "allow_hidden": false, "replace": false, "resume": false, "expect": "accept"},
+    {"name": "a.mov", "exists": false, "allow_hidden": false, "replace": false, "resume": false, "expect": "accept"},
+    {"name": "proj/a.txt", "exists": true, "allow_hidden": false, "replace": false, "resume": false, "expect": "accept"},
+    {"name": ".ssh", "exists": false, "allow_hidden": true, "replace": false, "resume": false, "expect": "accept"},
+    {"name": "proj", "exists": true, "allow_hidden": false, "replace": true, "resume": false, "expect": "accept"},
+    {"name": "proj", "exists": true, "allow_hidden": false, "replace": false, "resume": true, "expect": "accept"},
+    {"name": ".ssh", "exists": false, "allow_hidden": false, "replace": false, "resume": false, "expect": "hidden"},
+    {"name": ".bashrc", "exists": true, "allow_hidden": false, "replace": true, "resume": false, "expect": "hidden"},
+    {"name": "proj", "exists": true, "allow_hidden": false, "replace": false, "resume": false, "expect": "clash"},
+    {"name": "proj", "exists": true, "allow_hidden": true, "replace": false, "resume": false, "expect": "clash"}
+  ]
+}

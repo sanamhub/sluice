@@ -205,15 +205,15 @@ impl Manifest {
                 "the path to send is not a folder".to_string(),
             ));
         }
-        build_paths(&[root.to_path_buf()], limits, |_| {})
+        build_either(&[root.to_path_buf()], limits, |_| {}, false)
     }
 
     /// Builds one manifest from several arguments, as `sluice send a.mov photos/` does.
     ///
-    /// A single folder contributes its contents, not its own name. With more than one argument,
-    /// each folder contributes its name as a `Dir` entry and each file its own name, so the output
-    /// has the same shape the sender's arguments describe. The name checks, packing and limits are
-    /// the ones [`Manifest::build`] documents.
+    /// Every argument is one top-level entry: a file its own name, a folder a `Dir` entry with its
+    /// contents beneath it. A folder given on its own therefore arrives inside a folder of its own
+    /// name, as copying it in a file manager does. The name checks, packing and limits are the ones
+    /// [`Manifest::build`] documents.
     ///
     /// # Examples
     /// ```
@@ -233,15 +233,21 @@ impl Manifest {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build_paths(paths: &[PathBuf]) -> Result<Build, Error> {
-        build_paths(paths, Limits::default(), |_| {})
+        build_either(paths, Limits::default(), |_| {}, true)
     }
 }
 
 /// [`Manifest::build_with_limits`] with a hook that runs for each file between its last byte and
 /// the second look at its size and time, so a test can change a file there, which a real run
-/// cannot do on purpose.
-fn build_paths(paths: &[PathBuf], limits: Limits, between: impl Fn(&Path)) -> Result<Build, Error> {
-    let walked = walk::walk_paths(paths)?;
+/// cannot do on purpose. `name_roots` decides whether each argument contributes a top-level entry
+/// of its own name.
+fn build_either(
+    paths: &[PathBuf],
+    limits: Limits,
+    between: impl Fn(&Path),
+    name_roots: bool,
+) -> Result<Build, Error> {
+    let walked = walk::walk_paths(paths, name_roots)?;
     // Before the names are compared and before any file is hashed: renaming files does not
     // bring the count down, so a list of names to fix would not help.
     check_entries(walked.items.len(), limits)?;
@@ -281,11 +287,11 @@ fn build_paths(paths: &[PathBuf], limits: Limits, between: impl Fn(&Path)) -> Re
     }))
 }
 
-/// The one-folder form of [`build_paths`], with the hook, for the tests that change a file between
-/// its last byte and the second look at it.
+/// The one-folder form of [`build_either`], with the hook, for the tests that change a file
+/// between its last byte and the second look at it. The folder itself is not an entry.
 #[cfg(test)]
 pub(super) fn build(root: &Path, limits: Limits, between: impl Fn(&Path)) -> Result<Build, Error> {
-    build_paths(&[root.to_path_buf()], limits, between)
+    build_either(&[root.to_path_buf()], limits, between, false)
 }
 
 /// Decoding rule 2 at the sender. The message gives numbers and no name.

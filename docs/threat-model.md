@@ -11,6 +11,10 @@ vulnerability, see [`SECURITY.md`](../SECURITY.md).
 - **The identity key**, `$SLUICE_HOME/identity.key`. Whoever holds it can act as that endpoint.
 - **Relay bandwidth**, which costs the operator money.
 
+**A ticket on the command line is visible.** A ticket passed as an argument appears in the process
+list, where another local user can read it, and the shell writes it to its history. `sluice recv -`
+reads the ticket from standard input instead, and a caller that cares pipes it.
+
 ## Protected
 
 | Threat | Defense |
@@ -23,6 +27,10 @@ vulnerability, see [`SECURITY.md`](../SECURITY.md).
 | A malicious manifest makes two entries one file on a case-insensitive disk | Paths that are equal after full Unicode case folding and NFC are rejected on every platform, so `README.md` and `Readme.md` never both arrive. Fuzzed |
 | A malicious manifest exhausts the receiver's memory | The byte length and the entry count are checked against limits (256 MiB and 1,000,000 by default) before anything is read or reserved. Fuzzed |
 | A malicious manifest plants a setuid binary | `mode` holds permission bits only, and a receiver never applies the setuid or setgid bit, whatever the manifest says |
+| A transfer replaces a file the user did not mean to lose | Every target is checked before the first content request. A top-level name that already exists in the output, as a file, folder or link and checked without following a link, refuses the whole transfer with a `Policy` error naming it; an existing folder counts. A top-level name starting with `.` needs `--allow-hidden`. With `--force`, a clashing file or link is replaced only after its bytes verify and a folder of the same name is written into. The final rename cannot replace a name that appeared after the check, and packed files obey `--force` like any other |
+| An existing link in the output redirects a write | A parent that is a symlink is refused before anything is written. A link target is resolved lexically against the output, so a `..` that would leave it is refused, and the deepest existing prefix is canonicalized so a target reached through an earlier link cannot leave either. The same check runs on Windows |
+| A sender keeps serving after its ticket expires | The provider checks the expiry on every request, and the serving deadline uses the same clock; at the expiry the router closes every connection, so a get that started before it is cut off |
+| A partial get is mistaken for a complete download | The provider counts a download only when the ranges served for a blob add up to the blob's size, so asking for one block leaves the sender serving. A client that fetched from every root and then closed its connection has nothing left to receive, and the sender stops |
 | A provider serves a forged or reordered live stream | Every live record is signed under the ticket's key, with a label and the stream id in the signed message, and verified strictly. A record that does not verify, or comes too early, is refused and another provider can give it. Only two validly signed histories, or a signed record that breaks the chain, abort the stream. Fuzzed |
 | A ticket holder fills the sender's disk | `iroh-blobs` push is disabled, and the `get`, `get_many` and `observe` modes are set together to the ticket's allowlist. Restricting `get` alone would leave the other two open. Tested |
 | A leaked relay URL is used as free bandwidth | Relays run with authorization on. `open` mode needs a flag and has a per-client byte rate limit. ADR 0011, enforced by the guard below |

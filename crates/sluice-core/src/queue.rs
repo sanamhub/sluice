@@ -44,7 +44,8 @@ const MAX_JOBS: usize = 1000;
 const MAX_PATH_UNITS: usize = 4096;
 /// The network failure in a row that fails a job. With the waits below, a job retries for about 34
 /// minutes before it fails, which outlasts a laptop moving between networks or a router restart.
-pub(crate) const MAX_NETWORK_FAILURES: u32 = 15;
+/// A receive uses the same count and waits.
+pub const MAX_NETWORK_FAILURES: u32 = 15;
 /// The wait after the first network failure, doubled after each one that follows.
 const FIRST_WAIT_MS: u64 = 1000;
 /// The longest wait before a retry.

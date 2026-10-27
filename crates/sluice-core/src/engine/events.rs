@@ -76,6 +76,11 @@ pub enum Event {
         /// How long it will wait first.
         seconds: u64,
     },
+    /// Something the transfer could not do, which does not stop it.
+    Warning {
+        /// What was skipped, with no path from a manifest.
+        message: String,
+    },
     /// Every byte arrived and matched its root.
     Verified {
         /// Bytes verified.

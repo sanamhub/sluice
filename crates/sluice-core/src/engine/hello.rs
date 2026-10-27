@@ -82,7 +82,6 @@ pub fn encode(hello: Hello) -> Vec<u8> {
 
 /// Reads the greeting from its bytes and refuses another protocol version, a frame limit of zero,
 /// trailing bytes, a varint longer than needed and a varint that overflows.
-#[allow(dead_code)] // The greeting bytes are checked here and by the P3 vectors.
 pub fn decode(bytes: &[u8]) -> Result<Hello, std::io::Error> {
     let bad = |why: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, why.to_string());
     let mut at = 0;
@@ -136,21 +135,28 @@ pub async fn read_hello(recv: &mut RecvStream) -> Result<Hello, std::io::Error> 
 }
 
 async fn read_stream_varint(recv: &mut RecvStream) -> Result<u64, std::io::Error> {
+    let bad = |why: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, why.to_string());
     let mut value = 0u64;
-    for shift in (0..70).step_by(7) {
+    for count in 1..=10u32 {
         let mut byte = [0u8; 1];
         recv.read_exact(&mut byte)
             .await
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        value |= u64::from(byte[0] & 0x7f) << shift;
+        let bits = u64::from(byte[0] & 0x7f);
+        if count == 10 && bits > 1 {
+            return Err(bad("a Hello varint is longer than u64"));
+        }
+        value |= bits << (7 * (count - 1));
         if byte[0] & 0x80 == 0 {
+            // The shortest spelling of a value is the only one an encoder may write, and the only
+            // one this reads: a longer spelling would give one greeting two byte strings.
+            if count > 1 && bits == 0 {
+                return Err(bad("a Hello varint is longer than needed"));
+            }
             return Ok(value);
         }
     }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::InvalidData,
-        "a Hello varint is longer than u64",
-    ))
+    Err(bad("a Hello varint is longer than u64"))
 }
 
 fn take_one(bytes: &[u8], at: &mut usize) -> Result<u8, ()> {
@@ -161,16 +167,22 @@ fn take_one(bytes: &[u8], at: &mut usize) -> Result<u8, ()> {
 
 fn take_varint(bytes: &[u8], at: &mut usize) -> Option<u64> {
     let mut value = 0u64;
-    for shift in (0..70).step_by(7) {
+    for count in 1..=10u32 {
         let byte = take_one(bytes, at).ok()?;
-        value |= u64::from(byte & 0x7f) << shift;
+        let bits = u64::from(byte & 0x7f);
+        if count == 10 && bits > 1 {
+            return None;
+        }
+        value |= bits << (7 * (count - 1));
         if byte & 0x80 == 0 {
+            if count > 1 && bits == 0 {
+                return None;
+            }
             return Some(value);
         }
     }
     None
 }
-
 /// The dialer's half of the greeting. It writes `Hello` before it reads the answer, because
 /// `open_bi` is lazy: the listener is not told of the stream until the dialer writes to it. A
 /// dialer that read first would wait on a stream the listener has not seen.
@@ -186,7 +198,7 @@ pub async fn greet(conn: &Connection) -> std::io::Result<Hello> {
 const CLOSE_VERSION: u32 = 1;
 
 /// The `sluice/1` listener. It reads the dialer's greeting, rejects another protocol version, and
-/// answers with its own. A later change adds the control records after this exchange.
+/// answers with its own. The control records that follow this exchange are not supported yet.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SluiceProtocol;
 

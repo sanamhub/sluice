@@ -19,6 +19,7 @@ tests/vectors/
   manifests/    directory manifests as bytes, SPEC.md section 8
   packs/        small-file packing, SPEC.md section 9
   sequences/    the hash sequence of a folder ticket, SPEC.md section 8
+  writer/       the top-level rules a receiver applies before it writes, SPEC.md section 8
   live/         the signed segment log, SPEC.md section 6
   delta/        not written yet
 ```
@@ -372,3 +373,22 @@ bytes with `sequence`. A receiver must refuse the whole transfer when they diffe
 manifest root first, the pack roots in pack order, then every distinct `Blob` root of a `File` entry
 in manifest order. The sequence is the ticket's `root`; this directory checks the bytes, not the
 ticket that carries their hash.
+
+## `writer/`
+
+The `writer/` cases cover the receiver's rules for a top-level name, which `SPEC.md` section 8
+states after the entries: a hidden name needs `--allow-hidden`, and a name already in the output
+folder is a clash unless the caller asked to replace it or the transfer is resuming. A case is:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | A path from the manifest |
+| `exists` | bool | Something already stands at that top-level name in the output |
+| `allow_hidden` | bool | `--allow-hidden` was given |
+| `replace` | bool | `--force` was given |
+| `resume` | bool | An interrupted receive of the same ticket is continuing |
+| `expect` | string | `accept`, `hidden` or `clash` |
+
+Only the top-level name is a rule of this kind. A nested path is accepted here; its ancestors and
+its own target are checked against the output folder, which needs a file system and is covered by
+the engine tests.

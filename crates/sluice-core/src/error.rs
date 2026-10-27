@@ -92,9 +92,59 @@ pub enum ErrorKind {
     Bug,
 }
 
+/// `error` and every cause below it, one after the other, so a storage failure says which call and
+/// which file it was and not only the outermost wrapper.
+///
+/// # Examples
+///
+/// ```
+/// use sluice_core::Error;
+///
+/// let err = Error::Storage("cannot import a file".to_string());
+/// assert_eq!(sluice_core::chain(&err), "storage error: cannot import a file");
+/// ```
+pub fn chain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text.push_str(": ");
+        text.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Error, ErrorKind};
+
+    #[test]
+    fn a_chain_names_every_cause() {
+        #[derive(Debug)]
+        struct Outer(Inner);
+        #[derive(Debug)]
+        struct Inner;
+        impl std::fmt::Display for Outer {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("the outer call failed")
+            }
+        }
+        impl std::fmt::Display for Inner {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("the file is not there")
+            }
+        }
+        impl std::error::Error for Outer {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+        impl std::error::Error for Inner {}
+        assert_eq!(
+            super::chain(&Outer(Inner)),
+            "the outer call failed: the file is not there"
+        );
+    }
 
     #[test]
     fn display_is_stable() {

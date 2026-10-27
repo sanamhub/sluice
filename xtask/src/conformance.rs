@@ -11,6 +11,7 @@ mod sequences;
 #[cfg(test)]
 mod tests;
 mod tickets;
+mod writer;
 
 pub(crate) use manifests::hex_bytes;
 
@@ -90,6 +91,7 @@ pub fn check(root: &Path) -> Result<Report> {
             "paths" => paths::run(&dir, &mut report)?,
             "sequences" => sequences::run(&dir, &mut report)?,
             "tickets" => tickets::run(&dir, &mut report)?,
+            "writer" => writer::run(&dir, &mut report)?,
             _ => {
                 report
                     .lines

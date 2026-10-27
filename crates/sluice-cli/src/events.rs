@@ -83,6 +83,7 @@ fn human(event: &Event, verb: &str) -> String {
         Event::Retrying { attempt, seconds } => {
             format!("connection lost; retrying in {seconds} s (attempt {attempt})")
         }
+        Event::Warning { message } => format!("warning: {message}"),
         Event::Verified { bytes } => format!("verified {}", bytes_text(*bytes)),
         Event::Done { bytes, seconds } => {
             format!("done, {} in {seconds:.1} s", bytes_text(*bytes))

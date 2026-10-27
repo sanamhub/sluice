@@ -6,6 +6,7 @@ use std::pin::pin;
 use iroh_blobs::{
     Hash, HashAndFormat,
     api::{proto::BlobStatus, remote::GetProgressItem},
+    get::{GetError, fsm::DecodeError},
     protocol::{ChunkRanges, ChunkRangesExt, GetRequest},
     store::fs::FsStore,
 };
@@ -52,9 +53,30 @@ pub(super) async fn verified_size(
         return Ok(size);
     }
     request(store, conn, hash, ChunkRanges::last_chunk()).await?;
-    size_of(store, hash).await?.ok_or_else(|| {
-        Error::Verify("the provider did not prove the size of the manifest".to_string())
-    })
+    size_of(store, hash)
+        .await?
+        .ok_or_else(|| Error::Verify("the provider did not prove the size of the blob".to_string()))
+}
+
+/// Fetches a content blob after proving it has the size the manifest gives it. A blob that is
+/// larger or smaller than declared is refused before its body is requested, so a hostile provider
+/// cannot fill the store with bytes the manifest never accounted for.
+pub(super) async fn content_blob(
+    store: &FsStore,
+    conn: &iroh::endpoint::Connection,
+    hash: Hash,
+    expected: u64,
+    base: u64,
+    total: u64,
+    events: &UnboundedSender<Event>,
+) -> Result<(), Error> {
+    let size = verified_size(store, conn, hash).await?;
+    if size != expected {
+        return Err(Error::Verify(format!(
+            "a blob has {size} bytes and the manifest says {expected}"
+        )));
+    }
+    fetch_blob(store, conn, hash, base, total, events).await
 }
 
 async fn request(
@@ -75,12 +97,12 @@ async fn request(
 /// The size a store has proved for a blob, if it has.
 async fn size_of(store: &FsStore, hash: Hash) -> Result<Option<u64>, Error> {
     Ok(
-        match store
-            .blobs()
-            .status(hash)
-            .await
-            .map_err(|e| Error::Storage(format!("cannot read the partial store: {e}")))?
-        {
+        match store.blobs().status(hash).await.map_err(|e| {
+            Error::Storage(format!(
+                "cannot read the partial store: {}",
+                crate::chain(&e)
+            ))
+        })? {
             BlobStatus::Complete { size } => Some(size),
             BlobStatus::Partial { size } => size,
             BlobStatus::NotFound => None,
@@ -117,14 +139,7 @@ pub(super) async fn fetch_blob(
                 }
             }
             GetProgressItem::Done(_) => return Ok(()),
-            GetProgressItem::Error(e) => {
-                let text = e.to_string();
-                return Err(if text.contains("hash") && text.contains("mismatch") {
-                    Error::Verify("received bytes did not match the ticket root".to_string())
-                } else {
-                    Error::Network(format!("the transfer stopped: {text}"))
-                });
-            }
+            GetProgressItem::Error(e) => return Err(classify(e)),
         }
     }
     Err(Error::Network(
@@ -132,20 +147,49 @@ pub(super) async fn fetch_blob(
     ))
 }
 
+/// A get error is a verification failure only when the provider sent bytes that did not match the
+/// root; everything else is a connection that can be retried.
+fn classify(e: GetError) -> Error {
+    match &e {
+        GetError::Decode {
+            source: DecodeError::LeafHashMismatch { .. } | DecodeError::ParentHashMismatch { .. },
+            ..
+        } => Error::Verify("received bytes did not match the ticket root".to_string()),
+        _ => Error::Network(format!("the transfer stopped: {e}")),
+    }
+}
+
+/// The size of a blob the store has, without reading its bytes into memory.
+pub(super) async fn complete_size(store: &FsStore, hash: Hash) -> Result<u64, Error> {
+    match store.blobs().status(hash).await.map_err(|e| {
+        Error::Storage(format!(
+            "cannot read the partial store: {}",
+            crate::chain(&e)
+        ))
+    })? {
+        BlobStatus::Complete { size } => Ok(size),
+        _ => Err(Error::Verify(
+            "the transfer ended without the whole blob".to_string(),
+        )),
+    }
+}
+
 /// The verified bytes and size of a blob already in the store.
 pub(super) async fn complete_bytes(store: &FsStore, hash: Hash) -> Result<(Vec<u8>, u64), Error> {
-    let status = store
-        .blobs()
-        .status(hash)
-        .await
-        .map_err(|e| Error::Storage(format!("cannot read the partial store: {e}")))?;
+    let status = store.blobs().status(hash).await.map_err(|e| {
+        Error::Storage(format!(
+            "cannot read the partial store: {}",
+            crate::chain(&e)
+        ))
+    })?;
     match status {
         BlobStatus::Complete { size } => {
-            let bytes = store
-                .blobs()
-                .get_bytes(hash)
-                .await
-                .map_err(|e| Error::Storage(format!("cannot read the received blob: {e}")))?;
+            let bytes = store.blobs().get_bytes(hash).await.map_err(|e| {
+                Error::Storage(format!(
+                    "cannot read the received blob: {}",
+                    crate::chain(&e)
+                ))
+            })?;
             Ok((bytes.to_vec(), size))
         }
         _ => Err(Error::Verify(
