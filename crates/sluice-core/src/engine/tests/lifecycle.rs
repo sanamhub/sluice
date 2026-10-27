@@ -172,7 +172,6 @@ async fn a_resume_does_not_take_over_a_folder_that_was_already_there() {
     super::receive(&text, &options(&out), &tx).await.unwrap();
     assert_eq!(fs::read(tree.join("big.bin")).unwrap().len(), 900 * 1024);
     #[cfg(unix)]
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         // The mode is the user's, and it is not what a receive that took the folder over
@@ -183,6 +182,7 @@ async fn a_resume_does_not_take_over_a_folder_that_was_already_there() {
             0o750
         );
     }
+    outgoing.provider.shutdown().await.unwrap();
 }
 
 /// A provider that serves the hash sequence and refuses the manifest, so a receive fails between
