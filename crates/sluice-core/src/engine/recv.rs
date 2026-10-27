@@ -68,6 +68,11 @@ pub struct ReceiveOptions {
     pub free_bytes: Option<u64>,
     /// The congestion controller to run.
     pub congestion: Congestion,
+    /// The byte rate this command may use. Every receive of the command shares it.
+    pub rate: Option<std::sync::Arc<super::Rate>>,
+    /// Fail a write after this many bytes, with the error a full disk gives. A test simulates a
+    /// disk that fills mid-transfer; a real caller leaves it as `None`.
+    pub write_limit: Option<u64>,
     /// How many network failures in a row a receive retries before it gives up. A real caller uses
     /// [crate::queue::MAX_NETWORK_FAILURES]; a test lowers it to reach the end quickly.
     pub max_network_failures: u32,
@@ -206,6 +211,7 @@ async fn exchange(
         manifest: &manifest,
         plan,
         events,
+        rate: options.rate.as_deref(),
         max_failures: options.max_network_failures,
     };
     content::ensure_content(&session, conn).await?;

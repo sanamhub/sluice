@@ -6,7 +6,7 @@ use clap::Args;
 use sluice_core::{
     Error, Home,
     engine::{
-        N0_WARNING, Outgoing, RelayModeChoice, StopEnd, deadline, now_ms, parse_expiry,
+        N0_WARNING, Outgoing, Rate, RelayModeChoice, StopEnd, deadline, now_ms, parse_expiry,
         prepare_send, prepare_send_paths,
     },
 };
@@ -49,6 +49,9 @@ pub struct SendArgs {
     /// For --live, close the stream after the file has not grown for this many seconds
     #[arg(long, default_value_t = 2, value_name = "SECONDS")]
     pub close_after: u64,
+    /// Cap the bytes this send offers per second, shared by its transfers, such as 50M
+    #[arg(long, value_name = "RATE")]
+    pub limit_rate: Option<String>,
 }
 
 pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
@@ -56,6 +59,7 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
     if args.n0_relays {
         output.write_stderr(&format!("{N0_WARNING}\n"));
     }
+    let rate = args.limit_rate.as_deref().map(Rate::parse).transpose()?;
     let seconds = parse_expiry(&args.expires)?;
     let expiry = deadline(now_ms(), seconds);
     let stdin = args.paths.len() == 1 && args.paths[0] == std::path::Path::new("-");
@@ -108,6 +112,7 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
         } else {
             outgoing(&home, &paths, args, relay, expiry).await?
         };
+        outgoing.provider.set_rate(rate);
         events::ticket(*output, &outgoing.ticket.encode())?;
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "sending");

@@ -30,6 +30,28 @@ impl From<CongestionArg> for Congestion {
     }
 }
 
+/// Where a ticket starts among several, as the command line spells it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum PriorityArg {
+    /// Starts before every normal and low ticket.
+    High,
+    /// Starts after a high one and before a low one.
+    #[default]
+    Normal,
+    /// Starts when no high or normal ticket is waiting.
+    Low,
+}
+
+impl From<PriorityArg> for sluice_core::queue::Priority {
+    fn from(value: PriorityArg) -> Self {
+        match value {
+            PriorityArg::High => Self::High,
+            PriorityArg::Normal => Self::Normal,
+            PriorityArg::Low => Self::Low,
+        }
+    }
+}
+
 #[derive(Parser)]
 // `bin_name` too: clap otherwise prints the name of the executable, which is `sluice.exe` on
 // Windows.

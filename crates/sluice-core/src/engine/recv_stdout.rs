@@ -91,7 +91,15 @@ async fn stream(
             let needed = needed(&manifest, entry)?;
             storage::ensure_space(store_root, needed)?;
             let bytes = entry.size;
-            stream_entry(store, conn, &manifest, entry, events).await?;
+            stream_entry(
+                store,
+                conn,
+                &manifest,
+                entry,
+                options.rate.as_deref(),
+                events,
+            )
+            .await?;
             Ok(bytes)
         }
         Body::Live { .. } => Err(Error::Policy(
@@ -165,13 +173,15 @@ async fn stream_entry(
     conn: &iroh::endpoint::Connection,
     manifest: &Manifest,
     entry: &crate::manifest::Entry,
+    rate: Option<&crate::engine::Rate>,
     events: &UnboundedSender<Event>,
 ) -> Result<(), Error> {
     match entry.loc {
         Loc::Blob { root } => {
             let hash = Hash::from(root);
             if entry.size > 0 {
-                fetch::content_blob(store, conn, hash, entry.size, 0, entry.size, events).await?;
+                fetch::content_blob(store, conn, hash, entry.size, 0, entry.size, rate, events)
+                    .await?;
             }
             copy(store, hash, 0, entry.size).await
         }
@@ -190,6 +200,7 @@ async fn stream_entry(
                 pack.size,
                 0,
                 len,
+                rate,
                 events,
             )
             .await?;

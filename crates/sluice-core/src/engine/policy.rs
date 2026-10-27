@@ -22,6 +22,9 @@ use tokio::sync::mpsc::UnboundedSender;
 pub struct Policy {
     /// Handed to `BlobsProtocol`, which uses it for every request.
     pub events: EventSender,
+    /// The cap the command set, if any. A send sets it after it printed its ticket, so the handle
+    /// is shared with the event task rather than fixed when the provider starts.
+    rate: Arc<Mutex<Option<Arc<super::Rate>>>>,
     /// Payload served per connection and blob, so a test can see what a request moved.
     #[cfg(test)]
     totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>>,
@@ -30,6 +33,11 @@ pub struct Policy {
 }
 
 impl Policy {
+    /// Caps the bytes this provider sends per second, shared by every request.
+    pub fn set_rate(&self, rate: Option<Arc<super::Rate>>) {
+        *lock(&self.rate) = rate;
+    }
+
     /// Payload this provider sent of `hash`, over every connection, since it started.
     #[cfg(test)]
     pub fn served(&self, hash: Hash) -> u64 {
@@ -67,6 +75,10 @@ pub enum ServeEvent {
 
 /// What every request is answered against: the allowlist, the ticket deadline, the reporter, and
 /// the maps that say how much of each blob every connection has served.
+/// The cap this command set, paced on one schedule shared by every request. A cell rather than a
+/// value, because a send sets it after the provider has started.
+type RateCell = Arc<Mutex<Option<Arc<super::Rate>>>>;
+
 struct Gate {
     /// Shared with a live send, which adds each segment as it seals it.
     allowed: Arc<Mutex<BTreeSet<Hash>>>,
@@ -75,6 +87,7 @@ struct Gate {
     store: FsStore,
     totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>>,
     delivered: Arc<Mutex<BTreeMap<Hash, u64>>>,
+    rate: RateCell,
 }
 
 /// [`start`] with an allowlist the caller keeps. A live send adds the root of each segment it
@@ -87,6 +100,7 @@ pub fn start_shared(
 ) -> Policy {
     let (events, mut rx) = EventSender::channel(32, mask());
     let totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>> = Arc::default();
+    let rate: RateCell = Arc::default();
     let gate = Gate {
         allowed,
         expiry,
@@ -94,6 +108,7 @@ pub fn start_shared(
         store,
         totals: Arc::clone(&totals),
         delivered: Arc::default(),
+        rate: Arc::clone(&rate),
     };
     let task = AbortOnDropHandle::new(n0_future::task::spawn(async move {
         while let Some(message) = rx.recv().await {
@@ -102,6 +117,7 @@ pub fn start_shared(
     }));
     Policy {
         events,
+        rate,
         #[cfg(test)]
         totals,
         _task: task,
@@ -115,7 +131,9 @@ fn mask() -> EventMask {
         get_many: RequestMode::Intercept,
         push: RequestMode::Disabled,
         observe: ObserveMode::Intercept,
-        throttle: Default::default(),
+        // Every chunk can be paced here. Without a cap the answer is immediate, and the handler
+        // is the only place that sees each chunk before it goes out.
+        throttle: iroh_blobs::provider::events::ThrottleMode::Intercept,
     }
 }
 
@@ -180,6 +198,15 @@ impl Gate {
                 let _ = self.done.send(ServeEvent::Closed {
                     connection: msg.connection_id,
                 });
+            }
+            // The provider asks before each chunk goes out. Answering now would send it now, so
+            // the wait for this chunk's turn is the whole rate cap.
+            ProviderMessage::Throttle(msg) => {
+                let rate = lock(&self.rate).clone();
+                if let Some(rate) = rate {
+                    rate.acquire(msg.size).await;
+                }
+                msg.tx.send(Ok(())).await.ok();
             }
             // Push is disabled in the mask, so a push is refused before this task sees it.
             _ => {}

@@ -9,7 +9,9 @@ mod doctor;
 mod events;
 mod exit;
 mod id;
+mod network;
 mod output;
+mod queue;
 mod recv;
 mod send;
 

@@ -36,6 +36,7 @@ pub(super) async fn write(
         partial,
         resume,
         counts,
+        write_limit: options.write_limit,
         tmp: &tmp.0,
         next: 0,
         events,
@@ -84,6 +85,8 @@ struct Writer<'a> {
     partial: &'a std::path::Path,
     resume: bool,
     counts: BTreeMap<[u8; 32], u64>,
+    /// A test's full-disk hook: fail once this many bytes are written.
+    write_limit: Option<u64>,
     tmp: &'a std::path::Path,
     next: u64,
     events: &'a UnboundedSender<Event>,
@@ -232,7 +235,8 @@ impl Writer<'_> {
                 continue;
             }
             let incoming = self.fresh();
-            let file = file::copy_from_pack(&mut reader, entry, &incoming).await?;
+            let file =
+                file::copy_from_pack(&mut reader, entry, &incoming, self.write_limit).await?;
             file::apply(&file, &incoming, meta, self.options.no_times, self.events)?;
             file.sync_all()
                 .map_err(|e| storage::storage("sync", &incoming, e))?;

@@ -8,6 +8,7 @@ mod fetch;
 mod hello;
 mod live;
 mod policy;
+mod rate;
 mod recv;
 mod recv_range;
 mod recv_stdout;
@@ -39,6 +40,7 @@ pub use hello::{
     encode as encode_hello, greet,
 };
 pub use live::{CLOSE_AFTER, LiveLog, LiveSend, prepare_live, receive_live};
+pub use rate::Rate;
 pub use recv::{ReceiveOptions, Received, receive, top_level_rule};
 pub use recv_range::receive_range;
 pub use recv_stdout::receive_stdout;
@@ -198,6 +200,11 @@ impl Provider {
     #[cfg(test)]
     pub fn served_bytes(&self, hash: Hash) -> u64 {
         self._policy.served(hash)
+    }
+
+    /// Caps the bytes this provider sends per second, shared by every request it serves.
+    pub fn set_rate(&self, rate: Option<Arc<Rate>>) {
+        self._policy.set_rate(rate);
     }
 
     /// The store, for an import before or a check after serving.

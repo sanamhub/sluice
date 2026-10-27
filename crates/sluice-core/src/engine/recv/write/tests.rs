@@ -31,6 +31,8 @@ fn options(out: &std::path::Path) -> ReceiveOptions {
         limits: crate::manifest::Limits::default(),
         free_bytes: None,
         congestion: crate::engine::Congestion::Cubic,
+        rate: None,
+        write_limit: None,
         max_network_failures: crate::queue::MAX_NETWORK_FAILURES,
     }
 }

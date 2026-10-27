@@ -23,6 +23,7 @@ pub(super) struct Session<'a> {
     pub(super) manifest: &'a Manifest,
     pub(super) plan: Plan,
     pub(super) events: &'a UnboundedSender<Event>,
+    pub(super) rate: Option<&'a crate::engine::Rate>,
     pub(super) max_failures: u32,
 }
 
@@ -85,6 +86,7 @@ async fn fetch_content(
             pack.size,
             progress,
             session.plan.bytes,
+            session.rate,
             session.events,
         )
         .await?;
@@ -109,6 +111,7 @@ async fn fetch_content(
             entry.size,
             progress,
             session.plan.bytes,
+            session.rate,
             session.events,
         )
         .await?;

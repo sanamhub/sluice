@@ -49,6 +49,8 @@ fn options(out: &Path) -> super::ReceiveOptions {
         limits: Limits::default(),
         free_bytes: None,
         congestion: super::Congestion::Cubic,
+        rate: None,
+        write_limit: None,
         max_network_failures: crate::queue::MAX_NETWORK_FAILURES,
     }
 }

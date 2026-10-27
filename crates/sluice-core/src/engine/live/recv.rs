@@ -181,6 +181,7 @@ async fn exchange(
                     &mut file,
                     &mut hasher,
                     events,
+                    options.rate.as_deref(),
                     total,
                 )
                 .await?;
@@ -218,6 +219,7 @@ async fn apply_frame(
     file: &mut tokio::fs::File,
     hasher: &mut blake3::Hasher,
     events: &UnboundedSender<Event>,
+    rate: Option<&crate::engine::Rate>,
     total: u64,
 ) -> Result<u64, Error> {
     let outcome = log.frame(record);
@@ -239,7 +241,7 @@ async fn apply_frame(
         };
     };
     let hash = Hash::from(segment_root);
-    fetch::content_blob(store, blobs, hash, u64::from(len), 0, 0, events).await?;
+    fetch::content_blob(store, blobs, hash, u64::from(len), 0, 0, rate, events).await?;
     let bytes = fetch::complete_bytes(store, hash).await?.0;
     file.write_all(&bytes)
         .await

@@ -86,6 +86,7 @@ pub(super) async fn copy_from_pack(
     reader: &mut BlobReader,
     entry: &Entry,
     incoming: &Path,
+    write_limit: Option<u64>,
 ) -> Result<fs::File, Error> {
     let Loc::Packed { offset, len, .. } = entry.loc else {
         return Err(Error::Bug("a packed entry has no pack range".to_string()));
@@ -100,9 +101,7 @@ pub(super) async fn copy_from_pack(
         .seek(std::io::SeekFrom::Start(offset))
         .await
         .map_err(|e| storage::storage("read a pack", incoming, e))?;
-    let copied = tokio::io::copy(&mut reader.take(len), &mut file)
-        .await
-        .map_err(|e| storage::storage("write", incoming, e))?;
+    let copied = copy_limited(reader, &mut file, len, incoming, write_limit).await?;
     file.flush()
         .await
         .map_err(|e| storage::storage("write", incoming, e))?;
@@ -113,6 +112,43 @@ pub(super) async fn copy_from_pack(
         )));
     }
     Ok(file)
+}
+
+/// Copies `len` bytes from `reader` to `file`, and fails the way a full disk does once
+/// `write_limit` bytes are written. Without a limit this is one `tokio::io::copy`.
+async fn copy_limited(
+    reader: &mut BlobReader,
+    file: &mut tokio::fs::File,
+    len: u64,
+    incoming: &Path,
+    limit: Option<u64>,
+) -> Result<u64, Error> {
+    let Some(limit) = limit else {
+        return tokio::io::copy(&mut reader.take(len), file)
+            .await
+            .map_err(|e| storage::storage("write", incoming, e));
+    };
+    let mut buffer = vec![0u8; 64 * 1024];
+    let mut copied = 0u64;
+    while copied < len {
+        let take = (len - copied).min(buffer.len() as u64);
+        if copied + take > limit {
+            return Err(Error::Storage(format!(
+                "cannot write {}: no space left on device",
+                incoming.display()
+            )));
+        }
+        let take = take as usize;
+        reader
+            .read_exact(&mut buffer[..take])
+            .await
+            .map_err(|e| storage::storage("read a pack", incoming, e))?;
+        file.write_all(&buffer[..take])
+            .await
+            .map_err(|e| storage::storage("write", incoming, e))?;
+        copied += take as u64;
+    }
+    Ok(copied)
 }
 
 /// Whether `target` already holds the bytes of this pack range, which is how a receive that was

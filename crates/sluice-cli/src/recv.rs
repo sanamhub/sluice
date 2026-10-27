@@ -5,21 +5,26 @@ use std::{io::BufRead, path::PathBuf};
 use clap::Args;
 use sluice_core::{
     Error,
-    engine::{ReceiveOptions, receive, receive_live, receive_range, receive_stdout},
+    engine::{Rate, ReceiveOptions, receive, receive_live, receive_range, receive_stdout},
     manifest::Limits,
     range::ByteRange,
     ticket::{Body, Ticket},
 };
 use tokio::sync::mpsc::unbounded_channel;
 
-use crate::{cli::CongestionArg, events, output::Output};
+use crate::{
+    cli::{CongestionArg, PriorityArg},
+    events,
+    output::Output,
+};
 
 /// Receives the file a ticket names.
 #[derive(Args)]
 pub struct RecvArgs {
-    /// The ticket the sender printed, or `-` to read it from standard input
-    #[arg(value_name = "TICKET")]
-    pub ticket: String,
+    /// The ticket the sender printed, or `-` to read it from standard input. Several tickets run
+    /// through the queue, three at once by default
+    #[arg(value_name = "TICKET", required = true)]
+    pub tickets: Vec<String>,
     /// The folder to write into, `-` to write a single file to standard output, or for a live
     /// ticket the file to write
     #[arg(long, default_value = ".", value_name = "DIR")]
@@ -43,10 +48,21 @@ pub struct RecvArgs {
     /// The congestion controller: cubic (default) or bbr3 (experimental)
     #[arg(long, value_enum, default_value_t = CongestionArg::Cubic, value_name = "NAME")]
     pub congestion: CongestionArg,
+    /// Where several tickets start among themselves: high, normal (default) or low
+    #[arg(long, value_enum, default_value_t = PriorityArg::Normal, value_name = "LEVEL")]
+    pub priority: PriorityArg,
+    /// Cap the bytes this command fetches per second, shared by its transfers, such as 50M
+    #[arg(long, value_name = "RATE")]
+    pub limit_rate: Option<String>,
 }
 
 pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
-    let ticket = ticket_text(&args.ticket)?;
+    let tickets = tickets_text(&args.tickets)?;
+    let rate = args.limit_rate.as_deref().map(Rate::parse).transpose()?;
+    if tickets.len() > 1 {
+        return run_many(args, output, &tickets, rate);
+    }
+    let ticket = tickets.into_iter().next().unwrap_or_default();
     let decoded = Ticket::decode(&ticket)?;
     let range = args.range.as_deref().map(ByteRange::parse).transpose()?;
     if matches!(decoded.body(), Body::Live { .. }) {
@@ -60,7 +76,7 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
                 "--range works on a static transfer, not on a live one".to_string(),
             ));
         }
-        return run_live(args, output, &ticket);
+        return run_live(args, output, &ticket, rate);
     }
     if args.out.as_path() == std::path::Path::new("-") {
         if range.is_some() {
@@ -68,10 +84,10 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
                 "--range writes a file, so it cannot be combined with --out -".to_string(),
             ));
         }
-        return to_stdout(args, output, &ticket);
+        return to_stdout(args, output, &ticket, rate);
     }
     if let Some(range) = range {
-        return run_range(args, output, &ticket, range);
+        return run_range(args, output, &ticket, range, rate);
     }
     let out = std::path::absolute(&args.out)
         .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", args.out.display())))?;
@@ -82,7 +98,7 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
     runtime.block_on(async {
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "receiving");
-        let options = options(args, out);
+        let options = options(args, out, rate);
         let result = receive(&ticket, &options, &tx).await;
         drop(tx);
         let printed = printer
@@ -105,9 +121,53 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
     })
 }
 
+/// Several tickets in one command. They run through the queue, so three start at once, a high one
+/// starts before a normal one and a normal one before a low, and a network failure waits and tries
+/// the same ticket again with the partial store the last attempt left.
+fn run_many(
+    args: &RecvArgs,
+    output: &Output,
+    tickets: &[String],
+    rate: Option<std::sync::Arc<Rate>>,
+) -> Result<u8, Error> {
+    if args.out.as_path() == std::path::Path::new("-") {
+        return Err(Error::Policy(
+            "several tickets need a folder, so --out - receives one ticket at a time".to_string(),
+        ));
+    }
+    if args.range.is_some() {
+        return Err(Error::Policy(
+            "--range receives one byte range of one ticket, not several tickets".to_string(),
+        ));
+    }
+    let out = std::path::absolute(&args.out)
+        .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", args.out.display())))?;
+    let options = options(args, out, rate);
+    crate::queue::run(output, tickets, args.priority.into(), options)
+}
+
+/// The ticket arguments as text. One ticket may be `-`, read from standard input; several are
+/// used as they are, and `-` is refused because a pipe carries one ticket.
+fn tickets_text(arguments: &[String]) -> Result<Vec<String>, Error> {
+    if arguments.len() == 1 {
+        return Ok(vec![ticket_text(&arguments[0])?]);
+    }
+    if arguments.iter().any(|text| text == "-") {
+        return Err(Error::Policy(
+            "standard input carries one ticket, so read it in a command of its own".to_string(),
+        ));
+    }
+    Ok(arguments.to_vec())
+}
+
 /// Follows a live stream into the file `--out` names. The ticket carries no name, so the flag has
 /// to; a ticket with the default `--out` meets a folder and is refused with that advice.
-fn run_live(args: &RecvArgs, output: &Output, ticket: &str) -> Result<u8, Error> {
+fn run_live(
+    args: &RecvArgs,
+    output: &Output,
+    ticket: &str,
+    rate: Option<std::sync::Arc<Rate>>,
+) -> Result<u8, Error> {
     let out = std::path::absolute(&args.out)
         .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", args.out.display())))?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -117,7 +177,7 @@ fn run_live(args: &RecvArgs, output: &Output, ticket: &str) -> Result<u8, Error>
     runtime.block_on(async {
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "receiving");
-        let options = options(args, out);
+        let options = options(args, out, rate);
         let store = sluice_core::Home::temporary_store()?;
         let result = receive_live(ticket, &options, &store, &tx).await;
         drop(tx);
@@ -134,7 +194,12 @@ fn run_live(args: &RecvArgs, output: &Output, ticket: &str) -> Result<u8, Error>
 }
 
 /// Writes the content to standard output, where nothing else may go.
-fn to_stdout(args: &RecvArgs, output: &Output, ticket: &str) -> Result<u8, Error> {
+fn to_stdout(
+    args: &RecvArgs,
+    output: &Output,
+    ticket: &str,
+    rate: Option<std::sync::Arc<Rate>>,
+) -> Result<u8, Error> {
     if matches!(output.format(), crate::output::Format::Json) {
         return Err(Error::Policy(
             "--json writes events to standard output, so --out - cannot share it".to_string(),
@@ -146,7 +211,7 @@ fn to_stdout(args: &RecvArgs, output: &Output, ticket: &str) -> Result<u8, Error
         .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
     runtime.block_on(async {
         let (tx, _rx) = unbounded_channel();
-        let options = options(args, PathBuf::from("."));
+        let options = options(args, PathBuf::from("."), rate);
         let store = sluice_core::Home::temporary_store()?;
         let bytes = receive_stdout(ticket, &options, &store, &tx).await?;
         output.write_stderr(&format!("wrote {bytes} bytes to standard output\n"));
@@ -160,6 +225,7 @@ fn run_range(
     output: &Output,
     ticket: &str,
     range: ByteRange,
+    rate: Option<std::sync::Arc<Rate>>,
 ) -> Result<u8, Error> {
     let out = std::path::absolute(&args.out)
         .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", args.out.display())))?;
@@ -169,14 +235,14 @@ fn run_range(
         .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
     runtime.block_on(async {
         let (tx, _rx) = unbounded_channel();
-        let options = options(args, out);
+        let options = options(args, out, rate);
         let store = sluice_core::Home::temporary_store()?;
         let bytes = receive_range(ticket, range, &options, &store, &tx).await?;
         output.write_stderr(&format!("wrote {bytes} bytes from the range\n"));
         Ok(0)
     })
 }
-fn options(args: &RecvArgs, out: PathBuf) -> ReceiveOptions {
+fn options(args: &RecvArgs, out: PathBuf, rate: Option<std::sync::Arc<Rate>>) -> ReceiveOptions {
     ReceiveOptions {
         out,
         force: args.force,
@@ -186,6 +252,8 @@ fn options(args: &RecvArgs, out: PathBuf) -> ReceiveOptions {
         limits: Limits::default(),
         free_bytes: None,
         congestion: args.congestion.into(),
+        rate,
+        write_limit: None,
         max_network_failures: sluice_core::queue::MAX_NETWORK_FAILURES,
     }
 }

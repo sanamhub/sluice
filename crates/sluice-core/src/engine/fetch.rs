@@ -28,7 +28,7 @@ pub(super) async fn bounded_blob(
 ) -> Result<Vec<u8>, Error> {
     let size = verified_size(store, conn, hash).await?;
     limits.check_bytes(size)?;
-    fetch_blob(store, conn, hash, 0, 0, events).await?;
+    fetch_blob(store, conn, hash, 0, 0, events, None).await?;
     let (bytes, got) = complete_bytes(store, hash).await?;
     if got != size {
         return Err(Error::Verify(format!(
@@ -61,6 +61,7 @@ pub(super) async fn verified_size(
 /// Fetches a content blob after proving it has the size the manifest gives it. A blob that is
 /// larger or smaller than declared is refused before its body is requested, so a hostile provider
 /// cannot fill the store with bytes the manifest never accounted for.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn content_blob(
     store: &FsStore,
     conn: &iroh::endpoint::Connection,
@@ -68,6 +69,7 @@ pub(super) async fn content_blob(
     expected: u64,
     base: u64,
     total: u64,
+    rate: Option<&super::Rate>,
     events: &UnboundedSender<Event>,
 ) -> Result<(), Error> {
     let size = verified_size(store, conn, hash).await?;
@@ -76,7 +78,7 @@ pub(super) async fn content_blob(
             "a blob has {size} bytes and the manifest says {expected}"
         )));
     }
-    fetch_blob(store, conn, hash, base, total, events).await
+    fetch_blob(store, conn, hash, base, total, events, rate).await
 }
 
 async fn request(
@@ -141,7 +143,8 @@ async fn size_of(store: &FsStore, hash: Hash) -> Result<Option<u64>, Error> {
     )
 }
 
-/// Fetches a whole blob, reporting `base` plus the bytes seen against `total` when it is known.
+/// Fetches a whole blob, reporting `base` plus the bytes seen against `total` when it is known,
+/// and waiting under `rate` for the bytes of each step before it asks for more.
 pub(super) async fn fetch_blob(
     store: &FsStore,
     conn: &iroh::endpoint::Connection,
@@ -149,6 +152,7 @@ pub(super) async fn fetch_blob(
     base: u64,
     total: u64,
     events: &UnboundedSender<Event>,
+    rate: Option<&super::Rate>,
 ) -> Result<(), Error> {
     let mut progress = pin!(
         store
@@ -156,9 +160,14 @@ pub(super) async fn fetch_blob(
             .fetch(conn.clone(), HashAndFormat::raw(hash))
             .stream()
     );
+    let mut seen = 0u64;
     while let Some(item) = progress.next().await {
         match item {
             GetProgressItem::Progress(bytes) => {
+                if let Some(rate) = rate {
+                    rate.acquire(bytes.saturating_sub(seen)).await;
+                }
+                seen = bytes;
                 if total > 0 {
                     super::emit(
                         events,
