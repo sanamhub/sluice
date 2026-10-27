@@ -3,7 +3,7 @@
 //! runtime, and the partial store of a retried job is the one the last attempt left.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     time::{Duration, Instant},
 };
 
@@ -30,13 +30,25 @@ pub fn run(
 ) -> Result<u8, Error> {
     let mut queue = Queue::new();
     let mut texts = BTreeMap::new();
-    let mut pending = Vec::new();
-    for text in tickets {
+    let mut pending = VecDeque::new();
+    // Two tickets with one root would share a partial store, and the job that failed to load it
+    // would remove the store the other job is using, so a command that names one transfer twice is
+    // refused before anything starts.
+    let mut roots: BTreeMap<[u8; 32], usize> = BTreeMap::new();
+    for (index, text) in tickets.iter().enumerate() {
         let ticket = Ticket::decode(text)?;
-        if !matches!(ticket.body(), Body::Static { .. }) {
+        let Body::Static { root, .. } = ticket.body() else {
             return Err(Error::Policy(
                 "a live ticket is received on its own, not with other tickets".to_string(),
             ));
+        };
+        if let Some(first) = roots.insert(*root, index) {
+            return Err(Error::Policy(format!(
+                "ticket {} and ticket {} are the same transfer, which one partial store cannot hold \
+                 twice; give one of them",
+                first + 1,
+                index + 1
+            )));
         }
         let (id, actions) = queue.add(
             Work::Receive {
@@ -60,14 +72,16 @@ async fn drive(
     mut texts: BTreeMap<JobId, String>,
     options: ReceiveOptions,
     output: Output,
-    mut pending: Vec<Action>,
+    mut pending: VecDeque<Action>,
 ) -> Result<u8, Error> {
     let started = Instant::now();
     let mut tasks: JoinSet<Finished> = JoinSet::new();
     let mut wake_at: Option<u64> = None;
-    let mut failure: Option<ErrorKind> = None;
+    // The last state of every job that is not a success, by job, so a job that fails and then
+    // finishes on a retry does not leave the command's exit code behind.
+    let mut failures: BTreeMap<JobId, ErrorKind> = BTreeMap::new();
     loop {
-        while let Some(action) = pending.pop() {
+        while let Some(action) = pending.pop_front() {
             match action {
                 Action::Start(id) => spawn(&mut tasks, &mut texts, &options, output, id)?,
                 Action::Stop(_) => {}
@@ -85,7 +99,7 @@ async fn drive(
             Some(wait) => {
                 tokio::select! {
                     joined = tasks.join_next(), if !tasks.is_empty() => {
-                        pending.extend(settle(joined, &mut queue, &mut failure, started)?);
+                        pending.extend(settle(joined, &mut queue, &mut failures, &mut texts, started)?);
                     }
                     _ = tokio::time::sleep(wait) => {
                         pending.extend(queue.tick(elapsed_ms(started))?);
@@ -95,7 +109,13 @@ async fn drive(
             }
             None if !tasks.is_empty() => {
                 let joined = tasks.join_next().await;
-                pending.extend(settle(joined, &mut queue, &mut failure, started)?);
+                pending.extend(settle(
+                    joined,
+                    &mut queue,
+                    &mut failures,
+                    &mut texts,
+                    started,
+                )?);
             }
             // Only a retry is left, and its time has not come.
             None => {
@@ -106,14 +126,17 @@ async fn drive(
             }
         }
     }
-    Ok(failure.map_or(0, crate::exit::code_of))
+    Ok(failures
+        .values()
+        .next()
+        .map_or(0, |kind| crate::exit::code_of(*kind)))
 }
 
 /// Waits for the next retry to come due and lets the queue start it, or says there is nothing
 /// left to wait for.
 async fn wake_up(
     queue: &mut Queue,
-    pending: &mut Vec<Action>,
+    pending: &mut VecDeque<Action>,
     at: Option<u64>,
     started: Instant,
 ) -> Result<bool, Error> {
@@ -142,8 +165,12 @@ fn spawn(
     output: Output,
     id: JobId,
 ) -> Result<(), Error> {
-    let Some(text) = texts.remove(&id) else {
-        return Err(Error::Bug(format!("the queue started job {id} twice")));
+    // The ticket stays in the map: the queue may start this job again after a network failure,
+    // and the retry reads the same ticket the first attempt did.
+    let Some(text) = texts.get(&id).cloned() else {
+        return Err(Error::Bug(format!(
+            "the queue started job {id}, which has no ticket"
+        )));
     };
     let options = options.clone();
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -168,7 +195,8 @@ fn spawn(
 fn settle(
     joined: Option<Result<Finished, tokio::task::JoinError>>,
     queue: &mut Queue,
-    failure: &mut Option<ErrorKind>,
+    failures: &mut BTreeMap<JobId, ErrorKind>,
+    texts: &mut BTreeMap<JobId, String>,
     started: Instant,
 ) -> Result<Vec<Action>, Error> {
     let Some(joined) = joined else {
@@ -177,10 +205,16 @@ fn settle(
     let (id, result, printed) =
         joined.map_err(|e| Error::Bug(format!("a receive task stopped: {e}")))?;
     printed?;
+    // A job that ends without an error is done, and the ticket is no longer needed. A job that
+    // fails may be started again with the ticket it was given.
     match result {
-        Ok(_) => queue.finished(id),
+        Ok(_) => {
+            failures.remove(&id);
+            texts.remove(&id);
+            queue.finished(id)
+        }
         Err(e) => {
-            *failure = Some(e.kind());
+            failures.insert(id, e.kind());
             queue.failed(id, e.kind(), elapsed_ms(started))
         }
     }
