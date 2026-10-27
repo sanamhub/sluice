@@ -155,6 +155,7 @@ async fn provider_of_lying_manifest(
     dir: &TempDir,
     body: &[u8],
     declared: u64,
+    mtime_ms: u64,
 ) -> (Provider, Hash, Ticket) {
     let home = Home::open(&dir.path().join("lying-home")).unwrap();
     let store = FsStore::load(dir.path().join("lying-store")).await.unwrap();
@@ -164,7 +165,7 @@ async fn provider_of_lying_manifest(
             path: ManifestPath::parse("big.bin").unwrap(),
             kind: Kind::File,
             size: declared,
-            mtime_ms: 0,
+            mtime_ms,
             mode: 0,
             loc: Loc::Blob {
                 root: *hash.as_bytes(),
@@ -213,7 +214,7 @@ async fn provider_of_lying_manifest(
 async fn a_blob_larger_than_its_manifest_says_is_refused_before_its_body() {
     let dir = tempfile::tempdir().unwrap();
     let body = vec![4u8; 2 << 20];
-    let (provider, hash, ticket) = provider_of_lying_manifest(&dir, &body, 1 << 20).await;
+    let (provider, hash, ticket) = provider_of_lying_manifest(&dir, &body, 1 << 20, 0).await;
     let out = dir.path().join("out");
     let mut options = options(&out);
     options.max_network_failures = 1;
@@ -443,4 +444,26 @@ async fn a_range_request_does_not_count_as_a_complete_download() {
     assert_eq!(end, super::ServeEnd::Downloaded);
     client.close().await;
     client_store.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_time_the_platform_cannot_hold_is_skipped_with_a_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = b"a tiny body";
+    let (provider, _hash, ticket) =
+        provider_of_lying_manifest(&dir, body, body.len() as u64, u64::MAX).await;
+    let out = dir.path().join("out");
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    super::receive(&ticket.encode(), &options(&out), &tx)
+        .await
+        .unwrap();
+    assert_eq!(fs::read(out.join("big.bin")).unwrap(), body);
+    let mut warned = false;
+    while let Ok(event) = rx.try_recv() {
+        if matches!(event, super::Event::Warning { .. }) {
+            warned = true;
+        }
+    }
+    assert!(warned, "the file was written without a warning");
+    provider.shutdown().await.unwrap();
 }

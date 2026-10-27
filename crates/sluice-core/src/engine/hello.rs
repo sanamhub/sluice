@@ -250,6 +250,18 @@ mod tests {
     }
 
     #[test]
+    fn an_unshortest_varint_and_one_past_64_bits_are_refused() {
+        let whole = super::encode(Hello::ours());
+        // The version 1 written in three bytes instead of one.
+        let mut padded = vec![0x81, 0x80, 0x00];
+        padded.extend_from_slice(&whole[1..]);
+        assert!(decode(&padded).is_err());
+        // A ten-byte varint whose tenth byte carries a bit past 64.
+        let mut over = vec![0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02];
+        over.extend_from_slice(&whole[1..]);
+        assert!(decode(&over).is_err());
+    }
+    #[test]
     fn another_version_and_trailing_bytes_are_refused() {
         let mut bytes = encode(Hello::ours());
         bytes[0] = 2;
