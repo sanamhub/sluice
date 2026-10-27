@@ -31,6 +31,19 @@ pub async fn prepare(
     expiry_ms: Option<u64>,
     port: Option<u16>,
 ) -> Result<Outgoing, Error> {
+    prepare_with_rate(home, path, relay, congestion, expiry_ms, port, None).await
+}
+
+/// [`prepare`] with a byte rate for serving the file.
+pub async fn prepare_with_rate(
+    home: &Home,
+    path: &Path,
+    relay: RelayModeChoice,
+    congestion: Congestion,
+    expiry_ms: Option<u64>,
+    port: Option<u16>,
+    rate: Option<std::sync::Arc<crate::engine::Rate>>,
+) -> Result<Outgoing, Error> {
     let (shown, name, entry_path, before) = checked_file(path)?;
     let store = FsStore::load(home.path().join("blobs"))
         .await
@@ -46,8 +59,10 @@ pub async fn prepare(
     keep_metadata(&store, &manifest).await?;
     let relay_text = relay_text(&relay);
     let allowed = allowed_roots(&manifest);
-    let provider =
-        Provider::start(home, store, allowed, relay, congestion, expiry_ms, port).await?;
+    let provider = Provider::start_with_rate(
+        home, store, allowed, relay, congestion, expiry_ms, port, rate,
+    )
+    .await?;
     let ticket = ticket_of(&provider, &manifest, before.size, expiry_ms, relay_text)?;
     // The ticket is readable by anyone who has it, so it is printed and never traced.
     Ok(Outgoing {
@@ -72,6 +87,18 @@ pub async fn prepare_stdin(
     congestion: Congestion,
     expiry_ms: Option<u64>,
     port: Option<u16>,
+) -> Result<Outgoing, Error> {
+    prepare_stdin_with_rate(home, relay, congestion, expiry_ms, port, None).await
+}
+
+/// [`prepare_stdin`] with a byte rate for serving the blob.
+pub async fn prepare_stdin_with_rate(
+    home: &Home,
+    relay: RelayModeChoice,
+    congestion: Congestion,
+    expiry_ms: Option<u64>,
+    port: Option<u16>,
+    rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
     let store = FsStore::load(home.path().join("blobs"))
         .await
@@ -103,8 +130,10 @@ pub async fn prepare_stdin(
     let hash = tag.hash();
     let allowed = std::collections::BTreeSet::from([*hash.as_bytes()]);
     let relay_text = relay_text(&relay);
-    let provider =
-        Provider::start(home, store, allowed, relay, congestion, expiry_ms, port).await?;
+    let provider = Provider::start_with_rate(
+        home, store, allowed, relay, congestion, expiry_ms, port, rate,
+    )
+    .await?;
     let ticket = ticket_with_body(
         &provider,
         expiry_ms,

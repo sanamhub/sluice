@@ -4,9 +4,9 @@
 mod folder;
 mod single;
 
-pub use folder::prepare_paths;
+pub use folder::{prepare_paths, prepare_paths_with_rate};
 pub(super) use single::content_roots;
-pub use single::{prepare, prepare_stdin};
+pub use single::{prepare, prepare_stdin, prepare_stdin_with_rate, prepare_with_rate};
 
 use std::{
     fs,

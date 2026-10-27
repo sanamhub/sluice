@@ -39,6 +39,31 @@ pub async fn prepare_live(
     port: Option<u16>,
     close_after: Duration,
 ) -> Result<Outgoing, Error> {
+    prepare_live_with_rate(
+        home,
+        path,
+        relay,
+        congestion,
+        expiry_ms,
+        port,
+        close_after,
+        None,
+    )
+    .await
+}
+
+/// [`prepare_live`] with a byte rate for serving the segments.
+#[allow(clippy::too_many_arguments)]
+pub async fn prepare_live_with_rate(
+    home: &Home,
+    path: &Path,
+    relay: RelayModeChoice,
+    congestion: Congestion,
+    expiry_ms: Option<u64>,
+    port: Option<u16>,
+    close_after: Duration,
+    rate: Option<Arc<crate::engine::Rate>>,
+) -> Result<Outgoing, Error> {
     let shown = path.display().to_string();
     let meta = fs::symlink_metadata(path).map_err(|e| storage::policy_path("read", path, e))?;
     if meta.file_type().is_symlink() {
@@ -69,7 +94,7 @@ pub async fn prepare_live(
     let open = sender.log_open();
     let allowed = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
     let log = Arc::new(LiveLog::new(open, allowed));
-    let provider = Provider::start_live(
+    let provider = Provider::start_live_with_rate(
         home,
         store.clone(),
         log.clone(),
@@ -77,6 +102,7 @@ pub async fn prepare_live(
         congestion,
         expiry_ms,
         port,
+        rate,
     )
     .await?;
     let ticket = ticket_of(&provider, sender_key, stream_id, expiry_ms)?;

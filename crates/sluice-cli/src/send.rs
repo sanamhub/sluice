@@ -7,7 +7,7 @@ use sluice_core::{
     Error, Home,
     engine::{
         N0_WARNING, Outgoing, Rate, RelayModeChoice, StopEnd, deadline, now_ms, parse_expiry,
-        prepare_send, prepare_send_paths,
+        prepare_send_paths_with_rate, prepare_send_with_rate,
     },
 };
 use tokio::sync::mpsc::unbounded_channel;
@@ -90,7 +90,7 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
     runtime.block_on(async {
         let home = Home::open(&Home::locate()?)?;
         let outgoing = if args.live {
-            sluice_core::engine::prepare_live(
+            sluice_core::engine::prepare_live_with_rate(
                 &home,
                 &paths[0],
                 relay,
@@ -98,21 +98,22 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
                 expiry,
                 args.port,
                 std::time::Duration::from_secs(args.close_after),
+                rate,
             )
             .await?
         } else if stdin {
-            sluice_core::engine::prepare_send_stdin(
+            sluice_core::engine::prepare_send_stdin_with_rate(
                 &home,
                 relay,
                 args.congestion.into(),
                 expiry,
                 args.port,
+                rate,
             )
             .await?
         } else {
-            outgoing(&home, &paths, args, relay, expiry).await?
+            outgoing(&home, &paths, args, relay, expiry, rate).await?
         };
-        outgoing.provider.set_rate(rate);
         events::ticket(*output, &outgoing.ticket.encode())?;
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "sending");
@@ -151,26 +152,29 @@ async fn outgoing(
     args: &SendArgs,
     relay: RelayModeChoice,
     expiry: Option<u64>,
+    rate: Option<std::sync::Arc<Rate>>,
 ) -> Result<Outgoing, Error> {
     let one_file = paths.len() == 1 && fs::metadata(&paths[0]).is_ok_and(|meta| meta.is_file());
     if one_file {
-        prepare_send(
+        prepare_send_with_rate(
             home,
             &paths[0],
             relay,
             args.congestion.into(),
             expiry,
             args.port,
+            rate,
         )
         .await
     } else {
-        prepare_send_paths(
+        prepare_send_paths_with_rate(
             home,
             paths,
             relay,
             args.congestion.into(),
             expiry,
             args.port,
+            rate,
         )
         .await
     }

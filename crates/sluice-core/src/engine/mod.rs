@@ -40,7 +40,9 @@ pub use hello::{
     Hello, MAX_FRAME_BYTES, PROTO_VERSION, SluiceProtocol, decode as decode_hello,
     encode as encode_hello, greet,
 };
-pub use live::{CLOSE_AFTER, LiveLog, LiveSend, prepare_live, receive_live};
+pub use live::{
+    CLOSE_AFTER, LiveLog, LiveSend, prepare_live, prepare_live_with_rate, receive_live,
+};
 pub use net::{NetworkReport, report as network_report};
 pub use rate::Rate;
 pub use recv::{ReceiveOptions, Received, receive, top_level_rule};
@@ -48,7 +50,9 @@ pub use recv_range::receive_range;
 pub use recv_stdout::receive_stdout;
 pub use send::{
     Outgoing, StopEnd, default_expiry, prepare as prepare_send,
-    prepare_paths as prepare_send_paths, prepare_stdin as prepare_send_stdin,
+    prepare_paths as prepare_send_paths, prepare_paths_with_rate as prepare_send_paths_with_rate,
+    prepare_stdin as prepare_send_stdin, prepare_stdin_with_rate as prepare_send_stdin_with_rate,
+    prepare_with_rate as prepare_send_with_rate,
 };
 
 /// When `send` stops serving.
@@ -106,7 +110,30 @@ impl Provider {
     ) -> Result<Self, Error> {
         let allowed: BTreeSet<Hash> = allowed.into_iter().map(Hash::from).collect();
         let allowed = Arc::new(Mutex::new(allowed));
-        Self::start_inner(home, store, allowed, None, relay, congestion, expiry, port).await
+        Self::start_inner(
+            home, store, allowed, None, relay, congestion, expiry, port, None,
+        )
+        .await
+    }
+
+    /// [`start`] with a byte rate for serving, which enables the provider throttle.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn start_with_rate(
+        home: &Home,
+        store: FsStore,
+        allowed: BTreeSet<[u8; 32]>,
+        relay: RelayModeChoice,
+        congestion: Congestion,
+        expiry: Option<u64>,
+        port: Option<u16>,
+        rate: Option<Arc<Rate>>,
+    ) -> Result<Self, Error> {
+        let allowed: BTreeSet<Hash> = allowed.into_iter().map(Hash::from).collect();
+        let allowed = Arc::new(Mutex::new(allowed));
+        Self::start_inner(
+            home, store, allowed, None, relay, congestion, expiry, port, rate,
+        )
+        .await
     }
 
     /// Starts a provider whose `sluice/1` connection serves `log`, and whose static policy answers
@@ -131,6 +158,34 @@ impl Provider {
             congestion,
             expiry,
             port,
+            None,
+        )
+        .await
+    }
+
+    /// [`start_live`] with a byte rate, which enables the provider throttle.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn start_live_with_rate(
+        home: &Home,
+        store: FsStore,
+        log: Arc<LiveLog>,
+        relay: RelayModeChoice,
+        congestion: Congestion,
+        expiry: Option<u64>,
+        port: Option<u16>,
+        rate: Option<Arc<Rate>>,
+    ) -> Result<Self, Error> {
+        let allowed = log.allowed();
+        Self::start_inner(
+            home,
+            store,
+            allowed,
+            Some(log),
+            relay,
+            congestion,
+            expiry,
+            port,
+            rate,
         )
         .await
     }
@@ -145,6 +200,7 @@ impl Provider {
         congestion: Congestion,
         expiry: Option<u64>,
         port: Option<u16>,
+        rate: Option<Arc<Rate>>,
     ) -> Result<Self, Error> {
         let seed = home.identity()?.secret_seed();
         let saved = home.saved_port().filter(|_| port.is_none());
@@ -173,7 +229,7 @@ impl Provider {
         }
         endpoint::wait_for_direct_addr(&endpoint).await?;
         let (done, done_rx) = unbounded_channel();
-        let policy = policy::start_shared(allowed, expiry, done, store.clone());
+        let policy = policy::start_shared(allowed, expiry, done, store.clone(), rate);
         let blobs = BlobsProtocol::new(store.deref(), Some(policy.events.clone()));
         let sluice = match live {
             Some(log) => SluiceProtocol::live(log),
@@ -202,11 +258,6 @@ impl Provider {
     #[cfg(test)]
     pub fn served_bytes(&self, hash: Hash) -> u64 {
         self._policy.served(hash)
-    }
-
-    /// Caps the bytes this provider sends per second, shared by every request it serves.
-    pub fn set_rate(&self, rate: Option<Arc<Rate>>) {
-        self._policy.set_rate(rate);
     }
 
     /// The store, for an import before or a check after serving.

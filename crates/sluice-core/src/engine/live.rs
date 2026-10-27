@@ -6,7 +6,7 @@
 mod follow;
 mod recv;
 
-pub use follow::{CLOSE_AFTER, prepare_live};
+pub use follow::{CLOSE_AFTER, prepare_live, prepare_live_with_rate};
 pub use recv::receive_live;
 
 use std::{

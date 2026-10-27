@@ -29,6 +29,19 @@ pub async fn prepare_paths(
     expiry_ms: Option<u64>,
     port: Option<u16>,
 ) -> Result<Outgoing, Error> {
+    prepare_paths_with_rate(home, paths, relay, congestion, expiry_ms, port, None).await
+}
+
+/// [`prepare_paths`] with a byte rate for serving the tree.
+pub async fn prepare_paths_with_rate(
+    home: &Home,
+    paths: &[PathBuf],
+    relay: RelayModeChoice,
+    congestion: Congestion,
+    expiry_ms: Option<u64>,
+    port: Option<u16>,
+    rate: Option<std::sync::Arc<crate::engine::Rate>>,
+) -> Result<Outgoing, Error> {
     let Build::Ready(built) = Manifest::build_paths(paths)? else {
         return Err(Error::Policy(
             "a path cannot be sent because a receiver would reject one of its names".to_string(),
@@ -47,8 +60,10 @@ pub async fn prepare_paths(
     let sequence_root = add_sequence(&store, manifest).await?;
     let mut allowed: BTreeSet<[u8; 32]> = manifest.hash_sequence().into_iter().collect();
     allowed.insert(sequence_root);
-    let provider =
-        Provider::start(home, store, allowed, relay, congestion, expiry_ms, port).await?;
+    let provider = Provider::start_with_rate(
+        home, store, allowed, relay, congestion, expiry_ms, port, rate,
+    )
+    .await?;
     let ticket = ticket_of(&provider, manifest, sequence_root, expiry_ms)?;
     Ok(Outgoing {
         provider,
