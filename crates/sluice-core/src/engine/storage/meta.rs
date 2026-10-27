@@ -1,16 +1,17 @@
 //! The store a receive reads the hash sequence and the manifest into before it may claim its own.
 
-use std::{env, path::PathBuf};
+use std::path::{Path, PathBuf};
 
 use iroh_blobs::store::fs::FsStore;
 
 use super::{remove_quietly, temp_dir};
-use crate::Error;
+use crate::{Error, Home};
 
 /// The store a receive reads the hash sequence and the manifest into. Both are needed before the
 /// checks, which come before this receive may claim a partial store beside the output. It lives in
-/// the system temporary folder, which is this user's on every platform we support, and it is
-/// removed however the receive ends.
+/// the home's `tmp` folder, which is private to this user: the system temporary folder is shared on
+/// Unix, so another local user could read the names and sizes of the manifest there. A kill leaves
+/// the folder behind for the sweep of the next command.
 pub struct MetaStore {
     dir: PathBuf,
     /// The store inside the folder.
@@ -19,7 +20,13 @@ pub struct MetaStore {
 
 impl MetaStore {
     pub async fn open() -> Result<Self, Error> {
-        let dir = temp_dir(&env::temp_dir())?;
+        let parent = Home::temporary_store()?;
+        Self::open_in(&parent).await
+    }
+
+    /// [`open`] in a folder the caller names, which must already be private.
+    pub(super) async fn open_in(parent: &Path) -> Result<Self, Error> {
+        let dir = temp_dir(parent)?;
         let store = match FsStore::load(dir.join("store")).await {
             Ok(store) => store,
             Err(e) => {
@@ -31,6 +38,12 @@ impl MetaStore {
             }
         };
         Ok(Self { dir, store })
+    }
+
+    /// The folder this store owns, so a test can see where it went.
+    #[cfg(test)]
+    pub(super) fn dir(&self) -> &Path {
+        &self.dir
     }
 
     /// Closes the store and removes the folder.

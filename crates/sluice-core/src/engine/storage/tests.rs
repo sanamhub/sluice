@@ -63,6 +63,33 @@ fn an_install_with_force_replaces_the_target() {
     assert!(!incoming.exists());
 }
 
+/// The store that holds the manifest until the checks pass lives in a private folder of the home,
+/// not in the shared system temporary folder where another local user could read the names and
+/// sizes of a transfer. It removes itself when the receive ends.
+#[tokio::test]
+async fn the_metadata_store_lives_in_the_private_folder_it_is_given() {
+    use super::MetaStore;
+    let parent = tempfile::tempdir().unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(parent.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            std::fs::metadata(parent.path())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+    }
+    let store = MetaStore::open_in(parent.path()).await.unwrap();
+    let dir = store.dir().to_path_buf();
+    assert_eq!(dir.parent(), Some(parent.path()));
+    assert!(dir.is_dir());
+    store.close().await.unwrap();
+    assert!(!dir.exists(), "the store folder was left behind");
+}
 /// A marker says which names the run created and whether it was forced, so a resume knows what it
 /// may write into and whether the run it continues was allowed to replace what was there.
 #[test]
