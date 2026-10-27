@@ -143,8 +143,9 @@ async fn a_full_disk_at_write_time_keeps_the_store_for_the_next_run() {
     outgoing.provider.shutdown().await.unwrap();
 }
 
-/// A resumed receive writes into the folders a failed run made and leaves their mode and time
-/// alone: they belong to the user's output now, not to this transfer.
+/// A resumed receive writes into a folder the user already had, and leaves its mode and time alone:
+/// it belongs to the output now, not to this transfer. The first run had to be forced to write
+/// there, so the resume is forced too.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_resume_does_not_take_over_a_folder_that_was_already_there() {
     let dir = tempfile::tempdir().unwrap();
@@ -154,7 +155,10 @@ async fn a_resume_does_not_take_over_a_folder_that_was_already_there() {
     fs::write(source.join("sub").join("x.txt"), b"x").unwrap();
     let (outgoing, text) = prepared_paths(&dir, std::slice::from_ref(&source)).await;
     let out = dir.path().join("out");
+    // The user's own folder, which only `--force` may write into.
+    fs::create_dir_all(out.join("tree")).unwrap();
     let mut limited = options(&out);
+    limited.force = true;
     limited.write_limit = Some(256 * 1024);
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     super::receive(&text, &limited, &tx).await.unwrap_err();
@@ -169,7 +173,9 @@ async fn a_resume_does_not_take_over_a_folder_that_was_already_there() {
         fs::set_permissions(&tree, fs::Permissions::from_mode(0o750)).unwrap();
     }
 
-    super::receive(&text, &options(&out), &tx).await.unwrap();
+    let mut resumed = options(&out);
+    resumed.force = true;
+    super::receive(&text, &resumed, &tx).await.unwrap();
     assert_eq!(fs::read(tree.join("big.bin")).unwrap().len(), 900 * 1024);
     #[cfg(unix)]
     {
@@ -180,6 +186,44 @@ async fn a_resume_does_not_take_over_a_folder_that_was_already_there() {
         assert_eq!(
             fs::metadata(&tree).unwrap().permissions().mode() & 0o777,
             0o750
+        );
+    }
+    outgoing.provider.shutdown().await.unwrap();
+}
+
+/// A folder the cut-off run made is this transfer's, so the resume that finds it already there
+/// still restores its mode. Leaving it out would leave every folder a cut-off run made with the
+/// mode a plain `create_dir` gives.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_resume_restores_the_mode_of_a_folder_its_own_run_made() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("tree");
+    fs::create_dir_all(source.join("sub")).unwrap();
+    fs::write(source.join("big.bin"), vec![7u8; 900 * 1024]).unwrap();
+    fs::write(source.join("sub").join("x.txt"), b"x").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // A mode the sender records and a plain `create_dir` never sets.
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let (outgoing, text) = prepared_paths(&dir, std::slice::from_ref(&source)).await;
+    let out = dir.path().join("out");
+    let mut limited = options(&out);
+    limited.write_limit = Some(256 * 1024);
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    super::receive(&text, &limited, &tx).await.unwrap_err();
+    let tree = out.join("tree");
+    assert!(tree.is_dir());
+
+    super::receive(&text, &options(&out), &tx).await.unwrap();
+    assert_eq!(fs::read(tree.join("big.bin")).unwrap().len(), 900 * 1024);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&tree).unwrap().permissions().mode() & 0o777,
+            0o700
         );
     }
     outgoing.provider.shutdown().await.unwrap();

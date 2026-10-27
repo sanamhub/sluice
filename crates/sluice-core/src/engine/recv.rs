@@ -206,13 +206,13 @@ async fn exchange(
         ticket,
         store,
         manifest,
-        plan,
+        plan: &plan,
         events,
         rate: options.rate.as_deref(),
         max_failures: options.max_network_failures,
     };
     let conn = content::ensure_content(&session, conn).await?;
-    write::write(manifest, plan, store, options, partial, resume, events).await?;
+    write::write(manifest, &plan, store, options, partial, resume, events).await?;
     // Every file is verified and in place, so the whole tree arrived on this machine. Closing the
     // content connection with the completion code is how the sender learns that, and it is the
     // only moment it may: a receive that failed, or that took a range, never sends it.

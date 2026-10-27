@@ -20,7 +20,7 @@ use file::Meta;
 
 pub(super) async fn write(
     manifest: &Manifest,
-    _plan: Plan,
+    plan: &Plan,
     store: &FsStore,
     options: &ReceiveOptions,
     partial: &std::path::Path,
@@ -28,7 +28,7 @@ pub(super) async fn write(
     events: &UnboundedSender<Event>,
 ) -> Result<(), Error> {
     let counts = blob_counts(manifest);
-    let dirs = create_dirs(manifest, options)?;
+    let dirs = create_dirs(manifest, options, &plan.ours)?;
     let tmp = Temp(storage::temp_dir(&options.out)?);
     let mut writer = Writer {
         store,
@@ -321,12 +321,14 @@ pub(in crate::engine) async fn write_range(
     storage::install(&incoming, target, options.force)
 }
 
-/// Every folder entry, in manifest order, and whether this write made it. Manifest order puts a
-/// parent before its children, so one `create_dir` each is enough, and a folder that was already
-/// there is known to belong to someone else.
+/// Every folder entry, in manifest order, and whether this transfer made it. Manifest order puts a
+/// parent before its children, so one `create_dir` each is enough. A folder that is already there
+/// belongs to this transfer when it lies under a top-level name this transfer made: the run that
+/// was cut off created it, so its mode and time are still due.
 fn create_dirs(
     manifest: &Manifest,
     options: &ReceiveOptions,
+    ours: &std::collections::BTreeSet<String>,
 ) -> Result<Vec<(PathBuf, u64, u32, bool)>, Error> {
     let mut dirs = Vec::new();
     for entry in manifest.entries() {
@@ -336,12 +338,19 @@ fn create_dirs(
         let target = entry.path.under(&options.out);
         let made_here = match fs::create_dir(&target) {
             Ok(()) => true,
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && target.is_dir() => false,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && target.is_dir() => {
+                under_ours(entry.path.as_str(), ours)
+            }
             Err(e) => return Err(storage::policy_path("create", &target, e)),
         };
         dirs.push((target, entry.mtime_ms, entry.mode, made_here));
     }
     Ok(dirs)
+}
+
+/// Whether `path` is inside a top-level name this transfer made.
+fn under_ours(path: &str, ours: &std::collections::BTreeSet<String>) -> bool {
+    ours.contains(path.split('/').next().unwrap_or(path))
 }
 
 #[cfg(test)]

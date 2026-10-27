@@ -21,7 +21,7 @@ pub(super) struct Session<'a> {
     pub(super) ticket: &'a Ticket,
     pub(super) store: &'a FsStore,
     pub(super) manifest: &'a Manifest,
-    pub(super) plan: Plan,
+    pub(super) plan: &'a Plan,
     pub(super) events: &'a UnboundedSender<Event>,
     pub(super) rate: Option<&'a crate::engine::Rate>,
     pub(super) max_failures: u32,

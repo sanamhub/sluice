@@ -12,12 +12,16 @@ use crate::{
 };
 
 /// What the checked manifest will write.
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub(super) struct Plan {
     /// How many files.
     pub files: u64,
     /// Their total size in bytes.
     pub bytes: u64,
+    /// The top-level names this receive made, which a folder that is already there belongs to. A
+    /// folder under one of them was made by the run this one continues, so it gets its mode and
+    /// time like any other.
+    pub ours: std::collections::BTreeSet<String>,
 }
 
 /// Checks the whole manifest. Nothing here writes, so a refusal leaves the output untouched. The
@@ -34,12 +38,20 @@ pub(super) fn check(
     check_promised(ticket, bytes)?;
     check_space(options, bytes)?;
     let created = check_top(manifest, options, ours)?;
+    let made = created.union(ours).cloned().collect();
     for entry in manifest.entries() {
         let target = entry.path.under(&options.out);
         check_ancestors(&options.out, &target)?;
         check_target(&target, entry.kind, options.force || resume)?;
     }
-    Ok((Plan { files, bytes }, created))
+    Ok((
+        Plan {
+            files,
+            bytes,
+            ours: made,
+        },
+        created,
+    ))
 }
 
 /// How many files there are and how many bytes they add up to. A manifest comes from a stranger,

@@ -48,8 +48,9 @@ async fn run(
     let plan = Plan {
         files: manifest.entries().len() as u64,
         bytes: manifest.entries().iter().map(|entry| entry.size).sum(),
+        ours: std::collections::BTreeSet::new(),
     };
-    write(manifest, plan, store, &options(out), partial, false, &tx)
+    write(manifest, &plan, store, &options(out), partial, false, &tx)
         .await
         .unwrap();
 }
