@@ -33,3 +33,5 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0022](0022-landing-page-on-cloudflare.md) | The landing page lives in `site/`, on Cloudflare Workers | Accepted |
 | [0023](0023-cubic-until-the-max-bw-fix.md) | Cubic is the default congestion controller until the BBRv3 max bandwidth fix ships | Accepted, amends 0015, amended by 0024 |
 | [0024](0024-congestion-switch-is-delivered.md) | The congestion switch runs in `send` and `recv`, and the started event names it | Accepted, amends 0023 |
+| [0025](0025-receiver-says-when-complete.md) | A receiver says when the transfer is complete | Accepted, corrected by 0026 |
+| [0026](0026-completion-code-needs-every-root.md) | The completion code counts only for a connection that asked for every root | Accepted, corrects 0025 |

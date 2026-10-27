@@ -20,7 +20,7 @@ pub struct Provider {
     router: Option<Router>,
     endpoint: Endpoint,
     store: FsStore,
-    _policy: policy::Policy,
+    policy: policy::Policy,
     done: tokio::sync::mpsc::UnboundedReceiver<policy::ServeEvent>,
     /// One message per connection that a receiver closed with the completion code, holding that
     /// connection. The sender end is kept so the channel never closes while this provider is alive.
@@ -46,7 +46,7 @@ impl Provider {
     /// Payload this provider sent of `hash`, for a test that checks what a request moved.
     #[cfg(test)]
     pub fn served_bytes(&self, hash: Hash) -> u64 {
-        self._policy.served(hash)
+        self.policy.served(hash)
     }
 
     /// The store, for an import before or a check after serving.
@@ -126,6 +126,9 @@ impl Provider {
         if left == 0 {
             return Ok(ServeEnd::Expired);
         }
+        // Kept whole because `remaining` shrinks: a completion code is checked against every root
+        // of the transfer, not only the ones still outstanding.
+        let wanted = remaining.clone();
         let mut deadline = Box::pin(tokio::time::sleep(Duration::from_millis(left)));
         // Started when the last root is delivered and never restarted, so a client that keeps
         // asking for something else cannot hold the sender open for ever.
@@ -136,8 +139,15 @@ impl Provider {
             tokio::select! {
                 // The receiver verified and installed every file, which is the signal that says so.
                 // It ends the wait even when a byte count would not: a resumed receive takes only
-                // what the first one was missing, so this process never sees the whole blob.
-                Some(_connection) = self.complete.recv() => return Ok(ServeEnd::Downloaded),
+                // what the first one was missing, so this process never sees the whole blob. It is
+                // believed only for a connection that asked for every root: the close code is
+                // unauthenticated, so anyone who can reach this sender could otherwise end a send
+                // without a ticket and make it print success.
+                Some(connection) = self.complete.recv() => {
+                    if wanted.is_subset(&self.policy.asked_by(connection)) {
+                        return Ok(ServeEnd::Downloaded);
+                    }
+                }
                 event = self.done.recv() => match event {
                     Some(policy::ServeEvent::Downloaded { hash, connection }) => {
                         if remaining.remove(&hash) {

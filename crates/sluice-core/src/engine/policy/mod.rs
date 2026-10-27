@@ -25,7 +25,14 @@ use tokio::sync::mpsc::UnboundedSender;
 /// asked for twice counts once, so two requests for the first half are not the whole file.
 type Served = BTreeMap<Hash, Vec<(u64, u64)>>;
 
-/// time could otherwise grow this map without bound; past the cap the root is simply never
+/// The roots each connection asked for and was allowed to read. The completion code is believed
+/// only from a connection whose set holds every root of the transfer.
+type Asked = BTreeMap<u64, BTreeSet<Hash>>;
+
+/// How many connections the provider remembers. Past this the oldest record goes, so a peer that
+/// opens thousands of connections can only make the sender serve longer, never shorter.
+const MAX_ASKED: usize = 1024;
+
 /// The provider's policy and the task that answers its request events.
 pub struct Policy {
     /// Handed to `BlobsProtocol`, which uses it for every request.
@@ -33,6 +40,8 @@ pub struct Policy {
     /// Payload served per connection and blob, so a test can see what a request moved.
     #[cfg(test)]
     totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>>,
+    /// What each connection asked for, so the provider can check a completion code against it.
+    asked: Arc<Mutex<Asked>>,
     /// Aborted when the provider goes away, so no event task outlives it.
     pub _task: AbortOnDropHandle<()>,
 }
@@ -46,6 +55,14 @@ impl Policy {
             .filter(|((_, served), _)| *served == hash)
             .map(|(_, bytes)| *bytes)
             .sum()
+    }
+
+    /// The roots `connection` asked for and was allowed to read.
+    pub fn asked_by(&self, connection: u64) -> BTreeSet<Hash> {
+        lock(&self.asked)
+            .get(&connection)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -83,6 +100,7 @@ struct Gate {
     store: FsStore,
     totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>>,
     served: Arc<Mutex<Served>>,
+    asked: Arc<Mutex<Asked>>,
     rate: Option<Arc<super::Rate>>,
 }
 
@@ -97,6 +115,7 @@ pub fn start_shared(
 ) -> Policy {
     let (events, mut rx) = EventSender::channel(32, mask(rate.is_some()));
     let totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>> = Arc::default();
+    let asked: Arc<Mutex<Asked>> = Arc::default();
     let gate = Gate {
         allowed,
         expiry,
@@ -104,6 +123,7 @@ pub fn start_shared(
         store,
         totals: Arc::clone(&totals),
         served: Arc::default(),
+        asked: Arc::clone(&asked),
         rate,
     };
     let task = AbortOnDropHandle::new(n0_future::task::spawn(async move {
@@ -115,6 +135,7 @@ pub fn start_shared(
         events,
         #[cfg(test)]
         totals,
+        asked,
         _task: task,
     }
 }
@@ -158,6 +179,7 @@ impl Gate {
                 if msg.tx.send(answer(ok)).await.is_err() || !ok {
                     return;
                 }
+                self.remember(connection, hash);
                 let done = self.done.clone();
                 let store = self.store.clone();
                 let totals = Arc::clone(&self.totals);
@@ -206,6 +228,20 @@ impl Gate {
     /// The one access rule: an allowed hash, before the ticket's deadline.
     fn may(&self, hash: Hash) -> bool {
         !expired(self.expiry) && lock(&self.allowed).contains(&hash)
+    }
+
+    /// Notes that `connection` asked for `hash`, which is what a completion code is checked
+    /// against. A refused request is never noted, so a peer without the ticket cannot have the
+    /// code believed for a root it was not allowed to read.
+    fn remember(&self, connection: u64, hash: Hash) {
+        let mut asked = lock(&self.asked);
+        if asked.len() >= MAX_ASKED
+            && !asked.contains_key(&connection)
+            && let Some(oldest) = asked.keys().next().copied()
+        {
+            asked.remove(&oldest);
+        }
+        asked.entry(connection).or_default().insert(hash);
     }
 
     /// The same rule for a request that names several hashes at once: every one has to be allowed,

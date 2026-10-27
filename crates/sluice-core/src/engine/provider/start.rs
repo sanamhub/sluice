@@ -180,7 +180,7 @@ impl Provider {
             router: Some(router),
             endpoint,
             store,
-            _policy: policy,
+            policy,
             done: done_rx,
             complete: complete_rx,
             _complete: complete,
