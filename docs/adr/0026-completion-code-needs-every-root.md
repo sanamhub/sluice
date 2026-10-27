@@ -39,10 +39,10 @@ sees success.
   off and reconnects mid-transfer asks for the remaining roots on the new connection, so its code
   names only those. The sender then falls back to counting bytes, which is what a client that never
   sends the code does.
-- A transfer of several roots that is *resumed* against a new sender process is ended by the byte
-  count only for the roots that process served; the others were served by the process that was
-  killed, so the new sender waits for its ticket expiry instead of stopping on the code. A
-  single-root transfer, which is every one-file and every packed folder, resumes and stops on the
-  code as before.
+- A resumed transfer still ends its sender, including one of several roots. A receive asks for the
+  first chunk of every content root to prove its size, whether or not its store already holds the
+  blob, so the connection that sends the code asked for every root even when the bytes came from
+  the process that was killed. This was measured: a tree whose store was nearly complete and a
+  broken connection into a fresh sender finished and ended that sender.
 - The policy's connection records are the only new state. They hold hashes the transfer already
   allows and are dropped with the provider.
