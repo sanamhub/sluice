@@ -4,6 +4,9 @@
 mod plan;
 mod write;
 
+pub(super) use plan::check_one;
+pub(super) use write::write_range;
+
 use std::{
     collections::BTreeSet,
     fs,
@@ -206,35 +209,36 @@ async fn prepare(
     resume: bool,
     events: &UnboundedSender<Event>,
 ) -> Result<(Manifest, Plan), Error> {
+    let manifest = fetch_manifest(conn, ticket, store, options.limits, events).await?;
+    let plan = plan::check(&manifest, ticket, options, resume)?;
+    Ok((manifest, plan))
+}
+
+/// Fetches the hash sequence and the manifest and checks that one names the other. The store is
+/// open by now because the manifest lives in it; nothing here looks at the output folder.
+pub(super) async fn fetch_manifest(
+    conn: &iroh::endpoint::Connection,
+    ticket: &Ticket,
+    store: &FsStore,
+    limits: crate::manifest::Limits,
+    events: &UnboundedSender<Event>,
+) -> Result<Manifest, Error> {
     let sequence_root = static_root(ticket)?;
-    let sequence_bytes = fetch::bounded_blob(
-        store,
-        conn,
-        Hash::from(sequence_root),
-        options.limits,
-        events,
-    )
-    .await?;
-    let sequence = parse_sequence(&sequence_bytes, options.limits)?;
+    let sequence_bytes =
+        fetch::bounded_blob(store, conn, Hash::from(sequence_root), limits, events).await?;
+    let sequence = parse_sequence(&sequence_bytes, limits)?;
     let manifest_root = *sequence
         .first()
         .ok_or_else(|| Error::Policy("the hash sequence names no manifest root".to_string()))?;
-    let manifest_bytes = fetch::bounded_blob(
-        store,
-        conn,
-        Hash::from(manifest_root),
-        options.limits,
-        events,
-    )
-    .await?;
-    let manifest = Manifest::decode(&manifest_bytes, options.limits)?;
+    let manifest_bytes =
+        fetch::bounded_blob(store, conn, Hash::from(manifest_root), limits, events).await?;
+    let manifest = Manifest::decode(&manifest_bytes, limits)?;
     if manifest.hash_sequence() != sequence {
         return Err(Error::Policy(
             "the hash sequence does not match the manifest".to_string(),
         ));
     }
-    let plan = plan::check(&manifest, ticket, options, resume)?;
-    Ok((manifest, plan))
+    Ok(manifest)
 }
 
 /// What a receive fetches and writes, bundled so the retry loop takes one argument.
@@ -387,7 +391,7 @@ fn static_root(ticket: &Ticket) -> Result<[u8; 32], Error> {
     }
 }
 
-fn refuse_expired(ticket: &Ticket) -> Result<(), Error> {
+pub(super) fn refuse_expired(ticket: &Ticket) -> Result<(), Error> {
     if ticket.is_expired(super::now_ms()) {
         return Err(Error::Policy(
             "the ticket has expired; ask the sender for a new one".to_string(),
@@ -396,7 +400,7 @@ fn refuse_expired(ticket: &Ticket) -> Result<(), Error> {
     Ok(())
 }
 
-fn relay_of(ticket: &Ticket) -> RelayModeChoice {
+pub(super) fn relay_of(ticket: &Ticket) -> RelayModeChoice {
     ticket.relay_url().map_or(RelayModeChoice::Disabled, |url| {
         RelayModeChoice::Url(url.to_string())
     })

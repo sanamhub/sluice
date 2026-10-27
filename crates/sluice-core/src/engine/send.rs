@@ -91,6 +91,106 @@ pub async fn prepare(
     })
 }
 
+/// Sends standard input as a raw blob, ticket format 0. The bytes are read to the end before the
+/// root is known, so they are copied into the store rather than referenced, and the pipe closes
+/// before the ticket is printed.
+pub async fn prepare_stdin(
+    home: &Home,
+    relay: RelayModeChoice,
+    congestion: Congestion,
+    expiry_ms: Option<u64>,
+    port: Option<u16>,
+) -> Result<Outgoing, Error> {
+    let store = FsStore::load(home.path().join("blobs"))
+        .await
+        .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
+    let tmp_root = home.path().join("tmp");
+    fs::create_dir_all(&tmp_root)
+        .map_err(|e| Error::Storage(format!("cannot create {}: {e}", tmp_root.display())))?;
+    let tmp = storage::temp_dir(&tmp_root)?;
+    let path = tmp.join("input");
+    let size = match read_stdin(&path).await {
+        Ok(size) => size,
+        Err(e) => {
+            storage::remove_quietly(&tmp);
+            return Err(e);
+        }
+    };
+    let copied = store
+        .blobs()
+        .add_path_with_opts(AddPathOptions {
+            path: path.clone(),
+            format: BlobFormat::Raw,
+            mode: ImportMode::Copy,
+        })
+        .temp_tag()
+        .await;
+    storage::remove_quietly(&tmp);
+    let tag = copied
+        .map_err(|e| Error::Storage(format!("cannot keep standard input: {}", crate::chain(&e))))?;
+    let hash = tag.hash();
+    let allowed = std::collections::BTreeSet::from([*hash.as_bytes()]);
+    let relay_text = relay_text(&relay);
+    let provider =
+        Provider::start(home, store, allowed, relay, congestion, expiry_ms, port).await?;
+    let ticket = ticket_with_body(
+        &provider,
+        expiry_ms,
+        relay_text,
+        Body::Static {
+            root: *hash.as_bytes(),
+            size,
+            format: Format::Raw,
+        },
+    )?;
+    Ok(Outgoing {
+        provider,
+        ticket,
+        roots: vec![*hash.as_bytes()],
+        name: None,
+        files: 1,
+        bytes: size,
+        congestion,
+        _tags: vec![tag],
+    })
+}
+
+/// Reads standard input to a file on disk, so a large pipe never sits in memory.
+async fn read_stdin(path: &Path) -> Result<u64, Error> {
+    let target = path.to_path_buf();
+    let read = tokio::task::spawn_blocking(move || {
+        let mut file = fs::File::create(&target)?;
+        let mut stdin = std::io::stdin().lock();
+        let size = std::io::copy(&mut stdin, &mut file)?;
+        file.sync_all()?;
+        Ok::<u64, std::io::Error>(size)
+    })
+    .await
+    .map_err(|e| Error::Storage(format!("reading standard input stopped: {e}")))?;
+    read.map_err(|e| storage::storage("read standard input into", path, e))
+}
+
+/// A ticket for a body other than a manifest sequence, with the provider's addresses and relay.
+fn ticket_with_body(
+    provider: &Provider,
+    expiry_ms: Option<u64>,
+    relay_text: Option<String>,
+    body: Body,
+) -> Result<Ticket, Error> {
+    let addr = provider.addr();
+    let relay_url = relay_text.or_else(|| {
+        addr.relay_urls()
+            .next()
+            .map(std::string::ToString::to_string)
+    });
+    Ticket::new(
+        *addr.id.as_bytes(),
+        addr.ip_addrs().copied().collect(),
+        relay_url,
+        expiry_ms,
+        body,
+    )
+}
 /// The name, path and metadata of the one file a single-file send carries.
 fn checked_file(path: &Path) -> Result<(String, String, ManifestPath, Stamp), Error> {
     let shown = path.display().to_string();

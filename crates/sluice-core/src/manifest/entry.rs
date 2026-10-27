@@ -107,7 +107,7 @@ pub struct PackRef {
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
-    /// Relative to the folder that was sent, which is not an entry itself.
+    /// Relative to the output folder.
     pub path: ManifestPath,
     /// File, folder or symlink.
     pub kind: Kind,

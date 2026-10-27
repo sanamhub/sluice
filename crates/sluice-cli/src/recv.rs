@@ -5,8 +5,9 @@ use std::{io::BufRead, path::PathBuf};
 use clap::Args;
 use sluice_core::{
     Error,
-    engine::{ReceiveOptions, receive},
+    engine::{ReceiveOptions, receive, receive_range, receive_stdout},
     manifest::Limits,
+    range::ByteRange,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -18,7 +19,7 @@ pub struct RecvArgs {
     /// The ticket the sender printed, or `-` to read it from standard input
     #[arg(value_name = "TICKET")]
     pub ticket: String,
-    /// The folder to write into
+    /// The folder to write into, or `-` to write a single file to standard output
     #[arg(long, default_value = ".", value_name = "DIR")]
     pub out: PathBuf,
     /// Replace a path that is already there
@@ -30,6 +31,9 @@ pub struct RecvArgs {
     /// Create the symlinks the sender recorded (never followed outside the output)
     #[arg(long)]
     pub links: bool,
+    /// Write only this byte range of a one-file transfer, such as `4G:4.1G` (a folder is refused)
+    #[arg(long, value_name = "RANGE")]
+    pub range: Option<String>,
     /// Accept a top-level name that starts with a dot, such as `.ssh`
     #[arg(long)]
     pub allow_hidden: bool,
@@ -40,6 +44,18 @@ pub struct RecvArgs {
 
 pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
     let ticket = ticket_text(&args.ticket)?;
+    let range = args.range.as_deref().map(ByteRange::parse).transpose()?;
+    if args.out.as_path() == std::path::Path::new("-") {
+        if range.is_some() {
+            return Err(Error::Policy(
+                "--range writes a file, so it cannot be combined with --out -".to_string(),
+            ));
+        }
+        return to_stdout(args, output, &ticket);
+    }
+    if let Some(range) = range {
+        return run_range(args, output, &ticket, range);
+    }
     let out = std::path::absolute(&args.out)
         .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", args.out.display())))?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -49,17 +65,7 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
     runtime.block_on(async {
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "receiving");
-        let options = ReceiveOptions {
-            out,
-            force: args.force,
-            no_times: args.no_times,
-            links: args.links,
-            allow_hidden: args.allow_hidden,
-            limits: Limits::default(),
-            free_bytes: None,
-            congestion: args.congestion.into(),
-            max_network_failures: sluice_core::queue::MAX_NETWORK_FAILURES,
-        };
+        let options = options(args, out);
         let result = receive(&ticket, &options, &tx).await;
         drop(tx);
         let printed = printer
@@ -80,6 +86,61 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
         }
         Ok(0)
     })
+}
+
+/// Writes the content to standard output, where nothing else may go.
+fn to_stdout(args: &RecvArgs, output: &Output, ticket: &str) -> Result<u8, Error> {
+    if matches!(output.format(), crate::output::Format::Json) {
+        return Err(Error::Policy(
+            "--json writes events to standard output, so --out - cannot share it".to_string(),
+        ));
+    }
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
+    runtime.block_on(async {
+        let (tx, _rx) = unbounded_channel();
+        let options = options(args, PathBuf::from("."));
+        let bytes = receive_stdout(ticket, &options, &tx).await?;
+        output.write_stderr(&format!("wrote {bytes} bytes to standard output\n"));
+        Ok(0)
+    })
+}
+
+/// Writes the requested range of a one-file transfer to its usual name in the output folder.
+fn run_range(
+    args: &RecvArgs,
+    output: &Output,
+    ticket: &str,
+    range: ByteRange,
+) -> Result<u8, Error> {
+    let out = std::path::absolute(&args.out)
+        .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", args.out.display())))?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
+    runtime.block_on(async {
+        let (tx, _rx) = unbounded_channel();
+        let options = options(args, out);
+        let bytes = receive_range(ticket, range, &options, &tx).await?;
+        output.write_stderr(&format!("wrote {bytes} bytes from the range\n"));
+        Ok(0)
+    })
+}
+fn options(args: &RecvArgs, out: PathBuf) -> ReceiveOptions {
+    ReceiveOptions {
+        out,
+        force: args.force,
+        no_times: args.no_times,
+        links: args.links,
+        allow_hidden: args.allow_hidden,
+        limits: Limits::default(),
+        free_bytes: None,
+        congestion: args.congestion.into(),
+        max_network_failures: sluice_core::queue::MAX_NETWORK_FAILURES,
+    }
 }
 
 /// The ticket as given, or the one line on standard input when the argument is `-`. A ticket on

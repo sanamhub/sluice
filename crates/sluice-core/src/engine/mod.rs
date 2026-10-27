@@ -8,6 +8,8 @@ mod fetch;
 mod hello;
 mod policy;
 mod recv;
+mod recv_range;
+mod recv_stdout;
 mod send;
 mod storage;
 
@@ -35,8 +37,11 @@ pub use hello::{
     encode as encode_hello, greet,
 };
 pub use recv::{ReceiveOptions, Received, receive, top_level_rule};
+pub use recv_range::receive_range;
+pub use recv_stdout::receive_stdout;
 pub use send::{
-    Outgoing, StopEnd, default_expiry, prepare as prepare_send, prepare_paths as prepare_send_paths,
+    Outgoing, StopEnd, default_expiry, prepare as prepare_send,
+    prepare_paths as prepare_send_paths, prepare_stdin as prepare_send_stdin,
 };
 
 /// When `send` stops serving.

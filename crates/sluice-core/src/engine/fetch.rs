@@ -94,6 +94,37 @@ async fn request(
         .map_err(|e| Error::Network(format!("the transfer stopped: {e}")))
 }
 
+/// Fetches a whole blob with an explicit request, even when the store already holds it, so the
+/// provider sees a request that covers the whole blob and a raw receive has something to count.
+pub(super) async fn fetch_whole(
+    store: &FsStore,
+    conn: &iroh::endpoint::Connection,
+    hash: Hash,
+) -> Result<(), Error> {
+    store
+        .remote()
+        .execute_get(conn.clone(), GetRequest::blob(hash))
+        .complete()
+        .await
+        .map(|_| ())
+        .map_err(classify)
+}
+/// Fetches a range of a blob, verified block by block against its root. The range is in bytes and
+/// is rounded up to whole blocks, which is the smallest unit `iroh-blobs` verifies.
+pub(super) async fn fetch_range(
+    store: &FsStore,
+    conn: &iroh::endpoint::Connection,
+    hash: Hash,
+    ranges: ChunkRanges,
+) -> Result<(), Error> {
+    store
+        .remote()
+        .execute_get(conn.clone(), GetRequest::blob_ranges(hash, ranges))
+        .complete()
+        .await
+        .map(|_| ())
+        .map_err(classify)
+}
 /// The size a store has proved for a blob, if it has.
 async fn size_of(store: &FsStore, hash: Hash) -> Result<Option<u64>, Error> {
     Ok(

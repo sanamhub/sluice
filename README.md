@@ -19,8 +19,9 @@ It is built for large files and slow links. Every piece of the file is checked a
 dropped transfer picks up where it stopped. There is no account, no hosted service, no size plan,
 and no server in the middle that you did not choose.
 
-> **Status:** pre-1.0. `sluice id`, `sluice doctor` and `sluice completions` work today. Sending and
-> receiving are planned for 1.0 and do not exist yet.
+> **Status:** pre-1.0. `sluice send`, `sluice recv`, `sluice id`, `sluice doctor` and
+> `sluice completions` work today. Live mode, the queue, `doctor --network` and the desktop and
+> browser clients do not exist yet.
 
 ## Why it is different
 
@@ -34,13 +35,23 @@ and no server in the middle that you did not choose.
 
 ## Try it
 
-There is no release yet, so build from source. These three commands work today:
+There is no release yet, so build from source. A transfer between two folders on one machine, or
+two machines that can reach each other, works today:
 
 ```sh
+cargo run -p sluice-cli -- send ./bigfile.mkv    # prints a ticket
+cargo run -p sluice-cli -- recv <ticket> --out ./out
+cat dump.sql | cargo run -p sluice-cli -- send - # a pipe is copied into the store first
+cargo run -p sluice-cli -- recv <ticket> --out - # a single file to standard output
+
 cargo run -p sluice-cli -- id
 cargo run -p sluice-cli -- doctor
 cargo run -p sluice-cli -- completions bash
 ```
+
+A folder arrives inside a folder of its own name, as copying it in a file manager does. A name
+already in the output folder refuses the whole transfer unless `--force`, a top-level name that
+starts with `.` needs `--allow-hidden`, and a link is replaced as an entry and never followed.
 
 `doctor` changes nothing. It prints one line per check, `ok`, `warning`, `failed` or `skipped`, and
 the step that fixes a problem under it. Its exit code is 0 unless a check failed, and `transport` is
@@ -57,18 +68,14 @@ There is no release yet. When there is one, [`docs/install.md`](docs/install.md)
 archive names and the commands that check where an archive came from before it is run. The
 installers in a release check less than that, and the same page says what each one does.
 
-## The 1.0 plan
+## More of 1.0
 
-These commands do not exist yet. The parser behind `--range` does: it is tested and fuzzed, and
-lives in `sluice-core`.
+Live mode is not supported yet. The rest works today.
 
 ```sh
-sluice send ./bigfile.mkv               # prints a ticket
-sluice recv <ticket> -o ./out
-
-sluice send --live ./recording.mkv      # send a file while it is still being written
-cat dump.sql | sluice send -            # send a pipe
 sluice recv <ticket> --range 4G:4.1G    # fetch and verify one byte range
+
+sluice send --live ./recording.mkv      # not supported yet
 ```
 
 `--range` takes a half-open range, `start:end`, `start:+length`, `start:` or `:end`, in bytes or

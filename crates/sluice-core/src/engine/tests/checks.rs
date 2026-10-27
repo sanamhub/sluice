@@ -300,10 +300,12 @@ async fn an_expiry_cuts_off_a_get_that_started_before_it() {
     let dir = tempfile::tempdir().unwrap();
     let home = Home::open(&dir.path().join("home")).unwrap();
     let store = FsStore::load(dir.path().join("store")).await.unwrap();
-    // A sparse file is read by reference, so the test does not hold 128 MiB in memory.
+    // A sparse file is read by reference, so the test does not hold 512 MiB in memory. It is
+    // large enough that a debug-build fetch cannot finish before the deadline, which is what
+    // leaves a get in flight when the expiry closes the connection.
     let path = dir.path().join("large.bin");
     let file = fs::File::create(&path).unwrap();
-    file.set_len(128 << 20).unwrap();
+    file.set_len(512 << 20).unwrap();
     drop(file);
     let tag = store
         .blobs()
@@ -316,7 +318,18 @@ async fn an_expiry_cuts_off_a_get_that_started_before_it() {
         .await
         .unwrap();
     let hash = tag.hash();
-    let expiry = super::now_ms() + 300;
+    let client_store = FsStore::load(dir.path().join("client")).await.unwrap();
+    // The client is bound before the deadline is set, so a slow machine spends its time before
+    // the ticket exists rather than inside the transfer being measured.
+    let client = endpoint::bind(
+        None,
+        &RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+    )
+    .await
+    .unwrap();
+    let expiry = super::now_ms() + 1500;
     let provider = Provider::start(
         &home,
         store,
@@ -330,15 +343,6 @@ async fn an_expiry_cuts_off_a_get_that_started_before_it() {
     .unwrap();
     let addr = provider.addr();
     let serve = tokio::spawn(async move { provider.serve(super::Stop::Keep).await });
-    let client_store = FsStore::load(dir.path().join("client")).await.unwrap();
-    let client = endpoint::bind(
-        None,
-        &RelayModeChoice::Disabled,
-        super::Congestion::Cubic,
-        None,
-    )
-    .await
-    .unwrap();
     let conn = client.connect(addr, iroh_blobs::ALPN).await.unwrap();
     let err = client_store
         .remote()
@@ -385,4 +389,58 @@ async fn a_network_failure_keeps_the_partial_store_for_a_resume() {
     let err = task.await.unwrap().unwrap_err();
     assert!(matches!(err, Error::Network(_)), "{err}");
     assert!(partial_exists(&out), "the partial store was removed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_range_request_does_not_count_as_a_complete_download() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(&dir.path().join("home")).unwrap();
+    let store = FsStore::load(dir.path().join("store")).await.unwrap();
+    let body = vec![7u8; 1 << 20];
+    let hash = store.add_slice(&body).await.unwrap().hash;
+    let provider = Provider::start(
+        &home,
+        store,
+        BTreeSet::from([*hash.as_bytes()]),
+        RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let addr = provider.addr();
+    let client_store = FsStore::load(dir.path().join("client")).await.unwrap();
+    let client = endpoint::bind(
+        None,
+        &RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+    )
+    .await
+    .unwrap();
+    let conn = client.connect(addr, iroh_blobs::ALPN).await.unwrap();
+    crate::engine::fetch::fetch_range(&client_store, &conn, hash, ChunkRanges::bytes(1000..2000))
+        .await
+        .unwrap();
+    let mut serve = tokio::spawn(async move {
+        provider
+            .serve(super::Stop::OneDownload(vec![*hash.as_bytes()]))
+            .await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), &mut serve)
+            .await
+            .is_err(),
+        "a byte range stopped the sender"
+    );
+    conn.close(0u32.into(), b"done");
+    let end = tokio::time::timeout(Duration::from_secs(5), serve)
+        .await
+        .expect("the sender did not stop after the client left")
+        .unwrap()
+        .unwrap();
+    assert_eq!(end, super::ServeEnd::Downloaded);
+    client.close().await;
+    client_store.shutdown().await.unwrap();
 }

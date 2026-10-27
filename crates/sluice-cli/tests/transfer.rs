@@ -477,3 +477,241 @@ fn a_taken_port_is_refused_with_its_number() {
         "{text}"
     );
 }
+
+/// Starts a sender that reads its content from standard input, and returns its ticket.
+fn start_stdin(home: &Path, body: &[u8], expires: &str) -> (Sender, String) {
+    let mut child = Command::new(EXE)
+        .env("SLUICE_HOME", home)
+        .args(["send", "-", "--expires", expires])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("start send");
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(body)
+        .expect("write standard input");
+    drop(child.stdin.take());
+    let mut line = String::new();
+    BufReader::new(child.stdout.as_mut().unwrap())
+        .read_line(&mut line)
+        .expect("read ticket");
+    assert!(line.starts_with("sluice1"), "stdout is a ticket: {line:?}");
+    (Sender(child), line.trim().to_string())
+}
+
+#[test]
+fn standard_input_crosses_as_a_raw_blob() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let body = data(200 * 1024, 5);
+    let (mut sender, ticket) = start_stdin(&home, &body, "1h");
+
+    let result = Command::new(EXE)
+        .env("SLUICE_HOME", &home)
+        .args(["recv", &ticket, "--out", "-"])
+        .output()
+        .expect("run recv");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(result.stdout, body);
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("wrote 204800 bytes"),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    wait_for_sender(&mut sender);
+}
+
+#[test]
+fn an_empty_pipe_is_a_valid_raw_blob() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let (mut sender, ticket) = start_stdin(&home, b"", "1h");
+    let result = Command::new(EXE)
+        .env("SLUICE_HOME", &home)
+        .args(["recv", &ticket, "--out", "-"])
+        .output()
+        .expect("run recv");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(result.stdout.is_empty());
+    wait_for_sender(&mut sender);
+}
+
+#[test]
+fn a_one_file_transfer_goes_to_standard_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let file = dir.path().join("one.bin");
+    let body = data(150 * 1024, 8);
+    std::fs::write(&file, &body).unwrap();
+
+    let (mut sender, ticket) = start(&home, &file, "1h");
+    let result = Command::new(EXE)
+        .env("SLUICE_HOME", &home)
+        .args(["recv", &ticket, "--out", "-"])
+        .output()
+        .expect("run recv");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(result.stdout, body);
+    wait_for_sender(&mut sender);
+}
+
+#[test]
+fn a_folder_is_refused_on_standard_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let tree = dir.path().join("tree");
+    std::fs::create_dir(&tree).unwrap();
+    std::fs::write(tree.join("a.txt"), b"one").unwrap();
+    std::fs::write(tree.join("b.txt"), b"two").unwrap();
+
+    let (sender, ticket) = start(&home, &tree, "1h");
+    let result = Command::new(EXE)
+        .env("SLUICE_HOME", &home)
+        .args(["recv", &ticket, "--out", "-"])
+        .output()
+        .expect("run recv");
+    assert_eq!(result.status.code(), Some(6));
+    assert!(result.stdout.is_empty());
+    let text = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        text.contains("folder cannot be written to standard output"),
+        "{text}"
+    );
+    drop(sender);
+}
+
+#[test]
+fn json_cannot_share_standard_output_with_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let file = dir.path().join("json.bin");
+    std::fs::write(&file, b"bytes").unwrap();
+    let (_sender, ticket) = start(&home, &file, "1h");
+    let result = Command::new(EXE)
+        .env("SLUICE_HOME", &home)
+        .args(["--json", "recv", &ticket, "--out", "-"])
+        .output()
+        .expect("run recv");
+    assert_eq!(result.status.code(), Some(6));
+    assert!(result.stdout.is_empty());
+    let text = String::from_utf8_lossy(&result.stderr);
+    assert!(text.contains("--out - cannot share it"), "{text}");
+}
+
+fn recv_range(home: &Path, ticket: &str, out: &Path, range: &str) -> std::process::Output {
+    Command::new(EXE)
+        .env("SLUICE_HOME", home)
+        .args([
+            "recv",
+            ticket,
+            "--out",
+            out.to_str().unwrap(),
+            "--range",
+            range,
+        ])
+        .output()
+        .expect("run recv")
+}
+
+#[test]
+fn a_byte_range_writes_only_those_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let out = dir.path().join("out");
+    let file = dir.path().join("range.bin");
+    let body = data(300 * 1024, 12);
+    std::fs::write(&file, &body).unwrap();
+
+    let (mut sender, ticket) = start(&home, &file, "1h");
+    let result = recv_range(&home, &ticket, &out, "1000:2000");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(
+        std::fs::read(out.join("range.bin")).unwrap(),
+        &body[1000..2000]
+    );
+    wait_for_sender(&mut sender);
+}
+
+#[test]
+fn a_range_across_a_block_boundary_keeps_the_block_seam() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let out = dir.path().join("out");
+    let file = dir.path().join("seam.bin");
+    let body = data(64 * 1024, 4);
+    std::fs::write(&file, &body).unwrap();
+
+    let (mut sender, ticket) = start(&home, &file, "1h");
+    let result = recv_range(&home, &ticket, &out, "16000:17000");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(
+        std::fs::read(out.join("seam.bin")).unwrap(),
+        &body[16_000..17_000]
+    );
+    wait_for_sender(&mut sender);
+}
+
+#[test]
+fn a_range_of_a_packed_file_reads_out_of_its_pack() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let out = dir.path().join("out");
+    std::fs::create_dir_all(dir.path().join("small")).unwrap();
+    let file = dir.path().join("small").join("packed.txt");
+    let body = data(5000, 6);
+    std::fs::write(&file, &body).unwrap();
+
+    let (mut sender, ticket) =
+        start_in(dir.path(), &home, &["small/packed.txt", "--expires", "1h"]);
+    let result = recv_range(&home, &ticket, &out, "100:200");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(
+        std::fs::read(out.join("packed.txt")).unwrap(),
+        &body[100..200]
+    );
+    wait_for_sender(&mut sender);
+}
+
+#[test]
+fn a_range_is_refused_on_a_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let out = dir.path().join("out");
+    let tree = dir.path().join("tree");
+    std::fs::create_dir(&tree).unwrap();
+    std::fs::write(tree.join("a.txt"), b"one").unwrap();
+
+    let (sender, ticket) = start(&home, &tree, "1h");
+    let result = recv_range(&home, &ticket, &out, "0:1");
+    assert_eq!(result.status.code(), Some(6));
+    assert!(String::from_utf8_lossy(&result.stderr).contains("folder"));
+    drop(sender);
+}

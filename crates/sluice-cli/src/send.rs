@@ -21,7 +21,8 @@ use crate::{cli::CongestionArg, events, output::Output};
 /// Sends files and folders to whoever has the ticket.
 #[derive(Args)]
 pub struct SendArgs {
-    /// The files and folders to send
+    /// The files and folders to send, or `-` to send standard input as a raw blob (read to the
+    /// end and copied into the store, because its root is known only then)
     #[arg(value_name = "PATH", required = true)]
     pub paths: Vec<PathBuf>,
     /// The relay that carries the transfer when a direct path fails
@@ -54,14 +55,40 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
     }
     let seconds = parse_expiry(&args.expires)?;
     let expiry = deadline(now_ms(), seconds);
-    let paths = absolute_paths(&args.paths)?;
+    let stdin = args.paths.len() == 1 && args.paths[0] == std::path::Path::new("-");
+    if !stdin
+        && args
+            .paths
+            .iter()
+            .any(|path| path == std::path::Path::new("-"))
+    {
+        return Err(Error::Policy(
+            "standard input is one source, so send it on its own".to_string(),
+        ));
+    }
+    let paths = if stdin {
+        Vec::new()
+    } else {
+        absolute_paths(&args.paths)?
+    };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
     runtime.block_on(async {
         let home = Home::open(&Home::locate()?)?;
-        let outgoing = outgoing(&home, &paths, args, relay, expiry).await?;
+        let outgoing = if stdin {
+            sluice_core::engine::prepare_send_stdin(
+                &home,
+                relay,
+                args.congestion.into(),
+                expiry,
+                args.port,
+            )
+            .await?
+        } else {
+            outgoing(&home, &paths, args, relay, expiry).await?
+        };
         events::ticket(*output, &outgoing.ticket.encode())?;
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "sending");

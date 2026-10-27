@@ -7,7 +7,7 @@ use std::{fs, path::Path};
 use super::ReceiveOptions;
 use crate::{
     Error,
-    manifest::{Kind, Manifest},
+    manifest::{Entry, Kind, Manifest},
     ticket::{Body, Ticket},
 };
 
@@ -107,6 +107,39 @@ fn check_top(manifest: &Manifest, options: &ReceiveOptions, resume: bool) -> Res
     Ok(())
 }
 
+/// The checks a range download makes: a transfer of exactly one file, its top-level name and the
+/// target itself. The whole-tree size and free-space checks do not apply, because most of the file
+/// is never fetched or written.
+pub(in crate::engine) fn check_one<'a>(
+    manifest: &'a Manifest,
+    options: &ReceiveOptions,
+    resume: bool,
+) -> Result<&'a Entry, Error> {
+    let [entry] = manifest.entries() else {
+        return Err(Error::Policy(
+            "a range works on a one-file transfer, and this ticket is a folder".to_string(),
+        ));
+    };
+    if entry.kind != Kind::File {
+        return Err(Error::Policy(
+            "a range works on a one-file transfer, and this ticket is a folder".to_string(),
+        ));
+    }
+    let name = entry.path.as_str();
+    if name.starts_with('.') && !options.allow_hidden {
+        return Err(Error::Policy(format!(
+            "the transfer would write {name}, whose name starts with a dot; pass --allow-hidden \
+             to accept a top-level hidden name"
+        )));
+    }
+    let target = options.out.join(name);
+    if !options.force && !resume && fs::symlink_metadata(&target).is_ok() {
+        return Err(super::storage::clash(&target));
+    }
+    check_ancestors(&options.out, &target)?;
+    check_target(&target, entry.kind, options.force || resume)?;
+    Ok(entry)
+}
 /// The top-level rules as a decision that takes no file system, so the vectors can check every
 /// combination. `Err("hidden")` is a hidden name the user did not allow and `Err("clash")` a name
 /// already in the output. A resumed receive made the folder it writes into, so it may write there
