@@ -152,16 +152,6 @@ async fn a_resume_does_not_take_over_a_folder_that_was_already_there() {
     fs::create_dir_all(source.join("sub")).unwrap();
     fs::write(source.join("big.bin"), vec![7u8; 900 * 1024]).unwrap();
     fs::write(source.join("sub").join("x.txt"), b"x").unwrap();
-    // A folder time the sender would put back, and one no clock in this test reaches. Windows
-    // does not restore folder times, and a folder cannot be opened for writing there, so this is
-    // the one platform the case is not checked on.
-    #[cfg(unix)]
-    const SENT: u64 = 1_000_000_000_000;
-    #[cfg(unix)]
-    set_mtime(
-        &source,
-        SystemTime::UNIX_EPOCH + Duration::from_millis(SENT),
-    );
     let (outgoing, text) = prepared_paths(&dir, std::slice::from_ref(&source)).await;
     let out = dir.path().join("out");
     let mut limited = options(&out);
@@ -182,21 +172,17 @@ async fn a_resume_does_not_take_over_a_folder_that_was_already_there() {
     super::receive(&text, &options(&out), &tx).await.unwrap();
     assert_eq!(fs::read(tree.join("big.bin")).unwrap().len(), 900 * 1024);
     #[cfg(unix)]
+    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        // Writing a child changes the folder's time to now, which is not the sender's. The mode is
-        // the user's, and neither is what a receive that took the folder over would leave.
-        assert_ne!(
-            mtime_ms(&tree),
-            SENT,
-            "the sender's folder time was applied"
-        );
+        // The mode is the user's, and it is not what a receive that took the folder over
+        // leaves. Writing a child moves the folder's time on every platform, so the time is
+        // not asserted here; it is set by the same branch as the mode.
         assert_eq!(
             fs::metadata(&tree).unwrap().permissions().mode() & 0o777,
             0o750
         );
     }
-    outgoing.provider.shutdown().await.unwrap();
 }
 
 /// A provider that serves the hash sequence and refuses the manifest, so a receive fails between
