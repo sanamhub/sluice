@@ -89,6 +89,16 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
     if let Some(range) = range {
         return run_range(args, output, &ticket, range, rate);
     }
+    receive_one(args, output, &ticket, rate)
+}
+
+/// One static ticket into the output folder, with the usual events and final line.
+fn receive_one(
+    args: &RecvArgs,
+    output: &Output,
+    ticket: &str,
+    rate: Option<std::sync::Arc<Rate>>,
+) -> Result<u8, Error> {
     let out = std::path::absolute(&args.out)
         .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", args.out.display())))?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -99,7 +109,7 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "receiving");
         let options = options(args, out, rate);
-        let result = receive(&ticket, &options, &tx).await;
+        let result = receive(ticket, &options, &tx).await;
         drop(tx);
         let printed = printer
             .await

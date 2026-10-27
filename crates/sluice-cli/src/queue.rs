@@ -69,27 +69,7 @@ async fn drive(
     loop {
         while let Some(action) = pending.pop() {
             match action {
-                Action::Start(id) => {
-                    let Some(text) = texts.remove(&id) else {
-                        return Err(Error::Bug(format!("the queue started job {id} twice")));
-                    };
-                    let options = options.clone();
-                    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                    let printer = events::printer(output, rx, "receiving");
-                    tasks.spawn(async move {
-                        let result = receive(&text, &options, &tx).await;
-                        drop(tx);
-                        let printed = match printer.await {
-                            Ok(inner) => inner,
-                            Err(e) => Err(Error::Bug(format!("the event printer stopped: {e}"))),
-                        };
-                        let bytes = match result {
-                            Ok(received) => Ok(received.bytes),
-                            Err(e) => Err(e),
-                        };
-                        (id, bytes, printed)
-                    });
-                }
+                Action::Start(id) => spawn(&mut tasks, &mut texts, &options, output, id)?,
                 Action::Stop(_) => {}
                 Action::Save => {}
                 Action::Wake { at_ms } => wake_at = at_ms,
@@ -98,10 +78,9 @@ async fn drive(
         if tasks.is_empty() && queue.jobs().is_empty() {
             break;
         }
-        let now = elapsed_ms(started);
         let wait = wake_at
-            .filter(|at| *at > now)
-            .map(|at| Duration::from_millis(at - now));
+            .filter(|at| *at > elapsed_ms(started))
+            .map(|at| Duration::from_millis(at - elapsed_ms(started)));
         match wait {
             Some(wait) => {
                 tokio::select! {
@@ -120,22 +99,69 @@ async fn drive(
             }
             // Only a retry is left, and its time has not come.
             None => {
-                if let Some(at) = wake_at {
-                    let now = elapsed_ms(started);
-                    tokio::time::sleep(Duration::from_millis(at.saturating_sub(now))).await;
-                    pending.extend(queue.tick(elapsed_ms(started))?);
-                    wake_at = None;
-                } else if queue.jobs().is_empty() {
+                if !wake_up(&mut queue, &mut pending, wake_at, started).await? {
                     break;
-                } else {
-                    return Err(Error::Bug(
-                        "the queue waits without a time and without a task".to_string(),
-                    ));
                 }
+                wake_at = None;
             }
         }
     }
     Ok(failure.map_or(0, crate::exit::code_of))
+}
+
+/// Waits for the next retry to come due and lets the queue start it, or says there is nothing
+/// left to wait for.
+async fn wake_up(
+    queue: &mut Queue,
+    pending: &mut Vec<Action>,
+    at: Option<u64>,
+    started: Instant,
+) -> Result<bool, Error> {
+    let Some(at) = at else {
+        if queue.jobs().is_empty() {
+            return Ok(false);
+        }
+        return Err(Error::Bug(
+            "the queue waits without a time and without a task".to_string(),
+        ));
+    };
+    tokio::time::sleep(Duration::from_millis(
+        at.saturating_sub(elapsed_ms(started)),
+    ))
+    .await;
+    pending.extend(queue.tick(elapsed_ms(started))?);
+    Ok(true)
+}
+
+/// Starts one job's receive on the runtime. Its events print as they arrive, and the task hands
+/// back the id, the bytes or error, and whether printing failed.
+fn spawn(
+    tasks: &mut JoinSet<Finished>,
+    texts: &mut BTreeMap<JobId, String>,
+    options: &ReceiveOptions,
+    output: Output,
+    id: JobId,
+) -> Result<(), Error> {
+    let Some(text) = texts.remove(&id) else {
+        return Err(Error::Bug(format!("the queue started job {id} twice")));
+    };
+    let options = options.clone();
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let printer = events::printer(output, rx, "receiving");
+    tasks.spawn(async move {
+        let result = receive(&text, &options, &tx).await;
+        drop(tx);
+        let printed = match printer.await {
+            Ok(inner) => inner,
+            Err(e) => Err(Error::Bug(format!("the event printer stopped: {e}"))),
+        };
+        let bytes = match result {
+            Ok(received) => Ok(received.bytes),
+            Err(e) => Err(e),
+        };
+        (id, bytes, printed)
+    });
+    Ok(())
 }
 
 /// One finished task: report it to the queue as done or failed, and return the actions that follow.

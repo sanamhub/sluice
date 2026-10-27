@@ -103,30 +103,7 @@ pub async fn prepare_stdin_with_rate(
     let store = FsStore::load(home.path().join("blobs"))
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
-    let tmp_root = home.path().join("tmp");
-    fs::create_dir_all(&tmp_root)
-        .map_err(|e| Error::Storage(format!("cannot create {}: {e}", tmp_root.display())))?;
-    let tmp = storage::temp_dir(&tmp_root)?;
-    let path = tmp.join("input");
-    let size = match read_stdin(&path).await {
-        Ok(size) => size,
-        Err(e) => {
-            storage::remove_quietly(&tmp);
-            return Err(e);
-        }
-    };
-    let copied = store
-        .blobs()
-        .add_path_with_opts(AddPathOptions {
-            path: path.clone(),
-            format: BlobFormat::Raw,
-            mode: ImportMode::Copy,
-        })
-        .temp_tag()
-        .await;
-    storage::remove_quietly(&tmp);
-    let tag = copied
-        .map_err(|e| Error::Storage(format!("cannot keep standard input: {}", crate::chain(&e))))?;
+    let (tag, size) = import_stdin(home, &store).await?;
     let hash = tag.hash();
     let allowed = std::collections::BTreeSet::from([*hash.as_bytes()]);
     let relay_text = relay_text(&relay);
@@ -155,6 +132,36 @@ pub async fn prepare_stdin_with_rate(
         live: None,
         _tags: vec![tag],
     })
+}
+
+/// Reads standard input into a private file and copies it into the store, so the pipe closes
+/// before the ticket exists and the bytes survive the reader going away.
+async fn import_stdin(home: &Home, store: &FsStore) -> Result<(TempTag, u64), Error> {
+    let tmp_root = home.path().join("tmp");
+    fs::create_dir_all(&tmp_root)
+        .map_err(|e| Error::Storage(format!("cannot create {}: {e}", tmp_root.display())))?;
+    let tmp = storage::temp_dir(&tmp_root)?;
+    let path = tmp.join("input");
+    let size = match read_stdin(&path).await {
+        Ok(size) => size,
+        Err(e) => {
+            storage::remove_quietly(&tmp);
+            return Err(e);
+        }
+    };
+    let copied = store
+        .blobs()
+        .add_path_with_opts(AddPathOptions {
+            path: path.clone(),
+            format: BlobFormat::Raw,
+            mode: ImportMode::Copy,
+        })
+        .temp_tag()
+        .await;
+    storage::remove_quietly(&tmp);
+    let tag = copied
+        .map_err(|e| Error::Storage(format!("cannot keep standard input: {}", crate::chain(&e))))?;
+    Ok((tag, size))
 }
 
 /// Reads standard input to a file on disk, so a large pipe never sits in memory.

@@ -30,19 +30,50 @@ pub async fn receive_live(
     events: &UnboundedSender<Event>,
 ) -> Result<Received, Error> {
     let ticket = Ticket::decode(text)?;
-    let (stream_id, sender_key) = match ticket.body() {
+    let stream = live_ids(&ticket)?;
+    super::super::recv::refuse_expired(&ticket)?;
+    let opened = open(&ticket, options, store_root).await?;
+    let started = Instant::now();
+    emit(
+        events,
+        Event::Started {
+            name: None,
+            files: 1,
+            bytes: 0,
+            congestion: options.congestion,
+        },
+    );
+    let outcome = exchange(&opened, &ticket, stream, options, events).await;
+    finish(opened, outcome, options, events, started).await
+}
+
+/// The stream id and sender key a live ticket names.
+fn live_ids(ticket: &Ticket) -> Result<([u8; 16], [u8; 32]), Error> {
+    match ticket.body() {
         Body::Live {
             stream_id,
             sender_key,
-        } => (*stream_id, *sender_key),
-        Body::Static { .. } => {
-            return Err(Error::Policy("this ticket is not live".to_string()));
-        }
-    };
-    super::super::recv::refuse_expired(&ticket)?;
-    let target = &options.out;
-    check_target(target, options.force)?;
-    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+        } => Ok((*stream_id, *sender_key)),
+        Body::Static { .. } => Err(Error::Policy("this ticket is not live".to_string())),
+    }
+}
+
+/// The socket, the store and the two private folders one live receive holds.
+struct Opened {
+    receiver: Receiver,
+    store: FsStore,
+    file_tmp: Temp,
+    store_tmp: Temp,
+}
+
+/// Opens everything a live receive needs, refusing a target that is a folder or a link first.
+async fn open(
+    ticket: &Ticket,
+    options: &ReceiveOptions,
+    store_root: &Path,
+) -> Result<Opened, Error> {
+    check_target(&options.out, options.force)?;
+    let parent = options.out.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).map_err(|e| storage::policy_path("create", parent, e))?;
     let relay = ticket.relay_url().map_or(RelayModeChoice::Disabled, |url| {
         RelayModeChoice::Url(url.to_string())
@@ -62,41 +93,37 @@ pub async fn receive_live(
             return Err(e);
         }
     };
-    let store = match FsStore::load(store_tmp.0.join("store")).await {
-        Ok(store) => store,
+    match FsStore::load(store_tmp.0.join("store")).await {
+        Ok(store) => Ok(Opened {
+            receiver,
+            store,
+            file_tmp,
+            store_tmp,
+        }),
         Err(e) => {
             let _ = receiver.shutdown().await;
-            return Err(Error::Storage(format!(
+            Err(Error::Storage(format!(
                 "cannot open a temporary store: {}",
                 crate::plain(&e)
-            )));
+            )))
         }
-    };
-    let started = Instant::now();
-    emit(
-        events,
-        Event::Started {
-            name: None,
-            files: 1,
-            bytes: 0,
-            congestion: options.congestion,
-        },
-    );
-    let outcome = exchange(
-        &receiver,
-        &ticket,
-        (stream_id, sender_key),
-        &store,
-        &file_tmp.0.join("incoming"),
-        options,
-        events,
-    )
-    .await;
-    let endpoint = receiver.shutdown().await;
-    let closed = store.shutdown().await;
-    drop(store_tmp);
+    }
+}
+
+/// Closes the socket and the store on every path, removes both folders, and reports the file only
+/// when the transfer closed cleanly.
+async fn finish(
+    opened: Opened,
+    outcome: Result<u64, Error>,
+    options: &ReceiveOptions,
+    events: &UnboundedSender<Event>,
+    started: Instant,
+) -> Result<Received, Error> {
+    let endpoint = opened.receiver.shutdown().await;
+    let closed = opened.store.shutdown().await;
+    drop(opened.store_tmp);
     let bytes = outcome?;
-    drop(file_tmp);
+    drop(opened.file_tmp);
     if endpoint.is_err() || closed.is_err() {
         return Err(Error::Storage(
             "the file is in place but the transfer did not close cleanly".to_string(),
@@ -111,7 +138,7 @@ pub async fn receive_live(
         },
     );
     Ok(Received {
-        path: target.clone(),
+        path: options.out.clone(),
         bytes,
         files: 1,
     })
@@ -143,15 +170,14 @@ fn check_target(target: &Path, force: bool) -> Result<(), Error> {
 }
 
 async fn exchange(
-    receiver: &Receiver,
+    opened: &Opened,
     ticket: &Ticket,
     stream: ([u8; 16], [u8; 32]),
-    store: &FsStore,
-    incoming: &Path,
     options: &ReceiveOptions,
     events: &UnboundedSender<Event>,
 ) -> Result<u64, Error> {
-    let conn = receiver.connect(ticket, events.clone()).await?;
+    let incoming = opened.file_tmp.0.join("incoming");
+    let conn = opened.receiver.connect(ticket, events.clone()).await?;
     let (theirs, _send, mut recv) = hello::greet_stream(&conn)
         .await
         .map_err(|e| Error::Network(format!("the greeting failed: {e}")))?;
@@ -163,32 +189,60 @@ async fn exchange(
     let open = read_record(&mut recv).await?;
     let mut log = LogReceiver::new(stream.0, stream.1, &open)
         .map_err(|e| Error::Verify(format!("the live stream did not open: {e}")))?;
-    let blobs = receiver.connect_static(ticket, events.clone()).await?;
-    let mut file = tokio::fs::File::create(incoming)
+    let blobs = opened
+        .receiver
+        .connect_static(ticket, events.clone())
+        .await?;
+    let mut file = tokio::fs::File::create(&incoming)
         .await
-        .map_err(|e| storage::storage("create", incoming, e))?;
+        .map_err(|e| storage::storage("create", &incoming, e))?;
     let mut hasher = blake3::Hasher::new();
+    let total = records(
+        &mut log,
+        &mut recv,
+        &opened.store,
+        &blobs,
+        &mut file,
+        &mut hasher,
+        options.rate.as_deref(),
+        events,
+    )
+    .await?;
+    file.flush()
+        .await
+        .map_err(|e| storage::storage("write", &incoming, e))?;
+    let file = file.into_std().await;
+    file.sync_all()
+        .map_err(|e| storage::storage("sync", &incoming, e))?;
+    drop(file);
+    storage::install(&incoming, &options.out, options.force)?;
+    Ok(total)
+}
+
+/// Every record until the close: a frame adds its segment, and the close proves the whole file.
+#[allow(clippy::too_many_arguments)]
+async fn records(
+    log: &mut LogReceiver,
+    recv: &mut iroh::endpoint::RecvStream,
+    store: &FsStore,
+    blobs: &iroh::endpoint::Connection,
+    file: &mut tokio::fs::File,
+    hasher: &mut blake3::Hasher,
+    rate: Option<&crate::engine::Rate>,
+    events: &UnboundedSender<Event>,
+) -> Result<u64, Error> {
     let mut total = 0u64;
     loop {
-        let record = read_record(&mut recv).await?;
+        let record = read_record(recv).await?;
         match record.len() {
             sluice_live::Frame::LEN => {
                 total = apply_frame(
-                    &mut log,
-                    &record,
-                    store,
-                    &blobs,
-                    &mut file,
-                    &mut hasher,
-                    events,
-                    options.rate.as_deref(),
-                    total,
+                    log, &record, store, blobs, file, hasher, events, rate, total,
                 )
                 .await?;
             }
             sluice_live::LogClose::LEN => {
-                total = close(&mut log, &record, total, &mut hasher)?;
-                break;
+                return close(log, &record, total, hasher);
             }
             _ => {
                 return Err(Error::Verify(
@@ -197,15 +251,6 @@ async fn exchange(
             }
         }
     }
-    file.flush()
-        .await
-        .map_err(|e| storage::storage("write", incoming, e))?;
-    let file = file.into_std().await;
-    file.sync_all()
-        .map_err(|e| storage::storage("sync", incoming, e))?;
-    drop(file);
-    storage::install(incoming, &options.out, options.force)?;
-    Ok(total)
 }
 
 /// One frame: fetch its segment and add it to the file. A repeated entry changes nothing; one

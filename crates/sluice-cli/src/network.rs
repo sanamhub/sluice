@@ -79,8 +79,16 @@ fn udp() -> Line {
 }
 
 fn from_report(report: &NetworkReport) -> Vec<Line> {
-    let mut lines = Vec::new();
-    lines.push(Line {
+    vec![
+        udp_line(report),
+        address_line(report),
+        nat_line(report),
+        relay_line(report),
+    ]
+}
+
+fn udp_line(report: &NetworkReport) -> Line {
+    Line {
         name: "udp",
         status: if report.has_udp() {
             Status::Ok
@@ -97,8 +105,11 @@ fn from_report(report: &NetworkReport) -> Vec<Line> {
         } else {
             Some("a firewall may be blocking outgoing UDP".to_string())
         },
-    });
-    lines.push(Line {
+    }
+}
+
+fn address_line(report: &NetworkReport) -> Line {
+    Line {
         name: "address",
         status: if report.global_v4.is_some() || report.global_v6.is_some() {
             Status::Ok
@@ -112,28 +123,34 @@ fn from_report(report: &NetworkReport) -> Vec<Line> {
             (None, None) => "the relay saw no public address".to_string(),
         },
         fix: None,
-    });
-    lines.push(Line {
+    }
+}
+
+fn nat_line(report: &NetworkReport) -> Line {
+    let (status, detail) = match report.mapping_varies {
+        Some(true) => (
+            Status::Warning,
+            "each relay saw a different public address (a hard NAT), so a direct path may fail",
+        ),
+        Some(false) => (
+            Status::Ok,
+            "the same public address to every relay (a cone NAT), so a direct path can work",
+        ),
+        None => (
+            Status::Skipped,
+            "only one relay answered, so the mapping type is unknown",
+        ),
+    };
+    Line {
         name: "nat",
-        status: match report.mapping_varies {
-            Some(false) => Status::Ok,
-            Some(true) => Status::Warning,
-            None => Status::Skipped,
-        },
-        detail: match report.mapping_varies {
-            Some(true) => {
-                "each relay saw a different public address (a hard NAT), so a direct path may fail"
-                    .to_string()
-            }
-            Some(false) => {
-                "the same public address to every relay (a cone NAT), so a direct path can work"
-                    .to_string()
-            }
-            None => "only one relay answered, so the mapping type is unknown".to_string(),
-        },
+        status,
+        detail: detail.to_string(),
         fix: None,
-    });
-    lines.push(Line {
+    }
+}
+
+fn relay_line(report: &NetworkReport) -> Line {
+    Line {
         name: "relay",
         status: Status::Ok,
         detail: match &report.preferred_relay {
@@ -141,8 +158,7 @@ fn from_report(report: &NetworkReport) -> Vec<Line> {
             None => "reachable".to_string(),
         },
         fix: None,
-    });
-    lines
+    }
 }
 
 async fn portmap() -> Line {

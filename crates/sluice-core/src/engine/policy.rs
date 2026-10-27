@@ -137,12 +137,12 @@ fn answer(ok: bool) -> Result<(), AbortReason> {
 }
 
 impl Gate {
+    /// Answers one request. A get is checked against the allowlist, then its events decide when
+    /// every byte of the blob went out.
     async fn answer(&self, message: ProviderMessage) {
         match message {
             ProviderMessage::GetRequestReceived(mut msg) => {
                 let hash = msg.request.hash;
-                // Any range of an allowed hash is served, including a hash sequence request for
-                // the manifest root. The allowed set is the access rule, not the format.
                 let ok = self.may(hash);
                 let connection = msg.connection_id;
                 let whole = msg.request.ranges.is_all();
@@ -154,18 +154,17 @@ impl Gate {
                 let totals = Arc::clone(&self.totals);
                 let delivered = Arc::clone(&self.delivered);
                 n0_future::task::spawn(async move {
+                    let sent = Sent {
+                        store: &store,
+                        totals: &totals,
+                        delivered: &delivered,
+                        connection,
+                    };
                     while let Ok(Some(update)) = msg.rx.recv().await {
                         match update {
                             RequestUpdate::Completed(stats) => {
-                                let complete = covered(
-                                    &store,
-                                    hash,
-                                    stats.stats.payload_bytes_sent,
-                                    &totals,
-                                    &delivered,
-                                    connection,
-                                )
-                                .await;
+                                let complete =
+                                    sent.covered(hash, stats.stats.payload_bytes_sent).await;
                                 if whole || complete {
                                     let _ = done.send(ServeEvent::Downloaded { hash, connection });
                                 }
@@ -190,15 +189,12 @@ impl Gate {
                     connection: msg.connection_id,
                 });
             }
-            // The provider asks before each chunk goes out. Answering now would send it now, so
-            // the wait for this chunk's turn is the whole rate cap.
             ProviderMessage::Throttle(msg) => {
                 if let Some(rate) = &self.rate {
                     rate.acquire(msg.size).await;
                 }
                 msg.tx.send(Ok(())).await.ok();
             }
-            // Push is disabled in the mask, so a push is refused before this task sees it.
             _ => {}
         }
     }
@@ -219,32 +215,35 @@ impl Gate {
     }
 }
 
-/// Whether the payload served for `hash` has reached the whole blob. A chunk group request for a
-/// small file covers all of it; a request for the last block of a large one does not. The count is
-/// per root and not per connection, so a receive that fetches half a file, is killed and fetches
-/// the other half from a new connection still finishes the root. Asking twice for the same range
-/// could reach the size without the middle; the sender only stops serving, and a client that wants
-/// to keep it alive asks for what it needs.
-async fn covered(
-    store: &FsStore,
-    hash: Hash,
-    payload: u64,
-    totals: &Mutex<BTreeMap<(u64, Hash), u64>>,
-    delivered: &Mutex<BTreeMap<Hash, u64>>,
+/// One connection's view of what it has served, so the two maps travel together.
+struct Sent<'a> {
+    store: &'a FsStore,
+    totals: &'a Mutex<BTreeMap<(u64, Hash), u64>>,
+    delivered: &'a Mutex<BTreeMap<Hash, u64>>,
     connection: u64,
-) -> bool {
-    let size = match store.blobs().status(hash).await {
-        Ok(BlobStatus::Complete { size }) => size,
-        _ => return false,
-    };
-    let mut totals = lock(totals);
-    let sent = totals.entry((connection, hash)).or_default();
-    *sent = sent.saturating_add(payload);
-    drop(totals);
-    let mut delivered = lock(delivered);
-    let total = delivered.entry(hash).or_default();
-    *total = total.saturating_add(payload);
-    *total >= size
+}
+
+impl Sent<'_> {
+    /// Whether the payload served for `hash` has reached the whole blob. A chunk group request for
+    /// a small file covers all of it; a request for the last block of a large one does not. The
+    /// count is per root and not per connection, so a receive that fetches half a file, is killed
+    /// and fetches the other half from a new connection still finishes the root. Asking twice for
+    /// the same range could reach the size without the middle; the sender only stops serving, and
+    /// a client that wants to keep it alive asks for what it needs.
+    async fn covered(&self, hash: Hash, payload: u64) -> bool {
+        let size = match self.store.blobs().status(hash).await {
+            Ok(BlobStatus::Complete { size }) => size,
+            _ => return false,
+        };
+        let mut totals = lock(self.totals);
+        let sent = totals.entry((self.connection, hash)).or_default();
+        *sent = sent.saturating_add(payload);
+        drop(totals);
+        let mut delivered = lock(self.delivered);
+        let total = delivered.entry(hash).or_default();
+        *total = total.saturating_add(payload);
+        *total >= size
+    }
 }
 
 /// The lock cannot be held across an await and every holder only edits a map, so a panic in one

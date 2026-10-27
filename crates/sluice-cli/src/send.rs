@@ -83,6 +83,20 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
     } else {
         absolute_paths(&args.paths)?
     };
+    serve(args, output, relay, expiry, stdin, &paths, rate)
+}
+
+/// Opens the home, prepares the transfer and serves it, printing the ticket first.
+#[allow(clippy::too_many_arguments)]
+fn serve(
+    args: &SendArgs,
+    output: &Output,
+    relay: RelayModeChoice,
+    expiry: Option<u64>,
+    stdin: bool,
+    paths: &[PathBuf],
+    rate: Option<std::sync::Arc<Rate>>,
+) -> Result<u8, Error> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -112,7 +126,7 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
             )
             .await?
         } else {
-            outgoing(&home, &paths, args, relay, expiry, rate).await?
+            outgoing(&home, paths, args, relay, expiry, rate).await?
         };
         events::ticket(*output, &outgoing.ticket.encode())?;
         let (tx, rx) = unbounded_channel();

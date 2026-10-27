@@ -64,22 +64,7 @@ pub async fn prepare_live_with_rate(
     close_after: Duration,
     rate: Option<Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
-    let shown = path.display().to_string();
-    let meta = fs::symlink_metadata(path).map_err(|e| storage::policy_path("read", path, e))?;
-    if meta.file_type().is_symlink() {
-        return Err(Error::Policy(format!(
-            "{shown} is a symlink; follow the file it points at by its real path"
-        )));
-    }
-    if !meta.is_file() {
-        return Err(Error::Policy(format!(
-            "{shown} is not a regular file, so there is nothing to follow"
-        )));
-    }
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| Error::Policy(format!("{shown} has no UTF-8 file name")))?;
+    let (name, size) = checked_path(path)?;
     let store = FsStore::load(home.path().join("blobs"))
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
@@ -91,9 +76,10 @@ pub async fn prepare_live_with_rate(
         .map_err(|e| Error::Storage(format!("cannot name a live stream: {e}")))?;
     let sender = Sender::new(key, stream_id, SEGMENT_BYTES, now_ms())
         .map_err(|e| Error::Storage(format!("cannot start a live stream: {e}")))?;
-    let open = sender.log_open();
-    let allowed = Arc::new(Mutex::new(std::collections::BTreeSet::new()));
-    let log = Arc::new(LiveLog::new(open, allowed));
+    let log = Arc::new(LiveLog::new(
+        sender.log_open(),
+        Arc::new(Mutex::new(std::collections::BTreeSet::new())),
+    ));
     let provider = Provider::start_live_with_rate(
         home,
         store.clone(),
@@ -117,13 +103,35 @@ pub async fn prepare_live_with_rate(
         provider,
         ticket,
         roots: Vec::new(),
-        name: Some(name.to_string()),
+        name: Some(name),
         files: 1,
-        bytes: meta.len(),
+        bytes: size,
         congestion,
         live: Some(LiveSend::new(log, task)),
         _tags: Vec::new(),
     })
+}
+
+/// The name and size of the one regular file a live send follows. A link could be repointed while
+/// the stream is open, so it is refused.
+fn checked_path(path: &Path) -> Result<(String, u64), Error> {
+    let shown = path.display().to_string();
+    let meta = fs::symlink_metadata(path).map_err(|e| storage::policy_path("read", path, e))?;
+    if meta.file_type().is_symlink() {
+        return Err(Error::Policy(format!(
+            "{shown} is a symlink; follow the file it points at by its real path"
+        )));
+    }
+    if !meta.is_file() {
+        return Err(Error::Policy(format!(
+            "{shown} is not a regular file, so there is nothing to follow"
+        )));
+    }
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| Error::Policy(format!("{shown} has no UTF-8 file name")))?;
+    Ok((name.to_string(), meta.len()))
 }
 
 fn ticket_of(
