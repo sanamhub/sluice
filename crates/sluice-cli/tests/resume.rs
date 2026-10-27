@@ -89,9 +89,23 @@ fn two_identical_files_arrive_and_a_run_after_a_kill_finishes() {
     let owner: String = root.iter().map(|byte| format!("{byte:02x}")).collect();
     let partial = out.join(format!(".sluice-partial-{}", &owner[..16]));
     std::fs::create_dir_all(&partial).unwrap();
-    // The marker also names the top-level entry the killed run made, which is what lets a resume
-    // write into it.
-    std::fs::write(partial.join("ticket"), format!("{owner}\nname dup\n")).unwrap();
+    // A store is this receive's only when the home holds a record of it, and the record's id is in
+    // the marker. The record also names the top-level entry the killed run made, through the
+    // marker, which is what lets a resume write into it.
+    let id = "0123456789abcdef0123456789abcdef";
+    let records = home.join("partials");
+    std::fs::create_dir_all(&records).unwrap();
+    let absolute = std::path::absolute(&partial).unwrap();
+    std::fs::write(
+        records.join(id),
+        format!("path {}\nroot {owner}\n", absolute.display()),
+    )
+    .unwrap();
+    std::fs::write(
+        partial.join("ticket"),
+        format!("{owner}\nid {id}\nname dup\n"),
+    )
+    .unwrap();
 
     let (mut sender, ticket) = start_in(dir.path(), &home, &["dup", "--expires", "1h"]);
     let result = recv(&home, &ticket, &out, false);

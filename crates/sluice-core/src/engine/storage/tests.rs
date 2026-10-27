@@ -97,7 +97,7 @@ fn a_marker_says_which_names_were_created_and_whether_the_run_was_forced() {
     use super::{recorded, remember};
     let dir = tempfile::tempdir().unwrap();
     let names = std::collections::BTreeSet::from(["made".to_string()]);
-    remember(dir.path(), "abc123", &names, true).unwrap();
+    remember(dir.path(), "abc123", &names, true, "id-1").unwrap();
     let found = recorded(dir.path()).unwrap().unwrap();
     assert_eq!(found.root, "abc123");
     assert_eq!(found.names, names);
@@ -110,11 +110,13 @@ fn a_marker_says_which_names_were_created_and_whether_the_run_was_forced() {
         "abc123",
         &std::collections::BTreeSet::new(),
         false,
+        "id-2",
     )
     .unwrap();
     let found = recorded(dir.path()).unwrap().unwrap();
     assert!(found.names.is_empty());
     assert!(!found.force);
+    assert_eq!(found.id.as_deref(), Some("id-2"));
     let empty = tempfile::tempdir().unwrap();
     assert!(recorded(empty.path()).unwrap().is_none());
 }
@@ -154,4 +156,23 @@ fn a_path_past_two_hundred_and_sixty_characters_is_installed() {
     std::fs::write(&incoming, b"bytes").unwrap();
     install(&incoming, &target, false).unwrap();
     assert_eq!(std::fs::read(&target).unwrap(), b"bytes");
+}
+
+/// The home's record of a partial store is what makes a folder with the store's name trusted. A
+/// record names one absolute path and one root, a record for another root is not this store's, and
+/// forgetting the record leaves the folder alone.
+#[test]
+fn a_record_names_one_store_and_one_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join(".sluice-partial-0123456789abcdef");
+    std::fs::create_dir(&store).unwrap();
+    let id = super::remember_record(&store, "root-one").unwrap();
+    let found = super::find_record(&store, "root-one").unwrap().unwrap();
+    assert_eq!(found.id, id);
+    assert_eq!(found.path, std::path::absolute(&store).unwrap());
+    assert_eq!(found.root, "root-one");
+    assert!(super::find_record(&store, "root-two").unwrap().is_none());
+    super::forget_record(&store);
+    assert!(super::find_record(&store, "root-one").unwrap().is_none());
+    assert!(store.is_dir(), "a forgotten record removed the store");
 }

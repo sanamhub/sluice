@@ -1,0 +1,17 @@
+{
+  "description": "Rule 9: a manifest path may not name a folder that a receive gives to its own partial store or to a temporary folder during a write. The prefix itself is reserved as well as any name that starts with it, at any depth; a name that only looks similar is not.",
+  "cases": [
+    { "path": ".sluice-partial-0123456789abcdef", "valid": false, "rule": 9 },
+    { "path": ".sluice-tmp-0123456789abcdef", "valid": false, "rule": 9 },
+    { "path": ".sluice-partial-", "valid": false, "rule": 9 },
+    { "path": ".sluice-tmp-", "valid": false, "rule": 9 },
+    { "path": "tree/.sluice-partial-x/inside.txt", "valid": false, "rule": 9 },
+    { "path": ".sluice-tmp-x/b", "valid": false, "rule": 9 },
+    { "path": ".sluice-partial", "valid": true },
+    { "path": ".sluice-tmp", "valid": true },
+    { "path": "sluice-partial-x", "valid": true },
+    { "path": ".sluice-partials-x", "valid": true },
+    { "path": ".sluice-tmpx", "valid": true },
+    { "path": ".SLUICE-PARTIAL-X", "valid": true }
+  ]
+}

@@ -239,8 +239,19 @@ fn component_violation(component: &str) -> Option<Violation<'_>> {
     if is_reserved_device_name(component) {
         return broken(8, "is a Windows reserved device name");
     }
+    if RESERVED_PREFIXES
+        .iter()
+        .any(|prefix| component.starts_with(prefix))
+    {
+        return broken(9, "is reserved for sluice's own store folders");
+    }
     None
 }
+
+/// Rule 9: the names a receive gives the store it writes beside the output and a temporary folder
+/// during a write. A manifest that could name one of them would let a sender write into, or plant,
+/// the folder a later receive resumes from.
+pub const RESERVED_PREFIXES: [&str; 2] = [".sluice-partial-", ".sluice-tmp-"];
 
 /// Rule 6: the characters Windows refuses in a name, the two that mean something on some
 /// platform (`\` and `:`), the C0 and C1 controls, and the bidirectional controls. The last reorder

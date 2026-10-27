@@ -2,8 +2,13 @@
 //! temporary folder, and installing the finished file without replacing a path nobody allowed.
 
 mod meta;
+mod registry;
 
 pub use meta::MetaStore;
+pub use registry::{
+    clash as registry_clash, discard, find as find_record, forget as forget_record,
+    remember as remember_record,
+};
 
 use std::{
     fs::{self},
@@ -69,6 +74,9 @@ pub struct Owner {
     pub root: String,
     pub names: std::collections::BTreeSet<String>,
     pub force: bool,
+    /// The id this home's record of the store carries, so a folder that was replaced under the
+    /// same name is not taken for the one the record names.
+    pub id: Option<String>,
 }
 
 /// Reads the marker of `dir` without changing anything. A folder with no marker, or one this user
@@ -101,9 +109,13 @@ fn parse_marker(text: &str) -> Option<Owner> {
     }
     let mut names = std::collections::BTreeSet::new();
     let mut force = false;
+    let mut id = None;
     for line in lines {
         if let Some(name) = line.strip_prefix("name ") {
             names.insert(name.to_string());
+        }
+        if let Some(record) = line.strip_prefix("id ") {
+            id = Some(record.trim().to_string());
         }
         force |= line.trim() == "force";
     }
@@ -111,6 +123,7 @@ fn parse_marker(text: &str) -> Option<Owner> {
         root: root.to_string(),
         names,
         force,
+        id,
     })
 }
 
@@ -121,17 +134,19 @@ pub fn claim(dir: &Path) -> Result<(), Error> {
     fs::create_dir_all(dir).map_err(|e| storage("create", dir, e))
 }
 
-/// Writes the marker of a store this receive just made, naming the top-level entries it creates and
-/// whether it may replace what is there. A later run reads it to tell this receive's folders from
-/// the user's, and to refuse to continue a run that was forced when it is not forced itself.
+/// Writes the marker of a store this receive just made, naming the top-level entries it creates,
+/// whether it may replace what is there, and the id this home's record of the store carries. A
+/// later run reads it to tell this receive's folders from the user's, to refuse to continue a run
+/// that was forced when it is not forced itself, and to match the store to its record.
 pub fn remember(
     dir: &Path,
     root: &str,
     names: &std::collections::BTreeSet<String>,
     force: bool,
+    id: &str,
 ) -> Result<(), Error> {
     let marker = dir.join(MARKER);
-    let mut text = format!("{root}\n");
+    let mut text = format!("{root}\nid {id}\n");
     if force {
         text.push_str("force\n");
     }

@@ -220,6 +220,34 @@ fn rule_8_reserved_device_names() {
     ]);
 }
 
+/// Rule 9: the names a receive gives the store beside the output and a folder it writes through.
+/// A manifest that could name one would let a sender write into, or plant, the folder a later
+/// receive resumes from.
+#[test]
+fn rule_9_reserved_store_names() {
+    rejects(
+        9,
+        &[
+            ".sluice-partial-0123456789abcdef",
+            ".sluice-tmp-0123456789abcdef",
+            // The prefix itself names a store too, so it is reserved as well.
+            ".sluice-partial-",
+            ".sluice-tmp-",
+            "a/.sluice-partial-x",
+            ".sluice-partial-x/b",
+            "proj/.sluice-tmp-x/c.txt",
+        ],
+    );
+    accepts(&[
+        ".sluice-partial",
+        ".sluice-tmp",
+        "sluice-partial-x",
+        ".sluice-partials-x",
+        ".sluice-tmpx",
+        ".SLUICE-PARTIAL-X",
+    ]);
+}
+
 #[test]
 fn the_lowest_rule_wins_when_a_path_breaks_several() {
     assert_eq!(rule("/con"), Some(3));

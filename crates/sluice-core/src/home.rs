@@ -241,6 +241,17 @@ impl Home {
         let root = setup::create_folders(&given)?;
         setup::create_private_folder(&root, "tmp")
     }
+
+    /// A private folder for this home's records of the partial stores its receives made, so a
+    /// folder named like one of them is trusted only when a record here names it. The home and its
+    /// folders are made first, and the lock is not taken, for the same reason as
+    /// [`Home::temporary_store`]. It has mode 0700 on Unix and the home's private access list on
+    /// Windows.
+    pub fn partial_records() -> Result<PathBuf, Error> {
+        let given = Self::locate()?;
+        let root = setup::create_folders(&given)?;
+        setup::create_private_folder(&root, "partials")
+    }
 }
 
 /// Removes `lock.pid` while the lock is still held, before the file that holds it closes. A

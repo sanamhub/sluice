@@ -252,15 +252,15 @@ async fn a_link_chain_that_escapes_the_output_is_refused() {
     }
 }
 
-/// A store whose marker names another ticket is not a resume, and a clash the writer meets still
-/// removes the store: neither leaves a folder the next run would trust.
-#[tokio::test]
-async fn a_foreign_store_is_not_resumed_and_a_write_time_clash_removes_the_store() {
+/// A folder named like a partial store belongs to a receive only when this home has a record of it.
+/// One that does not is refused and left exactly as it was: it could have been planted where the
+/// store was, and resuming from it would trust bytes nobody in this home wrote.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_partial_folder_this_home_did_not_record_is_refused_and_kept() {
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("tree");
     fs::create_dir(&source).unwrap();
     fs::write(source.join("a.txt"), b"same").unwrap();
-    fs::write(source.join("b.txt"), b"other").unwrap();
     let (outgoing, text) = prepared_paths(&dir, std::slice::from_ref(&source)).await;
     let ticket = Ticket::decode(&text).unwrap();
     let Body::Static { root, .. } = ticket.body() else {
@@ -268,6 +268,9 @@ async fn a_foreign_store_is_not_resumed_and_a_write_time_clash_removes_the_store
     };
     let owner: String = root.iter().map(|byte| format!("{byte:02x}")).collect();
     let out = dir.path().join("out");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    // A folder with a marker that names another ticket, which this home never recorded.
     let partial = crate::engine::storage::partial_dir(&out, &owner);
     fs::create_dir_all(&partial).unwrap();
     fs::write(
@@ -275,22 +278,55 @@ async fn a_foreign_store_is_not_resumed_and_a_write_time_clash_removes_the_store
         "another ticket\n",
     )
     .unwrap();
-    fs::write(partial.join("junk"), b"not this transfer's").unwrap();
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    super::receive(&text, &options(&out), &tx).await.unwrap();
-    assert!(!partial.exists(), "a store from another ticket was kept");
-    assert_eq!(fs::read(out.join("tree").join("a.txt")).unwrap(), b"same");
+    fs::write(partial.join("junk"), b"planted").unwrap();
+    let err = super::receive(&text, &options(&out), &tx)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Policy(_)), "{err}");
+    assert!(err.to_string().contains(".sluice-partial-"), "{err}");
+    assert!(
+        partial.join("junk").exists(),
+        "the planted folder was changed"
+    );
 
-    // The same ticket's store, and a file the writer will refuse because it is not what it wrote.
-    fs::create_dir_all(&partial).unwrap();
+    // This home owns a store here now: the record and the marker id make it a resume. A file the
+    // writer finds changed is still a clash, and a clash removes both the store and its record.
     crate::engine::storage::claim(&partial).unwrap();
+    let id = crate::engine::storage::remember_record(&partial, &owner).unwrap();
     let names = std::collections::BTreeSet::from(["tree".to_string()]);
-    crate::engine::storage::remember(&partial, &owner, &names, false).unwrap();
-    fs::write(out.join("tree").join("b.txt"), b"clobbered").unwrap();
+    crate::engine::storage::remember(&partial, &owner, &names, false, &id).unwrap();
+    fs::create_dir_all(out.join("tree")).unwrap();
+    fs::write(out.join("tree").join("a.txt"), b"clobbered").unwrap();
     let err = super::receive(&text, &options(&out), &tx)
         .await
         .unwrap_err();
     assert!(matches!(err, Error::Policy(_)), "{err}");
     assert!(!partial.exists(), "a clash at write time kept the store");
     outgoing.provider.shutdown().await.unwrap();
+}
+
+/// A sender never puts a name in a manifest that the path rules reserve for a receive's own store:
+/// a folder or file called `.sluice-tmp-*` or `.sluice-partial-*` is refused when the send starts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_source_that_names_a_reserved_folder_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(&dir.path().join("home")).unwrap();
+    let source = dir.path().join("tree");
+    fs::create_dir(&source).unwrap();
+    fs::write(source.join(".sluice-tmp-0123456789abcdef"), b"x").unwrap();
+    let sent = crate::engine::prepare_send_paths(
+        &home,
+        std::slice::from_ref(&source),
+        RelayModeChoice::Disabled,
+        Congestion::Cubic,
+        None,
+        None,
+    )
+    .await;
+    let err = match sent {
+        Ok(_) => panic!("a reserved name was sent"),
+        Err(e) => e,
+    };
+    assert!(matches!(err, Error::Policy(_)), "{err}");
+    assert!(err.to_string().contains("reject"), "{err}");
 }

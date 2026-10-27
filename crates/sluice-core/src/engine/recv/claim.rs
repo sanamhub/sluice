@@ -13,8 +13,9 @@ use crate::{Error, manifest::Manifest, ticket::Ticket};
 
 /// Runs every check that needs no content blob, then claims the partial store and opens it. The
 /// order is the point: a refusal leaves no store for a later run to resume, and a folder is this
-/// transfer's store only when its marker says so. The marker also names the top-level entries this
-/// receive made, so a resume may write into those and into nothing else.
+/// transfer's store only when this home has a record of it and its marker carries the record's id.
+/// Anything else with that name is refused unread: it could have been planted where the store was,
+/// and resuming from it would trust bytes nobody in this home wrote.
 pub(super) async fn claim_store(
     partial: &std::path::Path,
     owner: &str,
@@ -22,7 +23,26 @@ pub(super) async fn claim_store(
     ticket: &Ticket,
     options: &ReceiveOptions,
 ) -> Result<(FsStore, bool, Plan), Error> {
-    let found = storage::recorded(partial)?;
+    let record = storage::find_record(partial, owner)?;
+    let exists = std::fs::symlink_metadata(partial).is_ok();
+    let found = match (record, exists) {
+        // The record, and only the record, says this folder is a store. Its marker then has to be
+        // the one that record was written with.
+        (Some(record), true) => {
+            let marker = storage::recorded(partial)?;
+            if marker.as_ref().and_then(|found| found.id.as_deref()) != Some(record.id.as_str()) {
+                return Err(storage::registry_clash(partial));
+            }
+            marker
+        }
+        (Some(_), false) => {
+            // A record of a store that is gone: this home left it behind, so drop it.
+            storage::forget_record(partial);
+            None
+        }
+        (None, true) => return Err(storage::registry_clash(partial)),
+        (None, false) => None,
+    };
     let resume = found.as_ref().is_some_and(|found| found.root == owner);
     // A run that was allowed to replace what was in the output was a deliberate choice, so the run
     // that continues it has to make the same one.
@@ -39,13 +59,17 @@ pub(super) async fn claim_store(
     let (plan, created) = plan::check(manifest, ticket, options, resume, &ours)?;
     if !resume {
         storage::claim(partial)?;
-        storage::remember(partial, owner, &created, options.force)?;
+        let id = storage::remember_record(partial, owner)?;
+        if let Err(e) = storage::remember(partial, owner, &created, options.force, &id) {
+            storage::discard(partial);
+            return Err(e);
+        }
     }
     match FsStore::load(partial).await {
         Ok(store) => Ok((store, resume, plan)),
         Err(e) => {
             // A store this receive could not open is not one a later one can resume.
-            storage::remove_quietly(partial);
+            storage::discard(partial);
             Err(Error::Storage(format!(
                 "cannot open the partial store: {}",
                 crate::plain(&e)

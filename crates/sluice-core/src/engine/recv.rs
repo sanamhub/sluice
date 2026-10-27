@@ -152,7 +152,7 @@ async fn run(
                 emit(events, Event::Warning { message });
             }
             // Every content blob was moved or copied out; what is left is metadata.
-            storage::remove_quietly(&partial);
+            storage::discard(&partial);
             emit(
                 events,
                 Event::Verified {
@@ -170,7 +170,7 @@ async fn run(
         }
         Err(e) => {
             if !keeps_store(&e) {
-                storage::remove_quietly(&partial);
+                storage::discard(&partial);
             }
             Err(e)
         }

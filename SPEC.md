@@ -540,6 +540,10 @@ stranger, and file names stay out of logs.
    `0` to `9`, `¹`, `²` or `³`. The name is the text before the first `.`, spaces before that `.`
    are ignored, and U+0131 is compared as `I`. So `con`, `Nul.txt` and `LPT¹.log` are rejected, and
    `CONSOLE` is not
+9. a component starts with `.sluice-partial-` or `.sluice-tmp-`, the two prefixes a receive gives
+   the store it writes beside the output and a folder it writes through. The prefixes themselves are
+   reserved too. A sender MUST NOT put such a name in a manifest, and a receive writes its own
+   stores under names no manifest can claim
 
 With these rules no accepted path can leave the output root by its text alone, and a symlink already
 on disk is the writer's concern, not these rules'.
@@ -620,6 +624,14 @@ found in the output belongs to the user and is a clash for a resume that is not 
 it. A store made by a run that was allowed to replace what was there records that too, and a resume
 of it needs the same permission again. It never changes the mode or the modification time of a folder
 that was already there when it wrote into it, and it never deletes a folder it did not make.
+
+**The home's record of a partial store.** A receive keeps a record of each partial store it makes,
+in the `partials` folder of the home, named by a random id that is also a line in the store's
+marker. The record holds the store's absolute path and the ticket root. A receive treats a
+`.sluice-partial-*` folder as its own only when a record names that folder and that root and the
+marker carries the record's id; a folder with that name and no such record is refused with a
+`Policy` error that names it, and is never read, changed or removed. The record is removed with the
+store. A sender MUST NOT name a path that the path rules reserve for these folders.
 
 **Sender.** A sender builds the entries from the folder it is given. It MUST:
 
