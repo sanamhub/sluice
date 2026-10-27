@@ -192,15 +192,7 @@ async fn a_request_for_the_last_chunk_leaves_the_sender_serving() {
     .await
     .unwrap();
     let addr = provider.addr();
-    let client_store = FsStore::load(dir.path().join("client")).await.unwrap();
-    let client = endpoint::bind(
-        None,
-        &RelayModeChoice::Disabled,
-        super::Congestion::Cubic,
-        None,
-    )
-    .await
-    .unwrap();
+    let (client, client_store) = client_of(&dir).await;
     let conn = client.connect(addr, iroh_blobs::ALPN).await.unwrap();
     client_store
         .remote()
@@ -260,17 +252,9 @@ async fn an_expiry_cuts_off_a_get_that_started_before_it() {
         .await
         .unwrap();
     let hash = tag.hash();
-    let client_store = FsStore::load(dir.path().join("client")).await.unwrap();
     // The client is bound before the deadline is set, so a slow machine spends its time before
     // the ticket exists rather than inside the transfer being measured.
-    let client = endpoint::bind(
-        None,
-        &RelayModeChoice::Disabled,
-        super::Congestion::Cubic,
-        None,
-    )
-    .await
-    .unwrap();
+    let (client, client_store) = client_of(&dir).await;
     let expiry = super::now_ms() + 1500;
     let provider = Provider::start(
         &home,
