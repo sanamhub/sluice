@@ -6,6 +6,7 @@ mod events;
 mod expiry;
 mod fetch;
 mod hello;
+mod live;
 mod policy;
 mod recv;
 mod recv_range;
@@ -16,6 +17,7 @@ mod storage;
 use std::{
     collections::BTreeSet,
     ops::Deref,
+    sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -36,6 +38,7 @@ pub use hello::{
     Hello, MAX_FRAME_BYTES, PROTO_VERSION, SluiceProtocol, decode as decode_hello,
     encode as encode_hello, greet,
 };
+pub use live::{CLOSE_AFTER, LiveLog, LiveSend, prepare_live, receive_live};
 pub use recv::{ReceiveOptions, Received, receive, top_level_rule};
 pub use recv_range::receive_range;
 pub use recv_stdout::receive_stdout;
@@ -45,10 +48,12 @@ pub use send::{
 };
 
 /// When `send` stops serving.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum Stop {
     /// After every content root has been served and the receiver has closed its connection.
     OneDownload(Vec<[u8; 32]>),
+    /// A live stream: serve until its close is signed, then until every segment is delivered.
+    Live(Arc<LiveLog>),
     /// On Ctrl+C, or at the ticket expiry.
     Keep,
 }
@@ -95,6 +100,48 @@ impl Provider {
         expiry: Option<u64>,
         port: Option<u16>,
     ) -> Result<Self, Error> {
+        let allowed: BTreeSet<Hash> = allowed.into_iter().map(Hash::from).collect();
+        let allowed = Arc::new(Mutex::new(allowed));
+        Self::start_inner(home, store, allowed, None, relay, congestion, expiry, port).await
+    }
+
+    /// Starts a provider whose `sluice/1` connection serves `log`, and whose static policy answers
+    /// for each segment the log seals. The allowlist is the log's, so a segment becomes readable
+    /// at the moment the frame that names it is pushed.
+    pub async fn start_live(
+        home: &Home,
+        store: FsStore,
+        log: Arc<LiveLog>,
+        relay: RelayModeChoice,
+        congestion: Congestion,
+        expiry: Option<u64>,
+        port: Option<u16>,
+    ) -> Result<Self, Error> {
+        let allowed = log.allowed();
+        Self::start_inner(
+            home,
+            store,
+            allowed,
+            Some(log),
+            relay,
+            congestion,
+            expiry,
+            port,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn start_inner(
+        home: &Home,
+        store: FsStore,
+        allowed: Arc<Mutex<BTreeSet<Hash>>>,
+        live: Option<Arc<LiveLog>>,
+        relay: RelayModeChoice,
+        congestion: Congestion,
+        expiry: Option<u64>,
+        port: Option<u16>,
+    ) -> Result<Self, Error> {
         let seed = home.identity()?.secret_seed();
         let saved = home.saved_port().filter(|_| port.is_none());
         let chosen = port.or(saved);
@@ -121,13 +168,16 @@ impl Provider {
             endpoint::wait_for_online(&endpoint).await?;
         }
         endpoint::wait_for_direct_addr(&endpoint).await?;
-        let allowed: BTreeSet<Hash> = allowed.into_iter().map(Hash::from).collect();
         let (done, done_rx) = unbounded_channel();
-        let policy = policy::start(allowed, expiry, done, store.clone());
+        let policy = policy::start_shared(allowed, expiry, done, store.clone());
         let blobs = BlobsProtocol::new(store.deref(), Some(policy.events.clone()));
+        let sluice = match live {
+            Some(log) => SluiceProtocol::live(log),
+            None => SluiceProtocol::default(),
+        };
         let router = Router::builder(endpoint.clone())
             .accept(iroh_blobs::ALPN, blobs)
-            .accept(ALPN, SluiceProtocol)
+            .accept(ALPN, sluice)
             .spawn();
         Ok(Self {
             router: Some(router),
@@ -163,10 +213,42 @@ impl Provider {
                 self.one_download(roots.into_iter().map(Hash::from).collect())
                     .await?
             }
+            Stop::Live(log) => self.live(log).await?,
             Stop::Keep => self.keep().await?,
         };
         self.shutdown_router().await?;
         Ok(end)
+    }
+
+    /// Serves a live stream until its close is signed, then waits for the segments the way a
+    /// static send waits for its roots. A reader can fetch a segment before the close, so the
+    /// delivery events that arrived earlier are still in the channel when the wait starts.
+    async fn live(&mut self, log: Arc<LiveLog>) -> Result<ServeEnd, Error> {
+        loop {
+            let left = self.expiry_ms_left();
+            if left == 0 && self.expiry.is_some() {
+                return Ok(ServeEnd::Expired);
+            }
+            let deadline = tokio::time::sleep(Duration::from_millis(left));
+            tokio::pin!(deadline);
+            tokio::select! {
+                _ = log.wait_closed() => break,
+                _ = &mut deadline => {
+                    if self.expiry.is_none_or(|expiry| now_ms() >= expiry) {
+                        return Ok(ServeEnd::Expired);
+                    }
+                }
+            }
+        }
+        let roots = log.roots();
+        if roots.is_empty() {
+            // An empty stream has no segment to fetch, so there is no delivery event to wait for.
+            // The close is what a reader needed, and it has it.
+            tokio::time::sleep(GRACE).await;
+            return Ok(ServeEnd::Downloaded);
+        }
+        self.one_download(roots.into_iter().map(Hash::from).collect())
+            .await
     }
 
     /// Stops serving without waiting for a download.
@@ -305,7 +387,7 @@ impl Receiver {
                 .map_err(|_| Error::Network("the relay did not answer in time".to_string()))?;
         }
         let router = Router::builder(endpoint.clone())
-            .accept(ALPN, SluiceProtocol)
+            .accept(ALPN, SluiceProtocol::default())
             .spawn();
         Ok(Self {
             router: Some(router),
@@ -318,6 +400,31 @@ impl Receiver {
     pub async fn connect(
         &self,
         ticket: &crate::ticket::Ticket,
+        events: UnboundedSender<Event>,
+    ) -> Result<Connection, Error> {
+        let alpn = match ticket.body() {
+            Body::Static { .. } => iroh_blobs::ALPN,
+            Body::Live { .. } => ALPN,
+        };
+        self.connect_alpn(ticket, alpn, events).await
+    }
+
+    /// Connects on the static blob ALPN, which is the second connection a live receive opens for
+    /// the segment content.
+    pub async fn connect_static(
+        &self,
+        ticket: &crate::ticket::Ticket,
+        events: UnboundedSender<Event>,
+    ) -> Result<Connection, Error> {
+        self.connect_alpn(ticket, iroh_blobs::ALPN, events).await
+    }
+
+    /// Connects to the provider the ticket names on `alpn`. An expired ticket is refused before a
+    /// socket is opened.
+    pub async fn connect_alpn(
+        &self,
+        ticket: &crate::ticket::Ticket,
+        alpn: &[u8],
         events: UnboundedSender<Event>,
     ) -> Result<Connection, Error> {
         if ticket.is_expired(now_ms()) {
@@ -337,10 +444,6 @@ impl Receiver {
                 .map_err(|_| Error::Policy("the ticket relay URL cannot be read".to_string()))?;
             addr.addrs.insert(TransportAddr::Relay(relay));
         }
-        let alpn = match ticket.body() {
-            Body::Static { .. } => iroh_blobs::ALPN,
-            Body::Live { .. } => ALPN,
-        };
         let conn = self
             .endpoint
             .connect(addr, alpn)

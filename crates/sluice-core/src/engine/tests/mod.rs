@@ -29,6 +29,7 @@ use crate::{
 
 mod checks;
 mod lifecycle;
+mod live;
 mod rules;
 mod server;
 mod transfer;

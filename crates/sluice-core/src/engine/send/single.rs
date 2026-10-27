@@ -58,6 +58,7 @@ pub async fn prepare(
         files: 1,
         bytes: before.size,
         congestion,
+        live: None,
         _tags: vec![tag],
     })
 }
@@ -122,6 +123,7 @@ pub async fn prepare_stdin(
         files: 1,
         bytes: size,
         congestion,
+        live: None,
         _tags: vec![tag],
     })
 }

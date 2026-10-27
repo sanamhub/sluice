@@ -5,9 +5,10 @@ use std::{io::BufRead, path::PathBuf};
 use clap::Args;
 use sluice_core::{
     Error,
-    engine::{ReceiveOptions, receive, receive_range, receive_stdout},
+    engine::{ReceiveOptions, receive, receive_live, receive_range, receive_stdout},
     manifest::Limits,
     range::ByteRange,
+    ticket::{Body, Ticket},
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -19,7 +20,8 @@ pub struct RecvArgs {
     /// The ticket the sender printed, or `-` to read it from standard input
     #[arg(value_name = "TICKET")]
     pub ticket: String,
-    /// The folder to write into, or `-` to write a single file to standard output
+    /// The folder to write into, `-` to write a single file to standard output, or for a live
+    /// ticket the file to write
     #[arg(long, default_value = ".", value_name = "DIR")]
     pub out: PathBuf,
     /// Replace a path that is already there. A folder is never replaced by a file or a link, even
@@ -45,7 +47,21 @@ pub struct RecvArgs {
 
 pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
     let ticket = ticket_text(&args.ticket)?;
+    let decoded = Ticket::decode(&ticket)?;
     let range = args.range.as_deref().map(ByteRange::parse).transpose()?;
+    if matches!(decoded.body(), Body::Live { .. }) {
+        if args.out.as_path() == std::path::Path::new("-") {
+            return Err(Error::Policy(
+                "a live ticket writes a file, so --out - is not supported yet".to_string(),
+            ));
+        }
+        if range.is_some() {
+            return Err(Error::Policy(
+                "--range works on a static transfer, not on a live one".to_string(),
+            ));
+        }
+        return run_live(args, output, &ticket);
+    }
     if args.out.as_path() == std::path::Path::new("-") {
         if range.is_some() {
             return Err(Error::Policy(
@@ -84,6 +100,34 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
                     received.path.display()
                 ));
             }
+        }
+        Ok(0)
+    })
+}
+
+/// Follows a live stream into the file `--out` names. The ticket carries no name, so the flag has
+/// to; a ticket with the default `--out` meets a folder and is refused with that advice.
+fn run_live(args: &RecvArgs, output: &Output, ticket: &str) -> Result<u8, Error> {
+    let out = std::path::absolute(&args.out)
+        .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", args.out.display())))?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
+    runtime.block_on(async {
+        let (tx, rx) = unbounded_channel();
+        let printer = events::printer(*output, rx, "receiving");
+        let options = options(args, out);
+        let store = sluice_core::Home::temporary_store()?;
+        let result = receive_live(ticket, &options, &store, &tx).await;
+        drop(tx);
+        let printed = printer
+            .await
+            .map_err(|e| Error::Bug(format!("the event printer stopped: {e}")))?;
+        printed?;
+        let received = result?;
+        if matches!(output.format(), crate::output::Format::Human) {
+            output.write_stderr(&format!("wrote {}\n", received.path.display()));
         }
         Ok(0)
     })

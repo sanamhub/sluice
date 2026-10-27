@@ -42,6 +42,13 @@ pub struct SendArgs {
     /// The congestion controller: cubic (default) or bbr3 (experimental)
     #[arg(long, value_enum, default_value_t = CongestionArg::Cubic, value_name = "NAME")]
     pub congestion: CongestionArg,
+    /// Follow one file that is still being written, sending each segment as it is sealed, instead
+    /// of sending what is there now
+    #[arg(long)]
+    pub live: bool,
+    /// For --live, close the stream after the file has not grown for this many seconds
+    #[arg(long, default_value_t = 2, value_name = "SECONDS")]
+    pub close_after: u64,
 }
 
 pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
@@ -62,6 +69,11 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
             "standard input is one source, so send it on its own".to_string(),
         ));
     }
+    if args.live && (stdin || args.paths.len() != 1) {
+        return Err(Error::Policy(
+            "a live send follows one regular file, so name exactly one path and no -".to_string(),
+        ));
+    }
     let paths = if stdin {
         Vec::new()
     } else {
@@ -73,7 +85,18 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
         .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
     runtime.block_on(async {
         let home = Home::open(&Home::locate()?)?;
-        let outgoing = if stdin {
+        let outgoing = if args.live {
+            sluice_core::engine::prepare_live(
+                &home,
+                &paths[0],
+                relay,
+                args.congestion.into(),
+                expiry,
+                args.port,
+                std::time::Duration::from_secs(args.close_after),
+            )
+            .await?
+        } else if stdin {
             sluice_core::engine::prepare_send_stdin(
                 &home,
                 relay,

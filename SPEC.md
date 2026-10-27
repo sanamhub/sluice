@@ -221,6 +221,13 @@ padding, so a record has one spelling.
 | `Frame` | the 76 bytes of its `LogEntry`, then `sig` 64 | 140 |
 | `LogClose` | `final_root` 32, `total_len` as a `u64` in 8, `closed` as a `u64` in 8, `last_entry_hash` 32, `sig` 64 | 144 |
 
+**Stream.** A record travels on the `sluice/1` connection after its length as a varint, and the
+receiver reads one record at a time. The length MUST be exactly the one the table gives for that
+record, so the three lengths 124, 140 and 144 are the only ones a receiver accepts, and the length
+is how it knows which record it has. A sender MUST write every record on the same stream, in the
+order **The chain** gives: the `LogOpen`, then the frames in `seq` order, then the `LogClose`.
+Nothing else is written on that stream, and the close ends it.
+
 `segment_bytes` is the size of a full segment. It is a multiple of 16,384 from 1,048,576 (1 MiB) to
 67,108,864 (64 MiB), and a sender uses 8,388,608 (8 MiB) unless it is told another. 16,384 is the
 block size of `iroh-blobs`, so a range inside a segment is a range of whole blocks. The lower bound

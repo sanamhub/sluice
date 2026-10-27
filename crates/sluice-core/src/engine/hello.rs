@@ -27,7 +27,7 @@ pub const CAP_RECEIPTS: u64 = 1 << 4;
 pub const CAP_ZSTD: u64 = 1 << 5;
 
 /// The capabilities this release offers. A capability is usable only when both sides set it.
-pub const CAPABILITIES: u64 = CAP_PACKS | CAP_MANIFEST_V1;
+pub const CAPABILITIES: u64 = CAP_LIVE | CAP_PACKS | CAP_MANIFEST_V1;
 /// The largest frame this side accepts. The sender must not exceed it.
 pub const MAX_FRAME_BYTES: u32 = 16 << 20;
 
@@ -66,18 +66,23 @@ pub fn encode(hello: Hello) -> Vec<u8> {
         hello.capabilities,
         u64::from(hello.max_frame_bytes),
     ] {
-        let mut value = value;
-        loop {
-            let low = (value & 0x7f) as u8;
-            value >>= 7;
-            if value == 0 {
-                out.push(low);
-                break;
-            }
-            out.push(low | 0x80);
-        }
+        out.extend_from_slice(&varint_bytes(value));
     }
     out
+}
+
+/// The shortest LEB128 spelling of one value, which is what a stream carries before a record.
+pub(super) fn varint_bytes(mut value: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(10);
+    loop {
+        let low = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(low);
+            return out;
+        }
+        out.push(low | 0x80);
+    }
 }
 
 /// Reads the greeting from its bytes and refuses another protocol version, a frame limit of zero,
@@ -134,7 +139,7 @@ pub async fn read_hello(recv: &mut RecvStream) -> Result<Hello, std::io::Error> 
     })
 }
 
-async fn read_stream_varint(recv: &mut RecvStream) -> Result<u64, std::io::Error> {
+pub(super) async fn read_stream_varint(recv: &mut RecvStream) -> Result<u64, std::io::Error> {
     let bad = |why: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, why.to_string());
     let mut value = 0u64;
     for count in 1..=10u32 {
@@ -194,18 +199,38 @@ pub async fn greet(conn: &Connection) -> std::io::Result<Hello> {
     Ok(theirs)
 }
 
+/// The dialer's half of the greeting, with both streams still open. A live transfer reads the
+/// records the listener writes after the greeting on the same stream, so the caller keeps both.
+pub async fn greet_stream(conn: &Connection) -> std::io::Result<(Hello, SendStream, RecvStream)> {
+    let (mut send, mut recv) = conn.open_bi().await.map_err(std::io::Error::other)?;
+    write_hello(&mut send, Hello::ours()).await?;
+    let theirs = read_hello(&mut recv).await?;
+    Ok((theirs, send, recv))
+}
+
 /// The close code for a `sluice/1` stream that names another protocol version.
 const CLOSE_VERSION: u32 = 1;
+/// The close code for a live request to a listener that serves no live stream.
+const CLOSE_NO_LIVE: u32 = 2;
 
-/// The `sluice/1` listener. It reads the dialer's greeting, rejects another protocol version, and
-/// answers with its own. The control records that follow this exchange are not supported yet.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct SluiceProtocol;
+/// The `sluice/1` listener. It reads the dialer's greeting, rejects another protocol version,
+/// answers with its own, and then writes the records of its live stream when there is one.
+#[derive(Clone, Debug, Default)]
+pub struct SluiceProtocol {
+    live: Option<std::sync::Arc<super::live::LiveLog>>,
+}
+
+impl SluiceProtocol {
+    /// A listener that serves the records of `log` after the greeting.
+    pub fn live(log: std::sync::Arc<super::live::LiveLog>) -> Self {
+        Self { live: Some(log) }
+    }
+}
 
 impl ProtocolHandler for SluiceProtocol {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         let (mut send, mut recv) = conn.accept_bi().await?;
-        let _theirs = match read_hello(&mut recv).await {
+        let theirs = match read_hello(&mut recv).await {
             Ok(hello) => hello,
             Err(cause) => {
                 // SPEC section 3 asks for a clear reason, which a generic accept error does not
@@ -220,9 +245,21 @@ impl ProtocolHandler for SluiceProtocol {
         write_hello(&mut send, Hello::ours())
             .await
             .map_err(AcceptError::from_err)?;
+        if let Some(log) = &self.live {
+            if !theirs.both(&Hello::ours(), CAP_LIVE) {
+                conn.close(
+                    VarInt::from_u32(CLOSE_NO_LIVE),
+                    b"the dialer does not offer live content",
+                );
+                return Ok(());
+            }
+            // The records are the only thing this stream carries; a failure means the dialer
+            // left, and the connection close below is the whole answer.
+            let _ = log.write_to(&mut send).await;
+        }
         send.finish()?;
-        // Returning from `accept` closes the connection, which can discard the greeting before the
-        // dialer reads it. The handler owns the connection until the dialer is done with it.
+        // Returning from `accept` closes the connection, which can discard what was written
+        // before the dialer reads it. The handler owns the connection until the dialer is done.
         let _ = conn.closed().await;
         Ok(())
     }
@@ -230,7 +267,7 @@ impl ProtocolHandler for SluiceProtocol {
 
 #[cfg(test)]
 mod tests {
-    use super::{CAP_LIVE, CAP_MANIFEST_V1, Hello, decode, encode};
+    use super::{CAP_LIVE, CAP_ZSTD, Hello, decode, encode};
 
     #[test]
     fn greeting_round_trips() {
@@ -242,11 +279,11 @@ mod tests {
     fn a_capability_needs_both_sides() {
         let ours = Hello::ours();
         let other = Hello {
-            capabilities: CAP_LIVE | CAP_MANIFEST_V1,
+            capabilities: CAP_LIVE | CAP_ZSTD,
             ..ours
         };
-        assert!(!ours.both(&other, CAP_LIVE));
-        assert!(ours.both(&other, CAP_MANIFEST_V1));
+        assert!(ours.both(&other, CAP_LIVE));
+        assert!(!ours.both(&other, CAP_ZSTD));
     }
 
     #[test]

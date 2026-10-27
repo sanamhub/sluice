@@ -58,6 +58,7 @@ pub async fn prepare_paths(
         files: file_count(manifest),
         bytes: total_bytes(manifest),
         congestion,
+        live: None,
         _tags: tags,
     })
 }

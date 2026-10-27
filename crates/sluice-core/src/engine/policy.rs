@@ -68,7 +68,8 @@ pub enum ServeEvent {
 /// What every request is answered against: the allowlist, the ticket deadline, the reporter, and
 /// the maps that say how much of each blob every connection has served.
 struct Gate {
-    allowed: Arc<BTreeSet<Hash>>,
+    /// Shared with a live send, which adds each segment as it seals it.
+    allowed: Arc<Mutex<BTreeSet<Hash>>>,
     expiry: Option<u64>,
     done: UnboundedSender<ServeEvent>,
     store: FsStore,
@@ -76,12 +77,10 @@ struct Gate {
     delivered: Arc<Mutex<BTreeMap<Hash, u64>>>,
 }
 
-/// Starts the policy. `done` receives every completed get and every closed connection, so a sender
-/// can stop after one download and not cut the last bytes off. `expiry` is UTC milliseconds; at or
-/// after it every request is refused. `store` is the provider's own store, which knows each blob's
-/// size, so a request that asks for the last block first is not mistaken for the whole file.
-pub fn start(
-    allowed: BTreeSet<Hash>,
+/// [`start`] with an allowlist the caller keeps. A live send adds the root of each segment it
+/// seals, and the same set is what the policy answers from.
+pub fn start_shared(
+    allowed: Arc<Mutex<BTreeSet<Hash>>>,
     expiry: Option<u64>,
     done: UnboundedSender<ServeEvent>,
     store: FsStore,
@@ -89,7 +88,7 @@ pub fn start(
     let (events, mut rx) = EventSender::channel(32, mask());
     let totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>> = Arc::default();
     let gate = Gate {
-        allowed: Arc::new(allowed),
+        allowed,
         expiry,
         done,
         store,
@@ -189,13 +188,17 @@ impl Gate {
 
     /// The one access rule: an allowed hash, before the ticket's deadline.
     fn may(&self, hash: Hash) -> bool {
-        !expired(self.expiry) && self.allowed.contains(&hash)
+        !expired(self.expiry) && lock(&self.allowed).contains(&hash)
     }
 
     /// The same rule for a request that names several hashes at once: every one has to be allowed,
     /// so one refused hash refuses the whole request.
     fn may_all(&self, hashes: &[Hash]) -> bool {
-        !expired(self.expiry) && hashes.iter().all(|hash| self.allowed.contains(hash))
+        if expired(self.expiry) {
+            return false;
+        }
+        let allowed = lock(&self.allowed);
+        hashes.iter().all(|hash| allowed.contains(hash))
     }
 }
 

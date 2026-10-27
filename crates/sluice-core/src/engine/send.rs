@@ -17,7 +17,7 @@ use std::{
 use iroh_blobs::api::TempTag;
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::{Congestion, Event, Provider, RelayModeChoice, Stop, emit, expiry, storage};
+use super::{Congestion, Event, LiveSend, Provider, RelayModeChoice, Stop, emit, expiry, storage};
 use crate::{
     Error,
     ticket::{Body, Ticket},
@@ -39,8 +39,10 @@ pub struct Outgoing {
     pub bytes: u64,
     /// The congestion controller this send runs with.
     pub congestion: Congestion,
+    /// The log this send follows, when the content is live.
+    pub live: Option<LiveSend>,
     // Keeps the in-place imports protected from garbage collection while the send runs.
-    _tags: Vec<TempTag>,
+    pub(crate) _tags: Vec<TempTag>,
 }
 
 /// Imports `path` in place and starts a provider for it. `expiry` is UTC milliseconds or none.
@@ -62,22 +64,26 @@ impl Outgoing {
                 congestion: self.congestion,
             },
         );
-        let roots = if self.roots.is_empty() {
-            match self.ticket.body() {
-                Body::Static { root, .. } => vec![*root],
-                Body::Live { .. } => Vec::new(),
-            }
-        } else {
-            self.roots.clone()
-        };
-        let end = self
-            .provider
-            .serve(if keep {
-                Stop::Keep
-            } else {
+        let stop = match (&self.live, keep) {
+            (_, true) => Stop::Keep,
+            (Some(live), false) => Stop::Live(live.log.clone()),
+            (None, false) => {
+                let roots = if self.roots.is_empty() {
+                    match self.ticket.body() {
+                        Body::Static { root, .. } => vec![*root],
+                        Body::Live { .. } => Vec::new(),
+                    }
+                } else {
+                    self.roots.clone()
+                };
                 Stop::OneDownload(roots)
-            })
-            .await?;
+            }
+        };
+        let end = self.provider.serve(stop).await;
+        if let Some(live) = &self.live {
+            live.stop();
+        }
+        let end = end?;
         Ok(match end {
             super::ServeEnd::Downloaded => StopEnd::Downloaded,
             super::ServeEnd::Expired => StopEnd::Expired,

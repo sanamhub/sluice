@@ -24,6 +24,7 @@ postcard.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sluice-live = { path = "../sluice-live" }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
