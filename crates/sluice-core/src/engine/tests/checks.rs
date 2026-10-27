@@ -464,6 +464,11 @@ async fn a_time_the_platform_cannot_hold_is_skipped_with_a_warning() {
             warned = true;
         }
     }
+    // Windows cannot hold a time that far ahead and says so; Linux can, and keeps it. Either way
+    // the file is written and nothing panics.
+    #[cfg(windows)]
     assert!(warned, "the file was written without a warning");
+    #[cfg(not(windows))]
+    let _ = warned;
     provider.shutdown().await.unwrap();
 }
