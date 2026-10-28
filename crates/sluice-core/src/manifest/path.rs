@@ -282,8 +282,8 @@ fn starts_with_reserved(name: &str, prefix: &str) -> bool {
 
 /// The one key two names are compared by when the question is whether they are the same name: the
 /// manifest's collision rule, the link check and rule 9 all use this. It is the form Unicode's
-/// `NFKC_Casefold` is built to give: the code points a name may not show are dropped, the dotless i
-/// is read as `i`, and NFKC, full case folding and NFKC again are applied in that order.
+/// `NFKC_Casefold` is built to give: the code points a name may not show are dropped, NFKC, full
+/// case folding and NFKC again are applied in that order, and the dotless i is read as `i` last.
 ///
 /// The second NFKC is what joins names a volume treats as one. A fold can leave a composition
 /// undone: U+0390 folds to iota, diaeresis and acute, while U+03AA U+0301 folds to the precomposed
@@ -291,20 +291,27 @@ fn starts_with_reserved(name: &str, prefix: &str) -> bool {
 /// compares canonically equivalent names, such as APFS or a casefold folder on Linux, reads the two
 /// as one, so a key that kept them apart would let two entries write one file and let a link target
 /// step above the output.
+///
+/// The dotless i is read last because NFKC writes U+1D6A4, the mathematical italic dotless i, as
+/// U+0131. Read before the last composition, the key of that character would still be dotless while
+/// the key of U+0131 was `i`, and rule 9 would miss a store folder spelled with it.
 pub(crate) fn fold_key(name: &str) -> String {
-    let kept: String = name
-        .chars()
-        .filter(|c| !is_ignorable(*c))
-        .map(|c| if c == '\u{131}' { 'i' } else { c })
-        .collect();
+    let kept: String = name.chars().filter(|c| !is_ignorable(*c)).collect();
     let composed: String = kept.nfkc().collect();
     let folded = UniCase::unicode(&composed).to_folded_case();
     // NFKC of ASCII is the same text, and a manifest's names are mostly ASCII, so the second
-    // composition runs only where it can change something.
-    if folded.is_ascii() {
-        return folded;
+    // composition runs only where it can change something. A key that is ASCII cannot hold U+0131,
+    // so the read at the end has nothing to do in that case either.
+    let key: String = if folded.is_ascii() {
+        folded
+    } else {
+        folded.nfkc().collect()
+    };
+    if key.contains('\u{131}') {
+        key.replace('\u{131}', "i")
+    } else {
+        key
     }
-    folded.nfkc().collect()
 }
 
 /// The cheap check for a prefix that is already ASCII and usually matches that way.

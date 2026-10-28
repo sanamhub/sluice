@@ -549,24 +549,27 @@ stranger, and file names stay out of logs.
    store it writes beside the output and a folder it writes through. The prefixes themselves are
    reserved too. A sender MUST NOT put such a name in a manifest, and a receive writes its own stores
    under names no manifest can claim. The comparison is by **the comparison key**, below, so
-   `.SLUICE-PARTIAL-x`, `．sluice-partial-x`, `.ſluice-partial-x`, `.sluıce-partial-x` and the same
-   name with a zero-width space after `slu` all name the same store there
+   `.SLUICE-PARTIAL-x`, `．sluice-partial-x`, `.ſluice-partial-x`, `.sluıce-partial-x`,
+   `.slu𝚤ce-partial-x` and the same name with a zero-width space after `slu` all name the same
+   store there
 
 **The comparison key.** Every question in this section about whether two names are the same name is
 answered by one key, and a decoder MUST use this one and no other. The key of a name is:
 
 1. every code point with the `Default_Ignorable_Code_Point` property of Unicode 18.0.0 dropped, such
    as U+180E, U+200B, U+FEFF and U+E0000 to U+E0FFF
-2. U+0131 read as `i`, because NTFS upcases the dotless `ı` to `I`
-3. NFKC applied, because macOS composes and decomposes a name and a fullwidth letter is its plain
+2. NFKC applied, because macOS composes and decomposes a name and a fullwidth letter is its plain
    one to it
-4. full Unicode case folding applied to the result, by the entries of status `C` and `F` in
+3. full Unicode case folding applied to the result, by the entries of status `C` and `F` in
    `CaseFolding.txt` and no other: `ß` becomes `ss`, `ﬃ` becomes `ffi`, and the Turkic entries of
    status `T` and the simple entries of status `S` are not used. Windows and macOS resolve a name
    regardless of case, and APFS folds some letters beyond ASCII
-5. NFKC applied again, because a fold can leave a composition undone: `ΐ` folds to three code
+4. NFKC applied again, because a fold can leave a composition undone: `ΐ` folds to three code
    points, while `Ϊ́` folds to two that compose to the same letter, and a volume that compares
    canonically equivalent names reads the two spellings as one
+5. U+0131 read as `i`, because NTFS upcases the dotless `ı` to `I`. This is the last step because
+   NFKC writes U+1D6A4, the mathematical italic dotless i, as U+0131: read any earlier, the two
+   spellings would key differently and a name could reach a reserved prefix with one of them
 
 Nothing follows the fifth step. The tables are those of Unicode 18.0.0. A later version adds pairs,
 and a receiver on newer tables would refuse a manifest that a sender on older ones built, so a

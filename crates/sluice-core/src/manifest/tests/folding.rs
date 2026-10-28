@@ -19,12 +19,17 @@ fn full_folding_joins_a_string_with_its_expansion() {
     assert_ne!(key("a"), key("b"));
 }
 
-/// The dotless i is read as `i` before the fold, because NTFS upcases it to `I`: a volume there
-/// finds one name where the text has two, so the key joins them and the receiver refuses the pair.
+/// The dotless i is read as `i`, because NTFS upcases it to `I`: a volume there finds one name where
+/// the text has two, so the key joins them and the receiver refuses the pair. The read is the last
+/// step, after the second NFKC: NFKC writes U+1D6A4 as U+0131, and a read before it would leave that
+/// spelling dotless and let rule 9 miss the store folder it names.
 #[test]
 fn the_dotless_i_is_read_as_i() {
     assert_eq!(key("ı"), key("i"));
     assert_eq!(key("\u{131}"), "i");
+    assert_eq!(key("\u{1d6a4}"), "i");
+    assert_eq!(key("\u{1d6a4}"), key("\u{131}"));
+    assert_eq!(key(".slu\u{1d6a4}ce-partial-x"), key(".sluice-partial-x"));
 }
 
 /// The code points a name may not show are read away, because a file system may compare a name as
@@ -79,17 +84,39 @@ fn the_key_is_nfkc_then_the_fold_then_nfkc_again() {
     assert!(is_nfc("\u{390}"));
 }
 
-/// Characters whose folding, composition or case is subtle, so a generated name reaches the parts
-/// of the key the examples above do not. Latin, Greek, Cyrillic and Hangul are the scripts a name
-/// is likely to be in, and the combining marks let a random name be canonically equivalent to
-/// another without being the same text.
+/// A character from a block whose characters NFKC or full case folding rewrites. Latin and its
+/// extended forms, Greek, Cyrillic, letterlike symbols, halfwidth and fullwidth forms, presentation
+/// forms, Hangul, mathematical alphanumerics and compatibility ideographs are where a fold, a
+/// composition or a case change has something to do, so a name drawn from them reaches the parts of
+/// the key the examples above do not. The combining marks let a random name be canonically
+/// equivalent to another without being the same text.
 fn a_name_character() -> impl Strategy<Value = char> {
-    prop::sample::select(vec![
-        'a', 'A', 'z', 'Z', ' ', '0', 'ß', 'ẞ', 'é', 'E', 'İ', 'ı', '\u{ff41}', '\u{ff21}',
-        '\u{301}', '\u{300}', '\u{308}', '\u{327}', '\u{390}', '\u{3aa}', '\u{3ca}', '\u{3b9}',
-        '\u{3b1}', '\u{3a9}', '\u{3c2}', '\u{3c3}', '\u{410}', '\u{415}', '\u{435}', '\u{401}',
-        '\u{ac00}', '\u{1100}', '\u{1161}', '\u{1112}', '\u{1175}', '\u{a7ce}', '\u{200d}',
-    ])
+    prop_oneof![
+        proptest::char::range('\u{20}', '\u{2ff}'),
+        proptest::char::range('\u{300}', '\u{36f}'),
+        proptest::char::range('\u{370}', '\u{3ff}'),
+        proptest::char::range('\u{400}', '\u{4ff}'),
+        proptest::char::range('\u{1e00}', '\u{1eff}'),
+        proptest::char::range('\u{2100}', '\u{214f}'),
+        proptest::char::range('\u{ac00}', '\u{d7a3}'),
+        proptest::char::range('\u{fb00}', '\u{fb4f}'),
+        proptest::char::range('\u{ff00}', '\u{ffef}'),
+        proptest::char::range('\u{1d400}', '\u{1d7ff}'),
+        proptest::char::range('\u{f900}', '\u{faff}'),
+        proptest::char::range('\u{2f800}', '\u{2fa1f}'),
+        prop::sample::select(vec![
+            '\u{1d6a4}',
+            '\u{301}',
+            '\u{308}',
+            '\u{390}',
+            '\u{3aa}',
+            '\u{131}',
+            '\u{130}',
+            '\u{200d}',
+            '\u{180e}',
+            '\u{a7ce}',
+        ]),
+    ]
 }
 
 proptest! {

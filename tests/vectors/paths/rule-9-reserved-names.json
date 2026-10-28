@@ -1,5 +1,5 @@
 {
-  "description": "Rule 9: a manifest path may not name a folder that a receive gives to its own partial store or to a temporary folder during a write. The prefix itself is reserved as well as any name that starts with it, at any depth, in any spelling that a file system may resolve to it: ASCII case, the fullwidth forms NFKC folds, the letters Unicode case folding matches such as a long s, the dotless i that NTFS upcases, and the default-ignorable code points a name may carry. A name that only looks similar is not.",
+  "description": "Rule 9: a manifest path may not name a folder that a receive gives to its own partial store or to a temporary folder during a write. The prefix itself is reserved as well as any name that starts with it, at any depth, in any spelling that a file system may resolve to it: ASCII case, the fullwidth forms NFKC folds, the letters Unicode case folding matches such as a long s, the dotless i that NTFS upcases and the mathematical italic dotless i that NFKC writes as it, and the default-ignorable code points a name may carry. A name that only looks similar is not.",
   "cases": [
     { "path": ".sluice-partial-0123456789abcdef", "valid": false, "rule": 9 },
     { "path": ".sluice-tmp-0123456789abcdef", "valid": false, "rule": 9 },
@@ -26,6 +26,7 @@
     { "path": "é.sluice-partial-x", "valid": true },
     { "path": "．sluice-tmpx", "valid": true },
     { "path": ".sluıce-partial-x", "valid": false, "rule": 9 },
+    { "path": ".slu𝚤ce-partial-x", "valid": false, "rule": 9 },
     { "path": "Tree/.sluıce-tmp-x/b", "valid": false, "rule": 9 },
     { "path": ".\u200bsluice-partial-x", "valid": false, "rule": 9 },
     { "path": ".slu\u200dice-partial-x", "valid": false, "rule": 9 },
