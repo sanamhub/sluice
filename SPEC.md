@@ -32,7 +32,9 @@ The transport, NAT traversal, and relay behaviour come from `iroh` and are out o
 - Timestamps are UTC milliseconds since the Unix epoch, as `u64`.
 - Sizes and rates written on a command line are bytes unless a unit follows: `K`, `M`, `G` and `T`
   alone or with `iB` are powers of 1024, the same letters with `B` are powers of 1000, and a bare
-  number is bytes. `--limit-rate`, `--max-size` and `--range` read sizes with the same parser.
+  number is bytes. Surrounding whitespace is not accepted: a size is read exactly as written, so a
+  count cannot quietly mean something other than what it looks like. `--limit-rate`, `--max-size`
+  and `--range` read sizes with the same parser.
 - "MUST", "SHOULD", "MAY" carry their RFC 2119 meaning.
 
 ---

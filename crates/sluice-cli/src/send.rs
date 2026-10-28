@@ -49,7 +49,8 @@ pub struct SendArgs {
     /// For --live, close the stream after the file has not grown for this many seconds
     #[arg(long, default_value_t = 2, value_name = "SECONDS")]
     pub close_after: u64,
-    /// Cap the bytes this send offers per second, shared by its transfers, such as 50M
+    /// Cap the bytes this send offers per second, shared by its transfers, such as `50M` or
+    /// `50MB`: `KB` is 1000 bytes and `KiB` 1024, and `K`, `M`, `G`, `T` alone are powers of 1024
     #[arg(long, value_name = "RATE")]
     pub limit_rate: Option<String>,
 }

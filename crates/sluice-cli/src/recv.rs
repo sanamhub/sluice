@@ -40,7 +40,8 @@ pub struct RecvArgs {
     /// Create the symlinks the sender recorded (never followed outside the output)
     #[arg(long)]
     pub links: bool,
-    /// Write only this byte range of a one-file transfer, such as `4G:4.1G` (a folder is refused)
+    /// Write only this byte range of a one-file transfer, such as `4G:4.1G`, with the units of
+    /// `--max-size` (`KB` is 1000 bytes, `KiB` 1024); a folder is refused
     #[arg(long, value_name = "RANGE")]
     pub range: Option<String>,
     /// Accept a top-level name that starts with a dot, such as `.ssh`
@@ -52,10 +53,12 @@ pub struct RecvArgs {
     /// Where several tickets start among themselves: high, normal (default) or low
     #[arg(long, value_enum, default_value_t = PriorityArg::Normal, value_name = "LEVEL")]
     pub priority: PriorityArg,
-    /// Cap the bytes this command fetches per second, shared by its transfers, such as 50M; a\n    /// `KB` is 1000 bytes and a `KiB` 1024
+    /// Cap the bytes this command fetches per second, shared by its transfers, such as `50M` or
+    /// `50MB`: `KB` is 1000 bytes and `KiB` 1024, and `K`, `M`, `G`, `T` alone are powers of 1024
     #[arg(long, value_name = "RATE")]
     pub limit_rate: Option<String>,
-    /// Stop a live receive once the file would pass this size, such as 4G or 4GiB; what arrived\n    /// stays. `KB` is a power of 1000 and `KiB` of 1024
+    /// Stop a live receive once the file would pass this size, such as `4G` or `4GB`; what arrived
+    /// stays. The units are those of `--limit-rate`: `KB` is 1000 bytes and `KiB` 1024
     #[arg(long, value_name = "SIZE")]
     pub max_size: Option<String>,
 }
