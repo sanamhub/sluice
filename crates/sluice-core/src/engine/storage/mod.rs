@@ -32,9 +32,14 @@ pub use temp::PREFIX as TEMP_PREFIX;
 pub use temp::{Temp, sweep_temporary_store, temp_dir, temp_path};
 pub use temp_store::TempStore;
 
-use std::{fs, io, path::Path};
+use std::{fs, io, path::Path, time::Duration};
 
 use crate::Error;
+
+/// The waits before another try at removing a folder that a command just closed. A store file can
+/// stay held for a moment after its database closes, by the store's own actor or by a scanner on
+/// Windows, and the waits add up to under two seconds together.
+const REMOVAL_DELAYS: [u64; 7] = [10, 20, 40, 80, 160, 320, 640];
 
 /// How much room a receive of `content` bytes needs before it starts. The store keeps the partial
 /// blob and its outboard, about 0.4% of the content, and the manifest and metadata are small. A
@@ -107,9 +112,53 @@ pub fn policy_path(doing: &str, path: &Path, source: io::Error) -> Error {
 
 /// Removes a file or folder that this receive made, ignoring a failure: the transfer itself
 /// succeeded or failed for a reason worth reporting first.
+///
+/// A store's database can still be closing when the folder above it is removed, and a scanner on
+/// Windows can hold a file for a moment after that, so a failure that may clear on its own is tried
+/// again for a short while. A folder that still cannot be removed is left to the sweep, which
+/// removes a temporary folder nobody holds; failing a send over it would hide the outcome that
+/// matters.
 pub fn remove_quietly(path: &Path) {
-    let _ = fs::remove_dir_all(path);
-    let _ = fs::remove_file(path);
+    let mut last = match remove_once(path) {
+        Ok(()) => return,
+        Err(error) => error,
+    };
+    for delay in REMOVAL_DELAYS {
+        if !retryable(&last) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(delay));
+        match remove_once(path) {
+            Ok(()) => return,
+            Err(error) => last = error,
+        }
+    }
+}
+
+/// Removes `path` once and says whether it is gone. A temporary folder can be a folder or a file,
+/// so both names are tried, and a name that is already gone counts as removed.
+fn remove_once(path: &Path) -> io::Result<()> {
+    match fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(second) if second.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(_) => Err(error),
+        },
+    }
+}
+
+/// Whether a removal failed for a reason that a moment can clear: a file another process still
+/// holds, or a folder whose last entry went away between the listing and the removal.
+fn retryable(error: &io::Error) -> bool {
+    match error.raw_os_error() {
+        #[cfg(windows)]
+        Some(5 | 32 | 33 | 145) => true,
+        #[cfg(unix)]
+        Some(16 | 39) => true,
+        _ => error.kind() == io::ErrorKind::WouldBlock,
+    }
 }
 
 #[cfg(unix)]
