@@ -589,10 +589,11 @@ new vectors.
   the setuid, setgid and sticky bits. It is applied on Unix. A receiver MUST NOT apply the setuid or
   setgid bit (`0o6000`) to anything it writes, whatever `mode` says, because a hostile sender could
   otherwise plant a setuid binary. A receiver MUST always keep owner read and write on a file it
-  writes, so a `mode` without them gains them: `000` becomes `600` and `444` becomes `644`. Without
-  them the receive could not read back a file it already wrote to compare it on a resume. On Windows
-  only the read-only bit is honored, and a file is read-only when `0o200` is clear after that rule, so
-  a received file is never read-only.
+  writes, so a `mode` without them gains them: `400` becomes `600` and `444` becomes `644`. Without
+  them the receive could not read back a file it already wrote to compare it on a resume. A `mode` of
+  `0` means the sender did not know one, and the file keeps the mode the receive makes it with, which
+  has owner read and write too. On Windows only the read-only bit is honored, and a file is read-only
+  when `0o200` is clear after that rule, so a received file is never read-only.
 - **Symlinks are recorded and never followed during send.** A receiver MUST NOT create a symlink
   unless explicitly enabled.
 - `link_target` is present exactly when `kind` is Symlink, which is rule 10.

@@ -26,6 +26,7 @@ pub fn partial_dir(out: &Path, root: &str) -> PathBuf {
 /// What a partial store's marker says: the transfer that made the folder, the top-level names that
 /// transfer created in the output, and whether it was allowed to write over what was there. A resume
 /// may write into those names and no others, and only if it is as deliberate as that run was.
+#[derive(Debug)]
 pub struct Owner {
     pub root: String,
     pub names: BTreeSet<String>,

@@ -120,7 +120,7 @@ async fn a_kept_store_is_given_its_own_bytes_back() {
 async fn a_mode_without_owner_access_keeps_owner_read_and_write() {
     let dir = tempfile::tempdir().unwrap();
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    for given in [0o000, 0o444, 0o750] {
+    for given in [0o400, 0o444, 0o750] {
         let path = dir.path().join(format!("mode-{given:o}.bin"));
         fs::write(&path, b"bytes").unwrap();
         let file = std::fs::File::options().write(true).open(&path).unwrap();
