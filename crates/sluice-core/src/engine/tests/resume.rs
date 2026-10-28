@@ -255,6 +255,52 @@ async fn a_resume_writes_only_into_the_names_the_first_run_made() {
     outgoing.provider.shutdown().await.unwrap();
 }
 
+/// A store kept for a resume does not collect: nothing in this process sweeps it, and the run that
+/// continues it opens it as it was. A store that collected would lose the blobs the failed run
+/// fetched at its next sweep, which is the whole reason the resume store is opened without one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_kept_store_keeps_its_blobs_across_a_sweep() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = vec![6u8; 900 * 1024];
+    let (outgoing, text) = prepared(&dir, &body).await;
+    let out = dir.path().join("out");
+    let mut limited = options(&out);
+    limited.write_limit = Some(256 * 1024);
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let err = super::receive(&text, &limited, &tx).await.unwrap_err();
+    assert!(matches!(err, Error::Storage(_)), "{err}");
+    assert!(partial_exists(&out), "the failed run removed its store");
+
+    // A store that collects sweeps every hundred milliseconds in a unit test.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let mut held = 0u64;
+    for entry in fs::read_dir(&out).unwrap().flatten() {
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".sluice-partial-")
+        {
+            for file in fs::read_dir(entry.path().join("data"))
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                held += file.metadata().map(|meta| meta.len()).unwrap_or(0);
+            }
+        }
+    }
+    assert!(
+        held >= body.len() as u64,
+        "the kept store held {held} bytes of {}",
+        body.len()
+    );
+
+    let received = super::receive(&text, &options(&out), &tx).await.unwrap();
+    assert_eq!(received.bytes, body.len() as u64);
+    assert_eq!(fs::read(out.join("source.bin")).unwrap(), body);
+    outgoing.provider.shutdown().await.unwrap();
+}
+
 /// Waits until a receive has opened the store beside `out`, and returns its database path. The
 /// folder exists a moment before the store does, so a test that cancels waits for the database:
 /// from that moment the folder is locked, which is what a resume in the same process has to get
