@@ -10,6 +10,7 @@ use std::{
     fs::{self, File},
     io,
     path::{Path, PathBuf},
+    sync::{Arc, Condvar, Mutex},
     time::{Duration, SystemTime},
 };
 
@@ -28,12 +29,71 @@ const LOCK: &str = "lock";
 /// disk for ever.
 pub const STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// A temporary folder whose lock could not be taken is still in use, so its folder time is touched
+/// while it lives. The sweep goes by that time; without the touch a transfer that runs past
+/// [`STALE_AFTER`] on a file system whose lock failed for a moment would be removed under it.
+const TOUCH_EVERY: Duration = Duration::from_secs(60 * 60);
+
 /// A temporary folder for one store, with the lock that keeps the sweep away from it. The folder is
 /// removed and the lock released when the value is dropped.
 pub struct Temp {
     path: PathBuf,
     /// Held for as long as this value lives.
     _lock: File,
+    /// Started only when the lock could not be taken, so the folder still looks in use.
+    heartbeat: Option<Heartbeat>,
+}
+
+/// A thread that keeps a temporary folder's time fresh. It stops when its `Temp` is dropped.
+struct Heartbeat {
+    stopped: Arc<(Mutex<bool>, Condvar)>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Heartbeat {
+    fn start(path: PathBuf, every: Duration) -> Self {
+        let stopped = Arc::new((Mutex::new(false), Condvar::new()));
+        let flag = Arc::clone(&stopped);
+        let thread = std::thread::Builder::new()
+            .name("sluice-temp-touch".to_string())
+            .spawn(move || {
+                let (lock, condvar) = &*flag;
+                let mut stopped = lock.lock().unwrap_or_else(|p| p.into_inner());
+                loop {
+                    let (guard, _) = condvar
+                        .wait_timeout(stopped, every)
+                        .unwrap_or_else(|p| p.into_inner());
+                    stopped = guard;
+                    if *stopped {
+                        return;
+                    }
+                    drop(stopped);
+                    touch(&path);
+                    stopped = lock.lock().unwrap_or_else(|p| p.into_inner());
+                }
+            })
+            .ok();
+        Self { stopped, thread }
+    }
+}
+
+impl Drop for Heartbeat {
+    fn drop(&mut self) {
+        let (lock, condvar) = &*self.stopped;
+        *lock.lock().unwrap_or_else(|p| p.into_inner()) = true;
+        condvar.notify_all();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Adds and removes a name inside `path`, which sets the folder's time on every platform.
+fn touch(path: &Path) {
+    let marker = path.join(".in-use");
+    if fs::write(&marker, b"").is_ok() {
+        let _ = fs::remove_file(&marker);
+    }
 }
 
 impl Temp {
@@ -45,6 +105,8 @@ impl Temp {
 
 impl Drop for Temp {
     fn drop(&mut self) {
+        // Stopped first, so a touch cannot recreate a name in a folder that is being removed.
+        self.heartbeat.take();
         remove_quietly(&self.path);
     }
 }
@@ -80,10 +142,17 @@ pub fn temp_dir(out: &Path) -> Result<Temp, Error> {
 /// folder is still removed when its command ends, and the sweep leaves it a day longer.
 fn hold(path: PathBuf) -> Result<Temp, Error> {
     let lock = File::create(path.join(LOCK)).map_err(|e| storage("create", &path, e))?;
-    if lock.try_lock().is_err() {
-        // Left unlocked on purpose rather than failing: see above.
-    }
-    Ok(Temp { path, _lock: lock })
+    // Left unlocked on purpose rather than failing: see above. The sweep then decides by the
+    // folder's time, so the heartbeat keeps it fresh while this command runs.
+    let heartbeat = match lock.try_lock() {
+        Ok(()) => None,
+        Err(_) => Some(Heartbeat::start(path.clone(), TOUCH_EVERY)),
+    };
+    Ok(Temp {
+        path,
+        _lock: lock,
+        heartbeat,
+    })
 }
 
 /// A name inside the temporary folder that no entry can have, because the folder is new and only
@@ -132,8 +201,12 @@ fn sweep(parent: &Path, now: SystemTime) -> Result<(), Error> {
 /// version writes one into every temporary folder it makes, and the `tmp` folder is private to this
 /// user, so nothing else can have put a folder there.
 fn held(path: &Path) -> bool {
-    let Ok(lock) = File::open(path.join(LOCK)) else {
-        return false;
+    let lock = match open_lock(&path.join(LOCK)) {
+        Ok(lock) => lock,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return false,
+        // A lock that cannot be read is not proof that the folder is free, and a folder removed
+        // under a running command is worse than one an old command keeps.
+        Err(_) => return true,
     };
     match lock.try_lock() {
         Ok(()) => {
@@ -141,6 +214,37 @@ fn held(path: &Path) -> bool {
             false
         }
         Err(_) => true,
+    }
+}
+
+/// Opens a lock file without following a link at its name. A link there would let the sweep lock,
+/// and take a reading from, a file outside the folder, so the folder would be judged by something
+/// that is not its lock.
+fn open_lock(path: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    {
+        use rustix::fs::{Mode, OFlags};
+
+        let fd = rustix::fs::open(
+            path,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )?;
+        Ok(File::from(fd))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(OPEN_REPARSE_POINT)
+            .open(path)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        File::open(path)
     }
 }
 
@@ -192,6 +296,49 @@ mod tests {
         assert!(!named.exists(), "an old temporary folder was kept");
     }
 
+    /// A folder whose lock could not be taken is still in use, and the sweep would take it for one a
+    /// killed command left once a day had passed. The heartbeat keeps the folder's time fresh, which
+    /// is the same time the sweep reads.
+    #[test]
+    fn a_folder_whose_lock_could_not_be_taken_is_touched_while_it_lives() {
+        use super::Heartbeat;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("folder");
+        fs::create_dir(&path).unwrap();
+        let before = fs::metadata(&path).unwrap().modified().unwrap();
+        let beat = Heartbeat::start(path.clone(), Duration::from_millis(20));
+        let mut touched = false;
+        for _ in 0..100 {
+            std::thread::sleep(Duration::from_millis(10));
+            if fs::metadata(&path).unwrap().modified().unwrap() > before {
+                touched = true;
+                break;
+            }
+        }
+        drop(beat);
+        assert!(
+            touched,
+            "a long transfer's folder was left to look abandoned"
+        );
+    }
+
+    /// The lock is opened without following a link. A link in its place would be read as the lock of
+    /// another file, and a folder with no real lock would be taken for one nobody holds.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_place_of_the_lock_does_not_free_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(format!("{PREFIX}linked"));
+        fs::create_dir(&path).unwrap();
+        let outside = dir.path().join("outside");
+        std::os::unix::fs::symlink(&outside, path.join("lock")).unwrap();
+        let later = SystemTime::now() + STALE_AFTER + Duration::from_secs(1);
+        sweep(dir.path(), later).unwrap();
+        assert!(
+            path.exists(),
+            "a folder whose lock is a link was swept as if nobody held it"
+        );
+    }
     /// Dropping the folder's value removes it, which is what a finished or cancelled command needs.
     #[test]
     fn a_dropped_folder_is_removed() {
