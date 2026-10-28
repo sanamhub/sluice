@@ -36,3 +36,4 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0025](0025-receiver-says-when-complete.md) | A receiver says when the transfer is complete | Accepted, corrected by 0026 |
 | [0026](0026-completion-code-needs-every-root.md) | The completion code counts only for a connection that asked for every root | Accepted, corrects 0025 |
 | [0027](0027-stores-run-their-collector.md) | Every blob store runs its collector, and a tag holds each blob while it is used | Accepted |
+| [0029](0029-only-the-live-stores-collect.md) | Only the live stores collect, and every store is closed on the way out | Accepted, corrects 0027 |

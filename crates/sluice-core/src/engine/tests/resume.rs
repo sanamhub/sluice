@@ -254,3 +254,63 @@ async fn a_resume_writes_only_into_the_names_the_first_run_made() {
     assert_eq!(fs::read(out.join("loose.bin")).unwrap().len(), 64 * 1024);
     outgoing.provider.shutdown().await.unwrap();
 }
+
+/// Waits until a receive has opened the store beside `out`, and returns its database path. The
+/// folder exists a moment before the store does, so a test that cancels waits for the database:
+/// from that moment the folder is locked, which is what a resume in the same process has to get
+/// free again.
+async fn wait_for_open_store(out: &Path) -> std::path::PathBuf {
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Ok(entries) = fs::read_dir(out) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let database = entry.path().join("blobs.db");
+                if name.starts_with(".sluice-partial-") && database.is_file() {
+                    return database;
+                }
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the receive never opened its store"
+        );
+        tokio::task::yield_now().await;
+    }
+}
+
+/// A receive that is cancelled mid-transfer drops its future where nothing can be awaited. The
+/// store it had open has to be closed on the way out, and the next command in this process closes
+/// it before it opens anything, so the resume opens the same folder rather than finding its
+/// database still locked.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cancelled_receive_is_resumed_in_the_same_process() {
+    let dir = tempfile::tempdir().unwrap();
+    // Eight megabytes of distinct bytes, so the transfer takes long enough to be cut off.
+    let mut body = vec![0u8; 8 << 20];
+    for (at, byte) in body.iter_mut().enumerate() {
+        *byte = (at % 253) as u8;
+    }
+    let (outgoing, text) = prepared(&dir, &body).await;
+    let out = dir.path().join("out");
+    let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
+    let serving = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+
+    let mut slow = options(&out);
+    slow.rate = Some(crate::engine::Rate::new(256 * 1024).unwrap());
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let first = {
+        let text = text.clone();
+        let tx = tx.clone();
+        tokio::spawn(async move { super::receive(&text, &slow, &tx).await })
+    };
+    let database = wait_for_open_store(&out).await;
+    assert!(database.is_file());
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+
+    let received = super::receive(&text, &options(&out), &tx).await.unwrap();
+    assert_eq!(received.bytes, body.len() as u64);
+    assert_eq!(fs::read(out.join("source.bin")).unwrap(), body);
+    assert_eq!(serving.await.unwrap().unwrap(), StopEnd::Downloaded);
+}

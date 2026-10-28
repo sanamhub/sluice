@@ -357,9 +357,9 @@ fn the_store_folder_is_never_claimed_over_a_folder_it_cannot_empty() {
     assert!(blocked.exists(), "a folder it did not make was changed");
 }
 
-/// The collector runs in every store this tree opens, so a blob stays only while a tag holds it.
-/// That is what bounds a live stream: a segment's tag is dropped as soon as the segment is written
-/// out, and the bytes go at the next sweep instead of staying until the process ends.
+/// Only the two live stores collect, so a blob in a store that does not collect stays until that
+/// store is closed or removed. In a live store a segment's tag is dropped as soon as the segment is
+/// written out, and the bytes go at the next sweep instead of staying until the process ends.
 #[tokio::test]
 async fn a_blob_stays_while_a_tag_holds_it_and_goes_after_the_tag_is_dropped() {
     let dir = tempfile::tempdir().unwrap();
@@ -392,4 +392,25 @@ async fn a_blob_stays_while_a_tag_holds_it_and_goes_after_the_tag_is_dropped() {
 #[test]
 fn the_collector_sweeps_every_ten_seconds() {
     assert_eq!(super::GC_INTERVAL, std::time::Duration::from_secs(10));
+}
+
+/// A command that is cancelled has no future left to await a close with, and a store it leaves
+/// behind is handed to the next command in this process: a resume opens the same folder, and it
+/// would find the database still held by a task that was still using it.
+#[tokio::test]
+async fn a_store_a_cancelled_command_left_open_is_closed_by_the_next_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("store");
+    let guard = super::Store::open(&root, super::Collector::Off)
+        .await
+        .unwrap();
+    // A task that was serving the store when the command was cancelled holds one of these.
+    let held = guard.handle();
+    drop(guard);
+
+    let mut again = super::Store::open(&root, super::Collector::Off)
+        .await
+        .unwrap();
+    again.close().await.unwrap();
+    drop(held);
 }

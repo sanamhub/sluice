@@ -55,17 +55,20 @@ impl Provider {
     }
 
     /// Serves until the requested stop. The router is shut down before this returns, so a closed
-    /// provider is not still accepting connections.
+    /// provider is not still accepting connections, and the store is closed after it, so the
+    /// database is free for the next command that opens the same home.
     pub async fn serve(mut self, stop: Stop) -> Result<ServeEnd, Error> {
         let end = match stop {
             Stop::OneDownload(roots) => {
                 self.one_download(roots.into_iter().map(Hash::from).collect())
-                    .await?
+                    .await
             }
-            Stop::Live(log) => self.live(log).await?,
-            Stop::Keep => self.keep().await?,
+            Stop::Live(log) => self.live(log).await,
+            Stop::Keep => self.keep().await,
         };
-        self.shutdown_router().await?;
+        let closed = self.close().await;
+        let end = end?;
+        closed?;
         Ok(end)
     }
 
@@ -107,6 +110,12 @@ impl Provider {
 
     /// Stops serving without waiting for a download.
     pub async fn shutdown(mut self) -> Result<(), Error> {
+        self.close().await
+    }
+
+    /// Stops the router, and with it the blob protocol: shutting the router down is what closes
+    /// the store, so the database is free for the next command that opens the same home.
+    async fn close(&mut self) -> Result<(), Error> {
         self.shutdown_router().await
     }
 

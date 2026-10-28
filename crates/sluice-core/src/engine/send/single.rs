@@ -45,7 +45,7 @@ pub async fn prepare_with_rate(
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
     let (shown, name, entry_path, before) = checked_file(path)?;
-    let store = storage::open_store(&home.path().join("blobs"), storage::Collector::Off)
+    let store = storage::Store::open(&home.path().join("blobs"), storage::Collector::Off)
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
     let tag = import(path, &shown, &store).await?;
@@ -60,7 +60,14 @@ pub async fn prepare_with_rate(
     let relay_text = relay_text(&relay);
     let allowed = allowed_roots(&manifest);
     let provider = Provider::start_with_rate(
-        home, store, allowed, relay, congestion, expiry_ms, port, rate,
+        home,
+        store.into_fs(),
+        allowed,
+        relay,
+        congestion,
+        expiry_ms,
+        port,
+        rate,
     )
     .await?;
     let ticket = ticket_of(&provider, &manifest, before.size, expiry_ms, relay_text)?;
@@ -104,7 +111,7 @@ pub async fn prepare_stdin_with_rate(
     port: Option<u16>,
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
-    let store = storage::open_store(&home.path().join("blobs"), storage::Collector::Off)
+    let store = storage::Store::open(&home.path().join("blobs"), storage::Collector::Off)
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
     let (tag, size) = import_stdin(home, &store).await?;
@@ -112,7 +119,14 @@ pub async fn prepare_stdin_with_rate(
     let allowed = std::collections::BTreeSet::from([*hash.as_bytes()]);
     let relay_text = relay_text(&relay);
     let provider = Provider::start_with_rate(
-        home, store, allowed, relay, congestion, expiry_ms, port, rate,
+        home,
+        store.into_fs(),
+        allowed,
+        relay,
+        congestion,
+        expiry_ms,
+        port,
+        rate,
     )
     .await?;
     let ticket = ticket_with_body(

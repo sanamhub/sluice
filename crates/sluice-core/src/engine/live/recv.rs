@@ -3,7 +3,6 @@
 
 use std::{fs, path::Path, time::Instant};
 
-use iroh_blobs::store::fs::FsStore;
 use sluice_live::Receiver as LogReceiver;
 use tokio::{io::AsyncWriteExt, sync::mpsc::UnboundedSender};
 
@@ -61,7 +60,7 @@ fn live_ids(ticket: &Ticket) -> Result<([u8; 16], [u8; 32]), Error> {
 /// The socket, the store and the two private folders one live receive holds.
 struct Opened {
     receiver: Receiver,
-    store: FsStore,
+    store: storage::Store,
     file_tmp: storage::Temp,
     store_tmp: storage::Temp,
 }
@@ -93,7 +92,7 @@ async fn open(
             return Err(e);
         }
     };
-    match storage::open_store(&store_tmp.path().join("store"), storage::Collector::On).await {
+    match storage::Store::open(&store_tmp.path().join("store"), storage::Collector::On).await {
         Ok(store) => Ok(Opened {
             receiver,
             store,
@@ -113,14 +112,14 @@ async fn open(
 /// Closes the socket and the store on every path, removes both folders, and reports the file only
 /// when the transfer closed cleanly.
 async fn finish(
-    opened: Opened,
+    mut opened: Opened,
     outcome: Result<u64, Error>,
     options: &ReceiveOptions,
     events: &UnboundedSender<Event>,
     started: Instant,
 ) -> Result<Received, Error> {
     let endpoint = opened.receiver.shutdown().await;
-    let closed = opened.store.shutdown().await;
+    let closed = opened.store.close().await;
     drop(opened.store_tmp);
     let bytes = outcome?;
     drop(opened.file_tmp);

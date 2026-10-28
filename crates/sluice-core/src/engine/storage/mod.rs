@@ -3,12 +3,16 @@
 
 mod install;
 mod meta;
+mod open;
 mod registry;
 mod store;
 mod temp;
 
 pub use install::install;
 pub use meta::MetaStore;
+pub use open::{Collector, Store};
+#[cfg(test)]
+pub(super) use open::{GC_INTERVAL, open_store_after};
 #[cfg(test)]
 pub(crate) use registry::remember_as;
 pub use registry::{
@@ -20,12 +24,7 @@ pub use store::MARKER;
 pub use store::{FolderId, Owner, claim, identify, partial_dir, recorded, remember};
 pub use temp::{Temp, sweep_temporary_store, temp_dir, temp_path};
 
-use std::{fs, io, path::Path, time::Duration};
-
-use iroh_blobs::store::{
-    GcConfig,
-    fs::{FsStore, options::Options},
-};
+use std::{fs, io, path::Path};
 
 use crate::Error;
 
@@ -45,69 +44,6 @@ pub fn needed_bytes(content: u64, links: bool) -> u64 {
     }
 }
 
-/// How often the store's collector runs. A live stream drops each segment's tag as soon as the
-/// segment is written out, and this is the longest the bytes can stay after that; it is also the
-/// longest a segment is kept for a reader whose request is still on its way. Ten seconds is a few
-/// segments at the rates a live stream is sealed at and far longer than a reader needs to have its
-/// request handled.
-pub const GC_INTERVAL: Duration = Duration::from_secs(10);
-
-/// Whether a store runs the collector that frees a blob no tag holds.
-///
-/// Every caller states it, so a store cannot be opened without saying whether its blobs may be
-/// freed. Only a store whose blobs are throwaway collects: the live send and the live receive keep
-/// each segment while it is being served or written, and free it afterwards. Every other store is a
-/// resume store, a pack a range reads, or a manifest a check depends on, and has to keep its bytes
-/// until the store is done or discarded.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Collector {
-    /// A blob stays only while a tag or a temporary tag holds it.
-    On,
-    /// Every blob stays until the store is shut down or its folder is removed.
-    Off,
-}
-
-/// Opens the store at `root` with the collector the caller chose.
-pub async fn open_store(root: &Path, collector: Collector) -> Result<FsStore, Error> {
-    let interval = match collector {
-        Collector::On => Some(gc_interval()),
-        Collector::Off => None,
-    };
-    let mut options = Options::new(root);
-    options.gc = interval.map(|interval| GcConfig {
-        interval,
-        add_protected: None,
-    });
-    FsStore::load_with_opts(root.join("blobs.db"), options)
-        .await
-        .map_err(|e| Error::Storage(format!("cannot open the store at {}: {e}", root.display())))
-}
-
-/// How often a collector sweeps. A unit test sweeps sooner so it does not wait ten seconds for the
-/// first sweep; a command always sweeps at [`GC_INTERVAL`].
-#[cfg(test)]
-fn gc_interval() -> Duration {
-    Duration::from_millis(100)
-}
-
-#[cfg(not(test))]
-fn gc_interval() -> Duration {
-    GC_INTERVAL
-}
-
-/// [`open_store`] with the collector's interval as an argument, so a test can make one sweep
-/// happen sooner than the constant does.
-#[cfg(test)]
-pub(super) async fn open_store_after(root: &Path, interval: Duration) -> Result<FsStore, Error> {
-    let mut options = Options::new(root);
-    options.gc = Some(GcConfig {
-        interval,
-        add_protected: None,
-    });
-    FsStore::load_with_opts(root.join("blobs.db"), options)
-        .await
-        .map_err(|e| Error::Storage(format!("cannot open the store at {}: {e}", root.display())))
-}
 /// Bytes free to this user on the volume that holds `path`.
 pub fn available_bytes(path: &Path) -> Result<u64, Error> {
     imp::available(path).map_err(|e| {

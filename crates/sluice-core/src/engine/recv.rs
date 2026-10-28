@@ -139,12 +139,13 @@ async fn run(
     let partial = storage::partial_dir(&options.out, &owner);
     let conn = receiver.connect(ticket, events.clone()).await?;
     let manifest = read_manifest(&conn, ticket, options, events).await?;
-    let (store, resume, plan) = claim_store(&partial, &owner, &manifest, ticket, options).await?;
+    let (mut store, resume, plan) =
+        claim_store(&partial, &owner, &manifest, ticket, options).await?;
     let outcome = exchange(
         receiver, ticket, &manifest, plan, &store, &partial, options, resume, conn, events,
     )
     .await;
-    let closed = store.shutdown().await;
+    let closed = store.close().await;
     let endpoint = receiver.shutdown().await;
     match outcome {
         Ok((received, seconds)) => {

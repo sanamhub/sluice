@@ -48,7 +48,7 @@ pub async fn prepare_paths_with_rate(
         ));
     };
     let manifest = &built.manifest;
-    let store = storage::open_store(&home.path().join("blobs"), storage::Collector::Off)
+    let store = storage::Store::open(&home.path().join("blobs"), storage::Collector::Off)
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
     let mut tags = Vec::new();
@@ -61,7 +61,14 @@ pub async fn prepare_paths_with_rate(
     let mut allowed: BTreeSet<[u8; 32]> = manifest.hash_sequence().into_iter().collect();
     allowed.insert(sequence_root);
     let provider = Provider::start_with_rate(
-        home, store, allowed, relay, congestion, expiry_ms, port, rate,
+        home,
+        store.into_fs(),
+        allowed,
+        relay,
+        congestion,
+        expiry_ms,
+        port,
+        rate,
     )
     .await?;
     let ticket = ticket_of(&provider, manifest, sequence_root, expiry_ms)?;

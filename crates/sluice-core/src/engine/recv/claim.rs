@@ -1,7 +1,6 @@
 //! Claiming the partial store of one transfer, and the metadata store the manifest is read into
 //! until every check has passed.
 
-use iroh_blobs::store::fs::FsStore;
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::{
@@ -22,7 +21,7 @@ pub(super) async fn claim_store(
     manifest: &Manifest,
     ticket: &Ticket,
     options: &ReceiveOptions,
-) -> Result<(FsStore, bool, Plan), Error> {
+) -> Result<(storage::Store, bool, Plan), Error> {
     let (resumed, checked) = resumable_store(partial, owner)?;
     let resume = resumed.is_some();
     // A run that was allowed to replace what was in the output was a deliberate choice, so the run
@@ -45,24 +44,25 @@ pub(super) async fn claim_store(
         start_store(partial, owner, &created, options)?;
         storage::identify(partial)?
     };
-    match storage::open_store(partial, storage::Collector::Off).await {
-        Ok(store) if storage::identify(partial)? == before => Ok((store, resume, plan)),
-        Ok(store) => {
-            let _ = store.shutdown().await;
-            Err(Error::Policy(format!(
-                "the partial store folder {} changed while it was opened; look at what is there",
-                partial.display()
-            )))
-        }
+    let mut store = match storage::Store::open(partial, storage::Collector::Off).await {
+        Ok(store) => store,
         Err(e) => {
             // A store this receive could not open is not one a later one can resume.
             storage::discard(partial);
-            Err(Error::Storage(format!(
+            return Err(Error::Storage(format!(
                 "cannot open the partial store: {}",
                 crate::plain(&e)
-            )))
+            )));
         }
+    };
+    if storage::identify(partial)? != before {
+        let _ = store.close().await;
+        return Err(Error::Policy(format!(
+            "the partial store folder {} changed while it was opened; look at what is there",
+            partial.display()
+        )));
     }
+    Ok((store, resume, plan))
 }
 
 /// The marker of the store this transfer may resume and the identity of the folder it was read

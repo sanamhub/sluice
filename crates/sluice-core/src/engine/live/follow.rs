@@ -67,7 +67,7 @@ pub async fn prepare_live_with_rate(
     let (name, size) = checked_path(path)?;
     // The live store is one of the two whose blobs are throwaway: the collector frees a segment as
     // soon as the send drops its tag, so an hour of following does not leave an hour of segments.
-    let store = storage::open_store(&home.path().join("blobs"), storage::Collector::On).await?;
+    let store = storage::Store::open(&home.path().join("blobs"), storage::Collector::On).await?;
     let seed = home.identity()?.secret_seed();
     let key = SigningKey::from_bytes(&seed);
     let sender_key = key.verifying_key().to_bytes();
@@ -80,9 +80,12 @@ pub async fn prepare_live_with_rate(
         sender.log_open(),
         Arc::new(Mutex::new(std::collections::BTreeSet::new())),
     ));
+    // The provider owns the store for the life of the send and closes it when it stops; the
+    // follower gets its own handle to seal segments through.
+    let follower_store = store.handle();
     let provider = Provider::start_live_with_rate(
         home,
-        store.clone(),
+        store.into_fs(),
         log.clone(),
         relay,
         congestion,
@@ -97,7 +100,7 @@ pub async fn prepare_live_with_rate(
     let tags: Arc<Mutex<Vec<TempTag>>> = Arc::default();
     let task = tokio::spawn(follow(
         path.to_path_buf(),
-        store,
+        follower_store,
         log.clone(),
         sender,
         close_after,

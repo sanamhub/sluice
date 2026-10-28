@@ -2,9 +2,7 @@
 
 use std::path::Path;
 
-use iroh_blobs::store::fs::FsStore;
-
-use super::{Temp, temp_dir};
+use super::{Store, Temp, temp_dir};
 use crate::{Error, Home};
 
 /// The store a receive reads the hash sequence and the manifest into. Both are needed before the
@@ -15,7 +13,7 @@ use crate::{Error, Home};
 pub struct MetaStore {
     _dir: Temp,
     /// The store inside the folder.
-    pub store: FsStore,
+    pub store: Store,
 }
 
 impl MetaStore {
@@ -27,8 +25,7 @@ impl MetaStore {
     /// [`open`] in a folder the caller names, which must already be private.
     pub(super) async fn open_in(parent: &Path) -> Result<Self, Error> {
         let dir = temp_dir(parent)?;
-        let store = match super::open_store(&dir.path().join("store"), super::Collector::Off).await
-        {
+        let store = match Store::open(&dir.path().join("store"), super::Collector::Off).await {
             Ok(store) => store,
             Err(e) => {
                 return Err(Error::Storage(format!(
@@ -47,12 +44,7 @@ impl MetaStore {
     }
 
     /// Closes the store and removes the folder.
-    pub async fn close(self) -> Result<(), Error> {
-        self.store.shutdown().await.map_err(|e| {
-            Error::Storage(format!(
-                "cannot close a temporary store: {}",
-                crate::plain(&e)
-            ))
-        })
+    pub async fn close(mut self) -> Result<(), Error> {
+        self.store.close().await
     }
 }

@@ -40,24 +40,24 @@ pub async fn receive_range(
             return Err(e);
         }
     };
-    let store = match storage::open_store(&tmp.path().join("store"), storage::Collector::Off).await
-    {
-        Ok(store) => store,
-        Err(e) => {
-            let _ = receiver.shutdown().await;
-            return Err(Error::Storage(format!(
-                "cannot open a temporary store: {}",
-                crate::plain(&e)
-            )));
-        }
-    };
+    let mut store =
+        match storage::Store::open(&tmp.path().join("store"), storage::Collector::Off).await {
+            Ok(store) => store,
+            Err(e) => {
+                let _ = receiver.shutdown().await;
+                return Err(Error::Storage(format!(
+                    "cannot open a temporary store: {}",
+                    crate::plain(&e)
+                )));
+            }
+        };
     let result = async {
         let conn = receiver.connect(&ticket, events.clone()).await?;
         fetch_and_write(&conn, &ticket, &store, range, options, store_root, events).await
     }
     .await;
     let endpoint = receiver.shutdown().await;
-    let closed = store.shutdown().await;
+    let closed = store.close().await;
     // Removed before the result is returned, so no path out of this function leaves the folder.
     drop(tmp);
     let bytes = result?;
