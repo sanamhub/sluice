@@ -23,9 +23,11 @@ pub(super) fn write_all(
     options: &ReceiveOptions,
     resume: bool,
 ) -> Result<(), Error> {
-    // Keyed by the name a filesystem may treat as equal to the path, not by the path itself: on a
-    // case-insensitive volume the operating system follows `sub/a` to `sub/A`, and a check that
-    // looked for `sub/a` in the manifest would miss the link and read the name as a plain folder.
+    // Keyed by the name a file system may treat as equal to the path, not by the path itself: a
+    // target that names `sub/a` where the manifest makes `sub/A` has to be answered, and the map is
+    // how the check finds the link that may be the same one there. The two spellings are never
+    // treated as one name, though: the answer to such a name is a refusal, because only the volume
+    // knows whether it folds them.
     let links: BTreeMap<String, (&str, &str)> = manifest
         .entries()
         .iter()
@@ -51,6 +53,16 @@ pub(super) fn write_all(
 fn outside(path: &str) -> Error {
     Error::Policy(format!(
         "the link at {path} points outside the output folder, directly or through another link"
+    ))
+}
+
+/// A target component that a file system may read as one of this transfer's links, spelled
+/// differently from that link. The check refuses it rather than deciding which spelling this
+/// volume will pick: the two names are named, because the sender has to change one of them.
+fn ambiguous(link: &str, name: &str, other: &str) -> Error {
+    Error::Policy(format!(
+        "the link at {link} goes through {name}, and this transfer makes a link at {other}; a file \
+         system may read those as the same name, so rename one of them to say which is meant"
     ))
 }
 
@@ -118,15 +130,23 @@ fn resolve(
             }
             name => {
                 parts.push(name.to_string());
-                let next = if let Some((_, next)) =
-                    links.get(&crate::manifest::folded_key(&parts.join("/")))
-                {
-                    (*next).to_string()
-                } else if let Some(next) = existing_link(out, &parts)? {
-                    next
-                } else {
-                    continue;
-                };
+                let joined = parts.join("/");
+                let next =
+                    if let Some((path, next)) = links.get(&crate::manifest::folded_key(&joined)) {
+                        // A file system may read two spellings as one name (`ß` and `ss` on neither
+                        // NTFS nor Linux, `É` and `é` on one of them), and the check cannot know which
+                        // one this output is on. Following the link when the names are not the same
+                        // would be guessing: the operating system may resolve the real name instead,
+                        // and land above the output. Refusing says which two names are in question.
+                        if *path != joined {
+                            return Err(ambiguous(link, &joined, path));
+                        }
+                        (*next).to_string()
+                    } else if let Some(next) = existing_link(out, &parts)? {
+                        next
+                    } else {
+                        continue;
+                    };
                 follows += 1;
                 if follows > MAX_LINKS {
                     return Err(outside(link));
@@ -290,22 +310,42 @@ mod tests {
         assert!(resolve(&second, empty_out(), "sub/m", "z/..").is_err());
     }
 
-    /// The manifest spells the link `A` and the target `a`. On a case-insensitive volume the disk
-    /// resolves the target's `a` to `A` and follows the link, so the check has to do the same on
-    /// every platform: otherwise `z` lands two folders above the output and the check sees the
-    /// output folder itself.
+    /// A target that names one of the transfer's links in another spelling is refused: the check
+    /// cannot know whether this volume reads the two as one name, and following the link would be
+    /// wrong where it does not. `ß` and `ss` are one name to full case folding and two to both NTFS
+    /// and Linux, which is the case that made the guess unsafe.
     #[test]
-    fn a_target_through_a_link_spelled_in_another_case_is_resolved_through_it() {
-        let pair = links(&[("sub/A", ".."), ("sub/z", "a/../..")]);
-        assert!(resolve(&pair, empty_out(), "sub/z", "a/../..").is_err());
-        // One `..` fewer is the same hole with a different spelling: the check reads it as `sub`,
-        // and the operating system lands on the folder above the output.
-        let one = links(&[("sub/A", ".."), ("sub/z", "a/..")]);
-        assert!(resolve(&one, empty_out(), "sub/z", "a/..").is_err());
-        // A name that only differs outside ASCII case still matches, which is stricter than the
-        // disk on a volume that folds ASCII alone.
-        let folded = links(&[("sub/É", ".."), ("sub/z", "é/../..")]);
-        assert!(resolve(&folded, empty_out(), "sub/z", "é/../..").is_err());
+    fn a_target_that_spells_a_links_name_differently_is_refused() {
+        let fold = links(&[("sub/ß", "a/b/c"), ("sub/z", "ss/../../../..")]);
+        let err = resolve(&fold, empty_out(), "sub/z", "ss/../../../..").unwrap_err();
+        assert!(matches!(err, crate::Error::Policy(_)), "{err}");
+        let text = err.to_string();
+        assert!(text.contains("sub/ß"), "{text}");
+        assert!(text.contains("sub/ss"), "{text}");
+
+        // Case alone is the same question, and so is a pair one volume folds and another does not.
+        let ascii = links(&[("sub/A", ".."), ("sub/z", "a/../..")]);
+        assert!(resolve(&ascii, empty_out(), "sub/z", "a/../..").is_err());
+        let accent = links(&[("sub/É", ".."), ("sub/z", "é/../..")]);
+        assert!(resolve(&accent, empty_out(), "sub/z", "é/../..").is_err());
+    }
+
+    /// The same question on a disk that already holds the other spelling: the output has a real
+    /// `sub/ss` folder, and the manifest makes `sub/ß` a link out of the tree. Reading the folder as
+    /// the link follows the link, while the operating system resolves the real folder and lands
+    /// above the output, so the transfer is refused and both names are in the message.
+    #[test]
+    fn a_real_folder_whose_name_folds_to_a_links_name_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        std::fs::create_dir_all(out.join("sub").join("ss")).unwrap();
+        let fold = links(&[("sub/ß", "a/b/c"), ("sub/z", "ss/../../../..")]);
+        let err = resolve(&fold, &out, "sub/z", "ss/../../../..").unwrap_err();
+        let text = err.to_string();
+        assert!(text.contains("sub/ß") && text.contains("sub/ss"), "{text}");
+        // The same two names in the other order: the folder is spelled as the link is.
+        let other = links(&[("sub/ss", "a/b/c"), ("sub/z", "ß/../../../..")]);
+        assert!(resolve(&other, &out, "sub/z", "ß/../../../..").is_err());
     }
 
     #[test]
