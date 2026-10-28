@@ -17,7 +17,9 @@ use words::words;
 #[derive(clap::Args)]
 pub struct Args {
     /// Also check the network: whether UDP can be bound, the relay, the public address, the NAT
-    /// mapping and whether a router can open a port. The plain report stays local and quick
+    /// mapping and whether a router can open a port. With a relay that relay is contacted; without
+    /// one two checks stay on the local network, an mDNS query on every interface and a
+    /// port-mapping request to the router. The plain report stays local and quick
     #[arg(long)]
     pub network: bool,
     /// The relay the network checks use and ask for a net report
