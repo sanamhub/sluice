@@ -85,7 +85,7 @@ fn a_link_to_an_empty_folder_makes_the_target_private_and_doctor_passes_it() {
     assert_ne!(home.root, link);
     drop(home);
     assert!(is_private(&target), "the target is the home");
-    for name in ["blobs", "db", "logs", "identity.key", "VERSION"] {
+    for name in ["db", "db", "logs", "identity.key", "VERSION"] {
         assert!(target.join(name).exists(), "{name} in the target");
     }
     assert_eq!(failed(&link), Vec::<Name>::new());
@@ -131,7 +131,7 @@ fn something_that_appears_while_the_home_is_made_private_stops_the_open() {
     );
     assert!(message.contains("something appeared in it"), "{message}");
     assert!(
-        !dir.path().join("blobs").exists(),
+        !dir.path().join("db").exists(),
         "the open stopped before it made a folder"
     );
     let empty = tempfile::tempdir().unwrap();
@@ -185,14 +185,14 @@ fn an_entry_this_user_did_not_make_is_refused() {
 #[test]
 fn what_sluice_makes_appearing_while_the_home_is_made_private_is_accepted() {
     fn restrict_while_another_sluice_arrives(home: &Path) -> Result<(), Error> {
-        fs::create_dir(home.join("blobs")).unwrap();
+        fs::create_dir(home.join("db")).unwrap();
         fs::write(home.join("VERSION"), "1\n").unwrap();
         fs::write(home.join("lock"), "").unwrap();
         Ok(())
     }
     fn restrict_while_a_link_arrives(home: &Path) -> Result<(), Error> {
         fs::create_dir(home.join("elsewhere")).unwrap();
-        link_folder(&home.join("elsewhere"), &home.join("blobs"));
+        link_folder(&home.join("elsewhere"), &home.join("db"));
         Ok(())
     }
     let dir = tempfile::tempdir().unwrap();
@@ -211,7 +211,7 @@ fn what_sluice_makes_appearing_while_the_home_is_made_private_is_accepted() {
 #[test]
 fn a_temporary_name_that_is_renamed_while_the_home_is_listed_is_accepted() {
     fn restrict_while_two_temporaries_arrive(home: &Path) -> Result<(), Error> {
-        fs::create_dir(home.join("blobs")).unwrap();
+        fs::create_dir(home.join("db")).unwrap();
         fs::write(home.join("VERSION.tmp"), "1\n").unwrap();
         fs::write(home.join("lock.pid.tmp"), "{}\n").unwrap();
         Ok(())

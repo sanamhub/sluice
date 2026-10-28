@@ -19,17 +19,17 @@ fn a_folder_or_a_key_another_user_owns_is_refused_by_open_and_reported_by_doctor
         path: dir.path().to_path_buf(),
         from_env: false,
     };
-    let blobs_not_ours = |path: &std::path::Path| Ok(!path.ends_with("blobs"));
+    let db_not_ours = |path: &std::path::Path| Ok(!path.ends_with("db"));
     assert_eq!(
-        home_with_owner(location.clone(), blobs_not_ours),
-        Finding::HomeFolderOwnedByOther(location, "blobs")
+        home_with_owner(location.clone(), db_not_ours),
+        Finding::HomeFolderOwnedByOther(location, "db")
     );
     let Err(Error::Policy(message)) =
-        crate::home::setup::prepare_with(dir.path(), false, |_| Ok(()), blobs_not_ours)
+        crate::home::setup::prepare_with(dir.path(), false, |_| Ok(()), db_not_ours)
     else {
-        panic!("a blobs folder another user owns was opened");
+        panic!("a db folder another user owns was opened");
     };
-    assert!(message.contains("blobs"), "{message}");
+    assert!(message.contains("db"), "{message}");
     assert!(message.contains("belongs to another user"), "{message}");
 
     assert_eq!(

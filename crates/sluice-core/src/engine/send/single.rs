@@ -12,7 +12,7 @@ use iroh_blobs::{
     store::fs::FsStore,
 };
 
-use super::{Congestion, Outgoing, Provider, RelayModeChoice, Stamp, storage};
+use super::{Congestion, Outgoing, Provider, RelayModeChoice, Scratch, Stamp, storage};
 use crate::{
     Error, Home,
     manifest::{Entry, Kind, Loc, Manifest, PackRef, path::ManifestPath},
@@ -45,10 +45,8 @@ pub async fn prepare_with_rate(
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
     let (shown, name, entry_path, before) = checked_file(path)?;
-    let store = storage::Store::open(&home.path().join("blobs"), storage::Collector::Off)
-        .await
-        .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
-    let tag = import(path, &shown, &store).await?;
+    let scratch = Scratch::open(home, storage::Collector::Off).await?;
+    let tag = import(path, &shown, scratch.store()).await?;
     let hash = tag.hash();
     if !before.same(path)? {
         return Err(Error::Verify(format!(
@@ -56,12 +54,12 @@ pub async fn prepare_with_rate(
         )));
     }
     let manifest = one_entry_manifest(entry_path, &before, hash)?;
-    let metadata = keep_metadata(&store, &manifest).await?;
+    let metadata = keep_metadata(scratch.store(), &manifest).await?;
     let relay_text = relay_text(&relay);
     let allowed = allowed_roots(&manifest);
-    let provider = Provider::start_with_rate(
+    let provider = match Provider::start_with_rate(
         home,
-        store.into_fs(),
+        scratch.store().handle(),
         allowed,
         relay,
         congestion,
@@ -69,8 +67,29 @@ pub async fn prepare_with_rate(
         port,
         rate,
     )
-    .await?;
-    let ticket = ticket_of(&provider, &manifest, before.size, expiry_ms, relay_text)?;
+    .await
+    {
+        Ok(provider) => provider,
+        Err(e) => {
+            // The send's folder goes with the failure, so nothing it copied stays in the home.
+            let _ = scratch.close().await;
+            return Err(e);
+        }
+    };
+    // The provider closes the store and then removes this folder, on every way it can end.
+    let Some(dir) = scratch.release() else {
+        return Err(Error::Bug("the send's folder is gone".to_string()));
+    };
+    let mut provider = provider;
+    provider.hold(dir);
+    let ticket = match ticket_of(&provider, &manifest, before.size, expiry_ms, relay_text) {
+        Ok(ticket) => ticket,
+        Err(e) => {
+            // Stopping the provider closes the store and removes the folder with it.
+            let _ = provider.shutdown().await;
+            return Err(e);
+        }
+    };
     // The ticket is readable by anyone who has it, so it is printed and never traced.
     Ok(Outgoing {
         provider,
@@ -111,16 +130,38 @@ pub async fn prepare_stdin_with_rate(
     port: Option<u16>,
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
-    let store = storage::Store::open(&home.path().join("blobs"), storage::Collector::Off)
-        .await
-        .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
-    let (tag, size) = import_stdin(home, &store).await?;
+    prepare_stdin_body(
+        home,
+        std::io::stdin(),
+        relay,
+        congestion,
+        expiry_ms,
+        port,
+        rate,
+    )
+    .await
+}
+
+/// [`prepare_stdin_with_rate`] with the stream to read as an argument, so a test sends bytes without
+/// a pipe. The bytes are read to the end before the root is known, so they are copied into the
+/// send's own store, and the stream is closed before the ticket exists.
+async fn prepare_stdin_body(
+    home: &Home,
+    from: impl std::io::Read + Send + 'static,
+    relay: RelayModeChoice,
+    congestion: Congestion,
+    expiry_ms: Option<u64>,
+    port: Option<u16>,
+    rate: Option<std::sync::Arc<crate::engine::Rate>>,
+) -> Result<Outgoing, Error> {
+    let scratch = Scratch::open(home, storage::Collector::Off).await?;
+    let (tag, size) = import_stdin(scratch.path(), scratch.store(), from).await?;
     let hash = tag.hash();
     let allowed = std::collections::BTreeSet::from([*hash.as_bytes()]);
     let relay_text = relay_text(&relay);
-    let provider = Provider::start_with_rate(
+    let provider = match Provider::start_with_rate(
         home,
-        store.into_fs(),
+        scratch.store().handle(),
         allowed,
         relay,
         congestion,
@@ -128,8 +169,21 @@ pub async fn prepare_stdin_with_rate(
         port,
         rate,
     )
-    .await?;
-    let ticket = ticket_with_body(
+    .await
+    {
+        Ok(provider) => provider,
+        Err(e) => {
+            let _ = scratch.close().await;
+            return Err(e);
+        }
+    };
+    // The provider closes the store and then removes this folder, on every way it can end.
+    let Some(dir) = scratch.release() else {
+        return Err(Error::Bug("the send's folder is gone".to_string()));
+    };
+    let mut provider = provider;
+    provider.hold(dir);
+    let ticket = match ticket_with_body(
         &provider,
         expiry_ms,
         relay_text,
@@ -138,7 +192,14 @@ pub async fn prepare_stdin_with_rate(
             size,
             format: Format::Raw,
         },
-    )?;
+    ) {
+        Ok(ticket) => ticket,
+        Err(e) => {
+            // Stopping the provider closes the store and removes the folder with it.
+            let _ = provider.shutdown().await;
+            return Err(e);
+        }
+    };
     Ok(Outgoing {
         provider,
         ticket,
@@ -152,15 +213,16 @@ pub async fn prepare_stdin_with_rate(
     })
 }
 
-/// Reads standard input into a private file and copies it into the store, so the pipe closes
-/// before the ticket exists and the bytes survive the reader going away.
-async fn import_stdin(home: &Home, store: &FsStore) -> Result<(TempTag, u64), Error> {
-    let tmp_root = home.path().join("tmp");
-    fs::create_dir_all(&tmp_root)
-        .map_err(|e| Error::Storage(format!("cannot create {}: {e}", tmp_root.display())))?;
-    let tmp = storage::temp_dir(&tmp_root)?;
-    let path = tmp.path().join("input");
-    let size = read_stdin(&path).await?;
+/// Reads standard input into a file of the send's own folder and copies it into the store, so the
+/// pipe closes before the ticket exists and the bytes survive the reader going away. The file is
+/// removed once the store holds the bytes, so the folder holds one copy of them.
+async fn import_stdin(
+    dir: &Path,
+    store: &FsStore,
+    from: impl std::io::Read + Send + 'static,
+) -> Result<(TempTag, u64), Error> {
+    let path = dir.join("input");
+    let size = read_input(&path, from).await?;
     let copied = store
         .blobs()
         .add_path_with_opts(AddPathOptions {
@@ -172,16 +234,19 @@ async fn import_stdin(home: &Home, store: &FsStore) -> Result<(TempTag, u64), Er
         .await;
     let tag = copied
         .map_err(|e| Error::Storage(format!("cannot keep standard input: {}", crate::plain(&e))))?;
+    let _ = fs::remove_file(&path);
     Ok((tag, size))
 }
 
-/// Reads standard input to a file on disk, so a large pipe never sits in memory.
-async fn read_stdin(path: &Path) -> Result<u64, Error> {
+/// Reads a stream to a file on disk, so a large pipe never sits in memory.
+async fn read_input(
+    path: &Path,
+    mut from: impl std::io::Read + Send + 'static,
+) -> Result<u64, Error> {
     let target = path.to_path_buf();
     let read = tokio::task::spawn_blocking(move || {
         let mut file = fs::File::create(&target)?;
-        let mut stdin = std::io::stdin().lock();
-        let size = std::io::copy(&mut stdin, &mut file)?;
+        let size = std::io::copy(&mut from, &mut file)?;
         file.sync_all()?;
         Ok::<u64, std::io::Error>(size)
     })
@@ -377,4 +442,20 @@ pub(in crate::engine) fn content_roots(manifest: &Manifest) -> Vec<[u8; 32]> {
         }
     }
     roots
+}
+
+/// A send of standard input whose bytes come from memory rather than a pipe, for a test that has no
+/// pipe to write to.
+#[cfg(test)]
+pub(crate) async fn prepare_stdin_from(home: &Home, bytes: Vec<u8>) -> Result<Outgoing, Error> {
+    prepare_stdin_body(
+        home,
+        std::io::Cursor::new(bytes),
+        RelayModeChoice::Disabled,
+        Congestion::Cubic,
+        None,
+        None,
+        None,
+    )
+    .await
 }

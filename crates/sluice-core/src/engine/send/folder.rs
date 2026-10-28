@@ -13,7 +13,7 @@ use iroh_blobs::{
     store::fs::FsStore,
 };
 
-use super::{Congestion, Outgoing, Provider, RelayModeChoice, storage};
+use super::{Congestion, Outgoing, Provider, RelayModeChoice, Scratch, storage};
 use crate::{
     Error, Home,
     manifest::{Build, Built, Kind, Loc, Manifest},
@@ -48,21 +48,19 @@ pub async fn prepare_paths_with_rate(
         ));
     };
     let manifest = &built.manifest;
-    let store = storage::Store::open(&home.path().join("blobs"), storage::Collector::Off)
-        .await
-        .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
+    let scratch = Scratch::open(home, storage::Collector::Off).await?;
     let mut tags = Vec::new();
-    import_blobs(&store, &built, manifest, &mut tags).await?;
+    import_blobs(scratch.store(), &built, manifest, &mut tags).await?;
     for index in 0..manifest.packs().len() {
-        add_pack(&store, &built, manifest, index, &mut tags).await?;
+        add_pack(scratch.store(), &built, manifest, index, &mut tags).await?;
     }
-    add_manifest(&store, manifest, &mut tags).await?;
-    let sequence_root = add_sequence(&store, manifest, &mut tags).await?;
+    add_manifest(scratch.store(), manifest, &mut tags).await?;
+    let sequence_root = add_sequence(scratch.store(), manifest, &mut tags).await?;
     let mut allowed: BTreeSet<[u8; 32]> = manifest.hash_sequence().into_iter().collect();
     allowed.insert(sequence_root);
-    let provider = Provider::start_with_rate(
+    let provider = match Provider::start_with_rate(
         home,
-        store.into_fs(),
+        scratch.store().handle(),
         allowed,
         relay,
         congestion,
@@ -70,8 +68,28 @@ pub async fn prepare_paths_with_rate(
         port,
         rate,
     )
-    .await?;
-    let ticket = ticket_of(&provider, manifest, sequence_root, expiry_ms)?;
+    .await
+    {
+        Ok(provider) => provider,
+        Err(e) => {
+            let _ = scratch.close().await;
+            return Err(e);
+        }
+    };
+    // The provider closes the store and then removes this folder, on every way it can end.
+    let Some(dir) = scratch.release() else {
+        return Err(Error::Bug("the send's folder is gone".to_string()));
+    };
+    let mut provider = provider;
+    provider.hold(dir);
+    let ticket = match ticket_of(&provider, manifest, sequence_root, expiry_ms) {
+        Ok(ticket) => ticket,
+        Err(e) => {
+            // Stopping the provider closes the store and removes the folder with it.
+            let _ = provider.shutdown().await;
+            return Err(e);
+        }
+    };
     Ok(Outgoing {
         provider,
         ticket,

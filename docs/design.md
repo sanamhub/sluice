@@ -171,6 +171,13 @@ in every flag.
 tree and metadata, about 0.4% of file size, so a 100 GB send costs about 400 MB. `--copy` imports
 into the store for volatile or removable sources. ADR 0006.
 
+**A send keeps only what it copies, in a store of its own.** Standard input, the packs of small
+files, the manifest and the hash sequence, and the segments of a live stream are copied into a store
+in a private folder under the home's temporary area. The folder and its store are removed when the
+send ends, however it ends, and a folder a killed send left is removed by the sweep of temporary
+folders. So a home that sends keeps nothing of what was sent, and two sends in one home never share
+a store. Regular files are still sent where they live. ADR 0030.
+
 **Receiving uses a store beside the destination.** `iroh-blobs` keeps partial data in its own store,
 not in a sparse `.part` of ours, so a receive makes a hidden per-transfer store in the output folder,
 `.sluice-partial-<ticket root prefix>`. It is on the same filesystem as the destination, which lets
@@ -181,12 +188,14 @@ file is in place; after a failure it is kept for resume. The receiver checks fre
 whole tree before it fetches content and refuses with `Storage` when the volume cannot hold it.
 ADR 0006.
 
-**The stores collect what no tag holds.** Every store is opened with `iroh-blobs`' collector on, so a
-blob lives only while a tag holds it. A send holds its content, packs and manifest until it stops; a
-receive holds every content root until the tree is written; a live stream holds each segment until it
-is written out (receiver) or until the send stops (sender). The interval is ten seconds, so a live
-stream keeps about that much beside its output instead of a second copy of everything it has already
-written. ADR 0027.
+**Only the live stores collect.** A store is opened with `iroh-blobs`' collector only where every
+blob in it is throwaway: the live send and the live receive. A live receive holds each segment until
+it is written out, and frees it at the next sweep, ten seconds later, so a stream keeps about that
+much beside its output instead of a second copy of everything it has written. A live send holds every
+segment until it stops, because a reader may ask for any of them until then, and what it leaves is
+bounded by its folder going away. Every other store keeps its bytes until the command is done with
+them: a resume store has to outlive the command, and a pack, a manifest or a range is in a folder
+that is removed when the command ends. ADR 0029, ADR 0030.
 **The source can change underneath us.** Size, mtime and inode (file id on Windows) are recorded at
 import and checked again before serving starts. A change after that is caught by the receiver: the
 ticket's root names the version that was hashed, so bytes read from the changed file do not verify
@@ -198,10 +207,10 @@ and the transfer fails with a `Verify` error. `--rehash-on-change` is not suppor
 $SLUICE_HOME/            XDG data dir, or Known Folders on Windows
   identity.key           Ed25519 secret, mode 0600
   VERSION                on-disk layout version
-  blobs/                 outboards, partial files, imported copies
   db/                    tags, jobs, peer trust list
   last-port              UDP port of the last send, so a restart keeps its ticket working
   logs/
+  tmp/                   private folders of running commands, swept when nobody holds them
 ```
 
 Reclaimable content is capped at 10 GB by default, evicted least recently used unless tagged.

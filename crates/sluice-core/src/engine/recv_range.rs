@@ -40,17 +40,17 @@ pub async fn receive_range(
             return Err(e);
         }
     };
-    let mut store =
-        match storage::Store::open(&tmp.path().join("store"), storage::Collector::Off).await {
-            Ok(store) => store,
-            Err(e) => {
-                let _ = receiver.shutdown().await;
-                return Err(Error::Storage(format!(
-                    "cannot open a temporary store: {}",
-                    crate::plain(&e)
-                )));
-            }
-        };
+    let store = match storage::Store::open(&tmp.path().join("store"), storage::Collector::Off).await
+    {
+        Ok(store) => store,
+        Err(e) => {
+            let _ = receiver.shutdown().await;
+            return Err(Error::Storage(format!(
+                "cannot open a temporary store: {}",
+                crate::plain(&e)
+            )));
+        }
+    };
     let result = async {
         let conn = receiver.connect(&ticket, events.clone()).await?;
         fetch_and_write(&conn, &ticket, &store, range, options, store_root, events).await

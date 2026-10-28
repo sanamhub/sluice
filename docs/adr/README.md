@@ -38,3 +38,4 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0027](0027-stores-run-their-collector.md) | Every blob store runs its collector, and a tag holds each blob while it is used | Accepted |
 | [0028](0028-one-relay-image-two-recipes.md) | One relay image, run either as a meeting point or as a full relay | Accepted |
 | [0029](0029-only-the-live-stores-collect.md) | Only the live stores collect, and every store is closed on the way out | Accepted, corrects 0027 |
+| [0030](0030-sends-keep-their-own-store.md) | Each send keeps its copies in a store of its own, and the home keeps none of them | Accepted, corrects 0029 |

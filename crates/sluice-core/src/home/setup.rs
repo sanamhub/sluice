@@ -27,7 +27,7 @@ pub(in crate::home) use resolve::{cannot_resolve, resolve_with};
 pub(in crate::home) use private::keep_home_private_for;
 
 /// The folders `open` creates under the home, besides the home itself.
-pub(super) const FOLDERS: [&str; 3] = ["blobs", "db", "logs"];
+pub(super) const FOLDERS: [&str; 2] = ["db", "logs"];
 
 /// The files sluice makes in a home, and the temporary names it makes them under. Another process
 /// opening the same new home at the same moment may have made any of them before this one looks.

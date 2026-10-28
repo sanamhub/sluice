@@ -10,24 +10,24 @@ use super::link_folder;
 use crate::{Error, Home};
 
 #[test]
-fn a_link_in_place_of_blobs_is_refused_and_named() {
+fn a_link_in_place_of_db_is_refused_and_named() {
     let parent = tempfile::tempdir().unwrap();
     let path = parent.path().join("home");
     let elsewhere = parent.path().join("elsewhere");
     fs::create_dir(&path).unwrap();
     fs::create_dir(&elsewhere).unwrap();
-    link_folder(&elsewhere, &path.join("blobs"));
+    link_folder(&elsewhere, &path.join("db"));
     let Err(Error::Policy(message)) = Home::open(&path) else {
-        panic!("a link as blobs was not refused");
+        panic!("a link as a db folder was not refused");
     };
-    assert!(message.contains("blobs"), "{message}");
+    assert!(message.contains("db"), "{message}");
     assert!(message.contains("is a link"), "{message}");
 }
 
-/// A home that is itself a link, with a link as its `blobs`: the message names the home as it was
+/// A home that is itself a link, with a link as its `db`: the message names the home as it was
 /// given, and not the folder the link leads to.
 #[test]
-fn a_linked_home_whose_blobs_is_a_link_is_named_by_the_path_given() {
+fn a_linked_home_whose_db_is_a_link_is_named_by_the_path_given() {
     let parent = tempfile::tempdir().unwrap();
     let target = parent.path().join("target");
     let given = parent.path().join("home");
@@ -36,12 +36,12 @@ fn a_linked_home_whose_blobs_is_a_link_is_named_by_the_path_given() {
         fs::create_dir(folder).unwrap();
     }
     link_folder(&target, &given);
-    link_folder(&elsewhere, &target.join("blobs"));
+    link_folder(&elsewhere, &target.join("db"));
     let Err(Error::Policy(message)) = Home::open(&given) else {
-        panic!("a link as blobs was not refused");
+        panic!("a link as a db folder was not refused");
     };
     assert!(
-        message.contains(&given.join("blobs").display().to_string()),
+        message.contains(&given.join("db").display().to_string()),
         "{message}"
     );
     assert!(

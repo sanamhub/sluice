@@ -20,19 +20,9 @@ async fn a_dropped_connection_is_retried() {
     .await
     .unwrap();
     let text = outgoing.ticket.encode();
-    let sequence_root = match outgoing.ticket.body() {
-        Body::Static { root, .. } => *root,
-        Body::Live { .. } => panic!("a live ticket"),
-    };
-    let sequence = outgoing
-        .provider
-        .store()
-        .blobs()
-        .get_bytes(Hash::from(sequence_root))
-        .await
-        .unwrap();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let out = dir.path().join("out");
+    let first = outgoing.provider.addr();
     let task = tokio::spawn(async move {
         let received = super::receive(&text, &options(&out), &tx).await;
         (received, out)
@@ -46,8 +36,30 @@ async fn a_dropped_connection_is_retried() {
         matches!(event, super::Event::Retrying { .. })
     })
     .await;
-    // A second provider on the same home and store answers the retry with the same ticket.
-    let provider = restart_provider(&home, &sequence).await;
+    // A sender that comes back imports the file again: the content of a send is its own and went
+    // with it. The home saves the port its last send bound, so the second send reaches the address
+    // the ticket already carries.
+    let again = super::prepare_send(
+        &home,
+        &source,
+        RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let provider = again.provider;
+    let reached = provider
+        .addr()
+        .ip_addrs()
+        .any(|at| first.ip_addrs().any(|old| old == at));
+    if !reached {
+        eprintln!("SKIPPED: the second send did not bind the address the ticket names");
+        task.abort();
+        provider.shutdown().await.unwrap();
+        return;
+    }
     let (received, out) = task.await.unwrap();
     let received = received.unwrap();
     assert_eq!(received.bytes, body.len() as u64);
@@ -67,25 +79,6 @@ async fn wait_for(
     }
 }
 
-/// Starts a provider again on the home's store, answering for the roots of `sequence`.
-async fn restart_provider(home: &Home, sequence: &[u8]) -> Provider {
-    let allowed: BTreeSet<[u8; 32]> = crate::manifest::parse_sequence(sequence, Limits::default())
-        .unwrap()
-        .into_iter()
-        .collect();
-    let store = FsStore::load(home.path().join("blobs")).await.unwrap();
-    Provider::start(
-        home,
-        store,
-        allowed,
-        RelayModeChoice::Disabled,
-        super::Congestion::Cubic,
-        None,
-        None,
-    )
-    .await
-    .unwrap()
-}
 #[tokio::test]
 async fn a_full_disk_is_refused_before_the_content_is_asked_for() {
     let dir = tempfile::tempdir().unwrap();

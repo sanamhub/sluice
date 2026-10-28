@@ -33,7 +33,7 @@ use crate::Error;
 /// lock           locked while a process uses the home
 /// lock.pid       the pid of that process, for the message of a refused open. Removed when the
 ///                process lets go cleanly, so one left behind marks a process that did not
-/// blobs/  db/  logs/
+/// db/  logs/
 /// ```
 ///
 /// A `Home` value holds the lock on its folder, so at most one process has a given home open. The
@@ -46,7 +46,7 @@ use crate::Error;
 ///
 /// let dir = tempfile::tempdir()?;
 /// let home = Home::open(dir.path())?;
-/// assert!(dir.path().join("blobs").is_dir());
+/// assert!(dir.path().join("db").is_dir());
 /// assert_eq!(std::fs::read_to_string(dir.path().join("VERSION"))?, "1\n");
 /// // A second open of the same folder is refused while the first is alive.
 /// assert!(Home::open(dir.path()).is_err());
@@ -87,7 +87,7 @@ impl Home {
         locate_from(env::var_os("SLUICE_HOME"), folder::data_folder())
     }
 
-    /// Opens the home at `path`, creating it and its `blobs`, `db` and `logs` folders if they are
+    /// Opens the home at `path`, creating it and its `db` and `logs` folders if they are
     /// missing, with mode 0700 on Unix, and takes the exclusive lock on it. A home folder that is
     /// already there and holds nothing at all is made private first, as a new one is: mode 0700 on
     /// Unix, and the private access list on Windows. One that holds anything keeps its access.
@@ -98,9 +98,9 @@ impl Home {
     ///
     /// - Something that appears in an empty home while it is made private fails with
     ///   [`Error::Policy`] naming the home unless sluice makes it and this user made it. A key or
-    ///   its temporary file is never accepted, even this user's, and neither is a `blobs`, `db` or
-    ///   `logs` that is a link.
-    /// - A home, or a `blobs`, `db` or `logs` folder, that another user owns fails with
+    ///   its temporary file is never accepted, even this user's, and neither is a `db` or `logs`
+    ///   that is a link.
+    /// - A home, or a `db` or `logs` folder, that another user owns fails with
     ///   [`Error::Policy`] naming it, on every open: its owner could change whatever sluice sets.
     ///   Root on Unix, and `Administrators` and `SYSTEM` on Windows, count as this user, since they
     ///   can already do anything to the files, and a home a backup tool restored still opens.
@@ -232,6 +232,14 @@ impl Home {
         identity::rotate(&self.root).map_err(|e| as_given(e, &self.root, &self.path))
     }
 
+    /// This home's private folder for temporary stores: the sends that copy bytes and the receives
+    /// that write no output folder each put a folder of their own inside it. It is made the way the
+    /// home's other folders are, mode 0700 on Unix and the home's private access list on Windows, so
+    /// a store is never in a folder another user can write in.
+    pub fn temporary_folder(&self) -> Result<PathBuf, Error> {
+        setup::create_private_folder(&self.root, "tmp")
+    }
+
     /// A private folder for the store of a transfer that writes no output folder, such as one to
     /// standard output or one byte range. The home and its folders are made first, so an empty
     /// home is made private before anything is written in it, but the lock is not taken: a receive
@@ -302,7 +310,7 @@ fn as_given(err: Error, root: &Path, given: &Path) -> Error {
 /// `text` with the resolved `root` written as the caller gave it, `given`. On Windows `root` is
 /// the verbatim form, `\\?\C:\...`, which the user never has to read.
 ///
-/// - A separator at the end of `given` is dropped, or `blobs` would be joined to it twice.
+/// - A separator at the end of `given` is dropped, or a name would be joined to it twice.
 /// - Only a whole path is replaced: the one that ends there, or goes on with a separator. `/h`
 ///   inside `/hx/lock` is another folder's name.
 /// - It runs once over `text`, so a `given` that holds `root`, as `/h/../h` holds `/h`, is not

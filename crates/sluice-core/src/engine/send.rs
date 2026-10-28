@@ -2,10 +2,15 @@
 //! prepare the ticket. The bytes are never copied into the home.
 
 mod folder;
+mod scratch;
 mod single;
+
+pub(crate) use scratch::Scratch;
 
 pub use folder::{prepare_paths, prepare_paths_with_rate};
 pub(super) use single::content_roots;
+#[cfg(test)]
+pub(crate) use single::prepare_stdin_from;
 pub use single::{prepare, prepare_stdin, prepare_stdin_with_rate, prepare_with_rate};
 
 use std::{
@@ -43,6 +48,14 @@ pub struct Outgoing {
     pub live: Option<LiveSend>,
     // Keeps the in-place imports protected from garbage collection while the send runs.
     pub(crate) _tags: Vec<TempTag>,
+}
+
+#[cfg(test)]
+impl Outgoing {
+    /// The folder this send keeps its copies in, for a test that watches it while the send runs.
+    pub(crate) fn scratch(&self) -> Option<&Path> {
+        self.provider.scratch()
+    }
 }
 
 /// Imports `path` in place and starts a provider for it. `expiry` is UTC milliseconds or none.
@@ -83,6 +96,8 @@ impl Outgoing {
         if let Some(live) = &self.live {
             live.stop();
         }
+        // The router shut the store down when it stopped serving and the provider removes the send's
+        // folder after that, so a send that copied anything leaves nothing of it in the home.
         let end = end?;
         Ok(match end {
             super::ServeEnd::Downloaded => StopEnd::Downloaded,

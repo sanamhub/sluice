@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use iroh::{Endpoint, EndpointAddr, protocol::Router};
 use iroh_blobs::{Hash, store::fs::FsStore};
 
-use super::{endpoint, live::LiveLog, now_ms, policy};
+use super::{endpoint, live::LiveLog, now_ms, policy, storage};
 mod start;
 mod stop;
 
@@ -27,6 +27,10 @@ pub struct Provider {
     complete: tokio::sync::mpsc::UnboundedReceiver<u64>,
     _complete: tokio::sync::mpsc::UnboundedSender<u64>,
     expiry: Option<u64>,
+    /// The send's own folder, removed after this provider has closed its store. A provider that is
+    /// dropped without being shut down hands the folder on with the store, so the two go in the
+    /// order that works: the database is closed and the folder removed after it.
+    _dir: Option<storage::Temp>,
 }
 
 impl std::fmt::Debug for Provider {
@@ -34,6 +38,18 @@ impl std::fmt::Debug for Provider {
         f.debug_struct("Provider")
             .field("endpoint", &self.endpoint.id().fmt_short().to_string())
             .finish_non_exhaustive()
+    }
+}
+
+impl Drop for Provider {
+    /// A provider that is dropped without being shut down has no moment to await the router's
+    /// shutdown: a send that was cancelled, or one whose ticket could not be built. The store it
+    /// holds is handed to the next command in this process, which closes it before it opens its
+    /// own, so the database is free for the next send that imports into the same home.
+    fn drop(&mut self) {
+        if self.router.is_some() {
+            storage::hand_on(Some(self.store.clone()), self._dir.take());
+        }
     }
 }
 
@@ -52,6 +68,17 @@ impl Provider {
     /// The store, for an import before or a check after serving.
     pub fn store(&self) -> &FsStore {
         &self.store
+    }
+
+    /// Keeps the folder this send's store lives in, and removes it once the store is closed.
+    pub(crate) fn hold(&mut self, dir: storage::Temp) {
+        self._dir = Some(dir);
+    }
+
+    /// The send's own folder, for a test that watches it while the send runs.
+    #[cfg(test)]
+    pub fn scratch(&self) -> Option<&std::path::Path> {
+        self._dir.as_ref().map(storage::Temp::path)
     }
 
     /// Serves until the requested stop. The router is shut down before this returns, so a closed

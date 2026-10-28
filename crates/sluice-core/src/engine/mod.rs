@@ -35,6 +35,9 @@ pub use rate::Rate;
 pub use recv::{ReceiveOptions, Received, receive, top_level_rule};
 pub use recv_range::receive_range;
 pub use recv_stdout::receive_stdout;
+pub(crate) use send::Scratch;
+#[cfg(test)]
+pub(super) use send::prepare_stdin_from as prepare_send_stdin_from;
 pub use send::{
     Outgoing, StopEnd, default_expiry, prepare as prepare_send,
     prepare_paths as prepare_send_paths, prepare_paths_with_rate as prepare_send_paths_with_rate,

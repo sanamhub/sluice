@@ -44,7 +44,7 @@ impl MetaStore {
     }
 
     /// Closes the store and removes the folder.
-    pub async fn close(mut self) -> Result<(), Error> {
+    pub async fn close(self) -> Result<(), Error> {
         self.store.close().await
     }
 }

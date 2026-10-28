@@ -191,6 +191,7 @@ impl Provider {
             complete: complete_rx,
             _complete: complete,
             expiry,
+            _dir: None,
         })
     }
 }

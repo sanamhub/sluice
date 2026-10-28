@@ -74,7 +74,7 @@ fn a_home_with_a_trailing_dot_component_is_that_folder_and_not_another() {
     let home = base.join("trail.");
     fs::create_dir(&home).unwrap();
     Home::open(&home).unwrap().identity().unwrap();
-    for name in ["blobs", "db", "logs", "VERSION", "identity.key"] {
+    for name in ["db", "db", "logs", "VERSION", "identity.key"] {
         assert!(home.join(name).exists(), "{name} in trail.");
     }
     assert!(!base.join("trail").exists(), "no folder without the dot");

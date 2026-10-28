@@ -50,7 +50,7 @@ pub(super) async fn claim_store(
     // repair, before it touches a file, because a folder swapped in since the check above is not
     // this transfer's store.
     storage::repair(partial, before).await?;
-    let mut store = match storage::Store::open(partial, storage::Collector::Off).await {
+    let store = match storage::Store::open(partial, storage::Collector::Off).await {
         Ok(store) => store,
         Err(e) => {
             // A store this receive could not open is not one a later one can resume.

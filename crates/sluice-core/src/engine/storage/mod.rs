@@ -8,9 +8,11 @@ mod registry;
 mod repair;
 mod store;
 mod temp;
+mod temp_store;
 
 pub use install::install;
 pub use meta::MetaStore;
+pub(crate) use open::hand_on;
 pub use open::{Collector, Store};
 #[cfg(test)]
 pub(super) use open::{GC_INTERVAL, open_store_after};
@@ -25,7 +27,10 @@ pub(crate) use repair::{changed, data_path, name_count};
 #[cfg(test)]
 pub use store::MARKER;
 pub use store::{FolderId, Owner, claim, identify, partial_dir, recorded, remember};
+#[cfg(test)]
+pub use temp::PREFIX as TEMP_PREFIX;
 pub use temp::{Temp, sweep_temporary_store, temp_dir, temp_path};
+pub use temp_store::TempStore;
 
 use std::{fs, io, path::Path};
 

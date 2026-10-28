@@ -41,6 +41,29 @@ use super::{
     prepare_send, receive,
 };
 
+/// Every byte a send left in the home: what is under its temporary area and in the `blobs` folder an
+/// older home kept its imports in. The home's own files are not a send's.
+fn send_bytes(home: &Home) -> u64 {
+    fn walk(dir: &Path) -> u64 {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return 0;
+        };
+        let mut total = 0;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if meta.is_dir() {
+                total += walk(&path);
+            } else {
+                total += meta.len();
+            }
+        }
+        total
+    }
+    walk(&home.path().join("tmp")) + walk(&home.path().join("blobs"))
+}
 fn options(out: &Path) -> super::ReceiveOptions {
     super::ReceiveOptions {
         out: out.to_path_buf(),

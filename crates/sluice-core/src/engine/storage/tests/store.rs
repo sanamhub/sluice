@@ -54,7 +54,7 @@ async fn a_store_a_cancelled_command_left_open_is_closed_by_the_next_open() {
     let held = guard.handle();
     drop(guard);
 
-    let mut again = Store::open(&root, Collector::Off).await.unwrap();
+    let again = Store::open(&root, Collector::Off).await.unwrap();
     again.close().await.unwrap();
     drop(held);
 }
@@ -62,7 +62,7 @@ async fn a_store_a_cancelled_command_left_open_is_closed_by_the_next_open() {
 /// A store of one receive, with `body` filed under its root, closed so nothing but the folder holds
 /// the bytes.
 async fn store_with(root: &std::path::Path, body: &[u8]) -> iroh_blobs::Hash {
-    let mut store = Store::open(root, Collector::Off).await.unwrap();
+    let store = Store::open(root, Collector::Off).await.unwrap();
     let tag = store.blobs().add_slice(body).temp_tag().await.unwrap();
     let hash = tag.hash();
     drop(tag);

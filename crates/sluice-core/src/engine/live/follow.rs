@@ -18,7 +18,7 @@ use super::LiveLog;
 use crate::{
     Error, Home,
     engine::{
-        Congestion, LiveSend, Outgoing, Provider, RelayModeChoice, now_ms,
+        Congestion, LiveSend, Outgoing, Provider, RelayModeChoice, Scratch, now_ms,
         storage::{self},
     },
     ticket::{Body, Ticket},
@@ -66,15 +66,16 @@ pub async fn prepare_live_with_rate(
 ) -> Result<Outgoing, Error> {
     let (name, size) = checked_path(path)?;
     // The live store is one of the two whose blobs are throwaway: the collector frees a segment as
-    // soon as the send drops its tag, so an hour of following does not leave an hour of segments.
-    let store = storage::Store::open(&home.path().join("blobs"), storage::Collector::On).await?;
+    // soon as the send drops its tag. The store is the send's own, in a folder that is removed when
+    // the send ends, so an hour of following leaves neither segments nor a store in the home.
+    let scratch = Scratch::open(home, storage::Collector::On).await?;
     let stream = new_stream(home)?;
     // The provider owns the store for the life of the send and closes it when it stops; the
     // follower gets its own handle to seal segments through.
-    let follower_store = store.handle();
-    let provider = Provider::start_live_with_rate(
+    let follower_store = scratch.store().handle();
+    let provider = match Provider::start_live_with_rate(
         home,
-        store.into_fs(),
+        scratch.store().handle(),
         stream.log.clone(),
         relay,
         congestion,
@@ -82,8 +83,28 @@ pub async fn prepare_live_with_rate(
         port,
         rate,
     )
-    .await?;
-    let ticket = ticket_of(&provider, stream.sender_key, stream.stream_id, expiry_ms)?;
+    .await
+    {
+        Ok(provider) => provider,
+        Err(e) => {
+            let _ = scratch.close().await;
+            return Err(e);
+        }
+    };
+    // The provider closes the store and then removes this folder, on every way it can end.
+    let Some(dir) = scratch.release() else {
+        return Err(Error::Bug("the send's folder is gone".to_string()));
+    };
+    let mut provider = provider;
+    provider.hold(dir);
+    let ticket = match ticket_of(&provider, stream.sender_key, stream.stream_id, expiry_ms) {
+        Ok(ticket) => ticket,
+        Err(e) => {
+            // Stopping the provider closes the store and removes the folder with it.
+            let _ = provider.shutdown().await;
+            return Err(e);
+        }
+    };
     // The segments stay in the home store while the stream is served, and are given back to the
     // collector when the send stops; the vector is shared with the task that seals them.
     let tags: Arc<Mutex<Vec<TempTag>>> = Arc::default();

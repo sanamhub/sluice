@@ -39,7 +39,12 @@ pub enum Collector {
 /// database wherever a command can await one, and hands a store it could not close to the next
 /// command that opens one.
 pub struct Store {
-    inner: Option<FsStore>,
+    /// The handle every method uses. It is not an `Option`, so no method has to say what a store
+    /// that was already closed would mean: closing consumes the value.
+    fs: FsStore,
+    /// A second handle of the same store, handed to the next command unless this one closed it. It
+    /// is kept apart from `fs` so the deref path never meets an empty guard.
+    hand: HandOff,
 }
 
 impl Store {
@@ -47,39 +52,38 @@ impl Store {
     /// resume opens the same folder, and its database has to be free first.
     pub async fn open(root: &Path, collector: Collector) -> Result<Self, Error> {
         settle().await;
+        let fs = open_store(root, collector).await?;
         Ok(Self {
-            inner: Some(open_store(root, collector).await?),
+            hand: HandOff(Some(fs.clone())),
+            fs,
         })
-    }
-
-    /// The store, for a call that needs the handle itself.
-    pub fn fs(&self) -> &FsStore {
-        self.inner
-            .as_ref()
-            .expect("a store is only gone once it was closed")
     }
 
     /// A second handle, for a task that serves or writes while this guard is alive.
     pub fn handle(&self) -> FsStore {
-        self.fs().clone()
+        self.fs.clone()
     }
 
-    /// Gives the store up without closing it, for a value that closes it on its own way out.
-    pub fn into_fs(mut self) -> FsStore {
-        self.inner
-            .take()
-            .expect("a store is only gone once it was closed")
+    /// Closes the store, so its database is free before this returns. It consumes the value, so
+    /// nothing can use a handle to a store it already closed.
+    pub async fn close(mut self) -> Result<(), Error> {
+        self.close_in_place().await
     }
 
-    /// Closes the store, so its database is free before this returns. A second call does nothing.
-    pub async fn close(&mut self) -> Result<(), Error> {
-        let Some(store) = self.inner.take() else {
-            return Ok(());
-        };
-        store
+    /// [`close`] on a value that is owned by something with a drop of its own, which cannot give the
+    /// value up but can still close it.
+    pub(crate) async fn close_in_place(&mut self) -> Result<(), Error> {
+        self.hand.0 = None;
+        self.fs
             .shutdown()
             .await
             .map_err(|e| Error::Storage(format!("cannot close the store: {}", crate::plain(&e))))
+    }
+
+    /// Stops this value handing the store on, for a caller that gives the store to something else
+    /// that closes it, or that already handed it on.
+    pub(crate) fn disarm(&mut self) {
+        self.hand.0 = None;
     }
 }
 
@@ -87,35 +91,84 @@ impl Deref for Store {
     type Target = FsStore;
 
     fn deref(&self) -> &FsStore {
-        self.fs()
+        &self.fs
     }
 }
 
-impl Drop for Store {
+/// A handle that is handed to the next command when it is dropped, unless it was taken.
+struct HandOff(Option<FsStore>);
+
+impl Drop for HandOff {
     /// A command that was cancelled has no moment to await a close. The store goes to the next
     /// command in this process, which closes it before it opens its own.
     fn drop(&mut self) {
-        if let Some(store) = self.inner.take() {
-            unclosed().push(store);
+        if let Some(store) = self.0.take() {
+            unclosed().push(Unclosed {
+                store: Some(store),
+                dir: None,
+            });
         }
     }
 }
 
+/// A store a cancelled command could not close, with the folder that has to go after it. The folder
+/// is kept with the store and not removed on its own: a folder removed while the database is still
+/// open fails on Windows and leaves the folder behind.
+struct Unclosed {
+    store: Option<FsStore>,
+    dir: Option<super::Temp>,
+}
+
 /// Stores a cancelled command could not close. Closing one is a message to its actor and a wait
 /// for the answer; a dropped future has nowhere to wait, so the work is handed on.
-static UNCLOSED: Mutex<Vec<FsStore>> = Mutex::new(Vec::new());
+static UNCLOSED: Mutex<Vec<Unclosed>> = Mutex::new(Vec::new());
 
-fn unclosed() -> std::sync::MutexGuard<'static, Vec<FsStore>> {
+/// Serialises the closes, so an open that starts while another is closing a store waits for the
+/// close to finish instead of finding the parked list already empty and the database still held.
+static SETTLING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn unclosed() -> std::sync::MutexGuard<'static, Vec<Unclosed>> {
     UNCLOSED
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Closes every store an interrupted command left open.
+/// Hands a store and the folder it lives in to the next command, when the command that held them
+/// was cancelled.
+///
+/// Where a runtime can still run the close, it is done at once, in the order that matters: the
+/// database is closed and the folder is removed after it. Where it cannot, the pair waits for the
+/// next command that opens a store, which does the same two steps in the same order. A process that
+/// ends before either leaves a folder the sweep of temporary folders removes.
+pub(crate) fn hand_on(store: Option<FsStore>, dir: Option<super::Temp>) {
+    match (store, dir) {
+        (Some(store), Some(dir)) => {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = store.shutdown().await;
+                    drop(dir);
+                });
+            } else {
+                unclosed().push(Unclosed {
+                    store: Some(store),
+                    dir: Some(dir),
+                });
+            }
+        }
+        (store, dir) => unclosed().push(Unclosed { store, dir }),
+    }
+}
+
+/// Closes every store an interrupted command left open, and removes the folder of one that was
+/// living in a temporary one.
 async fn settle() {
-    let stores = std::mem::take(&mut *unclosed());
-    for store in stores {
-        let _ = store.shutdown().await;
+    let _settled = SETTLING.lock().await;
+    let handing = std::mem::take(&mut *unclosed());
+    for Unclosed { store, dir } in handing {
+        if let Some(store) = store {
+            let _ = store.shutdown().await;
+        }
+        drop(dir);
     }
 }
 

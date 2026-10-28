@@ -299,12 +299,12 @@ async fn wait_for_store(dir: &Path, done: impl Fn(u64) -> bool) -> u64 {
     }
 }
 
-/// A live send keeps one copy of each segment it has sealed and no more, and gives every one of
-/// them back when the send stops: a send that follows a file all afternoon does not leave the
-/// afternoon on disk. The store's collector is the only thing that frees them, so this is also the
-/// check that the live store runs one.
+/// A live send keeps the segments it seals in a store of its own inside the home's temporary area,
+/// one copy of each and no more, and when it has served its close the whole folder goes: the home
+/// holds none of the send's bytes afterwards, and the `blobs` folder an older home kept them in is
+/// not there at all.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_live_send_store_is_bounded_while_it_runs_and_empty_after_it_stops() {
+async fn a_live_send_keeps_its_segments_in_its_own_folder_and_leaves_none_behind() {
     // Five full segments; the last, short one is the tail and is sealed only at the close.
     const SEALED: u64 = 5 * (8 << 20);
     const CONTENT: u64 = SEALED + (1 << 20);
@@ -316,7 +316,7 @@ async fn a_live_send_store_is_bounded_while_it_runs_and_empty_after_it_stops() {
     for (at, byte) in body.iter_mut().enumerate() {
         *byte = (at % 251) as u8;
     }
-    fs::write(&source, body).unwrap();
+    fs::write(&source, body.clone()).unwrap();
     let outgoing = prepare_live(
         &home,
         &source,
@@ -324,25 +324,46 @@ async fn a_live_send_store_is_bounded_while_it_runs_and_empty_after_it_stops() {
         Congestion::Cubic,
         None,
         None,
-        // Long enough that the follower seals every full segment and never closes the stream.
-        Duration::from_secs(60),
+        // Long enough that the follower seals every full segment before it closes the stream.
+        Duration::from_millis(300),
     )
     .await
     .unwrap();
-    let blobs = home.path().join("blobs");
+    let scratch = outgoing
+        .scratch()
+        .expect("a live send has a store folder")
+        .to_path_buf();
+    assert_eq!(
+        scratch.parent(),
+        Some(home.temporary_folder().unwrap().as_path()),
+        "the store is not in the home's temporary area"
+    );
     // Five full segments, held for the readers that have not asked for them yet.
-    let sealed = wait_for_store(&blobs, |bytes| bytes >= SEALED).await;
+    let sealed = wait_for_store(&scratch, |bytes| bytes >= SEALED).await;
     assert!(
         sealed < SEALED + (4 << 20),
         "the store held {sealed} bytes for {SEALED} bytes of sealed segments"
     );
 
-    // What a send that stops does: the follower goes, and with it the tags it held the segments by.
-    outgoing.live.as_ref().unwrap().stop();
-    drop(outgoing);
-    let left = wait_for_store(&blobs, |bytes| bytes < 1 << 20).await;
+    // The send serves the stream to a reader and stops at its close, which is the path that closes
+    // the store and removes the folder.
+    let text = outgoing.ticket.encode();
+    let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
+    let serving = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let out = dir.path().join("out.bin");
+    let store_root = dir.path().join("receive-store");
+    fs::create_dir(&store_root).unwrap();
+    let (recv_tx, _recv_rx) = tokio::sync::mpsc::unbounded_channel();
+    let received = receive_live(&text, &options(&out), &store_root, &recv_tx)
+        .await
+        .unwrap();
+    assert_eq!(received.bytes, CONTENT);
+    assert_eq!(fs::read(&out).unwrap(), body);
+    assert_eq!(serving.await.unwrap().unwrap(), StopEnd::Downloaded);
+    assert!(!scratch.exists(), "the send kept its store folder");
+    assert_eq!(send_bytes(&home), 0, "the send left bytes in the home");
     assert!(
-        left < 1 << 20,
-        "the store still held {left} bytes after the send stopped"
+        !home.path().join("blobs").exists(),
+        "the home still has a blobs folder"
     );
 }

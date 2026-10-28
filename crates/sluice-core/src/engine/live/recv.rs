@@ -112,7 +112,7 @@ async fn open(
 /// Closes the socket and the store on every path, removes both folders, and reports the file only
 /// when the transfer closed cleanly.
 async fn finish(
-    mut opened: Opened,
+    opened: Opened,
     outcome: Result<u64, Error>,
     options: &ReceiveOptions,
     events: &UnboundedSender<Event>,

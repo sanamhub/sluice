@@ -119,7 +119,7 @@ fn a_new_home_and_its_folders_have_the_three_entries_and_no_everyone() {
     let path = parent.path().join("home");
     drop(Home::open(&path).unwrap());
     assert_private(&path, INHERIT, true);
-    for name in ["blobs", "db", "logs"] {
+    for name in ["db", "db", "logs"] {
         // Inherited from the home, so the entries say so and the list is not protected itself.
         assert_private(&path.join(name), "OICIID", false);
     }
@@ -166,7 +166,7 @@ fn an_empty_folder_made_by_hand_gets_the_list_of_a_new_home() {
     drop(Home::open(&path).unwrap());
     assert_private(&path, INHERIT, true);
     // Made after the list was set, so they inherit it and not the parent's.
-    assert_private(&path.join("blobs"), "OICIID", false);
+    assert_private(&path.join("db"), "OICIID", false);
 }
 
 #[test]
@@ -227,7 +227,7 @@ fn a_folder_that_is_not_there_is_an_error_and_not_a_panic() {
 fn the_list_reaches_children_that_were_made_before_it_was_set() {
     let parent = parent_that_lets_everyone_read();
     let folder = parent.path().join("home");
-    let subfolder = folder.join("blobs");
+    let subfolder = folder.join("db");
     let file = subfolder.join("data");
     fs::create_dir_all(&subfolder).unwrap();
     fs::write(&file, b"x").unwrap();
