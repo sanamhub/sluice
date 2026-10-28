@@ -255,23 +255,28 @@ pub(super) fn is_device_path(path: &Path) -> bool {
     if starts(r"\\.\") || starts(r"\??\") || starts(r"\\?\GLOBALROOT\") {
         return true;
     }
+    // A named pipe is reachable as `\\server\pipe\name`, as `\\.\pipe\name` above and as
+    // `\\?\UNC\server\pipe\name`: `pipe` is a share name Windows reads without regard to case, and
+    // reading or writing one is a message to another process rather than a file in a folder.
+    if let Some(rest) = after_prefix(&wide, r"\\?\UNC\") {
+        return names_a_pipe(rest);
+    }
+    if let Some(rest) = after_prefix(&wide, r"\\") {
+        let namespace = matches!(rest.first().copied(), Some(c) if c == u16::from(b'?') || c == u16::from(b'.'));
+        if !namespace {
+            return names_a_pipe(rest);
+        }
+    }
     // A verbatim path names a file only when it starts with a drive letter and a colon or with
     // `UNC\`. `\\?\Volume{...}`, `\\?\GLOBALROOT\` and the rest of the namespace are devices.
     if !starts(r"\\?\") {
         return false;
     }
     let rest = &wide[4..];
-    let upper = |c: u16| {
-        if (u16::from(b'a')..=u16::from(b'z')).contains(&c) {
-            c - 32
-        } else {
-            c
-        }
-    };
     let unc = rest.get(..4).is_some_and(|part| {
-        upper(part[0]) == u16::from(b'U')
-            && upper(part[1]) == u16::from(b'N')
-            && upper(part[2]) == u16::from(b'C')
+        upper_of(part[0]) == u16::from(b'U')
+            && upper_of(part[1]) == u16::from(b'N')
+            && upper_of(part[2]) == u16::from(b'C')
             && part[3] == u16::from(b'\\')
     });
     let drive = rest.first().is_some_and(|c| {
@@ -279,4 +284,48 @@ pub(super) fn is_device_path(path: &Path) -> bool {
             || (u16::from(b'a')..=u16::from(b'z')).contains(c)
     }) && rest.get(1) == Some(&u16::from(b':'));
     !unc && !drive
+}
+
+/// `wide` after `prefix`, compared without regard to case, or `None` when it does not start with it.
+#[cfg(windows)]
+fn after_prefix<'a>(wide: &'a [u16], prefix: &str) -> Option<&'a [u16]> {
+    let want: Vec<u16> = prefix.encode_utf16().collect();
+    let head = wide.get(..want.len())?;
+    let same = head
+        .iter()
+        .zip(&want)
+        .all(|(got, want)| upper_of(*got) == upper_of(*want));
+    same.then(|| &wide[want.len()..])
+}
+
+/// Whether `rest` names a share called `pipe`: `server\pipe` or `server\pipe\name`. Windows reads a
+/// share name without regard to case, so `PIPE` is the same share.
+#[cfg(windows)]
+fn names_a_pipe(rest: &[u16]) -> bool {
+    let Some(at) = rest.iter().position(|&c| c == u16::from(b'\\')) else {
+        return false;
+    };
+    let share = &rest[at + 1..];
+    let end = share
+        .iter()
+        .position(|&c| c == u16::from(b'\\'))
+        .unwrap_or(share.len());
+    let pipe = "pipe".encode_utf16().collect::<Vec<u16>>();
+    share.get(..end).is_some_and(|name| {
+        name.len() == pipe.len()
+            && name
+                .iter()
+                .zip(&pipe)
+                .all(|(got, want)| upper_of(*got) == upper_of(*want))
+    })
+}
+
+/// `c` as an upper-case ASCII letter, for a comparison that Windows makes without regard to case.
+#[cfg(windows)]
+fn upper_of(c: u16) -> u16 {
+    if (u16::from(b'a')..=u16::from(b'z')).contains(&c) {
+        c - 32
+    } else {
+        c
+    }
 }

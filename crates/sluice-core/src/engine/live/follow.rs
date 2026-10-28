@@ -73,9 +73,9 @@ pub async fn prepare_live_with_rate(
     // The provider owns the store for the life of the send and closes it when it stops; the
     // follower gets its own handle to seal segments through.
     let follower_store = scratch.store().handle();
-    let provider = match Provider::start_live_with_rate(
+    let provider = crate::engine::send::serving_live(
         home,
-        scratch.store().handle(),
+        scratch,
         stream.log.clone(),
         relay,
         congestion,
@@ -83,20 +83,7 @@ pub async fn prepare_live_with_rate(
         port,
         rate,
     )
-    .await
-    {
-        Ok(provider) => provider,
-        Err(e) => {
-            let _ = scratch.close().await;
-            return Err(e);
-        }
-    };
-    // The provider closes the store and then removes this folder, on every way it can end.
-    let Some(dir) = scratch.release() else {
-        return Err(Error::Bug("the send's folder is gone".to_string()));
-    };
-    let mut provider = provider;
-    provider.hold(dir);
+    .await?;
     let ticket = match ticket_of(&provider, stream.sender_key, stream.stream_id, expiry_ms) {
         Ok(ticket) => ticket,
         Err(e) => {

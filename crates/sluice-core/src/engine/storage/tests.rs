@@ -289,6 +289,13 @@ fn a_device_path_is_not_a_file_path() {
         "//?/GLOBALROOT/Device/HarddiskVolume1",
         r"\\?\Volume{00000000-0000-0000-0000-000000000000}\x",
         r"\\?\",
+        // A named pipe is reached as a share, in every spelling and in any case.
+        r"\\server\pipe\name",
+        r"\\localhost\pipe\name",
+        r"\\SERVER\PIPE\name",
+        r"\\?\UNC\server\pipe\name",
+        r"\\?\unc\localhost\Pipe\name",
+        r"\\server\pipe",
     ] {
         assert!(
             super::install::is_device_path(Path::new(device)),
@@ -301,6 +308,8 @@ fn a_device_path_is_not_a_file_path() {
         "//?/c:/x",
         r"\\?\UNC\server\share\x",
         r"\\server\share\x",
+        // A share whose name only starts like the pipe share's is another share.
+        r"\\server\pipex\name",
     ] {
         assert!(!super::install::is_device_path(Path::new(file)), "{file}");
     }

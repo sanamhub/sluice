@@ -54,7 +54,7 @@ pub struct RecvArgs {
     #[arg(long, value_enum, default_value_t = PriorityArg::Normal, value_name = "LEVEL")]
     pub priority: PriorityArg,
     /// Cap the bytes this command fetches per second, shared by its transfers, such as `50M` or
-    /// `50MB`: `KB` is 1000 bytes and `KiB` 1024, and `K`, `M`, `G`, `T` alone are powers of 1024
+    /// `50MB`: `KB` is 1000 bytes and `KiB` 1024, and `K`, `M`, `G`, `T`, `P` alone are powers of 1024
     #[arg(long, value_name = "RATE")]
     pub limit_rate: Option<String>,
     /// Stop a live receive once the file would pass this size, such as `4G` or `4GB`; what arrived

@@ -13,7 +13,7 @@ use iroh_blobs::{
     store::fs::FsStore,
 };
 
-use super::{Congestion, Outgoing, Provider, RelayModeChoice, Scratch, storage};
+use super::{Congestion, Outgoing, Provider, RelayModeChoice, Scratch, serving, storage};
 use crate::{
     Error, Home,
     manifest::{Build, Built, Kind, Loc, Manifest},
@@ -58,30 +58,10 @@ pub async fn prepare_paths_with_rate(
     let sequence_root = add_sequence(scratch.store(), manifest, &mut tags).await?;
     let mut allowed: BTreeSet<[u8; 32]> = manifest.hash_sequence().into_iter().collect();
     allowed.insert(sequence_root);
-    let provider = match Provider::start_with_rate(
-        home,
-        scratch.store().handle(),
-        allowed,
-        relay,
-        congestion,
-        expiry_ms,
-        port,
-        rate,
+    let provider = serving(
+        home, scratch, allowed, relay, congestion, expiry_ms, port, rate,
     )
-    .await
-    {
-        Ok(provider) => provider,
-        Err(e) => {
-            let _ = scratch.close().await;
-            return Err(e);
-        }
-    };
-    // The provider closes the store and then removes this folder, on every way it can end.
-    let Some(dir) = scratch.release() else {
-        return Err(Error::Bug("the send's folder is gone".to_string()));
-    };
-    let mut provider = provider;
-    provider.hold(dir);
+    .await?;
     let ticket = match ticket_of(&provider, manifest, sequence_root, expiry_ms) {
         Ok(ticket) => ticket,
         Err(e) => {

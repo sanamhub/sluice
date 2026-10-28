@@ -12,7 +12,7 @@ use iroh_blobs::{
     store::fs::FsStore,
 };
 
-use super::{Congestion, Outgoing, Provider, RelayModeChoice, Scratch, Stamp, storage};
+use super::{Congestion, Outgoing, Provider, RelayModeChoice, Scratch, Stamp, serving, storage};
 use crate::{
     Error, Home,
     manifest::{Entry, Kind, Loc, Manifest, PackRef, path::ManifestPath},
@@ -57,31 +57,10 @@ pub async fn prepare_with_rate(
     let metadata = keep_metadata(scratch.store(), &manifest).await?;
     let relay_text = relay_text(&relay);
     let allowed = allowed_roots(&manifest);
-    let provider = match Provider::start_with_rate(
-        home,
-        scratch.store().handle(),
-        allowed,
-        relay,
-        congestion,
-        expiry_ms,
-        port,
-        rate,
+    let provider = serving(
+        home, scratch, allowed, relay, congestion, expiry_ms, port, rate,
     )
-    .await
-    {
-        Ok(provider) => provider,
-        Err(e) => {
-            // The send's folder goes with the failure, so nothing it copied stays in the home.
-            let _ = scratch.close().await;
-            return Err(e);
-        }
-    };
-    // The provider closes the store and then removes this folder, on every way it can end.
-    let Some(dir) = scratch.release() else {
-        return Err(Error::Bug("the send's folder is gone".to_string()));
-    };
-    let mut provider = provider;
-    provider.hold(dir);
+    .await?;
     let ticket = match ticket_of(&provider, &manifest, before.size, expiry_ms, relay_text) {
         Ok(ticket) => ticket,
         Err(e) => {
@@ -159,30 +138,10 @@ async fn prepare_stdin_body(
     let hash = tag.hash();
     let allowed = std::collections::BTreeSet::from([*hash.as_bytes()]);
     let relay_text = relay_text(&relay);
-    let provider = match Provider::start_with_rate(
-        home,
-        scratch.store().handle(),
-        allowed,
-        relay,
-        congestion,
-        expiry_ms,
-        port,
-        rate,
+    let provider = serving(
+        home, scratch, allowed, relay, congestion, expiry_ms, port, rate,
     )
-    .await
-    {
-        Ok(provider) => provider,
-        Err(e) => {
-            let _ = scratch.close().await;
-            return Err(e);
-        }
-    };
-    // The provider closes the store and then removes this folder, on every way it can end.
-    let Some(dir) = scratch.release() else {
-        return Err(Error::Bug("the send's folder is gone".to_string()));
-    };
-    let mut provider = provider;
-    provider.hold(dir);
+    .await?;
     let ticket = match ticket_with_body(
         &provider,
         expiry_ms,

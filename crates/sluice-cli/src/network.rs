@@ -25,7 +25,8 @@ pub async fn lines(relay: &RelayModeChoice) -> Vec<Line> {
                 name: "relay",
                 status: Status::Skipped,
                 detail: "none; across the internet only a sender whose router opens a port \
-                         (UPnP, PCP or NAT-PMP) or a full-cone NAT can be reached"
+                         (UPnP, PCP or NAT-PMP) can be reached, and two sides on one network can \
+                         still find each other directly"
                     .to_string(),
                 fix: Some(
                     "pass --relay URL to check one, or run a relay as a meeting point, so two \
@@ -184,9 +185,9 @@ async fn portmap() -> Line {
             status: Status::Warning,
             detail: "no router answered a mapping request, so no port can be opened".to_string(),
             fix: Some(
-                "a router with UPnP, PCP or NAT-PMP can open one; without one, or a full-cone \
-                 NAT, run a relay as a meeting point, because across the internet nothing else \
-                 reaches the other side"
+                "a router with UPnP, PCP or NAT-PMP can open one; without one, two sides on one \
+                 network still find each other directly, and across the internet a relay as a \
+                 meeting point is what lets the two sides meet"
                     .to_string(),
             ),
         },

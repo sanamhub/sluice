@@ -24,7 +24,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use super::{Congestion, Event, LiveSend, Provider, RelayModeChoice, Stop, emit, expiry, storage};
 use crate::{
-    Error,
+    Error, Home,
     ticket::{Body, Ticket},
 };
 
@@ -232,4 +232,83 @@ mod tests {
     fn the_default_is_one_day() {
         assert_eq!(default_expiry(1_000), Some(1_000 + 86_400_000));
     }
+}
+
+/// Starts the provider for the store `scratch` opened, and gives it the folder: the provider closes
+/// the store when it stops and removes the folder after that. A provider that could not start closes
+/// the store itself and the folder goes with the failed send.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn serving(
+    home: &Home,
+    scratch: Scratch,
+    allowed: std::collections::BTreeSet<[u8; 32]>,
+    relay: RelayModeChoice,
+    congestion: Congestion,
+    expiry_ms: Option<u64>,
+    port: Option<u16>,
+    rate: Option<std::sync::Arc<super::Rate>>,
+) -> Result<Provider, Error> {
+    let provider = match Provider::start_with_rate(
+        home,
+        scratch.store().handle(),
+        allowed,
+        relay,
+        congestion,
+        expiry_ms,
+        port,
+        rate,
+    )
+    .await
+    {
+        Ok(provider) => provider,
+        Err(e) => {
+            let _ = scratch.close().await;
+            return Err(e);
+        }
+    };
+    serving_folder(provider, scratch)
+}
+
+/// [`serving`] for a live stream, whose provider serves the log's connections as well.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn serving_live(
+    home: &Home,
+    scratch: Scratch,
+    log: std::sync::Arc<crate::engine::LiveLog>,
+    relay: RelayModeChoice,
+    congestion: Congestion,
+    expiry_ms: Option<u64>,
+    port: Option<u16>,
+    rate: Option<std::sync::Arc<super::Rate>>,
+) -> Result<Provider, Error> {
+    let provider = match Provider::start_live_with_rate(
+        home,
+        scratch.store().handle(),
+        log,
+        relay,
+        congestion,
+        expiry_ms,
+        port,
+        rate,
+    )
+    .await
+    {
+        Ok(provider) => provider,
+        Err(e) => {
+            let _ = scratch.close().await;
+            return Err(e);
+        }
+    };
+    serving_folder(provider, scratch)
+}
+
+/// Hands the send's folder to a provider that has started, so it removes the folder once it has
+/// closed the store.
+fn serving_folder(provider: Provider, scratch: Scratch) -> Result<Provider, Error> {
+    let mut provider = provider;
+    let Some(dir) = scratch.release() else {
+        return Err(Error::Bug("the send's folder is gone".to_string()));
+    };
+    provider.hold(dir);
+    Ok(provider)
 }

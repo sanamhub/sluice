@@ -190,9 +190,10 @@ fn colour_follows_the_flag_and_no_color() {
     );
 }
 /// The network checks report what they find and change no setting. Without a relay they say what
-/// that rules out, which is more than two hard NATs: across the internet only a router that opens
-/// a port or a full-cone NAT lets the other side reach this one. The command still exits as the
-/// local checks decide.
+/// that rules out and nothing more: this machine can be reached across the internet only if its
+/// router opens a port, and two sides on one network can still find each other. A full-cone NAT is
+/// not worth naming, because no relay was there to learn which kind of NAT this is. The command
+/// still exits as the local checks decide.
 #[test]
 fn network_checks_report_without_a_relay() {
     let dir = tempfile::tempdir().unwrap();
