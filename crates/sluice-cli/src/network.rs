@@ -24,9 +24,13 @@ pub async fn lines(relay: &RelayModeChoice) -> Vec<Line> {
             lines.push(Line {
                 name: "relay",
                 status: Status::Skipped,
-                detail: "none, so two hard NATs cannot connect".to_string(),
+                detail: "none; across the internet only a sender whose router opens a port \
+                         (UPnP, PCP or NAT-PMP) or a full-cone NAT can be reached"
+                    .to_string(),
                 fix: Some(
-                    "pass --relay URL to check a relay and get a net report from it".to_string(),
+                    "pass --relay URL to check one, or run a relay as a meeting point, so two \
+                     sides can find a direct path"
+                        .to_string(),
                 ),
             });
             lines.push(skipped(
@@ -180,8 +184,9 @@ async fn portmap() -> Line {
             status: Status::Warning,
             detail: "no router answered a mapping request, so no port can be opened".to_string(),
             fix: Some(
-                "a router with UPnP, PCP or NAT-PMP can open one; otherwise a relay is needed \
-                 between two hard NATs"
+                "a router with UPnP, PCP or NAT-PMP can open one; without one, or a full-cone \
+                 NAT, run a relay as a meeting point, because across the internet nothing else \
+                 reaches the other side"
                     .to_string(),
             ),
         },

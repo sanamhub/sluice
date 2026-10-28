@@ -189,8 +189,10 @@ fn colour_follows_the_flag_and_no_color() {
         "JSON is never coloured"
     );
 }
-/// The network checks report what they find and change no setting. Without a relay they still
-/// say what that means for two hard NATs, and the command exits as the local checks decide.
+/// The network checks report what they find and change no setting. Without a relay they say what
+/// that rules out, which is more than two hard NATs: across the internet only a router that opens
+/// a port or a full-cone NAT lets the other side reach this one. The command still exits as the
+/// local checks decide.
 #[test]
 fn network_checks_report_without_a_relay() {
     let dir = tempfile::tempdir().unwrap();
@@ -202,8 +204,10 @@ fn network_checks_report_without_a_relay() {
     let text = stdout_text(&result);
     assert!(text.contains("udp"), "{text}");
     assert!(
-        text.contains("none, so two hard NATs cannot connect"),
+        text.contains("only a sender whose router opens a port"),
         "{text}"
     );
+    assert!(text.contains("run a relay as a meeting point"), "{text}");
     assert!(text.contains("portmap"), "{text}");
+    assert!(!text.contains("rendezvous"), "{text}");
 }

@@ -187,10 +187,10 @@ because decoding reads no clock.
 bytes and 190 characters. A Live ticket with the IPv4 pair is 101 bytes and 169 characters.
 Implementations MUST accept tickets up to 4096 bytes of text and MUST NOT write longer ones.
 
-**Short codes.** Where a rendezvous is configured, a ticket MAY be published under a short code. The
-code is a SPAKE2 password; the rendezvous stores only the ciphertext and MUST rate-limit attempts
-per code. Short codes are optional, and the SPAKE2 implementation in use has no independent audit,
-which implementations MUST state in their documentation.
+**Short codes.** Where a relay is configured, a ticket MAY be published under a short code. The code
+is a SPAKE2 password; the relay stores only the ciphertext and MUST rate-limit attempts per code.
+Short codes are optional, and the SPAKE2 implementation in use has no independent audit, which
+implementations MUST state in their documentation.
 
 ---
 
