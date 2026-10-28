@@ -16,7 +16,7 @@ pub use registry::{
 };
 #[cfg(test)]
 pub use store::MARKER;
-pub use store::{claim, identify, partial_dir, recorded, remember};
+pub use store::{Owner, claim, identify, partial_dir, recorded, remember};
 
 use std::{
     fs, io,

@@ -115,6 +115,26 @@ fn a_closed_stdout_is_not_an_error() {
     }
 }
 
+/// A test that writes its output with a relative path leaves the file in the crate folder, where a
+/// later commit picks it up as if it were source. Nothing a test writes may be left beside the
+/// crate, so the folder is checked for the shapes a stray transfer output takes.
+#[test]
+fn nothing_a_test_writes_is_left_beside_the_crate() {
+    let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut found = Vec::new();
+    for entry in fs::read_dir(crate_dir).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".bin") || name.starts_with(".sluice-") {
+            found.push(name);
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "test output was left in {}: {found:?}",
+        crate_dir.display()
+    );
+}
+
 /// The same, as a shell pipeline, with a reader that takes one byte and closes the pipe. The rest
 /// of the output has nowhere to go, and `pipefail` makes the status that of sluice and not of
 /// `head`.

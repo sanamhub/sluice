@@ -95,33 +95,25 @@ async fn drive(
         let wait = wake_at
             .filter(|at| *at > elapsed_ms(started))
             .map(|at| Duration::from_millis(at - elapsed_ms(started)));
-        match wait {
-            Some(wait) => {
-                tokio::select! {
-                    joined = tasks.join_next(), if !tasks.is_empty() => {
-                        pending.extend(settle(joined, &mut queue, &mut failures, &mut texts, started)?);
-                    }
-                    _ = tokio::time::sleep(wait) => {
-                        pending.extend(queue.tick(elapsed_ms(started))?);
-                        wake_at = None;
-                    }
-                }
+        // Only a retry is left, and its time has not come: wait for it, and stop if there is
+        // nothing left to wait for.
+        if wait.is_none() && tasks.is_empty() {
+            if !wake_up(&mut queue, &mut pending, wake_at, started).await? {
+                break;
             }
-            None if !tasks.is_empty() => {
-                let joined = tasks.join_next().await;
-                pending.extend(settle(
-                    joined,
-                    &mut queue,
-                    &mut failures,
-                    &mut texts,
-                    started,
-                )?);
-            }
-            // Only a retry is left, and its time has not come.
-            None => {
-                if !wake_up(&mut queue, &mut pending, wake_at, started).await? {
-                    break;
-                }
+            wake_at = None;
+            continue;
+        }
+        match step(&mut tasks, wait).await {
+            Step::Joined(joined) => pending.extend(settle(
+                joined,
+                &mut queue,
+                &mut failures,
+                &mut texts,
+                started,
+            )?),
+            Step::Due => {
+                pending.extend(queue.tick(elapsed_ms(started))?);
                 wake_at = None;
             }
         }
@@ -130,6 +122,24 @@ async fn drive(
         .values()
         .next()
         .map_or(0, |kind| crate::exit::code_of(*kind)))
+}
+
+/// One wait of the loop: a task that finished, or the retry time coming due.
+enum Step {
+    Joined(Option<Result<Finished, tokio::task::JoinError>>),
+    Due,
+}
+
+/// Waits for whichever comes first: a task finishing, or `wait` running out. With no tasks left the
+/// task branch is not polled, because it would answer `None` at once and spin.
+async fn step(tasks: &mut JoinSet<Finished>, wait: Option<Duration>) -> Step {
+    match wait {
+        Some(wait) => tokio::select! {
+            joined = tasks.join_next(), if !tasks.is_empty() => Step::Joined(joined),
+            _ = tokio::time::sleep(wait) => Step::Due,
+        },
+        None => Step::Joined(tasks.join_next().await),
+    }
 }
 
 /// Waits for the next retry to come due and lets the queue start it, or says there is nothing

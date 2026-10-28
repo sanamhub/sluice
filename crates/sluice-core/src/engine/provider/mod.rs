@@ -116,71 +116,47 @@ impl Provider {
     }
 
     async fn one_download(&mut self, roots: Vec<Hash>) -> Result<ServeEnd, Error> {
-        let mut remaining: BTreeSet<Hash> = roots.into_iter().collect();
-        if remaining.is_empty() {
-            return Err(Error::Bug(
-                "a one-download send has no content to serve".to_string(),
-            ));
-        }
+        let mut wait = Waiting::new(roots)?;
         let left = self.expiry_ms_left();
         if left == 0 {
             return Ok(ServeEnd::Expired);
         }
-        // Kept whole because `remaining` shrinks: a completion code is checked against every root
-        // of the transfer, not only the ones still outstanding.
-        let wanted = remaining.clone();
         let mut deadline = Box::pin(tokio::time::sleep(Duration::from_millis(left)));
-        // Started when the last root is delivered and never restarted, so a client that keeps
-        // asking for something else cannot hold the sender open for ever.
-        let mut grace: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
-        let mut closed = BTreeSet::new();
-        let mut connections = BTreeSet::new();
         loop {
             tokio::select! {
                 // The receiver verified and installed every file, which is the signal that says so.
                 // It ends the wait even when a byte count would not: a resumed receive takes only
-                // what the first one was missing, so this process never sees the whole blob. It is
-                // believed only for a connection that asked for every root: the close code is
-                // unauthenticated, so anyone who can reach this sender could otherwise end a send
-                // without a ticket and make it print success.
+                // what the first one was missing, so this process never sees the whole blob.
                 Some(connection) = self.complete.recv() => {
-                    if wanted.is_subset(&self.policy.asked_by(connection)) {
+                    if self.believed(connection, &wait.wanted) {
                         return Ok(ServeEnd::Downloaded);
                     }
                 }
                 event = self.done.recv() => match event {
-                    Some(policy::ServeEvent::Downloaded { hash, connection }) => {
-                        if remaining.remove(&hash) {
-                            connections.insert(connection);
-                        }
-                        if remaining.is_empty() && grace.is_none() {
-                            grace = Some(Box::pin(tokio::time::sleep(GRACE)));
-                        }
-                    }
-                    Some(policy::ServeEvent::Closed { connection }) => {
-                        closed.insert(connection);
-                    }
+                    Some(event) => wait.event(event),
                     None => return Err(Error::Bug("the provider event task stopped".into())),
                 },
                 // A receiver that keeps its connection open must not keep this sender alive: every
                 // root was delivered, so stop after the grace period even without the close.
-                _ = wait_grace(&mut grace) => return Ok(ServeEnd::Downloaded),
+                _ = wait_grace(&mut wait.grace) => return Ok(ServeEnd::Downloaded),
                 _ = deadline.as_mut() => {
-                    match self.expiry {
-                        // The sleep can wake early when the wall clock moved back, so the clock
-                        // and not the timer decides. The remainder is waited for again.
-                        Some(expiry) if now_ms() < expiry => {
-                            let left = Duration::from_millis(expiry - now_ms());
-                            deadline.as_mut().reset(tokio::time::Instant::now() + left);
-                        }
-                        _ => return Ok(ServeEnd::Expired),
+                    if let Some(end) = elapsed(self.expiry, &mut deadline) {
+                        return Ok(end);
                     }
                 }
             }
-            if remaining.is_empty() && connections.is_subset(&closed) {
+            if wait.delivered() {
                 return Ok(ServeEnd::Downloaded);
             }
         }
+    }
+
+    /// Whether a completion code from `connection` ends the wait. It is believed only for a
+    /// connection the policy let a request in from that also asked for every root of the transfer:
+    /// the code is unauthenticated, so anyone who can reach this sender could otherwise end a send
+    /// without a ticket and make it print success.
+    fn believed(&self, connection: u64, wanted: &BTreeSet<Hash>) -> bool {
+        wanted.is_subset(&self.policy.asked_by(connection))
     }
 
     async fn keep(&mut self) -> Result<ServeEnd, Error> {
@@ -209,5 +185,77 @@ impl Provider {
             Some(expiry) => expiry.saturating_sub(now_ms()),
             None => 100 * 365 * 24 * 60 * 60 * 1000,
         }
+    }
+}
+
+/// What a one-download wait knows: the roots still owed, every root of the transfer (a completion
+/// code is checked against all of them, not only the outstanding ones), the grace that starts when
+/// the last root goes out, and which connections delivered or closed.
+struct Waiting {
+    remaining: BTreeSet<Hash>,
+    wanted: BTreeSet<Hash>,
+    grace: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
+    closed: BTreeSet<u64>,
+    connections: BTreeSet<u64>,
+}
+
+impl Waiting {
+    fn new(roots: Vec<Hash>) -> Result<Self, Error> {
+        let remaining: BTreeSet<Hash> = roots.into_iter().collect();
+        if remaining.is_empty() {
+            return Err(Error::Bug(
+                "a one-download send has no content to serve".to_string(),
+            ));
+        }
+        Ok(Self {
+            wanted: remaining.clone(),
+            remaining,
+            grace: None,
+            closed: BTreeSet::new(),
+            connections: BTreeSet::new(),
+        })
+    }
+
+    /// One policy event: a delivered root is no longer owed, and a closed connection is recorded so
+    /// the wait can end once every connection that delivered a root has gone. The grace is started
+    /// when the last root goes out and never restarted, so a client that keeps asking for something
+    /// else cannot hold the sender open for ever.
+    fn event(&mut self, event: policy::ServeEvent) {
+        match event {
+            policy::ServeEvent::Downloaded { hash, connection } => {
+                if self.remaining.remove(&hash) {
+                    self.connections.insert(connection);
+                }
+                if self.remaining.is_empty() && self.grace.is_none() {
+                    self.grace = Some(Box::pin(tokio::time::sleep(GRACE)));
+                }
+            }
+            policy::ServeEvent::Closed { connection } => {
+                self.closed.insert(connection);
+            }
+        }
+    }
+
+    /// Whether every root is delivered and every connection that took one has closed: nothing is
+    /// left to ask for, and nobody is left who could.
+    fn delivered(&self) -> bool {
+        self.remaining.is_empty() && self.connections.is_subset(&self.closed)
+    }
+}
+
+/// What a deadline that just fired means: another wait when the wall clock moved back, or the end
+/// of the ticket. A sleep can wake early across a clock change, so the clock and not the timer
+/// decides, and the remainder is waited for again.
+fn elapsed(
+    expiry: Option<u64>,
+    deadline: &mut std::pin::Pin<Box<tokio::time::Sleep>>,
+) -> Option<ServeEnd> {
+    match expiry {
+        Some(expiry) if now_ms() < expiry => {
+            let left = Duration::from_millis(expiry - now_ms());
+            deadline.as_mut().reset(tokio::time::Instant::now() + left);
+            None
+        }
+        _ => Some(ServeEnd::Expired),
     }
 }

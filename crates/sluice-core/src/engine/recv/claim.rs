@@ -23,30 +23,7 @@ pub(super) async fn claim_store(
     ticket: &Ticket,
     options: &ReceiveOptions,
 ) -> Result<(FsStore, bool, Plan), Error> {
-    let record = storage::find_record(partial, owner)?;
-    let exists = std::fs::symlink_metadata(partial).is_ok();
-    let found = match (record, exists) {
-        // The record, and only the record, says this folder is a store. Its marker then has to be
-        // the one that record was written with, and it has to be this ticket's store: a marker
-        // under the right id for another root is another transfer's, which this receive must
-        // neither remove nor write into.
-        (Some(record), true) => {
-            let marker = storage::recorded(partial)?;
-            let mine = marker.as_ref().and_then(|found| found.id.as_deref());
-            let right_root = marker.as_ref().is_some_and(|found| found.root == owner);
-            if mine != Some(record.id.as_str()) || !right_root {
-                return Err(storage::registry_clash(partial));
-            }
-            marker
-        }
-        (Some(_), false) => {
-            // A record of a store that is gone: this home left it behind, so drop it.
-            storage::forget_record(partial);
-            None
-        }
-        (None, true) => return Err(storage::registry_clash(partial)),
-        (None, false) => None,
-    };
+    let found = resumable_store(partial, owner)?;
     let resume = found.is_some();
     // A run that was allowed to replace what was in the output was a deliberate choice, so the run
     // that continues it has to make the same one.
@@ -56,10 +33,7 @@ pub(super) async fn claim_store(
             options.out.display()
         )));
     }
-    let ours = match found {
-        Some(found) if resume => found.names,
-        _ => std::collections::BTreeSet::new(),
-    };
+    let ours = found.map(|found| found.names).unwrap_or_default();
     let (plan, created) = plan::check(manifest, ticket, options, resume, &ours)?;
     if !resume {
         start_store(partial, owner, &created, options)?;
@@ -85,6 +59,39 @@ pub(super) async fn claim_store(
                 crate::plain(&e)
             )))
         }
+    }
+}
+
+/// The marker of the store this transfer may resume, or `None` when the folder is not there.
+///
+/// A folder is this transfer's store only when this home has a record of it, the marker in it is
+/// the one that record was written with, and that marker names this ticket's root. Anything else is
+/// refused and left alone: it could have been planted where the store was, or be another
+/// transfer's, and resuming from it would trust bytes nobody in this home wrote.
+fn resumable_store(
+    partial: &std::path::Path,
+    owner: &str,
+) -> Result<Option<storage::Owner>, Error> {
+    let record = storage::find_record(partial, owner)?;
+    let exists = std::fs::symlink_metadata(partial).is_ok();
+    match (record, exists) {
+        (Some(record), true) => {
+            let marker = storage::recorded(partial)?;
+            let mine = marker.as_ref().and_then(|found| found.id.as_deref());
+            let right_root = marker.as_ref().is_some_and(|found| found.root == owner);
+            if mine != Some(record.id.as_str()) || !right_root {
+                return Err(storage::registry_clash(partial));
+            }
+            Ok(marker)
+        }
+        (Some(_), false) => {
+            // A record of a store that is gone: this home left it behind, so drop it.
+            storage::forget_record(partial);
+            Ok(None)
+        }
+        // A folder with the store's name that this home did not record.
+        (None, true) => Err(storage::registry_clash(partial)),
+        (None, false) => Ok(None),
     }
 }
 
