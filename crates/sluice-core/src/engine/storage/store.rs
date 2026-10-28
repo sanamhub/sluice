@@ -103,13 +103,15 @@ fn parse_marker(text: &str) -> Option<Owner> {
 /// Makes `dir` an empty store of this receive, removing a folder that is not one. Called only after
 /// every check has passed, so a refusal leaves no store for a later run to resume.
 ///
-/// The folder is made with one `create_dir`, which fails on a name that exists, so a folder another
-/// process put there between the checks is never claimed, and is refused rather than written into.
-/// A folder this call made is then made private: another user who can write in the output could
-/// otherwise read the marker, and a store whose marker can be read can be copied and swapped in.
+/// The folder is made with the private builder, which fails on a name that exists and makes the
+/// folder mode 0700 as it is created: another user who can write in the output could otherwise read
+/// the marker, and a store whose marker can be read can be copied and swapped in. The access list,
+/// where the platform has one, is set next through a handle, so the folder whose kind and owner are
+/// checked is the folder that gets the list. A folder another process put there between the checks
+/// is never claimed, and is refused rather than written into.
 pub fn claim(dir: &Path) -> Result<(), Error> {
     remove_quietly(dir);
-    match fs::create_dir(dir) {
+    match crate::home::create_private_dir(dir) {
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
             return Err(registry::clash(dir));
@@ -140,7 +142,52 @@ pub fn remember(
         text.push_str(name);
         text.push('\n');
     }
-    fs::write(&marker, text).map_err(|e| storage("write", &marker, e))
+    write_marker(&marker, &text).map_err(|e| storage("write", &marker, e))
+}
+
+/// Writes a marker at a name that must not exist yet, and never through a link: the store folder is
+/// this user's, but a `ticket` link planted in it would otherwise be written through to wherever it
+/// points. `O_EXCL` and `create_new` refuse a name that is there; `NOFOLLOW` and
+/// `OPEN_REPARSE_POINT` refuse a link at it.
+fn write_marker(marker: &Path, text: &str) -> io::Result<()> {
+    use std::io::Write;
+
+    let mut file = open_new_marker(marker)?;
+    file.write_all(text.as_bytes())
+}
+
+#[cfg(unix)]
+fn open_new_marker(marker: &Path) -> io::Result<fs::File> {
+    use rustix::fs::{Mode, OFlags};
+
+    // Mode 0600 at creation: the marker holds a ticket root, which names content this home is
+    // receiving, and nothing outside this user needs to read it.
+    let fd = rustix::fs::open(
+        marker,
+        OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::from_raw_mode(0o600),
+    )?;
+    Ok(fs::File::from(fd))
+}
+
+#[cfg(windows)]
+fn open_new_marker(marker: &Path) -> io::Result<fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .custom_flags(OPEN_REPARSE_POINT)
+        .open(marker)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_new_marker(marker: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(marker)
 }
 
 /// What names one folder on this machine, independent of its path: a folder renamed away and

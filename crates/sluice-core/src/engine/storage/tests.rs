@@ -118,7 +118,9 @@ fn a_marker_says_which_names_were_created_and_whether_the_run_was_forced() {
     assert!(found.id.is_some(), "the folder's identity was not taken");
 
     // A marker from a run that created nothing and was not forced records exactly that, and a
-    // folder with no marker at all is not a resume.
+    // folder with no marker at all is not a resume. A marker is written once, so the first one is
+    // removed as a store folder that is claimed again would have it removed with the folder.
+    std::fs::remove_file(dir.path().join(super::MARKER)).unwrap();
     remember(
         dir.path(),
         "abc123",
@@ -136,6 +138,49 @@ fn a_marker_says_which_names_were_created_and_whether_the_run_was_forced() {
     assert!(recorded(empty.path()).unwrap().is_none());
 }
 
+/// A store folder is made private as it is created, not a moment later: another user who can write in
+/// the output could otherwise read the marker, and with it copy a store this home would resume from.
+#[test]
+fn the_store_folder_is_private_from_its_first_moment() {
+    use super::claim;
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("store");
+    claim(&store).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&store).unwrap().permissions().mode() & 0o777,
+            0o700,
+            "the store folder was made with the umask"
+        );
+    }
+    assert!(store.is_dir());
+}
+
+/// A marker is written with `create_new` and without following a link, so a `ticket` link planted in
+/// the store folder is refused instead of being written through. Without the no-follow open, the
+/// link would let another user read, and forge, a marker by pointing it at their own file.
+#[cfg(unix)]
+#[test]
+fn a_link_in_place_of_the_marker_is_refused() {
+    use super::remember;
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("store");
+    std::fs::create_dir(&store).unwrap();
+    let outside = root.path().join("outside");
+    std::os::unix::fs::symlink(&outside, store.join(super::MARKER)).unwrap();
+    let err = remember(
+        &store,
+        "abc123",
+        &std::collections::BTreeSet::new(),
+        false,
+        "id-1",
+    )
+    .unwrap_err();
+    assert!(matches!(err, crate::Error::Storage(_)), "{err}");
+    assert!(!outside.exists(), "the marker was written through the link");
+}
 /// The identity of a store is taken while its marker is read, from the handle that checked the
 /// folder, so a folder renamed away and another put under the same name is told apart even when the
 /// new one carries a marker that says the same thing. A compare against an identity taken later

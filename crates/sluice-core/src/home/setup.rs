@@ -375,6 +375,12 @@ mod imp {
     }
 }
 
+/// Makes a folder with the private builder: mode 0700 from the moment it exists, so a folder that
+/// another user can read is never on disk even for the moment before an access list is set, and
+/// the call fails when the name is already there.
+pub(crate) fn create_private_dir(folder: &Path) -> io::Result<()> {
+    folder_builder(false).create(folder)
+}
 /// Makes a folder this process just made private: mode 0700 on Unix, the private access list on
 /// Windows. The owner and the kind are checked through the same handle the access is set through,
 /// so the folder made private is the folder that was checked.
