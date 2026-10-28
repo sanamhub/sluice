@@ -226,6 +226,27 @@ fn the_link_fallback_installs_and_still_refuses_a_taken_name() {
     assert_eq!(std::fs::read(&target).unwrap(), b"new");
 }
 
+/// A Windows device path is refused before it is turned into a verbatim path. Windows reads `/` as a
+/// separator, so `//./pipe/name` names the same device as `\\.\pipe\name` and has to be recognised
+/// before the separators are rewritten.
+#[cfg(windows)]
+#[test]
+fn a_device_path_is_refused_with_either_separator() {
+    use super::install::is_device_path;
+    use std::path::Path;
+    for device in [
+        r"\\.\C:",
+        r"\\.\pipe\name",
+        "//./pipe/name",
+        "//./C:",
+        r"//.\C:",
+    ] {
+        assert!(is_device_path(Path::new(device)), "{device}");
+    }
+    for file in [r"\\?\C:\x", r"C:\x", r"\\server\share\x", "a/../b"] {
+        assert!(!is_device_path(Path::new(file)), "{file}");
+    }
+}
 /// `MoveFileExW` needs the verbatim form for a path past 260 characters, which `std::fs` builds
 /// itself. Without it the last step of a deep transfer is the one that fails.
 #[cfg(windows)]

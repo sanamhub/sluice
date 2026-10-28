@@ -102,7 +102,11 @@ fn resolve(
         Some((parent, _)) => parent.split('/').map(str::to_string).collect(),
         None => Vec::new(),
     };
-    let mut queue: Vec<String> = target.split('/').rev().map(str::to_string).collect();
+    let mut queue: Vec<String> = parts_of(target)
+        .into_iter()
+        .rev()
+        .map(str::to_string)
+        .collect();
     let mut follows = 0usize;
     while let Some(part) = queue.pop() {
         match part.as_str() {
@@ -128,7 +132,7 @@ fn resolve(
                     return Err(outside(link));
                 }
                 parts.pop();
-                queue.extend(next.split('/').rev().map(str::to_string));
+                queue.extend(parts_of(&next).into_iter().rev().map(str::to_string));
             }
         }
     }
@@ -137,6 +141,17 @@ fn resolve(
         .fold(std::path::PathBuf::new(), |at, part| at.join(part)))
 }
 
+/// The names a link target is made of. Windows writes a target with `\`, and the operating system
+/// there splits on both separators, so a check that only split on `/` would read `..\x` as one name
+/// and let a target pass that the operating system takes a folder up. Elsewhere `\` is a character
+/// in a name and only `/` separates.
+fn parts_of(target: &str) -> Vec<&str> {
+    if cfg!(windows) {
+        target.split(['/', '\\']).collect()
+    } else {
+        target.split('/').collect()
+    }
+}
 /// The target of the link already at `OUT/parts`, if there is one. An absolute target leaves the
 /// output wherever the `..` after it would land, and a target this code cannot read is refused:
 /// following neither would be following the operating system.
@@ -299,6 +314,18 @@ mod tests {
         assert!(resolve(&chain, empty_out(), "sub/a", "b/..").is_err());
     }
 
+    /// Windows writes a link target with `\` and resolves both separators, so a check that split
+    /// only on `/` would read `..\x` as a single name and keep a target that goes a folder up.
+    #[cfg(windows)]
+    #[test]
+    fn a_target_written_with_backslashes_is_split_on_them() {
+        let none = BTreeMap::new();
+        assert_eq!(
+            resolve(&none, empty_out(), "sub/link", r"..\x").unwrap(),
+            Path::new("x")
+        );
+        assert!(resolve(&none, empty_out(), "link", r"..\x").is_err());
+    }
     #[test]
     fn a_chain_that_loops_is_refused() {
         let looped = links(&[("a", "b"), ("b", "a")]);

@@ -230,12 +230,20 @@ fn move_file(from: &Path, target: &Path, replace: bool) -> io::Result<()> {
 }
 
 /// Whether `path` names a device rather than a file: a Windows device path starts with `\\.\`, as in
-/// `\\.\C:` or `\\.\pipe\name`.
+/// `\\.\C:` or `\\.\pipe\name`. Windows reads `/` as a separator too, so `//./pipe/name` names the
+/// same device and is refused in the same way; the check normalises the separators before comparing,
+/// which is the order the rename below uses when it turns the path into its verbatim form.
 #[cfg(windows)]
 pub(super) fn is_device_path(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
 
-    let mut wide = path.as_os_str().encode_wide();
+    let mut wide = path.as_os_str().encode_wide().map(|c| {
+        if c == u16::from(b'/') {
+            u16::from(b'\\')
+        } else {
+            c
+        }
+    });
     let device = [
         u16::from(b'\\'),
         u16::from(b'\\'),
