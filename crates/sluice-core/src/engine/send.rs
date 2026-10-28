@@ -218,20 +218,9 @@ fn mode_of(meta: &fs::Metadata) -> u32 {
 fn mode_of(_meta: &fs::Metadata) -> u32 {
     0
 }
-
 /// The default expiry: 24 hours from now.
 pub fn default_expiry(now_ms: u64) -> Option<u64> {
     expiry::deadline(now_ms, Some(expiry::DEFAULT_SECONDS))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::default_expiry;
-
-    #[test]
-    fn the_default_is_one_day() {
-        assert_eq!(default_expiry(1_000), Some(1_000 + 86_400_000));
-    }
 }
 
 /// Starts the provider for the store `scratch` opened, and gives it the folder: the provider closes
@@ -311,4 +300,13 @@ fn serving_folder(provider: Provider, scratch: Scratch) -> Result<Provider, Erro
     };
     provider.hold(dir);
     Ok(provider)
+}
+#[cfg(test)]
+mod tests {
+    use super::default_expiry;
+
+    #[test]
+    fn the_default_is_one_day() {
+        assert_eq!(default_expiry(1_000), Some(1_000 + 86_400_000));
+    }
 }

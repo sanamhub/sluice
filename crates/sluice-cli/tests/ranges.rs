@@ -4,11 +4,12 @@ mod common;
 
 use common::{data, recv_range, start, start_in};
 
-fn assert_no_temporary_store(home: &std::path::Path) {
-    let left = std::fs::read_dir(home.join("tmp"))
+/// The folders under the home's `tmp` now. A send keeps its own store there while it serves, so a
+/// test of what a receive leaves counts what was there before the receive started.
+fn temporary_stores(home: &std::path::Path) -> usize {
+    std::fs::read_dir(home.join("tmp"))
         .map(|entries| entries.count())
-        .unwrap_or(0);
-    assert_eq!(left, 0, "a temporary store was left under the home");
+        .unwrap_or(0)
 }
 
 #[test]
@@ -21,6 +22,7 @@ fn a_byte_range_writes_only_those_bytes() {
     std::fs::write(&file, &body).unwrap();
 
     let (sender, ticket) = start(&home, &file, "1h");
+    let before = temporary_stores(&home);
     let result = recv_range(&home, &ticket, &out, "1000:2000");
     assert!(
         result.status.success(),
@@ -31,7 +33,12 @@ fn a_byte_range_writes_only_those_bytes() {
         std::fs::read(out.join("range.bin")).unwrap(),
         &body[1000..2000]
     );
-    assert_no_temporary_store(&home);
+    // The sender's own store may already be gone by now; what this checks is that the receive added
+    // a folder of its own and did not remove it.
+    assert!(
+        temporary_stores(&home) <= before,
+        "the receive left a temporary store under the home"
+    );
     // A range is not a whole download, so the sender is still serving here.
     drop(sender);
 }
@@ -46,6 +53,7 @@ fn a_range_across_a_block_boundary_keeps_the_block_seam() {
     std::fs::write(&file, &body).unwrap();
 
     let (sender, ticket) = start(&home, &file, "1h");
+    let before = temporary_stores(&home);
     let result = recv_range(&home, &ticket, &out, "16000:17000");
     assert!(
         result.status.success(),
@@ -56,7 +64,12 @@ fn a_range_across_a_block_boundary_keeps_the_block_seam() {
         std::fs::read(out.join("seam.bin")).unwrap(),
         &body[16_000..17_000]
     );
-    assert_no_temporary_store(&home);
+    // The sender's own store may already be gone by now; what this checks is that the receive added
+    // a folder of its own and did not remove it.
+    assert!(
+        temporary_stores(&home) <= before,
+        "the receive left a temporary store under the home"
+    );
     drop(sender);
 }
 
@@ -71,6 +84,7 @@ fn a_range_of_a_packed_file_reads_out_of_its_pack() {
     std::fs::write(&file, &body).unwrap();
 
     let (sender, ticket) = start_in(dir.path(), &home, &["small/packed.txt", "--expires", "1h"]);
+    let before = temporary_stores(&home);
     let result = recv_range(&home, &ticket, &out, "100:200");
     assert!(
         result.status.success(),
@@ -81,7 +95,12 @@ fn a_range_of_a_packed_file_reads_out_of_its_pack() {
         std::fs::read(out.join("packed.txt")).unwrap(),
         &body[100..200]
     );
-    assert_no_temporary_store(&home);
+    // The sender's own store may already be gone by now; what this checks is that the receive added
+    // a folder of its own and did not remove it.
+    assert!(
+        temporary_stores(&home) <= before,
+        "the receive left a temporary store under the home"
+    );
     drop(sender);
 }
 

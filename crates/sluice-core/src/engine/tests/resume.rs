@@ -298,7 +298,7 @@ async fn a_kept_store_keeps_its_blobs_across_a_sweep() {
     for _ in 0..10 {
         let tag = control
             .blobs()
-            .add_slice(&vec![3u8; 128 * 1024])
+            .add_slice(vec![3u8; 128 * 1024])
             .temp_tag()
             .await
             .unwrap();

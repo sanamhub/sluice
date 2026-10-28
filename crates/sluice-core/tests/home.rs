@@ -36,10 +36,7 @@ fn open_creates_the_folders_and_the_version_and_nothing_else() {
     let path = dir.path().join("new").join("home");
     let home = Home::open(&path).unwrap();
     assert_eq!(home.path(), path);
-    assert_eq!(
-        names(&path),
-        ["VERSION", "db", "db", "lock", "lock.pid", "logs"]
-    );
+    assert_eq!(names(&path), ["VERSION", "db", "lock", "lock.pid", "logs"]);
     assert_eq!(fs::read_to_string(path.join("VERSION")).unwrap(), "1\n");
     // The identity is made when asked for, not when the home is opened.
     assert!(!path.join("identity.key").exists());
