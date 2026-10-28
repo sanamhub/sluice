@@ -43,8 +43,9 @@ pub(in crate::home) fn is_owned_by_us_handle(file: &File) -> io::Result<bool> {
 }
 
 /// A handle to an entry with the access that reading its owner needs. `BACKUP_SEMANTICS` is what
-/// lets a folder be opened at all.
-pub(super) fn open_entry(path: &Path) -> io::Result<File> {
+/// lets a folder be opened at all. The handle names the entry at `path` and never what a link there
+/// leads to, which is what lets a caller check the folder it is about to work in.
+pub(crate) fn open_entry(path: &Path) -> io::Result<File> {
     OpenOptions::new()
         .access_mode(READ_CONTROL)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
@@ -110,11 +111,19 @@ fn information(
     File,
     windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION,
 )> {
+    let entry = open_entry(path)?;
+    let info = information_of(&entry)?;
+    Ok((entry, info))
+}
+
+/// What an open handle says about its object, without asking the name again.
+fn information_of(
+    entry: &File,
+) -> io::Result<windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION> {
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
     };
 
-    let entry = open_entry(path)?;
     let mut info = BY_HANDLE_FILE_INFORMATION::default();
     // SAFETY: the handle is open for the whole call and `info` is a valid place for the structure
     // the call fills.
@@ -122,7 +131,29 @@ fn information(
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok((entry, info))
+    Ok(info)
+}
+
+/// The volume number and file index of the object `file` is a handle to. The caller keeps the
+/// handle open, so these numbers describe the object it checked and not a name that may have moved.
+pub(crate) fn handle_id(file: &File) -> io::Result<(u64, u64)> {
+    let info = information_of(file)?;
+    Ok((u64::from(info.dwVolumeSerialNumber), index(&info)))
+}
+
+/// Whether the object `file` is a handle to is a reparse point, and whether it is a folder, from
+/// the attributes the file system reports for that handle.
+pub(crate) fn handle_kind(file: &File) -> io::Result<(bool, bool)> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+    };
+
+    let info = information_of(file)?;
+    let attributes = info.dwFileAttributes;
+    Ok((
+        attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0,
+        attributes & FILE_ATTRIBUTE_DIRECTORY != 0,
+    ))
 }
 
 fn index(info: &windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION) -> u64 {
