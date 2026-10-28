@@ -107,7 +107,7 @@ async fn import_blobs(
             })
             .temp_tag()
             .await
-            .map_err(|e| Error::Storage(format!("cannot import a file: {}", crate::chain(&e))))?;
+            .map_err(|e| Error::Storage(format!("cannot import a file: {}", crate::plain(&e))))?;
         if *tag.hash().as_bytes() != root {
             return Err(Error::Verify(
                 "a file changed between the manifest build and the import".to_string(),
@@ -160,7 +160,7 @@ async fn add_pack(
         .blobs()
         .add_bytes(bytes)
         .await
-        .map_err(|e| Error::Storage(format!("cannot keep a pack: {}", crate::chain(&e))))?;
+        .map_err(|e| Error::Storage(format!("cannot keep a pack: {}", crate::plain(&e))))?;
     if *added.hash.as_bytes() != pack.root {
         return Err(Error::Verify(
             "a packed file changed between the manifest build and the import".to_string(),
@@ -175,7 +175,7 @@ async fn add_manifest(store: &FsStore, manifest: &Manifest) -> Result<(), Error>
         .blobs()
         .add_bytes(manifest.encode())
         .await
-        .map_err(|e| Error::Storage(format!("cannot keep the manifest: {}", crate::chain(&e))))?;
+        .map_err(|e| Error::Storage(format!("cannot keep the manifest: {}", crate::plain(&e))))?;
     if added.hash != Hash::from(manifest.root()) {
         return Err(Error::Bug(
             "the store gave the manifest a root other than its BLAKE3 hash".to_string(),
@@ -193,7 +193,7 @@ async fn add_sequence(store: &FsStore, manifest: &Manifest) -> Result<[u8; 32], 
         .map_err(|e| {
             Error::Storage(format!(
                 "cannot keep the hash sequence: {}",
-                crate::chain(&e)
+                crate::plain(&e)
             ))
         })?;
     let root = manifest.sequence_root();

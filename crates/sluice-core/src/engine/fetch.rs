@@ -150,7 +150,7 @@ async fn size_of(store: &FsStore, hash: Hash) -> Result<Option<u64>, Error> {
         match store.blobs().status(hash).await.map_err(|e| {
             Error::Storage(format!(
                 "cannot read the partial store: {}",
-                crate::chain(&e)
+                crate::plain(&e)
             ))
         })? {
             BlobStatus::Complete { size } => Some(size),
@@ -221,7 +221,7 @@ pub(super) async fn complete_size(store: &FsStore, hash: Hash) -> Result<u64, Er
     match store.blobs().status(hash).await.map_err(|e| {
         Error::Storage(format!(
             "cannot read the partial store: {}",
-            crate::chain(&e)
+            crate::plain(&e)
         ))
     })? {
         BlobStatus::Complete { size } => Ok(size),
@@ -236,7 +236,7 @@ pub(super) async fn complete_bytes(store: &FsStore, hash: Hash) -> Result<(Vec<u
     let status = store.blobs().status(hash).await.map_err(|e| {
         Error::Storage(format!(
             "cannot read the partial store: {}",
-            crate::chain(&e)
+            crate::plain(&e)
         ))
     })?;
     match status {
@@ -244,7 +244,7 @@ pub(super) async fn complete_bytes(store: &FsStore, hash: Hash) -> Result<(Vec<u
             let bytes = store.blobs().get_bytes(hash).await.map_err(|e| {
                 Error::Storage(format!(
                     "cannot read the received blob: {}",
-                    crate::chain(&e)
+                    crate::plain(&e)
                 ))
             })?;
             Ok((bytes.to_vec(), size))

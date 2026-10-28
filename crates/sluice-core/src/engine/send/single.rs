@@ -153,7 +153,7 @@ async fn import_stdin(home: &Home, store: &FsStore) -> Result<(TempTag, u64), Er
         .temp_tag()
         .await;
     let tag = copied
-        .map_err(|e| Error::Storage(format!("cannot keep standard input: {}", crate::chain(&e))))?;
+        .map_err(|e| Error::Storage(format!("cannot keep standard input: {}", crate::plain(&e))))?;
     Ok((tag, size))
 }
 
@@ -225,7 +225,7 @@ async fn import(path: &Path, shown: &str, store: &FsStore) -> Result<TempTag, Er
         })
         .temp_tag()
         .await
-        .map_err(|e| Error::Storage(format!("cannot import {shown}: {}", crate::chain(&e))))
+        .map_err(|e| Error::Storage(format!("cannot import {shown}: {}", crate::plain(&e))))
 }
 
 /// A file of 1 byte to under `PACK_THRESHOLD` is a pack of its own, so the receiver reads it the
@@ -276,7 +276,7 @@ async fn keep_metadata(store: &FsStore, manifest: &Manifest) -> Result<(), Error
         .blobs()
         .add_bytes(manifest.encode())
         .await
-        .map_err(|e| Error::Storage(format!("cannot keep the manifest: {}", crate::chain(&e))))?;
+        .map_err(|e| Error::Storage(format!("cannot keep the manifest: {}", crate::plain(&e))))?;
     if added.hash != Hash::from(manifest.root()) {
         return Err(Error::Bug(
             "the store gave the manifest a root other than its BLAKE3 hash".to_string(),
@@ -289,7 +289,7 @@ async fn keep_metadata(store: &FsStore, manifest: &Manifest) -> Result<(), Error
         .map_err(|e| {
             Error::Storage(format!(
                 "cannot keep the hash sequence: {}",
-                crate::chain(&e)
+                crate::plain(&e)
             ))
         })?;
     if added.hash != Hash::from(manifest.sequence_root()) {

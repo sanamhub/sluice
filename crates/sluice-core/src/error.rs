@@ -92,28 +92,6 @@ pub enum ErrorKind {
     Bug,
 }
 
-/// `error` and every cause below it, one after the other, so a storage failure says which call and
-/// which file it was and not only the outermost wrapper.
-///
-/// # Examples
-///
-/// ```
-/// use sluice_core::Error;
-///
-/// let err = Error::Storage("cannot import a file".to_string());
-/// assert_eq!(sluice_core::chain(&err), "storage error: cannot import a file");
-/// ```
-pub fn chain(error: &(dyn std::error::Error + 'static)) -> String {
-    let mut text = error.to_string();
-    let mut source = error.source();
-    while let Some(cause) = source {
-        text.push_str(": ");
-        text.push_str(&cause.to_string());
-        source = cause.source();
-    }
-    text
-}
-
 /// The last cause below `error`, with none of the wrappers above it. A library that names its own
 /// variants in `Display` would otherwise put `Error::Io` in a message a person reads, and the
 /// deepest cause is the one that says what went wrong: a missing file, a full disk, a locked one.
@@ -142,7 +120,7 @@ mod tests {
     use super::{Error, ErrorKind};
 
     #[test]
-    fn a_chain_names_every_cause() {
+    fn a_message_is_the_last_cause() {
         #[derive(Debug)]
         struct Outer(Inner);
         #[derive(Debug)]
@@ -163,10 +141,6 @@ mod tests {
             }
         }
         impl std::error::Error for Inner {}
-        assert_eq!(
-            super::chain(&Outer(Inner)),
-            "the outer call failed: the file is not there"
-        );
         assert_eq!(super::plain(&Outer(Inner)), "the file is not there");
     }
 

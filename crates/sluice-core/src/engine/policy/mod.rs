@@ -251,10 +251,16 @@ impl Gate {
                 }
             }
             ProviderMessage::Throttle(msg) => {
-                if let Some(rate) = &self.rate {
-                    rate.acquire(msg.size).await;
-                }
-                msg.tx.send(Ok(())).await.ok();
+                // The wait is a task of its own, not this gate's: one paced chunk would otherwise
+                // hold up the permission checks and close events of every other connection. The
+                // provider waits for the answer before it writes, so the pacing still applies.
+                let rate = self.rate.clone();
+                n0_future::task::spawn(async move {
+                    if let Some(rate) = rate {
+                        rate.acquire(msg.size).await;
+                    }
+                    let _ = msg.tx.send(Ok(())).await;
+                });
             }
             _ => {}
         }

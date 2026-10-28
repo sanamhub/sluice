@@ -9,5 +9,5 @@ pub mod range;
 pub mod reclaim;
 pub mod ticket;
 
-pub use error::{Error, ErrorKind, chain, plain};
+pub use error::{Error, ErrorKind, plain};
 pub use home::{Home, Identity, doctor};

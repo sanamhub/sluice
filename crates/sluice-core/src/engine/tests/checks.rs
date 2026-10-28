@@ -285,3 +285,69 @@ async fn an_expiry_cuts_off_a_get_that_started_before_it() {
     client_store.shutdown().await.unwrap();
     drop(tag);
 }
+
+/// One paced chunk must not hold up the answers every other connection waits for. With a cap of a
+/// byte a second, a single chunk would wait for hours; a second connection's refused request still
+/// has to be answered at once, because the wait belongs to the chunk and not to the gate.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_paced_chunk_does_not_hold_up_another_connection() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(&dir.path().join("home")).unwrap();
+    let store = FsStore::load(dir.path().join("sender-store"))
+        .await
+        .unwrap();
+    let hash = store.add_slice(vec![2u8; 64 * 1024]).await.unwrap().hash;
+    let other = store.add_slice(vec![3u8; 1024]).await.unwrap().hash;
+    let rate = crate::engine::Rate::new(1).unwrap();
+    let provider = Provider::start_with_rate(
+        &home,
+        store,
+        BTreeSet::from([*hash.as_bytes()]),
+        RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+        None,
+        Some(rate),
+    )
+    .await
+    .unwrap();
+    let addr = provider.addr();
+    let serve = tokio::spawn(async move { provider.serve(super::Stop::Keep).await });
+
+    let (client, client_store) = client_of(&dir).await;
+    // One connection asks for the allowed blob, whose first chunk is paced.
+    let paced = {
+        let store = client_store.clone();
+        let addr = addr.clone();
+        let endpoint = client.clone();
+        tokio::spawn(async move {
+            let conn = endpoint.connect(addr, iroh_blobs::ALPN).await.unwrap();
+            store
+                .remote()
+                .execute_get(conn, GetRequest::blob(hash))
+                .complete()
+                .await
+        })
+    };
+    // Give the paced request time to reach the gate's throttle.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // A hash that is not allowed is refused by the same policy, and that answer cannot wait for the
+    // chunk that is still being paced.
+    let conn = client.connect(addr, iroh_blobs::ALPN).await.unwrap();
+    let refused = tokio::time::timeout(
+        Duration::from_secs(5),
+        client_store
+            .remote()
+            .execute_get(conn, GetRequest::blob(other))
+            .complete(),
+    )
+    .await
+    .expect("a refused request waited behind a paced chunk");
+    assert!(refused.is_err());
+
+    paced.abort();
+    serve.abort();
+    client.close().await;
+    client_store.shutdown().await.unwrap();
+}
