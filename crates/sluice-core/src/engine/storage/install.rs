@@ -50,36 +50,83 @@ pub(super) fn link_no_replace(from: &Path, target: &Path) -> Result<(), Error> {
 
 /// Errors from a rename that mean the flag itself is not supported, not that the call was refused.
 /// NFS, FUSE, some macOS volumes and old kernels answer like this, and a link still works there.
+/// `ENOSYS` and `EOPNOTSUPP` are 78 and 102 on macOS and 38 and 95 on Linux, and `ENOTSUP` is 45 on
+/// macOS, so every platform's numbers for "this file system has no such flag" are here.
 #[cfg(unix)]
-fn unsupported(error: &io::Error) -> bool {
-    // EINVAL, ENOSYS, ENOTSUP and EOPNOTSUPP. The last two share a number on Linux.
-    matches!(error.raw_os_error(), Some(22 | 38 | 45 | 95))
+pub(super) fn unsupported(error: &io::Error) -> bool {
+    matches!(error.raw_os_error(), Some(22 | 38 | 45 | 78 | 95 | 102))
 }
 
 #[cfg(not(unix))]
-fn unsupported(_error: &io::Error) -> bool {
+pub(super) fn unsupported(_error: &io::Error) -> bool {
     false
 }
 
 /// Replaces `target` in one rename. Windows refuses a read-only destination; clearing that one bit
 /// and trying the same rename again is the only fallback, and it loses no bytes.
+///
+/// The bit is cleared on the entry at `target` itself, through a handle that does not follow a link.
+/// A link in the output must not let `--force` change a file outside it, which is what a path-based
+/// call would do.
 fn replace(from: &Path, target: &Path) -> io::Result<()> {
     match replace_once(from, target) {
         Ok(()) => Ok(()),
-        Err(e) if target.exists() => {
-            let meta = fs::symlink_metadata(target)?;
-            if !meta.permissions().readonly() {
-                return Err(e);
+        Err(e) => match fs::symlink_metadata(target) {
+            Ok(meta) if meta.permissions().readonly() => {
+                clear_readonly(target)?;
+                replace_once(from, target)
             }
-            let mut permissions = meta.permissions();
-            // This is Windows, where readonly is the only permission bit `set_permissions` holds.
-            #[allow(clippy::permissions_set_readonly_false)]
-            permissions.set_readonly(false);
-            fs::set_permissions(target, permissions)?;
-            replace_once(from, target)
-        }
-        Err(e) => Err(e),
+            _ => Err(e),
+        },
     }
+}
+
+/// Clears the read-only bit of the entry at `path`, and never of what a link points at.
+#[cfg(unix)]
+pub(super) fn clear_readonly(path: &Path) -> io::Result<()> {
+    use rustix::fs::{Mode, OFlags};
+
+    // `O_NOFOLLOW` makes the open fail on a link, so the mode is only ever set on a file that is
+    // already there. `fchmod` works through a handle, so the file the mode is set on is the file
+    // that was opened.
+    let handle = rustix::fs::open(
+        path,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?;
+    let meta = rustix::fs::fstat(&handle)?;
+    rustix::fs::fchmod(
+        &handle,
+        Mode::from_raw_mode((meta.st_mode & 0o7777) | 0o200),
+    )
+    .map_err(io::Error::from)
+}
+
+/// Clears the read-only attribute of the entry at `path`, and never of what a link points at: the
+/// handle is opened with `OPEN_REPARSE_POINT`, which names the link itself.
+#[cfg(windows)]
+pub(super) fn clear_readonly(path: &Path) -> io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+    const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    let handle = fs::OpenOptions::new()
+        .access_mode(FILE_WRITE_ATTRIBUTES)
+        .custom_flags(OPEN_REPARSE_POINT)
+        .open(path)?;
+    let mut permissions = handle.metadata()?.permissions();
+    // This is Windows, where readonly is the only permission bit `set_permissions` holds.
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    handle.set_permissions(permissions)
+}
+
+#[cfg(not(any(unix, windows)))]
+pub(super) fn clear_readonly(path: &Path) -> io::Result<()> {
+    let mut permissions = fs::symlink_metadata(path)?.permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    permissions.set_readonly(false);
+    fs::set_permissions(path, permissions)
 }
 
 #[cfg(windows)]
@@ -123,6 +170,18 @@ fn rename_no_replace(from: &Path, target: &Path) -> io::Result<()> {
 fn move_file(from: &Path, target: &Path, replace: bool) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MoveFileExW};
+
+    // A device path names a device or a volume and not a file in a folder. Built into the verbatim
+    // form below it becomes `\\?\UNC\.\...`, which names something else entirely, so it is refused
+    // rather than turned into a path it is not.
+    for path in [from, target] {
+        if is_device_path(path) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "a device path is not a file path",
+            ));
+        }
+    }
 
     /// The path as a verbatim wide string: `\\?\C:\...` or `\\?\UNC\server\share\...`, with `\`
     /// separators. `MoveFileExW` is limited to 260 characters without it, while `std::fs` works
@@ -168,4 +227,20 @@ fn move_file(from: &Path, target: &Path, replace: bool) -> io::Result<()> {
     } else {
         Ok(())
     }
+}
+
+/// Whether `path` names a device rather than a file: a Windows device path starts with `\\.\`, as in
+/// `\\.\C:` or `\\.\pipe\name`.
+#[cfg(windows)]
+pub(super) fn is_device_path(path: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+
+    let mut wide = path.as_os_str().encode_wide();
+    let device = [
+        u16::from(b'\\'),
+        u16::from(b'\\'),
+        u16::from(b'.'),
+        u16::from(b'\\'),
+    ];
+    device.iter().all(|want| wide.next() == Some(*want))
 }

@@ -210,32 +210,52 @@ pub(super) fn same_blob(target: &Path, hash: Hash, size: u64) -> Result<bool, Er
 }
 
 /// Opens a file without following a link at its name, so a target that became a link between the
-/// clash check and this open is refused rather than read through.
+/// clash check and this open is refused rather than read through. The handle is checked to be a
+/// regular file before it is used: a FIFO that appeared at the name would otherwise wait for a
+/// writer, or read whatever was written to it, and the check that saw a file is the wrong check for
+/// it. `NONBLOCK` is what keeps the open of a FIFO from waiting.
 fn open_no_follow(path: &Path) -> std::io::Result<fs::File> {
     #[cfg(unix)]
     {
-        use rustix::fs::{Mode, OFlags};
+        use rustix::fs::{FileType, Mode, OFlags};
         let fd = rustix::fs::open(
             path,
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
             Mode::empty(),
         )?;
-        Ok(fs::File::from(fd))
+        let file = fs::File::from(fd);
+        let stat = rustix::fs::fstat(&file)?;
+        if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
+            return Err(not_regular(path));
+        }
+        Ok(file)
     }
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
         // FILE_FLAG_OPEN_REPARSE_POINT: the name itself is opened, not what it points at.
         const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        fs::OpenOptions::new()
+        let file = fs::OpenOptions::new()
             .read(true)
             .custom_flags(OPEN_REPARSE_POINT)
-            .open(path)
+            .open(path)?;
+        if !file.metadata()?.file_type().is_file() {
+            return Err(not_regular(path));
+        }
+        Ok(file)
     }
     #[cfg(not(any(unix, windows)))]
     {
         fs::File::open(path)
     }
+}
+
+/// The refusal for a name that is not a regular file.
+fn not_regular(path: &Path) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!("{} is not a regular file", path.display()),
+    )
 }
 
 /// Opens a file for setting its time and mode without following a link at its name. On Windows a
@@ -372,7 +392,7 @@ pub(super) fn set_time_path(
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::same_blob;
+    use super::{open_no_follow, same_blob};
     use iroh_blobs::Hash;
     use std::fs;
 
@@ -388,5 +408,20 @@ mod tests {
         std::os::unix::fs::symlink(&real, dir.path().join("link.bin")).unwrap();
         let link = dir.path().join("link.bin");
         assert!(!same_blob(&link, hash, body.len() as u64).unwrap());
+    }
+
+    /// A FIFO that appeared where a file was checked is refused at the open, and not waited on for a
+    /// writer: `NONBLOCK` is what makes the refusal immediate, and the check of the opened handle is
+    /// what makes it a regular file's worth of bytes or nothing.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_fifo_is_refused_instead_of_waited_on() {
+        use rustix::fs::{CWD, Mode, mkfifoat};
+
+        let dir = tempfile::tempdir().unwrap();
+        let pipe = dir.path().join("pipe");
+        mkfifoat(CWD, &pipe, Mode::RUSR | Mode::WUSR).unwrap();
+        let err = open_no_follow(&pipe).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput, "{err}");
     }
 }

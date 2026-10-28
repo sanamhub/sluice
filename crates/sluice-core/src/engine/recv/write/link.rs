@@ -16,8 +16,8 @@ use crate::{
 const MAX_LINKS: usize = 40;
 
 /// Checks every link in the manifest against the tree the transfer is about to make, then writes
-/// them. The check is a decision about the manifest alone, so the order the links are written in
-/// cannot change an answer.
+/// them. The check is a decision about the manifest and the output folder as it is, so the order the
+/// links are written in cannot change an answer.
 pub(super) fn write_all(
     manifest: &Manifest,
     options: &ReceiveOptions,
@@ -33,7 +33,7 @@ pub(super) fn write_all(
         })
         .collect();
     for (path, target) in &links {
-        let resolved = resolve_in(&links, path, target).ok_or_else(|| outside(path))?;
+        let resolved = resolve(&links, &options.out, path, target)?;
         if !stays_inside(&options.out, &resolved)? {
             return Err(outside(path));
         }
@@ -80,46 +80,88 @@ fn write_one(
     create(&link, target)
 }
 
-/// The target resolved from the folder that holds the link, one component at a time. A component
-/// that names another link of this transfer is replaced by that link's target, as the operating
-/// system would resolve it. `None` when a `..` would step above the output folder or a chain is
-/// longer than the limit.
-fn resolve_in(
+/// The target of `link` resolved from the folder that holds it, one component at a time, as the
+/// operating system resolves it: a name that is a link, either one this transfer makes or one that
+/// is already on disk, is replaced by what it points to before the next `..` is applied. Reading the
+/// disk as well as the manifest is what stops `foo/../x` from landing beside the output when
+/// `OUT/foo` is a link to somewhere else.
+///
+/// Fails when a `..` would step above the output folder, a link points at an absolute path, a
+/// target cannot be read as a path this code can follow, or a chain is longer than the limit.
+fn resolve(
     links: &BTreeMap<&str, &str>,
+    out: &Path,
     link: &str,
     target: &str,
-) -> Option<std::path::PathBuf> {
-    let mut parts: Vec<&str> = match link.rsplit_once('/') {
-        Some((parent, _)) => parent.split('/').collect(),
+) -> Result<std::path::PathBuf, Error> {
+    let mut parts: Vec<String> = match link.rsplit_once('/') {
+        Some((parent, _)) => parent.split('/').map(str::to_string).collect(),
         None => Vec::new(),
     };
-    let mut queue: Vec<&str> = target.split('/').rev().collect();
+    let mut queue: Vec<String> = target.split('/').rev().map(str::to_string).collect();
     let mut follows = 0usize;
     while let Some(part) = queue.pop() {
-        match part {
-            "" | "." => return None,
+        match part.as_str() {
+            "" | "." => return Err(outside(link)),
             ".." => {
-                parts.pop()?;
+                if parts.pop().is_none() {
+                    return Err(outside(link));
+                }
             }
             name => {
-                parts.push(name);
-                let at = parts.join("/");
-                if let Some(next) = links.get(at.as_str()) {
-                    follows += 1;
-                    if follows > MAX_LINKS {
-                        return None;
-                    }
-                    parts.pop();
-                    queue.extend(next.split('/').rev());
+                parts.push(name.to_string());
+                let next = if let Some(next) = links.get(parts.join("/").as_str()) {
+                    (*next).to_string()
+                } else if let Some(next) = existing_link(out, &parts)? {
+                    next
+                } else {
+                    continue;
+                };
+                follows += 1;
+                if follows > MAX_LINKS {
+                    return Err(outside(link));
                 }
+                parts.pop();
+                queue.extend(next.split('/').rev().map(str::to_string));
             }
         }
     }
-    Some(
-        parts
-            .iter()
-            .fold(std::path::PathBuf::new(), |at, part| at.join(part)),
-    )
+    Ok(parts
+        .iter()
+        .fold(std::path::PathBuf::new(), |at, part| at.join(part)))
+}
+
+/// The target of the link already at `OUT/parts`, if there is one. An absolute target leaves the
+/// output wherever the `..` after it would land, and a target this code cannot read is refused:
+/// following neither would be following the operating system.
+fn existing_link(out: &Path, parts: &[String]) -> Result<Option<String>, Error> {
+    let at = parts
+        .iter()
+        .fold(out.to_path_buf(), |at, part| at.join(part));
+    let meta = match fs::symlink_metadata(&at) {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(storage::policy_path("check", &at, e)),
+    };
+    if !meta.file_type().is_symlink() {
+        return Ok(None);
+    }
+    let target =
+        fs::read_link(&at).map_err(|e| storage::policy_path("read the link at", &at, e))?;
+    if target.is_absolute() {
+        return Err(Error::Policy(format!(
+            "{} is a link to an absolute path, so a target that goes through it leaves the output \
+             folder",
+            at.display()
+        )));
+    }
+    match target.to_str() {
+        Some(target) => Ok(Some(target.to_string())),
+        None => Err(Error::Policy(format!(
+            "{} is a link whose target is not valid Unicode, so where it leads cannot be checked",
+            at.display()
+        ))),
+    }
 }
 
 /// Whether every existing prefix of `resolved` is inside `out`, with links followed. A prefix that
@@ -176,7 +218,7 @@ fn create(_link: &Path, _target: &str) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_in, stays_inside};
+    use super::{resolve, stays_inside};
     use std::collections::BTreeMap;
     use std::path::Path;
 
@@ -184,15 +226,20 @@ mod tests {
         pairs.iter().copied().collect()
     }
 
+    /// An output folder that holds nothing on disk, so a check sees only the manifest's links.
+    fn empty_out() -> &'static Path {
+        Path::new("a-folder-that-does-not-exist")
+    }
+
     #[test]
     fn a_target_that_steps_above_the_output_is_refused() {
         let none = BTreeMap::new();
         let link = "sub/link";
-        assert!(resolve_in(&none, link, "../x").is_some());
-        assert!(resolve_in(&none, link, "a/x").is_some());
-        assert!(resolve_in(&none, link, "../../x").is_none());
+        assert!(resolve(&none, empty_out(), link, "../x").is_ok());
+        assert!(resolve(&none, empty_out(), link, "a/x").is_ok());
+        assert!(resolve(&none, empty_out(), link, "../../x").is_err());
         assert_eq!(
-            resolve_in(&none, link, "../x").unwrap(),
+            resolve(&none, empty_out(), link, "../x").unwrap(),
             Path::new("x"),
             "the link's own folder is part of the resolution"
         );
@@ -201,8 +248,8 @@ mod tests {
     #[test]
     fn a_link_at_the_top_of_the_output_cannot_step_above_it() {
         let none = BTreeMap::new();
-        assert!(resolve_in(&none, "link", "x").is_some());
-        assert!(resolve_in(&none, "link", "../x").is_none());
+        assert!(resolve(&none, empty_out(), "link", "x").is_ok());
+        assert!(resolve(&none, empty_out(), "link", "../x").is_err());
     }
 
     #[test]
@@ -211,22 +258,48 @@ mod tests {
         // `a` as a plain folder would keep `z` inside, which is not where the operating system
         // takes it.
         let first = links(&[("sub/a", ".."), ("sub/z", "a/..")]);
-        assert!(resolve_in(&first, "sub/z", "a/..").is_none());
+        assert!(resolve(&first, empty_out(), "sub/z", "a/..").is_err());
         // The same chain with the links in the other path order, which is the other entry order.
         let second = links(&[("sub/m", "z/.."), ("sub/z", "..")]);
-        assert!(resolve_in(&second, "sub/m", "z/..").is_none());
+        assert!(resolve(&second, empty_out(), "sub/m", "z/..").is_err());
     }
 
     #[test]
     fn a_chain_of_three_links_that_escapes_is_refused() {
         let chain = links(&[("sub/a", "b/.."), ("sub/b", "c/.."), ("sub/c", "..")]);
-        assert!(resolve_in(&chain, "sub/a", "b/..").is_none());
+        assert!(resolve(&chain, empty_out(), "sub/a", "b/..").is_err());
     }
 
     #[test]
     fn a_chain_that_loops_is_refused() {
         let looped = links(&[("a", "b"), ("b", "a")]);
-        assert!(resolve_in(&looped, "a", "b").is_none());
+        assert!(resolve(&looped, empty_out(), "a", "b").is_err());
+    }
+
+    /// A link that is already in the output is resolved the way the operating system resolves it,
+    /// before the next `..` is applied. A target that goes through such a link to somewhere else
+    /// would otherwise land beside the output: `foo/../x` reads as `x` only if `foo` is a folder.
+    #[cfg(unix)]
+    #[test]
+    fn a_target_through_a_link_already_in_the_output_is_resolved_through_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, out.join("foo")).unwrap();
+        assert!(
+            resolve(&BTreeMap::new(), &out, "l", "foo/../x").is_err(),
+            "a target through a link out of the output was followed to the wrong place"
+        );
+
+        // The same spelling with a link that stays inside lands inside.
+        std::fs::create_dir_all(out.join("bar")).unwrap();
+        std::os::unix::fs::symlink("bar", out.join("baz")).unwrap();
+        assert_eq!(
+            resolve(&BTreeMap::new(), &out, "l", "baz/../x").unwrap(),
+            Path::new("x")
+        );
     }
 
     #[test]

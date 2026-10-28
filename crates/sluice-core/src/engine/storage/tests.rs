@@ -248,6 +248,114 @@ fn a_store_that_is_a_link_is_never_read() {
     assert!(store.is_symlink(), "the link was removed");
 }
 
+/// `--force` on a target that is a link replaces the link and touches nothing the link points at: a
+/// link in the output must not let a receive change a file outside it.
+#[test]
+fn replacing_a_link_never_changes_what_it_points_at() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = dir.path().join("outside.bin");
+    std::fs::write(&outside, b"the user's file").unwrap();
+    let target = dir.path().join("target.bin");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&outside, std::fs::Permissions::from_mode(0o444)).unwrap();
+        std::os::unix::fs::symlink(&outside, &target).unwrap();
+    }
+    #[cfg(windows)]
+    {
+        if std::os::windows::fs::symlink_file(&outside, &target).is_err() {
+            eprintln!("SKIPPED: this account cannot create a symlink on Windows");
+            return;
+        }
+        let mut permissions = std::fs::metadata(&outside).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&outside, permissions).unwrap();
+    }
+    #[cfg(not(any(unix, windows)))]
+    return;
+    let incoming = dir.path().join("incoming");
+    std::fs::write(&incoming, b"the new file").unwrap();
+    install(&incoming, &target, true).unwrap();
+    assert!(
+        !std::fs::symlink_metadata(&target)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), b"the new file");
+    assert_eq!(std::fs::read(&outside).unwrap(), b"the user's file");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&outside).unwrap().permissions().mode() & 0o777,
+            0o444
+        );
+    }
+    #[cfg(windows)]
+    assert!(
+        std::fs::metadata(&outside)
+            .unwrap()
+            .permissions()
+            .readonly()
+    );
+}
+
+/// Clearing a read-only flag is done through a handle that does not follow a link, so a link in the
+/// output cannot have a file outside it changed.
+#[cfg(unix)]
+#[test]
+fn clearing_a_read_only_flag_never_follows_a_link() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let outside = dir.path().join("outside.bin");
+    std::fs::write(&outside, b"the user's file").unwrap();
+    std::fs::set_permissions(&outside, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let link = dir.path().join("link.bin");
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+    assert!(super::install::clear_readonly(&link).is_err());
+    assert_eq!(
+        std::fs::metadata(&outside).unwrap().permissions().mode() & 0o777,
+        0o444
+    );
+}
+
+/// A rename that cannot refuse a name is recognized by its error number, which macOS and Linux
+/// spell differently. Every number either uses means "this file system has no such flag".
+#[cfg(unix)]
+#[test]
+fn the_errnos_that_mean_a_rename_flag_is_unsupported_are_known() {
+    use super::install::unsupported;
+    for errno in [22, 38, 45, 78, 95, 102] {
+        assert!(
+            unsupported(&std::io::Error::from_raw_os_error(errno)),
+            "{errno}"
+        );
+    }
+    assert!(!unsupported(&std::io::Error::from_raw_os_error(17)));
+}
+
+/// A device path names a device, not a file, and building a verbatim path from one names something
+/// else entirely. It is refused before any call.
+#[cfg(windows)]
+#[test]
+fn a_device_path_is_not_a_file_path() {
+    use std::path::Path;
+
+    assert!(super::install::is_device_path(Path::new(r"\\.\C:\x")));
+    assert!(super::install::is_device_path(Path::new(r"\\.\pipe\name")));
+    assert!(!super::install::is_device_path(Path::new(r"C:\out\file")));
+    assert!(!super::install::is_device_path(Path::new(r"\\?\C:\x")));
+
+    let dir = tempfile::tempdir().unwrap();
+    let incoming = dir.path().join("incoming");
+    std::fs::write(&incoming, b"x").unwrap();
+    let err = install(&incoming, Path::new(r"\\.\C:\nope"), true).unwrap_err();
+    assert!(err.to_string().contains("device path"), "{err}");
+}
+
 /// A store folder is made for this user alone: another user who can write in the output cannot read
 /// the marker through it, and cannot copy a store in.
 #[test]
