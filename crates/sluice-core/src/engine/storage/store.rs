@@ -40,6 +40,7 @@ pub struct Owner {
 /// folder read while that marker was read. The identity is taken inside the check, from the handle
 /// that checked the folder's kind and owner, so a caller can compare it with the folder the store
 /// was actually opened in.
+#[derive(Debug)]
 pub struct Found {
     /// The marker.
     pub owner: Owner,

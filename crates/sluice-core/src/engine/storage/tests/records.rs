@@ -1,6 +1,7 @@
 //! Tests for the store marker, the identity a folder is claimed by, and the names and paths a store
 //! is installed under.
 
+#[cfg(windows)]
 use super::super::install;
 
 #[test]

@@ -298,7 +298,8 @@ fn not_a_folder(folder: &Path) -> Error {
 mod imp {
     use std::{fs, path::Path};
 
-    use rustix::fs::{Errno, FileType, Mode, OFlags};
+    use rustix::fs::{FileType, Mode, OFlags};
+    use rustix::io::Errno;
 
     use super::{accepted_uid, not_a_folder, private, storage};
     use crate::Error;
@@ -310,7 +311,8 @@ mod imp {
         let flags = OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
         match rustix::fs::open(folder, flags, Mode::empty()) {
             Ok(file) => {
-                let stat = rustix::fs::fstat(&file).map_err(|e| storage("read", folder, e))?;
+                let stat =
+                    rustix::fs::fstat(&file).map_err(|e| storage("read", folder, e.into()))?;
                 if FileType::from_raw_mode(stat.st_mode) != FileType::Directory {
                     return Err(not_a_folder(folder));
                 }
