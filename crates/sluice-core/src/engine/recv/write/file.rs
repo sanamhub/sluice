@@ -1,12 +1,14 @@
 //! One file's install: a private temporary name, its metadata set through the open handle, one
 //! rename into place, and the content comparison that lets a resumed receive skip a file it wrote.
 
-use std::{
-    fs,
-    io::Read,
-    path::Path,
-    time::{Duration, UNIX_EPOCH},
-};
+mod meta;
+mod open;
+
+use meta::{set_mode, set_time};
+pub(super) use meta::{set_mode_path, set_time_path};
+use open::{open_for_metadata, open_no_follow};
+
+use std::{fs, io::Read, path::Path};
 
 use iroh_blobs::{Hash, api::blobs::BlobReader};
 use tokio::{
@@ -14,7 +16,7 @@ use tokio::{
     sync::mpsc::UnboundedSender,
 };
 
-use super::super::{Event, emit, storage};
+use super::super::{Event, storage};
 use crate::{
     Error,
     manifest::{Entry, Loc},
@@ -207,187 +209,6 @@ pub(super) fn same_blob(target: &Path, hash: Hash, size: u64) -> Result<bool, Er
     let mut hasher = blake3::Hasher::new();
     std::io::copy(&mut file, &mut hasher).map_err(|e| storage::storage("read", target, e))?;
     Ok(*hasher.finalize().as_bytes() == *hash.as_bytes())
-}
-
-/// Opens a file without following a link at its name, so a target that became a link between the
-/// clash check and this open is refused rather than read through. The handle is checked to be a
-/// regular file before it is used: a FIFO that appeared at the name would otherwise wait for a
-/// writer, or read whatever was written to it, and the check that saw a file is the wrong check for
-/// it. `NONBLOCK` is what keeps the open of a FIFO from waiting.
-fn open_no_follow(path: &Path) -> std::io::Result<fs::File> {
-    #[cfg(unix)]
-    {
-        use rustix::fs::{FileType, Mode, OFlags};
-        let fd = rustix::fs::open(
-            path,
-            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
-            Mode::empty(),
-        )?;
-        let file = fs::File::from(fd);
-        let stat = rustix::fs::fstat(&file)?;
-        if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
-            return Err(not_regular(path));
-        }
-        Ok(file)
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        // FILE_FLAG_OPEN_REPARSE_POINT: the name itself is opened, not what it points at.
-        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        let file = fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(OPEN_REPARSE_POINT)
-            .open(path)?;
-        if !file.metadata()?.file_type().is_file() {
-            return Err(not_regular(path));
-        }
-        Ok(file)
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        fs::File::open(path)
-    }
-}
-
-/// The refusal for a name that is not a regular file.
-fn not_regular(path: &Path) -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        format!("{} is not a regular file", path.display()),
-    )
-}
-
-/// Opens a file for setting its time and mode without following a link at its name. On Windows a
-/// handle opened only for reading cannot set them, and a read-only file cannot be opened for
-/// writing, so this asks for the two attribute rights alone.
-fn open_for_metadata(path: &Path) -> std::io::Result<fs::File> {
-    #[cfg(unix)]
-    {
-        open_no_follow(path)
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        const FILE_READ_ATTRIBUTES: u32 = 0x0080;
-        const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
-        const SYNCHRONIZE: u32 = 0x0010_0000;
-        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-        fs::OpenOptions::new()
-            .access_mode(FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | SYNCHRONIZE)
-            .custom_flags(OPEN_REPARSE_POINT)
-            .open(path)
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        fs::File::open(path)
-    }
-}
-
-/// Restores one modification time, or says why it was skipped. A time the platform cannot hold is
-/// not a reason to fail a transfer whose bytes are already correct.
-fn set_time(
-    file: &fs::File,
-    path: &Path,
-    mtime_ms: u64,
-    events: &UnboundedSender<Event>,
-) -> Result<(), Error> {
-    if mtime_ms == 0 {
-        return Ok(());
-    }
-    let Some(time) = UNIX_EPOCH.checked_add(Duration::from_millis(mtime_ms)) else {
-        emit(
-            events,
-            Event::Warning {
-                message: "a modification time is too far in the future for this platform, so it \
-                          was not restored"
-                    .to_string(),
-            },
-        );
-        return Ok(());
-    };
-    file.set_times(fs::FileTimes::new().set_modified(time))
-        .map_err(|e| storage::storage("set the modification time of", path, e))
-}
-
-#[cfg(unix)]
-fn set_mode(file: &fs::File, path: &Path, mode: u32) -> Result<(), Error> {
-    use std::os::unix::fs::PermissionsExt;
-    if mode == 0 {
-        return Ok(());
-    }
-    // Setuid and setgid are never applied, whatever the sender wrote. Owner read and write always
-    // are: a file without them cannot be read back for a resumed receive to compare, and a resume
-    // that cannot read what it wrote would fail on a file that is already correct.
-    let mode = (mode & 0o777) | 0o600;
-    file.set_permissions(fs::Permissions::from_mode(mode))
-        .map_err(|e| storage::policy_path("set the mode of", path, e))
-}
-
-#[cfg(windows)]
-fn set_mode(file: &fs::File, path: &Path, mode: u32) -> Result<(), Error> {
-    if mode == 0 {
-        return Ok(());
-    }
-    // A mode with owner write is never made read-only, for the same reason as the Unix clamp: the
-    // file has to stay readable and replaceable by the receive that wrote it.
-    let mode = mode | 0o600;
-    let mut permissions = file
-        .metadata()
-        .map_err(|e| storage::policy_path("read the mode of", path, e))?
-        .permissions();
-    permissions.set_readonly(mode & 0o200 == 0);
-    file.set_permissions(permissions)
-        .map_err(|e| storage::policy_path("set the mode of", path, e))
-}
-
-#[cfg(not(any(unix, windows)))]
-fn set_mode(_file: &fs::File, _path: &Path, _mode: u32) -> Result<(), Error> {
-    Ok(())
-}
-
-/// A folder's mode, set after its children exist so their creation cannot change it.
-#[cfg(unix)]
-pub(super) fn set_mode_path(path: &Path, mode: u32) -> Result<(), Error> {
-    use std::os::unix::fs::PermissionsExt;
-    if mode == 0 {
-        return Ok(());
-    }
-    fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o777))
-        .map_err(|e| storage::policy_path("set the mode of", path, e))
-}
-
-#[cfg(windows)]
-pub(super) fn set_mode_path(_path: &Path, _mode: u32) -> Result<(), Error> {
-    Ok(())
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(super) fn set_mode_path(_path: &Path, _mode: u32) -> Result<(), Error> {
-    Ok(())
-}
-
-/// A folder's time. Windows does not restore folder times, so this is a no-op there.
-#[cfg(unix)]
-pub(super) fn set_time_path(
-    path: &Path,
-    mtime_ms: u64,
-    events: &UnboundedSender<Event>,
-) -> Result<(), Error> {
-    if mtime_ms == 0 {
-        return Ok(());
-    }
-    let file = fs::File::open(path).map_err(|e| storage::storage("open", path, e))?;
-    set_time(&file, path, mtime_ms, events)
-}
-
-#[cfg(not(unix))]
-pub(super) fn set_time_path(
-    _path: &Path,
-    _mtime_ms: u64,
-    _events: &UnboundedSender<Event>,
-) -> Result<(), Error> {
-    Ok(())
 }
 
 #[cfg(all(test, unix))]

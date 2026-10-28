@@ -1,24 +1,24 @@
 //! Watching a live stream: every segment is fetched as its frame is accepted, appended to a
 //! private file, and the close proves the whole file before it takes its name.
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    time::Instant,
-};
+use std::{fs, path::Path, time::Instant};
 
-use iroh_blobs::{Hash, store::fs::FsStore};
-use sluice_live::{Outcome, Receiver as LogReceiver};
+use iroh_blobs::store::fs::FsStore;
+use sluice_live::Receiver as LogReceiver;
 use tokio::{io::AsyncWriteExt, sync::mpsc::UnboundedSender};
 
+mod limits;
+mod records;
+
 use super::read_record;
+
 use crate::{
     Error,
-    engine::{
-        Event, ReceiveOptions, Received, Receiver, RelayModeChoice, emit, fetch, hello, storage,
-    },
+    engine::{Event, ReceiveOptions, Received, Receiver, RelayModeChoice, emit, hello, storage},
     ticket::{Body, Ticket},
 };
+use limits::Bounds;
+use records::records;
 
 /// Writes the file a live ticket follows to `options.out`, which is the file's path: a live ticket
 /// carries no name. Each segment is written as it verifies, and the file is installed only after
@@ -239,252 +239,4 @@ async fn flush(file: &mut tokio::fs::File, incoming: &Path) -> Result<(), Error>
     file.sync_all()
         .await
         .map_err(|e| storage::storage("sync", incoming, e))
-}
-
-/// A live stream that stopped before the close: the error to report, and whether the bytes that
-/// arrived are the start of the file. Only the size bound leaves a prefix worth keeping; a broken
-/// chain or a failed fetch leaves nothing that can be trusted.
-struct Stop {
-    error: Error,
-    keep: bool,
-}
-
-impl Stop {
-    fn keep(error: Error) -> Self {
-        Self { error, keep: true }
-    }
-}
-
-impl From<Error> for Stop {
-    fn from(error: Error) -> Self {
-        Self { error, keep: false }
-    }
-}
-
-/// The room a live receive must leave free on the output's volume after the next segment. A live
-/// stream has no known end, so nothing else would stop it before the disk is full.
-const FREE_FLOOR: u64 = 1 << 30;
-
-/// The two limits a live stream stops at, checked before each segment is fetched: the free room the
-/// next segment must leave on every volume it fills, and the size the file may not pass.
-struct Bounds {
-    /// The volume the output file is written on.
-    output: PathBuf,
-    /// The volume the temporary store of the segments is written on, which is the home's `tmp` and
-    /// may be a different disk.
-    store: PathBuf,
-    max_size: Option<u64>,
-    /// Free bytes for the output and for the store, given instead of asking the volumes, for a test
-    /// that has no full disk.
-    free: Option<(u64, u64)>,
-}
-
-impl Bounds {
-    fn new(options: &ReceiveOptions, store: &Path) -> Self {
-        Self {
-            output: options
-                .out
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf(),
-            store: store.to_path_buf(),
-            max_size: options.max_size,
-            free: options.free_bytes.map(|bytes| (bytes, bytes)),
-        }
-    }
-
-    #[cfg(test)]
-    fn with_free(output: &Path, store: &Path, max_size: Option<u64>, free: (u64, u64)) -> Self {
-        Self {
-            output: output
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf(),
-            store: store.to_path_buf(),
-            max_size,
-            free: Some(free),
-        }
-    }
-
-    /// Refuses a segment that would pass the size or leave too little room on either volume. The
-    /// store holds every segment until it is written out, so a stream can fill the disk the home is
-    /// on while the output's disk still has room.
-    fn check(&self, total: u64, len: u32) -> Result<(), Stop> {
-        let len = u64::from(len);
-        if let Some(max) = self.max_size
-            && total.saturating_add(len) > max
-        {
-            return Err(Stop::keep(Error::Storage(format!(
-                "the file would pass --max-size of {max} bytes; the {total} bytes that arrived are \
-                 the start of it"
-            ))));
-        }
-        for (index, volume) in [&self.output, &self.store].into_iter().enumerate() {
-            let available = match self.free {
-                Some((output, store)) => {
-                    if index == 0 {
-                        output
-                    } else {
-                        store
-                    }
-                }
-                None => storage::available_bytes(volume).map_err(Stop::from)?,
-            };
-            if available.saturating_sub(len) < FREE_FLOOR {
-                return Err(Stop::keep(Error::Storage(format!(
-                    "{} would have less than {FREE_FLOOR} bytes free after the next segment; the \
-                     {total} bytes that arrived are the start of the file",
-                    volume.display()
-                ))));
-            }
-        }
-        Ok(())
-    }
-}
-
-/// Every record until the close: a frame adds its segment, and the close proves the whole file.
-#[allow(clippy::too_many_arguments)]
-async fn records(
-    log: &mut LogReceiver,
-    recv: &mut iroh::endpoint::RecvStream,
-    store: &FsStore,
-    blobs: &iroh::endpoint::Connection,
-    file: &mut tokio::fs::File,
-    hasher: &mut blake3::Hasher,
-    bounds: &Bounds,
-    rate: Option<&crate::engine::Rate>,
-    events: &UnboundedSender<Event>,
-) -> Result<u64, Stop> {
-    let mut total = 0u64;
-    loop {
-        let record = read_record(recv).await?;
-        match record.len() {
-            sluice_live::Frame::LEN => {
-                total = apply_frame(
-                    log, &record, store, blobs, file, hasher, bounds, events, rate, total,
-                )
-                .await?;
-            }
-            sluice_live::LogClose::LEN => {
-                return close(log, &record, total, hasher).map_err(Stop::from);
-            }
-            _ => {
-                return Err(Stop::from(Error::Verify(
-                    "a live record is not one of the three the stream carries".to_string(),
-                )));
-            }
-        }
-    }
-}
-
-/// One frame: check it against the limits, fetch its segment, and add it to the file. A repeated
-/// entry changes nothing; one that breaks the chain or comes out of order stops the transfer.
-#[allow(clippy::too_many_arguments)]
-async fn apply_frame(
-    log: &mut LogReceiver,
-    record: &[u8],
-    store: &FsStore,
-    blobs: &iroh::endpoint::Connection,
-    file: &mut tokio::fs::File,
-    hasher: &mut blake3::Hasher,
-    bounds: &Bounds,
-    events: &UnboundedSender<Event>,
-    rate: Option<&crate::engine::Rate>,
-    total: u64,
-) -> Result<u64, Stop> {
-    let outcome = log.frame(record);
-    let Outcome::Accepted {
-        segment_root, len, ..
-    } = outcome
-    else {
-        return match outcome {
-            Outcome::Repeat { .. } => Ok(total),
-            Outcome::Refused(fault) => {
-                Err(Error::Verify(format!("the live chain refused a frame: {fault}")).into())
-            }
-            Outcome::Aborted { seq, reason } => {
-                Err(Error::Verify(format!("the live chain was aborted at {seq}: {reason}")).into())
-            }
-            _ => Err(Error::Verify("a live frame did not change the stream".to_string()).into()),
-        };
-    };
-    // The limits are checked before the segment is fetched, so a stream that would pass one stops
-    // without spending the room or the bandwidth on bytes that cannot be written.
-    bounds.check(total, len)?;
-    let hash = Hash::from(segment_root);
-    fetch::content_blob(store, blobs, hash, u64::from(len), 0, 0, rate, events).await?;
-    let bytes = fetch::complete_bytes(store, hash).await?.0;
-    file.write_all(&bytes)
-        .await
-        .map_err(|e| storage::storage("write", Path::new("the live file"), e))?;
-    hasher.update(&bytes);
-    total
-        .checked_add(u64::from(len))
-        .ok_or_else(|| Error::Verify("the live file is longer than u64::MAX".to_string()).into())
-}
-
-/// The close: the length and the root have to match everything that arrived.
-fn close(
-    log: &mut LogReceiver,
-    record: &[u8],
-    total: u64,
-    hasher: &mut blake3::Hasher,
-) -> Result<u64, Error> {
-    match log.close(record) {
-        Outcome::Closed {
-            final_root,
-            total_len,
-        } => {
-            if total_len != total {
-                return Err(Error::Verify(format!(
-                    "the close says {total_len} bytes and the segments add up to {total}"
-                )));
-            }
-            if *hasher.finalize().as_bytes() != final_root {
-                return Err(Error::Verify(
-                    "the file does not hash to the root the close names".to_string(),
-                ));
-            }
-            Ok(total)
-        }
-        Outcome::Aborted { seq, reason } => Err(Error::Verify(format!(
-            "the live chain was aborted at {seq}: {reason}"
-        ))),
-        other => Err(Error::Verify(format!(
-            "the live close was refused: {other:?}"
-        ))),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Bounds, FREE_FLOOR};
-    use std::path::Path;
-
-    /// A live receive keeps every segment in the store until it is written out, and the store is
-    /// under the home's `tmp`, which may be another volume from the output. The floor belongs to
-    /// both: a stream that fills the home's disk cannot be read back either.
-    #[test]
-    fn the_store_volume_must_keep_the_floor_too() {
-        let out = Path::new("out/file.bin");
-        let store = Path::new("home/tmp/store");
-        let fixed = |free| Bounds::with_free(out, store, None, free);
-        let err = fixed((FREE_FLOOR * 4, FREE_FLOOR / 2))
-            .check(0, 16 * 1024)
-            .unwrap_err();
-        assert!(
-            err.error.to_string().contains("home/tmp/store"),
-            "{}",
-            err.error
-        );
-        assert!(
-            fixed((FREE_FLOOR * 2, FREE_FLOOR * 2))
-                .check(0, 16 * 1024)
-                .is_ok()
-        );
-        let err = fixed((FREE_FLOOR, FREE_FLOOR * 2))
-            .check(0, 16 * 1024)
-            .unwrap_err();
-        assert!(err.error.to_string().contains("out"), "{}", err.error);
-    }
 }
