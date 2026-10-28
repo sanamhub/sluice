@@ -68,6 +68,10 @@ fn human(event: &Event, verb: &str) -> String {
         Event::PathChanged { path, relay } => {
             format!("path changed: {}", path_text(*path, relay))
         }
+        Event::Relayed { relay, seconds } => format!(
+            "no direct path after {seconds} s; relayed through {relay}. A meeting point carries it \
+             at 64 KiB/s; a full relay at its own limit."
+        ),
         Event::Progress { bytes, total } => {
             let percent = bytes
                 .saturating_mul(100)
@@ -149,5 +153,23 @@ mod tests {
         assert_eq!(bytes_text(0), "0 bytes");
         assert_eq!(bytes_text(1536), "1.5 KiB");
         assert_eq!(bytes_text(100 << 20), "100.0 MiB");
+    }
+
+    /// A transfer carried by a relay says so in one line, naming both kinds of relay: the client
+    /// cannot know which one it reached, and a user deciding whether to wait needs both.
+    #[test]
+    fn a_relayed_transfer_names_the_relay_and_both_kinds_of_limit() {
+        let text = human(
+            &Event::Relayed {
+                relay: "https://relay.example/".into(),
+                seconds: 10,
+            },
+            "sending",
+        );
+        assert_eq!(
+            text,
+            "no direct path after 10 s; relayed through https://relay.example/. A meeting point \
+             carries it at 64 KiB/s; a full relay at its own limit."
+        );
     }
 }

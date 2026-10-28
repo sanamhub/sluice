@@ -264,11 +264,15 @@ no working connection-accept limit, so byte limits are all we document. The imag
 it says. ADR 0019, ADR 0020.
 
 **Every transfer says how it is connected.** The progress line and `--json` output show direct or
-relayed, and through which relay. `sluice doctor` is to report NAT type, port mapping result, MTU,
-UDP egress, the chosen path, and the relay's reachability and authorization mode, in one block that
-can be pasted into an issue. Today it checks the local home only, and reports its `transport` check
-as skipped until the transport is measured; the [CLI README](../crates/sluice-cli/README.md) lists
-what it checks.
+relayed, and through which relay. A transfer that has no direct path ten seconds after its
+connection came up says so once: `no direct path after 10 s; relayed through <url>`, then which
+limits the two kinds of relay apply, because the client cannot tell a meeting point from a full
+relay. Nothing fails over a relayed path; a direct path that arrives later is the ordinary
+`path_changed`. `sluice doctor` is to report NAT type, port mapping result, MTU, UDP egress, the
+chosen path, and the relay's reachability and authorization mode, in one block that can be pasted
+into an issue. Today it checks the local home only, and reports its `transport` check as skipped
+until the transport is measured; the [CLI README](../crates/sluice-cli/README.md) lists what it
+checks.
 
 **The browser is always relayed.** iroh in a tab has no UDP socket, so it reaches peers over a
 WebSocket relay for the whole session. Browser throughput is relay throughput, and the web UI needs

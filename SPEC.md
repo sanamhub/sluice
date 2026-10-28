@@ -776,6 +776,15 @@ require TLS and token authentication.
 It is a control plane. **No file bytes ever traverse this API.** A client asks the engine to move
 bytes and observes progress; it never carries them.
 
+The progress events an implementation reports are named here, in the order a transfer may report
+them: `started`, `connected`, `path_changed`, `relayed`, `progress`, `retrying`, `warning`,
+`verified`, `done`. `--json` writes one object per line with the name in `event`. `connected` names
+the chosen path and, when it is relayed, the relay; `path_changed` reports every later move. Both are
+taken back as soon as a direct path is in use. `relayed` is said at most once per connection, ten
+seconds after it came up and only if the path is still relayed then, and names the relay and the
+seconds waited; it is information and not a failure, and a path that goes direct after it is reported
+by `path_changed` like any other move.
+
 Store access is single-writer. A client MUST take an exclusive lock on the store directory, and if
 the lock is held by a live process it MUST connect to that process instead of opening the store.
 

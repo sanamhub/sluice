@@ -1,7 +1,7 @@
 //! What a transfer reports while it runs. One type, so the text output, the JSON lines and the
 //! control API added later cannot drift apart.
 
-use std::fmt;
+use std::{fmt, time::Duration};
 
 use iroh::endpoint::{Connection, PathList};
 use n0_future::StreamExt;
@@ -9,6 +9,11 @@ use serde::Serialize;
 use tokio::{sync::mpsc::UnboundedSender, task::JoinHandle};
 
 use super::endpoint::Congestion;
+
+/// How long a connection may go on without a direct path before the transfer says so. Ten seconds
+/// is long enough for a hole punch that is going to work, and short enough that a stream carried by
+/// a relay is explained before a user gives up on it.
+pub const RELAY_NOTICE: Duration = Duration::from_secs(10);
 
 /// How a connection reaches the peer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -61,6 +66,15 @@ pub enum Event {
         path: PathKind,
         /// The relay URL when the path is relayed.
         relay: Option<String>,
+    },
+    /// The connection has been up for a while and still has no direct path, so the transfer is
+    /// carried by the relay named here. Nothing failed; a meeting point is fast enough to
+    /// coordinate and slow enough that a file takes a while, and a full relay has its own limit.
+    Relayed {
+        /// The relay the transfer goes through.
+        relay: String,
+        /// How many seconds the connection waited for a direct path.
+        seconds: u64,
     },
     /// Bytes verified and written so far.
     Progress {
@@ -138,10 +152,11 @@ fn path_of(path: &iroh::endpoint::Path<'_>) -> (PathKind, Option<String>) {
 }
 
 /// Follows the connection's selected path until it closes, reporting the first one immediately and
-/// every change after that. The returned task is detached when the receiver goes away.
+/// every change after that, and saying once when the connection has gone [`RELAY_NOTICE`] without a
+/// direct path. The returned task is detached when the receiver goes away.
 pub fn watch_path(conn: Connection, tx: UnboundedSender<Event>) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut last = None;
+        let mut notice = RelayNotice::new();
         if let Some((path, relay)) = current_path(&conn) {
             emit(
                 &tx,
@@ -150,26 +165,88 @@ pub fn watch_path(conn: Connection, tx: UnboundedSender<Event>) -> JoinHandle<()
                     relay: relay.clone(),
                 },
             );
-            last = Some((path, relay));
+            notice.start((path, relay));
         }
         let mut changes = conn.paths_stream();
-        while let Some(list) = changes.next().await {
-            let Some(path) = selected(&list) else {
-                continue;
-            };
-            if last.as_ref() == Some(&path) {
-                continue;
+        loop {
+            tokio::select! {
+                event = notice.expired(), if notice.owed() => {
+                    if let Some(event) = event {
+                        emit(&tx, event);
+                    }
+                }
+                list = changes.next() => {
+                    let Some(list) = list else {
+                        break;
+                    };
+                    let Some(path) = selected(&list) else {
+                        continue;
+                    };
+                    if let Some(event) = notice.saw(path) {
+                        emit(&tx, event);
+                    }
+                }
             }
-            emit(
-                &tx,
-                Event::PathChanged {
-                    path: path.0,
-                    relay: path.1.clone(),
-                },
-            );
-            last = Some(path);
         }
     })
+}
+
+/// The one relay line a connection may owe: a deadline of [`RELAY_NOTICE`] from the connection
+/// coming up, the path last seen, and whether the line was already said. It is a value of its own so
+/// the decision can be driven by a paused clock in a test.
+struct RelayNotice {
+    last: Option<(PathKind, Option<String>)>,
+    deadline: std::pin::Pin<Box<tokio::time::Sleep>>,
+    said: bool,
+}
+
+impl RelayNotice {
+    fn new() -> Self {
+        Self {
+            last: None,
+            deadline: Box::pin(tokio::time::sleep(RELAY_NOTICE)),
+            said: false,
+        }
+    }
+
+    /// The path the connection started on. It was already reported as `connected`.
+    fn start(&mut self, path: (PathKind, Option<String>)) {
+        self.last = Some(path);
+    }
+
+    /// The change event for a path the connection moved to, and none when it did not move.
+    fn saw(&mut self, path: (PathKind, Option<String>)) -> Option<Event> {
+        if self.last.as_ref() == Some(&path) {
+            return None;
+        }
+        self.last = Some(path.clone());
+        Some(Event::PathChanged {
+            path: path.0,
+            relay: path.1,
+        })
+    }
+
+    /// Whether the deadline has something left to say. The watcher stops polling once it has.
+    fn owed(&self) -> bool {
+        !self.said
+    }
+
+    /// Waits for the deadline and returns the line it owes, if the path is still relayed then. A
+    /// path that went direct before the deadline owes nothing.
+    async fn expired(&mut self) -> Option<Event> {
+        if self.said {
+            return None;
+        }
+        (&mut self.deadline).await;
+        self.said = true;
+        match self.last.clone() {
+            Some((PathKind::Relayed, Some(relay))) => Some(Event::Relayed {
+                relay,
+                seconds: RELAY_NOTICE.as_secs(),
+            }),
+            _ => None,
+        }
+    }
 }
 
 fn selected(list: &PathList<'_>) -> Option<(PathKind, Option<String>)> {
@@ -182,7 +259,78 @@ fn selected(list: &PathList<'_>) -> Option<(PathKind, Option<String>)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Congestion, Event, PathKind};
+    use super::{Congestion, Event, PathKind, RELAY_NOTICE, RelayNotice};
+    use std::time::Duration;
+
+    const RELAY: &str = "https://relay.example/";
+
+    fn relayed() -> (PathKind, Option<String>) {
+        (PathKind::Relayed, Some(RELAY.to_string()))
+    }
+
+    fn direct() -> (PathKind, Option<String>) {
+        (PathKind::Direct, None)
+    }
+
+    /// A connection that is still relayed at the mark says so once, with the relay and the wait, and
+    /// never again: the line is about the path it could not find, and a second one says nothing new.
+    #[tokio::test(start_paused = true)]
+    async fn a_relayed_connection_is_named_once_at_the_mark() {
+        let mut notice = RelayNotice::new();
+        notice.start(relayed());
+        tokio::time::advance(RELAY_NOTICE).await;
+        assert_eq!(
+            notice.expired().await,
+            Some(Event::Relayed {
+                relay: RELAY.to_string(),
+                seconds: 10,
+            })
+        );
+        assert_eq!(notice.expired().await, None, "the line was said twice");
+    }
+
+    /// A path that goes direct before the mark owes no line at all: it is the ordinary change, and
+    /// the wait it reports is not one a user has to read about.
+    #[tokio::test(start_paused = true)]
+    async fn a_path_that_goes_direct_before_the_mark_says_nothing() {
+        let mut notice = RelayNotice::new();
+        notice.start(relayed());
+        tokio::time::advance(Duration::from_secs(9)).await;
+        assert_eq!(
+            notice.saw(direct()),
+            Some(Event::PathChanged {
+                path: PathKind::Direct,
+                relay: None,
+            })
+        );
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert_eq!(
+            notice.expired().await,
+            None,
+            "a direct path was still called relayed"
+        );
+    }
+
+    /// A path that goes direct after the mark gets both: the relay line it owed, and then the
+    /// change to the path that arrived.
+    #[tokio::test(start_paused = true)]
+    async fn a_path_that_goes_direct_after_the_mark_gets_the_line_and_the_change() {
+        let mut notice = RelayNotice::new();
+        notice.start(relayed());
+        tokio::time::advance(Duration::from_secs(12)).await;
+        assert!(matches!(
+            notice.expired().await,
+            Some(Event::Relayed { .. })
+        ));
+        assert_eq!(
+            notice.saw(direct()),
+            Some(Event::PathChanged {
+                path: PathKind::Direct,
+                relay: None
+            })
+        );
+        assert_eq!(notice.saw(direct()), None, "a path that did not move");
+    }
 
     #[test]
     fn json_names_the_variant_and_its_fields() {
