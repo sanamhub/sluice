@@ -257,8 +257,12 @@ pub const RESERVED_PREFIXES: [&str; 2] = [".sluice-partial-", ".sluice-tmp-"];
 /// Rule 9 folds case and compatibility the way a file system may, because a folder a receive keeps
 /// its store in is one name whatever spelling of it the file system resolves: Windows and macOS
 /// resolve case, macOS also resolves the composed and decomposed forms, and APFS folds some letters
-/// beyond ASCII, such as `ſ` to `s`. The name is folded with Unicode case folding after NFKC, which
-/// covers the fullwidth and other compatibility spellings too.
+/// beyond ASCII, such as `ſ` to `s`.
+///
+/// Two things are read away before folding, because a file system may read them away too: the code
+/// points a name may not show (the default-ignorable ones, which HFS+ drops when it compares) and
+/// U+0131, which NTFS upcases to `I` although NFKC and case folding leave it alone. A name that only
+/// reaches the prefix once those are gone would open the store folder on such a volume.
 fn starts_with_reserved(name: &str, prefix: &str) -> bool {
     if starts_with_ignore_ascii_case(name, prefix) {
         return true;
@@ -269,10 +273,46 @@ fn starts_with_reserved(name: &str, prefix: &str) -> bool {
     if name.is_ascii() {
         return false;
     }
-    let folded: String = name.nfkc().collect::<String>();
-    UniCase::unicode(&folded)
-        .to_folded_case()
-        .starts_with(prefix)
+    reserved_key(name).starts_with(prefix)
+}
+
+/// The name rule 9 compares: what a file system may compare, without the code points it may ignore
+/// and with the dotless i read as `i`, in NFKC and full case folding.
+fn reserved_key(name: &str) -> String {
+    let kept: String = name
+        .chars()
+        .filter(|c| !is_ignorable(*c))
+        .map(|c| if c == '\u{131}' { 'i' } else { c })
+        .collect();
+    let composed: String = kept.nfkc().collect();
+    UniCase::unicode(&composed).to_folded_case()
+}
+
+/// The Unicode default-ignorable code points: a name may carry one and a file system may compare it
+/// as though it were not there, which HFS+ does and another volume may. The bidirectional controls
+/// in the set are already refused by rule 6; skipping them here costs nothing and keeps one list.
+fn is_ignorable(c: char) -> bool {
+    matches!(
+        c,
+        '\u{ad}'
+            | '\u{34f}'
+            | '\u{61c}'
+            | '\u{115f}'
+            | '\u{1160}'
+            | '\u{17b4}'
+            | '\u{17b5}'
+            | '\u{180b}'..='\u{180f}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{206f}'
+            | '\u{3164}'
+            | '\u{fe00}'..='\u{fe0f}'
+            | '\u{feff}'
+            | '\u{ffa0}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0000}'..='\u{e0fff}'
+    )
 }
 
 /// The cheap check for a prefix that is already ASCII and usually matches that way.

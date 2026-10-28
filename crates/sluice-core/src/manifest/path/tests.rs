@@ -397,3 +397,29 @@ fn rule_9_folds_unicode_spellings_of_a_reserved_prefix() {
         "．sluice-partials-x",
     ]);
 }
+
+/// Two spellings rule 9 has to read as the prefix although neither NFKC nor case folding changes
+/// them: NTFS upcases the dotless `ı` to `I`, and HFS+ ignores the code points a name may not show,
+/// so a name that reaches `.sluice-partial-` only after those are gone still names the store.
+#[test]
+fn rule_9_reads_the_dotless_i_and_the_ignorable_code_points() {
+    rejects(
+        9,
+        &[
+            ".sluıce-partial-x",
+            ".SLUICE-PART\u{131}AL-X",
+            "tree/.sluıce-tmp-x/b",
+            ".\u{200b}sluice-partial-x",
+            ".slu\u{200d}ice-partial-x",
+            ".slu\u{2060}ice-tmp-x",
+            ".\u{feff}sluice-partial-x",
+            ".\u{ad}sluice-partial-x",
+        ],
+    );
+    accepts(&[
+        ".sluıce-partials-x",
+        ".slu\u{131}ce",
+        "a\u{200b}b.txt",
+        "ſluıce.txt",
+    ]);
+}

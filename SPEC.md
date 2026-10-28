@@ -546,10 +546,13 @@ stranger, and file names stay out of logs.
 9. a component starts with `.sluice-partial-` or `.sluice-tmp-`, the two prefixes a receive gives the
    store it writes beside the output and a folder it writes through. The prefixes themselves are
    reserved too. A sender MUST NOT put such a name in a manifest, and a receive writes its own stores
-   under names no manifest can claim. The comparison applies NFKC and then full Unicode case folding,
-   because Windows and macOS resolve a name regardless of case, macOS composes and decomposes it, and
-   APFS folds some letters beyond ASCII, so `.SLUICE-PARTIAL-x`, `．sluice-partial-x` and
-   `.ſluice-partial-x` all name the same store there
+   under names no manifest can claim. The comparison first drops the code points a file system may
+   ignore in a name (the Unicode default-ignorable ones, such as U+200B and U+FEFF) and reads
+   U+0131 as `i`, because NTFS upcases the dotless `ı` to `I`; then it applies NFKC and full Unicode
+   case folding, because Windows and macOS resolve a name regardless of case, macOS composes and
+   decomposes it, and APFS folds some letters beyond ASCII. So `.SLUICE-PARTIAL-x`,
+   `．sluice-partial-x`, `.ſluice-partial-x`, `.sluıce-partial-x` and the same name with a
+   zero-width space after `slu` all name the same store there
 
 With these rules no accepted path can leave the output root by its text alone, and a symlink already
 on disk is the writer's concern, not these rules'.
