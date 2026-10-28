@@ -21,7 +21,7 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0010](0010-measure-noq-first.md) | Measure the transport before building on it | Accepted |
 | [0011](0011-browser-is-relay-bound.md) | The browser is always relayed, and relay mode is never chosen silently | Accepted |
 | [0012](0012-crypto-provider-is-chosen.md) | The TLS crypto provider is chosen explicitly | Superseded by 0018 |
-| [0013](0013-rendezvous-and-relay-are-two-tiers.md) | Rendezvous and relay ship as two separate images | Accepted |
+| [0013](0013-rendezvous-and-relay-are-two-tiers.md) | Rendezvous and relay ship as two separate images | Superseded by 0028 |
 | [0014](0014-browser-build-is-single-threaded.md) | The browser build hashes on one thread and needs no special headers | Accepted |
 | [0015](0015-bbrv3-by-default.md) | BBRv3 is the default congestion controller | Accepted |
 | [0016](0016-parallel-connections-and-tcp-bulk-path.md) | Shard large transfers across connections, with a TCP bulk path for direct peers | Accepted |
@@ -31,3 +31,4 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0020](0020-guard-closes-more-defaults-and-guards-rendezvous.md) | The guard closes three more open defaults, pins the file it checked, and guards rendezvous | Accepted, extended by 0021 |
 | [0021](0021-guard-hands-over-a-sealed-copy.md) | The guard hands iroh-relay a sealed copy, and a relay without TLS needs a flag | Accepted |
 | [0022](0022-landing-page-on-cloudflare.md) | The landing page lives in `site/`, on Cloudflare Workers | Accepted |
+| [0028](0028-one-relay-image-two-recipes.md) | One relay image, run either as a meeting point or as a full relay | Accepted |
