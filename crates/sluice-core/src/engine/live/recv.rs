@@ -168,14 +168,14 @@ fn check_target(target: &Path, force: bool) -> Result<(), Error> {
     Ok(())
 }
 
-async fn exchange(
+/// The record stream and the log of one live ticket: the greeting proves the provider serves live
+/// content, and the opening record names the stream this ticket is for.
+async fn open_stream(
     opened: &Opened,
     ticket: &Ticket,
     stream: ([u8; 16], [u8; 32]),
-    options: &ReceiveOptions,
     events: &UnboundedSender<Event>,
-) -> Result<u64, Error> {
-    let incoming = opened.file_tmp.path().join("incoming");
+) -> Result<(iroh::endpoint::RecvStream, LogReceiver), Error> {
     let conn = opened.receiver.connect(ticket, events.clone()).await?;
     let (theirs, _send, mut recv) = hello::greet_stream(&conn)
         .await
@@ -186,8 +186,20 @@ async fn exchange(
         ));
     }
     let open = read_record(&mut recv).await?;
-    let mut log = LogReceiver::new(stream.0, stream.1, &open)
+    let log = LogReceiver::new(stream.0, stream.1, &open)
         .map_err(|e| Error::Verify(format!("the live stream did not open: {e}")))?;
+    Ok((recv, log))
+}
+
+async fn exchange(
+    opened: &Opened,
+    ticket: &Ticket,
+    stream: ([u8; 16], [u8; 32]),
+    options: &ReceiveOptions,
+    events: &UnboundedSender<Event>,
+) -> Result<u64, Error> {
+    let incoming = opened.file_tmp.path().join("incoming");
+    let (mut recv, mut log) = open_stream(opened, ticket, stream, events).await?;
     let blobs = opened
         .receiver
         .connect_static(ticket, events.clone())

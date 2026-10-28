@@ -68,25 +68,14 @@ pub async fn prepare_live_with_rate(
     // The live store is one of the two whose blobs are throwaway: the collector frees a segment as
     // soon as the send drops its tag, so an hour of following does not leave an hour of segments.
     let store = storage::Store::open(&home.path().join("blobs"), storage::Collector::On).await?;
-    let seed = home.identity()?.secret_seed();
-    let key = SigningKey::from_bytes(&seed);
-    let sender_key = key.verifying_key().to_bytes();
-    let mut stream_id = [0u8; 16];
-    getrandom::fill(&mut stream_id)
-        .map_err(|e| Error::Storage(format!("cannot name a live stream: {e}")))?;
-    let sender = Sender::new(key, stream_id, SEGMENT_BYTES, now_ms())
-        .map_err(|e| Error::Storage(format!("cannot start a live stream: {e}")))?;
-    let log = Arc::new(LiveLog::new(
-        sender.log_open(),
-        Arc::new(Mutex::new(std::collections::BTreeSet::new())),
-    ));
+    let stream = new_stream(home)?;
     // The provider owns the store for the life of the send and closes it when it stops; the
     // follower gets its own handle to seal segments through.
     let follower_store = store.handle();
     let provider = Provider::start_live_with_rate(
         home,
         store.into_fs(),
-        log.clone(),
+        stream.log.clone(),
         relay,
         congestion,
         expiry_ms,
@@ -94,15 +83,15 @@ pub async fn prepare_live_with_rate(
         rate,
     )
     .await?;
-    let ticket = ticket_of(&provider, sender_key, stream_id, expiry_ms)?;
+    let ticket = ticket_of(&provider, stream.sender_key, stream.stream_id, expiry_ms)?;
     // The segments stay in the home store while the stream is served, and are given back to the
     // collector when the send stops; the vector is shared with the task that seals them.
     let tags: Arc<Mutex<Vec<TempTag>>> = Arc::default();
     let task = tokio::spawn(follow(
         path.to_path_buf(),
         follower_store,
-        log.clone(),
-        sender,
+        stream.log.clone(),
+        stream.sender,
         close_after,
         Arc::clone(&tags),
     ));
@@ -114,8 +103,37 @@ pub async fn prepare_live_with_rate(
         files: 1,
         bytes: size,
         congestion,
-        live: Some(LiveSend::new(log, task, tags)),
+        live: Some(LiveSend::new(stream.log, task, tags)),
         _tags: Vec::new(),
+    })
+}
+
+/// One new live stream: its id, the key that signs its segments, the sender that seals them and the
+/// log the provider serves.
+struct Stream {
+    sender: Sender,
+    log: Arc<LiveLog>,
+    sender_key: [u8; 32],
+    stream_id: [u8; 16],
+}
+
+fn new_stream(home: &Home) -> Result<Stream, Error> {
+    let key = SigningKey::from_bytes(&home.identity()?.secret_seed());
+    let sender_key = key.verifying_key().to_bytes();
+    let mut stream_id = [0u8; 16];
+    getrandom::fill(&mut stream_id)
+        .map_err(|e| Error::Storage(format!("cannot name a live stream: {e}")))?;
+    let sender = Sender::new(key, stream_id, SEGMENT_BYTES, now_ms())
+        .map_err(|e| Error::Storage(format!("cannot start a live stream: {e}")))?;
+    let log = Arc::new(LiveLog::new(
+        sender.log_open(),
+        Arc::new(Mutex::new(std::collections::BTreeSet::new())),
+    ));
+    Ok(Stream {
+        sender,
+        log,
+        sender_key,
+        stream_id,
     })
 }
 
