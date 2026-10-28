@@ -190,10 +190,11 @@ fn colour_follows_the_flag_and_no_color() {
     );
 }
 /// The network checks report what they find and change no setting. Without a relay they say what
-/// that rules out and nothing more: this machine can be reached across the internet only if its
-/// router opens a port, and two sides on one network can still find each other. A full-cone NAT is
-/// not worth naming, because no relay was there to learn which kind of NAT this is. The command
-/// still exits as the local checks decide.
+/// that rules out and nothing more: this machine can be reached across the internet at the direct
+/// addresses in a ticket only if it has a public address and no firewall, or its router opens a
+/// port, and two sides on one network can still find each other. A full-cone NAT is not worth
+/// naming, because no relay was there to learn which kind of NAT this is. The command still exits
+/// as the local checks decide.
 #[test]
 fn network_checks_report_without_a_relay() {
     let dir = tempfile::tempdir().unwrap();
@@ -204,10 +205,8 @@ fn network_checks_report_without_a_relay() {
         .success();
     let text = stdout_text(&result);
     assert!(text.contains("udp"), "{text}");
-    assert!(
-        text.contains("only a sender whose router opens a port"),
-        "{text}"
-    );
+    assert!(text.contains("direct addresses in its ticket"), "{text}");
+    assert!(text.contains("a public address and no firewall"), "{text}");
     assert!(text.contains("run a relay as a meeting point"), "{text}");
     assert!(text.contains("portmap"), "{text}");
     assert!(!text.contains("rendezvous"), "{text}");

@@ -137,14 +137,17 @@ fn unclosed() -> std::sync::MutexGuard<'static, Vec<Unclosed>> {
 /// was cancelled.
 ///
 /// Where a runtime can still run the close, it is done at once, in the order that matters: the
-/// database is closed and the folder is removed after it. Where it cannot, the pair waits for the
-/// next command that opens a store, which does the same two steps in the same order. A process that
-/// ends before either leaves a folder the sweep of temporary folders removes.
+/// database is closed and the folder is removed after it. The close takes the same lock an open
+/// takes, so an open that starts while this close is running waits for it instead of finding the
+/// parked list already empty and the database still held. Where a runtime cannot run the close, the
+/// pair waits for the next command that opens a store, which does the same two steps in the same
+/// order. A process that ends before either leaves a folder the sweep of temporary folders removes.
 pub(crate) fn hand_on(store: Option<FsStore>, dir: Option<super::Temp>) {
     match (store, dir) {
         (Some(store), Some(dir)) => {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 handle.spawn(async move {
+                    let _settled = SETTLING.lock().await;
                     let _ = store.shutdown().await;
                     drop(dir);
                 });

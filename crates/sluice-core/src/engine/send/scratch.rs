@@ -25,7 +25,8 @@ impl Scratch {
     /// The home's `blobs` folder is removed here rather than in every other command: a send is what
     /// used to fill it, and no other command reads it any more.
     pub(crate) async fn open(home: &Home, collector: Collector) -> Result<Self, Error> {
-        forget_home_store(home);
+        let root = home.path().to_path_buf();
+        let _ = tokio::task::spawn_blocking(move || forget_home_store(&root)).await;
         let parent = home.temporary_folder()?;
         Ok(Self {
             store: TempStore::open(&parent, collector).await?,
@@ -56,9 +57,10 @@ impl Scratch {
 
 /// Removes the `blobs` folder an older home holds, when it is the folder this tree makes. A send
 /// used to keep its imports there, and a home that sent anything may still carry them; nothing
-/// reads that folder now, and it holds nothing a user can name.
-fn forget_home_store(home: &Home) {
-    let blobs = home.path().join("blobs");
+/// reads that folder now, and it holds nothing a user can name. It is removed on a blocking thread
+/// because a home can hold many files and the send has other work to do.
+fn forget_home_store(root: &Path) {
+    let blobs = root.join("blobs");
     let Ok(meta) = fs::symlink_metadata(&blobs) else {
         return;
     };

@@ -296,6 +296,11 @@ fn a_device_path_is_not_a_file_path() {
         r"\\?\UNC\server\pipe\name",
         r"\\?\unc\localhost\Pipe\name",
         r"\\server\pipe",
+        // Windows drops a trailing dot or space from a share name before it resolves it, so these
+        // name the pipe share too.
+        r"\\server\pipe.\name",
+        r"\\server\pipe \name",
+        r"\\?\UNC\server\pipe.\name",
     ] {
         assert!(
             super::install::is_device_path(Path::new(device)),
@@ -310,6 +315,7 @@ fn a_device_path_is_not_a_file_path() {
         r"\\server\share\x",
         // A share whose name only starts like the pipe share's is another share.
         r"\\server\pipex\name",
+        r"\\server\pip.\name",
     ] {
         assert!(!super::install::is_device_path(Path::new(file)), "{file}");
     }

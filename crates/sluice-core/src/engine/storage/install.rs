@@ -235,8 +235,20 @@ fn move_file(from: &Path, target: &Path, replace: bool) -> io::Result<()> {
 /// next component is not a drive letter or `UNC\`. Windows reads `/` as a separator too, so
 /// `//./pipe/name` names the same device; the check normalises the separators before comparing,
 /// which is the order the rename below uses when it turns the path into its verbatim form.
+///
+/// The path is checked as written and again after it is made absolute, because the rename builds
+/// its verbatim form from the absolute path: a prefix that only appears after that step would
+/// otherwise be checked as a relative name.
 #[cfg(windows)]
 pub(super) fn is_device_path(path: &Path) -> bool {
+    if is_absolute_device_path(path) {
+        return true;
+    }
+    std::path::absolute(path).is_ok_and(|absolute| is_absolute_device_path(&absolute))
+}
+
+#[cfg(windows)]
+fn is_absolute_device_path(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
 
     let wide: Vec<u16> = path
@@ -299,7 +311,8 @@ fn after_prefix<'a>(wide: &'a [u16], prefix: &str) -> Option<&'a [u16]> {
 }
 
 /// Whether `rest` names a share called `pipe`: `server\pipe` or `server\pipe\name`. Windows reads a
-/// share name without regard to case, so `PIPE` is the same share.
+/// share name without regard to case and drops a trailing dot or space before it resolves one, so
+/// `PIPE`, `pipe.` and `pipe ` are all the same share.
 #[cfg(windows)]
 fn names_a_pipe(rest: &[u16]) -> bool {
     let Some(at) = rest.iter().position(|&c| c == u16::from(b'\\')) else {
@@ -311,13 +324,23 @@ fn names_a_pipe(rest: &[u16]) -> bool {
         .position(|&c| c == u16::from(b'\\'))
         .unwrap_or(share.len());
     let pipe = "pipe".encode_utf16().collect::<Vec<u16>>();
-    share.get(..end).is_some_and(|name| {
+    share.get(..end).map(trim_share).is_some_and(|name| {
         name.len() == pipe.len()
             && name
                 .iter()
                 .zip(&pipe)
                 .all(|(got, want)| upper_of(*got) == upper_of(*want))
     })
+}
+
+/// A share name without the trailing dots and spaces Windows drops before it resolves it.
+#[cfg(windows)]
+fn trim_share(name: &[u16]) -> &[u16] {
+    let end = name
+        .iter()
+        .rposition(|&c| c != u16::from(b'.') && c != u16::from(b' '))
+        .map_or(0, |at| at + 1);
+    &name[..end]
 }
 
 /// `c` as an upper-case ASCII letter, for a comparison that Windows makes without regard to case.

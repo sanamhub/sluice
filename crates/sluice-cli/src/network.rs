@@ -24,9 +24,10 @@ pub async fn lines(relay: &RelayModeChoice) -> Vec<Line> {
             lines.push(Line {
                 name: "relay",
                 status: Status::Skipped,
-                detail: "none; across the internet only a sender whose router opens a port \
-                         (UPnP, PCP or NAT-PMP) can be reached, and two sides on one network can \
-                         still find each other directly"
+                detail: "none; across the internet a sender is reachable only at the direct \
+                         addresses in its ticket, which needs a public address and no firewall or \
+                         a router that opens a port (UPnP, PCP or NAT-PMP), and two sides on one \
+                         network can still find each other directly"
                     .to_string(),
                 fix: Some(
                     "pass --relay URL to check one, or run a relay as a meeting point, so two \
