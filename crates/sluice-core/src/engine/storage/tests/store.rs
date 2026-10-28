@@ -3,7 +3,9 @@
 
 use std::time::Duration;
 
-use crate::engine::storage::{self, Collector, Store, data_path, name_count, open_store_after};
+use crate::engine::storage::{
+    self, Collector, Store, TempStore, data_path, name_count, open_store_after,
+};
 
 /// Only the two live stores collect, so a blob in a store that does not collect stays until that
 /// store is closed or removed. In a live store a segment's tag is dropped as soon as the segment is
@@ -269,4 +271,31 @@ async fn an_open_waits_for_a_close_that_is_still_running() {
     first.close().await.unwrap();
     second.close().await.unwrap();
     drop(held);
+}
+
+/// A store in a temporary folder whose command is cancelled closes before its folder is removed,
+/// and where the drop cannot wait the next command in this process does the two steps: no folder is
+/// left behind, with a database still open inside it.
+#[tokio::test]
+async fn a_cancelled_temp_store_leaves_no_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let temp = TempStore::open(dir.path(), Collector::Off).await.unwrap();
+    let path = temp.path().to_path_buf();
+    assert!(path.is_dir());
+    // A cancelled command drops the value where nothing can be awaited.
+    drop(temp);
+    // The next command in this process opens a store, which is where a store and a folder that were
+    // handed on are closed and then removed. This waits for those two steps, not for a time.
+    let other = Store::open(&dir.path().join("other"), Collector::Off)
+        .await
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while path.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "a cancelled store left its folder behind"
+        );
+        tokio::task::yield_now().await;
+    }
+    other.close().await.unwrap();
 }

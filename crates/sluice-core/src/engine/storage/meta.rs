@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{Store, Temp, temp_dir};
+use super::{Collector, Store, TempStore};
 use crate::{Error, Home};
 
 /// The store a receive reads the hash sequence and the manifest into. Both are needed before the
@@ -11,9 +11,8 @@ use crate::{Error, Home};
 /// Unix, so another local user could read the names and sizes of the manifest there. A kill leaves
 /// the folder behind for the sweep of the next command.
 pub struct MetaStore {
-    _dir: Temp,
-    /// The store inside the folder.
-    pub store: Store,
+    /// The store and the folder it lives in, which goes only after the store is closed.
+    store: TempStore,
 }
 
 impl MetaStore {
@@ -24,26 +23,27 @@ impl MetaStore {
 
     /// [`open`] in a folder the caller names, which must already be private.
     pub(super) async fn open_in(parent: &Path) -> Result<Self, Error> {
-        let dir = temp_dir(parent)?;
-        let store = match Store::open(&dir.path().join("store"), super::Collector::Off).await {
-            Ok(store) => store,
-            Err(e) => {
-                return Err(Error::Storage(format!(
-                    "cannot open a temporary store: {}",
-                    crate::plain(&e)
-                )));
-            }
-        };
-        Ok(Self { _dir: dir, store })
+        let store = TempStore::open(parent, Collector::Off).await.map_err(|e| {
+            Error::Storage(format!(
+                "cannot open a temporary store: {}",
+                crate::plain(&e)
+            ))
+        })?;
+        Ok(Self { store })
+    }
+
+    /// The store, for the fetches that fill it.
+    pub(crate) fn store(&self) -> &Store {
+        self.store.store()
     }
 
     /// The folder this store owns, so a test can see where it went.
     #[cfg(test)]
     pub(super) fn dir(&self) -> &Path {
-        self._dir.path()
+        self.store.path()
     }
 
-    /// Closes the store and removes the folder.
+    /// Closes the store and removes the folder, in that order.
     pub async fn close(self) -> Result<(), Error> {
         self.store.close().await
     }

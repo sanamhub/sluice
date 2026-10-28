@@ -128,7 +128,7 @@ pub(super) async fn read_manifest(
     events: &UnboundedSender<Event>,
 ) -> Result<Manifest, Error> {
     let meta = storage::MetaStore::open().await?;
-    let manifest = fetch_manifest(conn, ticket, &meta.store, options.limits, events).await;
+    let manifest = fetch_manifest(conn, ticket, meta.store(), options.limits, events).await;
     meta.close().await?;
     manifest
 }

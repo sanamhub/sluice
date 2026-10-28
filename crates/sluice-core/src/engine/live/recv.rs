@@ -57,12 +57,12 @@ fn live_ids(ticket: &Ticket) -> Result<([u8; 16], [u8; 32]), Error> {
     }
 }
 
-/// The socket, the store and the two private folders one live receive holds.
+/// The socket, the store in its folder, and the private folder the file is written in. They are
+/// declared in the order they have to go: the store is closed before its folder is removed.
 struct Opened {
     receiver: Receiver,
-    store: storage::Store,
+    store: storage::TempStore,
     file_tmp: storage::Temp,
-    store_tmp: storage::Temp,
 }
 
 /// Opens everything a live receive needs, refusing a target that is a folder or a link first.
@@ -85,19 +85,11 @@ async fn open(
             return Err(e);
         }
     };
-    let store_tmp = match storage::temp_dir(store_root) {
-        Ok(tmp) => tmp,
-        Err(e) => {
-            let _ = receiver.shutdown().await;
-            return Err(e);
-        }
-    };
-    match storage::Store::open(&store_tmp.path().join("store"), storage::Collector::On).await {
+    match storage::TempStore::open(store_root, storage::Collector::On).await {
         Ok(store) => Ok(Opened {
             receiver,
             store,
             file_tmp,
-            store_tmp,
         }),
         Err(e) => {
             let _ = receiver.shutdown().await;
@@ -119,8 +111,8 @@ async fn finish(
     started: Instant,
 ) -> Result<Received, Error> {
     let endpoint = opened.receiver.shutdown().await;
+    // Closes the store and then removes the folder it lives in.
     let closed = opened.store.close().await;
-    drop(opened.store_tmp);
     let bytes = outcome?;
     drop(opened.file_tmp);
     if endpoint.is_err() || closed.is_err() {
@@ -208,11 +200,11 @@ async fn exchange(
         .await
         .map_err(|e| storage::storage("create", &incoming, e))?;
     let mut hasher = blake3::Hasher::new();
-    let bounds = Bounds::new(options, opened.store_tmp.path());
+    let bounds = Bounds::new(options, opened.store.path());
     let outcome = records(
         &mut log,
         &mut recv,
-        &opened.store,
+        opened.store.store(),
         &blobs,
         &mut file,
         &mut hasher,
