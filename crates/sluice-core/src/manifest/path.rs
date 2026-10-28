@@ -4,7 +4,8 @@
 //! checked only the rules of the OS it runs on would accept a tree on Linux that it rejects on
 //! Windows, and the two would write different folders from one manifest.
 
-use unicode_normalization::is_nfc;
+use unicase::UniCase;
+use unicode_normalization::{UnicodeNormalization, is_nfc};
 
 use crate::Error;
 
@@ -241,7 +242,7 @@ fn component_violation(component: &str) -> Option<Violation<'_>> {
     }
     if RESERVED_PREFIXES
         .iter()
-        .any(|prefix| starts_with_ignore_ascii_case(component, prefix))
+        .any(|prefix| starts_with_reserved(component, prefix))
     {
         return broken(9, "is reserved for sluice's own store folders");
     }
@@ -253,9 +254,28 @@ fn component_violation(component: &str) -> Option<Violation<'_>> {
 /// the folder a later receive resumes from.
 pub const RESERVED_PREFIXES: [&str; 2] = [".sluice-partial-", ".sluice-tmp-"];
 
-/// Rule 9 ignores ASCII case, because Windows and macOS resolve a name regardless of it: a folder a
-/// receive keeps its store in is the same folder under any spelling of its name. The prefixes are
-/// ASCII, so a component that starts with another character cannot match however its bytes are cut.
+/// Rule 9 folds case and compatibility the way a file system may, because a folder a receive keeps
+/// its store in is one name whatever spelling of it the file system resolves: Windows and macOS
+/// resolve case, macOS also resolves the composed and decomposed forms, and APFS folds some letters
+/// beyond ASCII, such as `ſ` to `s`. The name is folded with Unicode case folding after NFKC, which
+/// covers the fullwidth and other compatibility spellings too.
+fn starts_with_reserved(name: &str, prefix: &str) -> bool {
+    if starts_with_ignore_ascii_case(name, prefix) {
+        return true;
+    }
+    // A name of only ASCII cannot fold to a prefix the exact comparison above did not already see,
+    // so the tables run for a name with a character outside ASCII and not for every component of a
+    // manifest.
+    if name.is_ascii() {
+        return false;
+    }
+    let folded: String = name.nfkc().collect::<String>();
+    UniCase::unicode(&folded)
+        .to_folded_case()
+        .starts_with(prefix)
+}
+
+/// The cheap check for a prefix that is already ASCII and usually matches that way.
 fn starts_with_ignore_ascii_case(name: &str, prefix: &str) -> bool {
     name.len() >= prefix.len()
         && name.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())

@@ -375,3 +375,25 @@ proptest! {
         }
     }
 }
+
+/// Rule 9 folds the way a file system may, not only ASCII case: APFS folds a long s to `s`, and a
+/// fullwidth letter or dot is the plain one after NFKC. Rejecting only the ASCII spellings would let
+/// a sender name a folder that a later receive would resume from.
+#[test]
+fn rule_9_folds_unicode_spellings_of_a_reserved_prefix() {
+    rejects(
+        9,
+        &[
+            ".ſluice-partial-x",
+            ".ſLUICE-TMP-X",
+            "．sluice-partial-x",
+            ".Ｓluice-TMP-x",
+            "tree/.ſluice-partial-x/b",
+        ],
+    );
+    accepts(&[
+        "ſluice-partials-x",
+        "é.sluice-partial-x",
+        "．sluice-partials-x",
+    ]);
+}
