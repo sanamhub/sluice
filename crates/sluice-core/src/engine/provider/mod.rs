@@ -143,7 +143,14 @@ impl Provider {
     /// Stops the router, and with it the blob protocol: shutting the router down is what closes
     /// the store, so the database is free for the next command that opens the same home.
     async fn close(&mut self) -> Result<(), Error> {
-        self.shutdown_router().await
+        let closed = self.shutdown_router().await;
+        // The store is closed with the router, and the folder is removed after it, on a blocking
+        // thread: a removal can wait for a file a scanner still holds, which is not work for an
+        // async thread.
+        if let Some(dir) = self._dir.take() {
+            dir.remove_now().await;
+        }
+        closed
     }
 
     async fn shutdown_router(&mut self) -> Result<(), Error> {

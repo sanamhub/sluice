@@ -42,7 +42,9 @@ impl TempStore {
     /// Closes the store and then removes the folder.
     pub async fn close(mut self) -> Result<(), Error> {
         let closed = self.store.close_in_place().await;
-        self.dir.take();
+        if let Some(dir) = self.dir.take() {
+            dir.remove_now().await;
+        }
         closed
     }
 

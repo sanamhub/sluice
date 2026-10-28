@@ -19,7 +19,7 @@ pub(super) use open::{GC_INTERVAL, open_store_after};
 #[cfg(test)]
 pub(crate) use registry::remember_as;
 pub use registry::{
-    clash as registry_clash, discard, find as find_record, forget as forget_record,
+    clash as registry_clash, discard_apart, find as find_record, forget as forget_record,
     remember as remember_record,
 };
 pub use repair::repair;
@@ -110,6 +110,45 @@ pub fn policy_path(doing: &str, path: &Path, source: io::Error) -> Error {
     Error::Policy(format!("cannot {doing} {}: {source}", path.display()))
 }
 
+/// A removal a test can hold at its start, keyed by folder, so the test can act while the removal
+/// is still to be tried. A test run shares the static with every other removal in the process, so
+/// only the armed folder stops, and only once.
+#[cfg(test)]
+pub(crate) mod parked {
+    use std::{
+        path::{Path, PathBuf},
+        sync::{Mutex, mpsc},
+    };
+
+    type Arms = (PathBuf, mpsc::Sender<()>, mpsc::Receiver<()>);
+
+    static ARMED: Mutex<Option<Arms>> = Mutex::new(None);
+
+    /// Holds the next removal of `path` until the returned sender is signalled, and reports on the
+    /// returned receiver when the removal has reached this point.
+    pub(crate) fn arm(path: &Path) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+        let (started, started_at) = mpsc::channel();
+        let (release, released_at) = mpsc::channel();
+        *ARMED.lock().unwrap() = Some((path.to_owned(), started, released_at));
+        (started_at, release)
+    }
+
+    /// Called at the start of every removal. Blocks only the removal of an armed folder.
+    pub(crate) fn wait(path: &Path) {
+        let armed = {
+            let mut slot = ARMED.lock().unwrap();
+            match &*slot {
+                Some((at, _, _)) if at == path => slot.take(),
+                _ => None,
+            }
+        };
+        if let Some((_, started, release)) = armed {
+            let _ = started.send(());
+            let _ = release.recv();
+        }
+    }
+}
+
 /// Removes a file or folder that this receive made, ignoring a failure: the transfer itself
 /// succeeded or failed for a reason worth reporting first.
 ///
@@ -119,6 +158,8 @@ pub fn policy_path(doing: &str, path: &Path, source: io::Error) -> Error {
 /// removes a temporary folder nobody holds; failing a send over it would hide the outcome that
 /// matters.
 pub fn remove_quietly(path: &Path) {
+    #[cfg(test)]
+    parked::wait(path);
     let mut last = match remove_once(path) {
         Ok(()) => return,
         Err(error) => error,

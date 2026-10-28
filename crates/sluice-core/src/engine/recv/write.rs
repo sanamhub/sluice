@@ -87,21 +87,30 @@ async fn tree(
         shared,
     };
     writer.files(manifest).await?;
-    if options.links {
-        link::write_all(manifest, options, resume)?;
-    }
-    for (target, mtime_ms, mode, made_here) in dirs.iter().rev() {
-        // A folder that was already there keeps the mode and time it had: a resume writes into it
-        // but does not take it over, and neither does a first run that met the user's own folder.
-        if !made_here {
-            continue;
+    drop(writer);
+    let outcome = async {
+        if options.links {
+            link::write_all(manifest, options, resume)?;
         }
-        file::set_mode_path(target, *mode)?;
-        if !options.no_times {
-            file::set_time_path(target, *mtime_ms, events)?;
+        for (target, mtime_ms, mode, made_here) in dirs.iter().rev() {
+            // A folder that was already there keeps the mode and time it had: a resume writes into
+            // it but does not take it over, and neither does a first run that met the user's own
+            // folder.
+            if !made_here {
+                continue;
+            }
+            file::set_mode_path(target, *mode)?;
+            if !options.no_times {
+                file::set_time_path(target, *mtime_ms, events)?;
+            }
         }
+        Ok(())
     }
-    Ok(())
+    .await;
+    // The write is over, so the folder goes before this returns. It is removed on a blocking
+    // thread, like every other folder a command made.
+    tmp.remove_now().await;
+    outcome
 }
 
 /// How many File entries name each blob root. One naming it can take the store's own file, because

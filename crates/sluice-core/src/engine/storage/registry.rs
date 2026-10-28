@@ -89,6 +89,13 @@ pub fn discard(path: &Path) {
     forget(path);
 }
 
+/// [`discard`] for an async caller. The removal waits for a file another process may still hold,
+/// and those waits belong on a blocking thread, not on the thread the caller runs on.
+pub async fn discard_apart(path: &Path) {
+    let path = path.to_owned();
+    let _ = tokio::task::spawn_blocking(move || discard(&path)).await;
+}
+
 /// The error for a `.sluice-partial-*` folder that no record of this home names.
 pub fn clash(path: &Path) -> Error {
     Error::Policy(format!(

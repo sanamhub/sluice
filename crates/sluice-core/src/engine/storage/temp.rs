@@ -42,6 +42,8 @@ pub struct Temp {
     _lock: File,
     /// Started only when the lock could not be taken, so the folder still looks in use.
     heartbeat: Option<Heartbeat>,
+    /// Set by an explicit removal, so the drop that follows is not a second attempt.
+    gone: bool,
 }
 
 /// A thread that keeps a temporary folder's time fresh. It stops when its `Temp` is dropped.
@@ -101,13 +103,53 @@ impl Temp {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Removes the folder on a blocking thread and waits for it to be gone. A removal can wait for
+    /// a file another process still holds; those waits belong on a thread that may block, and a
+    /// caller that promises the folder is gone when it returns waits for this.
+    pub(crate) async fn remove_now(mut self) {
+        self.heartbeat.take();
+        let path = self.path.clone();
+        let _ = tokio::task::spawn_blocking(move || remove_quietly(&path)).await;
+        self.gone = true;
+    }
+
+    /// Removes the folder on a blocking thread without waiting. A process that ends before the
+    /// removal does leaves the folder to the sweep of temporary folders.
+    pub(crate) fn remove_apart(mut self) {
+        self.heartbeat.take();
+        self.gone = true;
+        let path = self.path.clone();
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn_blocking(move || remove_quietly(&path));
+            }
+            Err(_) => remove_quietly(&path),
+        }
+    }
 }
 
 impl Drop for Temp {
     fn drop(&mut self) {
+        if self.gone {
+            return;
+        }
         // Stopped first, so a touch cannot recreate a name in a folder that is being removed.
         self.heartbeat.take();
-        remove_quietly(&self.path);
+        // A drop can run on an async thread, where the waits a held file needs would stop other
+        // work. One attempt is immediate and almost always enough; the waits go to a thread of
+        // their own, and a process that ends first leaves the folder to the sweep.
+        if tokio::runtime::Handle::try_current().is_err() {
+            remove_quietly(&self.path);
+            return;
+        }
+        if super::remove_once(&self.path).is_ok() {
+            return;
+        }
+        let path = std::mem::take(&mut self.path);
+        let _ = std::thread::Builder::new()
+            .name("sluice-temp-remove".to_string())
+            .spawn(move || remove_quietly(&path));
     }
 }
 
@@ -152,6 +194,7 @@ fn hold(path: PathBuf) -> Result<Temp, Error> {
         path,
         _lock: lock,
         heartbeat,
+        gone: false,
     })
 }
 

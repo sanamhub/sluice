@@ -1,5 +1,47 @@
 //! Removing what a command made: one attempt, then a bounded wait for a file that is still held.
 
+/// An open of another store does not wait for a temporary folder whose removal is still being
+/// tried. The removal is parked on an event; the open finishes while it is parked, so the wait is
+/// the store's close and not the folder's.
+#[tokio::test]
+async fn an_open_is_not_held_by_a_removal_that_is_retrying() {
+    use std::time::Duration;
+
+    use crate::engine::storage::{Collector, Store, TempStore};
+
+    let dir = tempfile::tempdir().unwrap();
+    let temp = TempStore::open(dir.path(), Collector::Off).await.unwrap();
+    let folder = temp.path().to_path_buf();
+    let (started, release) = super::super::parked::arm(&folder);
+    // Dropping the pair hands the store and its folder to the next command, the way a cancelled
+    // command does; the next open closes the store and then tries to remove the folder.
+    drop(temp);
+    tokio::task::spawn_blocking(move || started.recv().unwrap())
+        .await
+        .unwrap();
+
+    let other = dir.path().join("other");
+    std::fs::create_dir(&other).unwrap();
+    // The removal is parked, so the folder is not gone. The open has to finish anyway: the lock it
+    // waits on was released when the store closed. The timeout only keeps a regression from
+    // hanging the test.
+    let store = tokio::time::timeout(Duration::from_secs(5), Store::open(&other, Collector::Off))
+        .await
+        .expect("an open waited for a removal that was still being tried")
+        .unwrap();
+    store.close().await.unwrap();
+
+    release.send(()).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while folder.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the temporary folder stayed"
+        );
+        tokio::task::yield_now().await;
+    }
+}
+
 /// A file that a scanner or a store's own close holds for a moment is released while the removal
 /// keeps trying, and the folder still goes without the command seeing a failure.
 #[cfg(windows)]

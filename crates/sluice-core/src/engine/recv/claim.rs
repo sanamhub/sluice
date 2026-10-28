@@ -41,7 +41,7 @@ pub(super) async fn claim_store(
     let before = if resume {
         checked
     } else {
-        start_store(partial, owner, &created, options)?;
+        start_store(partial, owner, &created, options).await?;
         storage::identify(partial)?
     };
     // A store that a cancelled command left sharing an inode with a file in the output is given its
@@ -54,7 +54,7 @@ pub(super) async fn claim_store(
         Ok(store) => store,
         Err(e) => {
             // A store this receive could not open is not one a later one can resume.
-            storage::discard(partial);
+            storage::discard_apart(partial).await;
             return Err(Error::Storage(format!(
                 "cannot open the partial store: {}",
                 crate::plain(&e)
@@ -104,16 +104,23 @@ fn resumable_store(
 /// Makes this receive's store: the folder, the home's record of it, and the marker that ties the
 /// two together. A marker that cannot be written leaves no store and no record, so the next run
 /// starts from an empty folder rather than from one whose marker says something else.
-fn start_store(
+async fn start_store(
     partial: &std::path::Path,
     owner: &str,
     created: &std::collections::BTreeSet<String>,
     options: &ReceiveOptions,
 ) -> Result<(), Error> {
-    storage::claim(partial)?;
+    // Claiming removes a folder left under the store's name, which can wait for a held file; the
+    // waits are taken on a blocking thread so a receive does not hold its runtime while they run.
+    let dir = partial.to_owned();
+    tokio::task::spawn_blocking(move || storage::claim(&dir))
+        .await
+        .map_err(|error| {
+            Error::Storage(format!("cannot claim {}: {error}", partial.display()))
+        })??;
     let id = storage::remember_record(partial, owner)?;
     if let Err(e) = storage::remember(partial, owner, created, options.force, &id) {
-        storage::discard(partial);
+        storage::discard_apart(partial).await;
         return Err(e);
     }
     Ok(())

@@ -139,17 +139,21 @@ fn unclosed() -> std::sync::MutexGuard<'static, Vec<Unclosed>> {
 /// Where a runtime can still run the close, it is done at once, in the order that matters: the
 /// database is closed and the folder is removed after it. The close takes the same lock an open
 /// takes, so an open that starts while this close is running waits for it instead of finding the
-/// parked list already empty and the database still held. Where a runtime cannot run the close, the
-/// pair waits for the next command that opens a store, which does the same two steps in the same
+/// parked list already empty and the database still held. The folder goes after the lock is
+/// released and on a blocking thread, because a removal can wait for a file that another process
+/// still holds and an open has no reason to wait for that. Where a runtime cannot run the close,
+/// the pair waits for the next command that opens a store, which does the same steps in the same
 /// order. A process that ends before either leaves a folder the sweep of temporary folders removes.
 pub(crate) fn hand_on(store: Option<FsStore>, dir: Option<super::Temp>) {
     match (store, dir) {
         (Some(store), Some(dir)) => {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 handle.spawn(async move {
-                    let _settled = SETTLING.lock().await;
-                    let _ = store.shutdown().await;
-                    drop(dir);
+                    {
+                        let _settled = SETTLING.lock().await;
+                        let _ = store.shutdown().await;
+                    }
+                    dir.remove_apart();
                 });
             } else {
                 unclosed().push(Unclosed {
@@ -163,15 +167,22 @@ pub(crate) fn hand_on(store: Option<FsStore>, dir: Option<super::Temp>) {
 }
 
 /// Closes every store an interrupted command left open, and removes the folder of one that was
-/// living in a temporary one.
+/// living in a temporary one. The folders go after the lock and each on its own blocking thread:
+/// an open that follows waits for the closes it can see, not for a folder a held file keeps.
 async fn settle() {
-    let _settled = SETTLING.lock().await;
-    let handing = std::mem::take(&mut *unclosed());
-    for Unclosed { store, dir } in handing {
-        if let Some(store) = store {
-            let _ = store.shutdown().await;
+    let mut dirs = Vec::new();
+    {
+        let _settled = SETTLING.lock().await;
+        let handing = std::mem::take(&mut *unclosed());
+        for Unclosed { store, dir } in handing {
+            if let Some(store) = store {
+                let _ = store.shutdown().await;
+            }
+            dirs.extend(dir);
         }
-        drop(dir);
+    }
+    for dir in dirs {
+        dir.remove_apart();
     }
 }
 

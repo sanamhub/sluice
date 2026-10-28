@@ -93,6 +93,7 @@ async fn open(
         }),
         Err(e) => {
             let _ = receiver.shutdown().await;
+            file_tmp.remove_now().await;
             Err(Error::Storage(format!(
                 "cannot open a temporary store: {}",
                 crate::plain(&e)
@@ -113,8 +114,8 @@ async fn finish(
     let endpoint = opened.receiver.shutdown().await;
     // Closes the store and then removes the folder it lives in.
     let closed = opened.store.close().await;
+    opened.file_tmp.remove_now().await;
     let bytes = outcome?;
-    drop(opened.file_tmp);
     if endpoint.is_err() || closed.is_err() {
         return Err(Error::Storage(
             "the file is in place but the transfer did not close cleanly".to_string(),

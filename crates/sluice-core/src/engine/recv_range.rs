@@ -59,7 +59,7 @@ pub async fn receive_range(
     let endpoint = receiver.shutdown().await;
     let closed = store.close().await;
     // Removed before the result is returned, so no path out of this function leaves the folder.
-    drop(tmp);
+    tmp.remove_now().await;
     let bytes = result?;
     if endpoint.is_err() || closed.is_err() {
         return Err(Error::Storage(
