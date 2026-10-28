@@ -5,6 +5,43 @@ use iroh_blobs::Hash;
 use super::{copy_and_hash, repair};
 use crate::engine::storage::identify;
 
+/// A place a test can stop a sweep once both of its handles are open.
+#[cfg(windows)]
+pub(super) mod hold {
+    use std::{
+        path::{Path, PathBuf},
+        sync::{Mutex, mpsc},
+    };
+
+    type Arms = (PathBuf, mpsc::Sender<()>, mpsc::Receiver<()>);
+
+    static ARMED: Mutex<Option<Arms>> = Mutex::new(None);
+
+    /// Stops the next sweep of `partial` once the store folder and `data` are held open, and
+    /// returns the ends a test waits on, then releases.
+    pub(super) fn arm(partial: &Path) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
+        let (reached, reached_at) = mpsc::channel();
+        let (release, released_at) = mpsc::channel();
+        *ARMED.lock().unwrap() = Some((partial.to_owned(), reached, released_at));
+        (reached_at, release)
+    }
+
+    /// Called by a sweep once its handles are open. Does nothing unless a test armed this folder.
+    pub(crate) fn wait(partial: &Path) {
+        let armed = {
+            let mut slot = ARMED.lock().unwrap();
+            match &*slot {
+                Some((at, _, _)) if at == partial => slot.take(),
+                _ => None,
+            }
+        };
+        if let Some((_, reached, release)) = armed {
+            let _ = reached.send(());
+            let _ = release.recv();
+        }
+    }
+}
+
 /// A reader whose second read gives other bytes, the way a source file edited through its other
 /// name does while it is copied. Only a copy that hashes the bytes it wrote can see that.
 struct Changing {
@@ -93,6 +130,58 @@ async fn a_link_where_the_data_folder_belongs_is_refused() {
         !outside.join(format!("{hash}.store")).exists(),
         "the link was followed"
     );
+}
+
+/// The store folder and `data` cannot be renamed away while the sweep runs. Both are held open
+/// without delete sharing, so a junction put in place of either between the check and the sweep
+/// fails instead of moving the files this repair deletes and renames.
+#[cfg(windows)]
+#[tokio::test]
+async fn the_folders_a_repair_holds_cannot_be_renamed_while_it_sweeps() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join("store");
+    let data = store.join("data");
+    fs::create_dir_all(&data).unwrap();
+    let body = b"the store's bytes";
+    let hash = Hash::new(body);
+    let source = data.join(format!("{hash}.data"));
+    fs::write(&source, body).unwrap();
+    fs::hard_link(&source, dir.path().join("output")).unwrap();
+    let identity = identify(&store).unwrap();
+
+    let (reached, release) = hold::arm(&store);
+    let at = store.clone();
+    let sweeping = tokio::spawn(async move { repair(&at, identity).await });
+    // The sweep is stopped with both handles open: the store folder and `data`.
+    tokio::task::spawn_blocking(move || reached.recv().unwrap())
+        .await
+        .unwrap();
+
+    let moved_store = dir.path().join("store-moved");
+    let error = fs::rename(&store, &moved_store).unwrap_err();
+    assert!(
+        matches!(error.raw_os_error(), Some(5 | 32)),
+        "the store folder was renamed: {error}"
+    );
+    let moved_data = dir.path().join("data-moved");
+    let error = fs::rename(&data, &moved_data).unwrap_err();
+    assert!(
+        matches!(error.raw_os_error(), Some(5 | 32)),
+        "data was renamed: {error}"
+    );
+    assert!(!moved_store.exists() && !moved_data.exists());
+
+    release.send(()).unwrap();
+    sweeping.await.unwrap().unwrap();
+
+    assert_eq!(fs::read(&source).unwrap(), body);
+    let names = super::name_count(&source, &fs::metadata(&source).unwrap()).unwrap();
+    assert_eq!(names, 1, "the repair did not give the store its own bytes");
+
+    // The same two renames now succeed, so the refusals above were the handles and not a folder
+    // that cannot be moved at all.
+    fs::rename(&data, &moved_data).unwrap();
+    fs::rename(&store, &moved_store).unwrap();
 }
 
 /// A link planted at the copy's name is taken away and never written through, and the repair still
