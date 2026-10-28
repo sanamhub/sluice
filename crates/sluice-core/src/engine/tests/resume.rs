@@ -255,50 +255,111 @@ async fn a_resume_writes_only_into_the_names_the_first_run_made() {
     outgoing.provider.shutdown().await.unwrap();
 }
 
-/// A store kept for a resume does not collect: nothing in this process sweeps it, and the run that
-/// continues it opens it as it was. A store that collected would lose the blobs the failed run
-/// fetched at its next sweep, which is the whole reason the resume store is opened without one.
+/// A store kept for a resume does not collect, and this shows it by watching the bytes across sweeps
+/// that are known to have run rather than by waiting for one. A second store opened with the
+/// collector on holds one blob after another whose tag is dropped; each one that is gone is a sweep
+/// that happened, and a store that collected would have freed the resume store's bytes at one of
+/// them. The run that continues the store then finds the blobs it needs.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_kept_store_keeps_its_blobs_across_a_sweep() {
     let dir = tempfile::tempdir().unwrap();
-    let body = vec![6u8; 900 * 1024];
+    // Distinct bytes, so the blob is one this store had to fetch rather than one it made up.
+    let mut body = vec![0u8; 4 << 20];
+    for (at, byte) in body.iter_mut().enumerate() {
+        *byte = (at % 251) as u8;
+    }
     let (outgoing, text) = prepared(&dir, &body).await;
     let out = dir.path().join("out");
-    let mut limited = options(&out);
-    limited.write_limit = Some(256 * 1024);
+    let mut slow = options(&out);
+    slow.rate = Some(crate::engine::Rate::new(256 * 1024).unwrap());
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let err = super::receive(&text, &limited, &tx).await.unwrap_err();
-    assert!(matches!(err, Error::Storage(_)), "{err}");
-    assert!(partial_exists(&out), "the failed run removed its store");
+    let first = {
+        let text = text.clone();
+        let tx = tx.clone();
+        tokio::spawn(async move { super::receive(&text, &slow, &tx).await })
+    };
+    let database = wait_for_open_store(&out).await;
+    let store = database.parent().unwrap().to_path_buf();
+    // The store holds what the first run fetched, and this waits for the fetch to have written it.
+    let held = wait_for_bytes(&store).await;
+    // The cancelled run drops its store where nothing can be awaited, so its tags are gone with it:
+    // only the folder holds the bytes now, which is the state a sweep would take them from.
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
 
-    // A store that collects sweeps every hundred milliseconds in a unit test.
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    let mut held = 0u64;
-    for entry in fs::read_dir(&out).unwrap().flatten() {
-        if entry
-            .file_name()
-            .to_string_lossy()
-            .starts_with(".sluice-partial-")
-        {
-            for file in fs::read_dir(entry.path().join("data"))
-                .into_iter()
-                .flatten()
-                .flatten()
-            {
-                held += file.metadata().map(|meta| meta.len()).unwrap_or(0);
-            }
-        }
+    // Ten sweeps of a control store, each awaited as the event it is. If the resume store collected,
+    // one of them would have freed its bytes, and the check after every one would see it.
+    let control = crate::engine::storage::open_store_after(
+        &dir.path().join("control-store"),
+        Duration::from_millis(20),
+    )
+    .await
+    .unwrap();
+    for _ in 0..10 {
+        let tag = control
+            .blobs()
+            .add_slice(&vec![3u8; 128 * 1024])
+            .temp_tag()
+            .await
+            .unwrap();
+        let hash = tag.hash();
+        drop(tag);
+        wait_until_gone(&control, hash).await;
+        let now = bytes_in(&store);
+        assert!(
+            now >= held,
+            "a sweep took {} of the {held} bytes the resume store kept",
+            held.saturating_sub(now)
+        );
     }
-    assert!(
-        held >= body.len() as u64,
-        "the kept store held {held} bytes of {}",
-        body.len()
-    );
+    control.shutdown().await.unwrap();
 
     let received = super::receive(&text, &options(&out), &tx).await.unwrap();
     assert_eq!(received.bytes, body.len() as u64);
     assert_eq!(fs::read(out.join("source.bin")).unwrap(), body);
     outgoing.provider.shutdown().await.unwrap();
+}
+
+/// How many bytes the data files of the store at `store` hold.
+fn bytes_in(store: &Path) -> u64 {
+    fs::read_dir(store.join("data"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| entry.metadata().ok())
+        .map(|meta| meta.len())
+        .sum()
+}
+
+/// Waits until the store at `store` holds at least a megabyte, and returns what it held then.
+async fn wait_for_bytes(store: &Path) -> u64 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        let bytes = bytes_in(store);
+        if bytes >= 1 << 20 {
+            return bytes;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the receive never wrote bytes into its store"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// Waits until the collector of `store` has freed `hash`, which is a sweep that happened.
+async fn wait_until_gone(store: &FsStore, hash: iroh_blobs::Hash) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    loop {
+        if !store.blobs().has(hash).await.unwrap() {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the control store's collector never swept"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
 }
 
 /// Waits until a receive has opened the store beside `out`, and returns its database path. The
