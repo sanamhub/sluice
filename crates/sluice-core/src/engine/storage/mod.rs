@@ -191,15 +191,20 @@ fn remove_once(path: &Path) -> io::Result<()> {
 }
 
 /// Whether a removal failed for a reason that a moment can clear: a file another process still
-/// holds, or a folder whose last entry went away between the listing and the removal.
+/// holds, or a folder whose last entry went away between the listing and the removal. The Unix
+/// codes are named through `rustix` because they differ between the Unixes: `ENOTEMPTY` is 39 on
+/// Linux and 66 on macOS.
 fn retryable(error: &io::Error) -> bool {
-    match error.raw_os_error() {
-        #[cfg(windows)]
-        Some(5 | 32 | 33 | 145) => true,
-        #[cfg(unix)]
-        Some(16 | 39) => true,
-        _ => error.kind() == io::ErrorKind::WouldBlock,
+    #[cfg(windows)]
+    if matches!(error.raw_os_error(), Some(5 | 32 | 33 | 145)) {
+        return true;
     }
+    #[cfg(unix)]
+    if let Some(code) = error.raw_os_error() {
+        return code == rustix::io::Errno::BUSY.raw_os_error()
+            || code == rustix::io::Errno::NOTEMPTY.raw_os_error();
+    }
+    error.kind() == io::ErrorKind::WouldBlock
 }
 
 #[cfg(unix)]

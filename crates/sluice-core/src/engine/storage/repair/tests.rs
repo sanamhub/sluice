@@ -75,6 +75,19 @@ fn a_copy_is_judged_by_the_bytes_it_wrote() {
     assert_eq!(written, b"onetwo");
 }
 
+/// The other answer of the same check: a source that gives the blob's bytes gives a copy that is
+/// judged to be the blob, and the copy holds exactly them. A `copy_and_hash` that always said the
+/// copy changed would pass the test above and fail this one.
+#[test]
+fn a_copy_of_the_blob_is_judged_to_be_the_blob() {
+    let source = b"the store's bytes";
+    let root = Hash::new(source);
+    let mut written = Vec::new();
+    let copied = copy_and_hash(std::io::Cursor::new(source), &mut written, root).unwrap();
+    assert!(copied, "a copy of the blob was not judged to be it");
+    assert_eq!(written, source);
+}
+
 /// A store file with a second name is copied and the copy takes its place, so the store stops
 /// sharing its bytes with the output and keeps them.
 #[cfg(unix)]
@@ -100,6 +113,35 @@ async fn a_shared_data_file_is_given_its_own_bytes() {
         1,
         "the store still shares its bytes"
     );
+    assert!(!data.join(format!("{hash}.store")).exists());
+}
+
+/// A fifo where a data file's name belongs is skipped before it is opened for reading: opening a
+/// fifo waits for a writer, and a repair must not stop for one. The fifo is not the store's bytes,
+/// so it is left where it is.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_fifo_where_a_data_file_belongs_is_left_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join("store");
+    let data = store.join("data");
+    fs::create_dir_all(&data).unwrap();
+    let hash = Hash::new(b"fifo");
+    let fifo = data.join(format!("{hash}.data"));
+    let made = std::process::Command::new("mkfifo").arg(&fifo).status();
+    if !made.is_ok_and(|status| status.success()) {
+        eprintln!("SKIPPED: this system has no mkfifo");
+        return;
+    }
+
+    let repaired = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        repair(&store, identify(&store).unwrap()),
+    )
+    .await
+    .expect("the repair waited on a fifo");
+    repaired.unwrap();
+    assert!(fifo.exists(), "the fifo was removed");
     assert!(!data.join(format!("{hash}.store")).exists());
 }
 

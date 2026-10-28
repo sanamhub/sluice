@@ -99,7 +99,10 @@ fn only_a_held_name_is_tried_again() {
 #[cfg(unix)]
 #[test]
 fn only_a_busy_name_is_tried_again() {
-    for code in [16, 39] {
+    for code in [
+        rustix::io::Errno::BUSY.raw_os_error(),
+        rustix::io::Errno::NOTEMPTY.raw_os_error(),
+    ] {
         assert!(
             super::super::retryable(&std::io::Error::from_raw_os_error(code)),
             "{code}"

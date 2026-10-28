@@ -96,9 +96,10 @@ impl Dir {
 }
 
 /// The size of `name` when it is a regular file with more than one name, and `None` otherwise.
+/// Asked of the name without opening it: opening a fifo for reading waits for a writer, so a fifo
+/// planted under a data file's name would stop the sweep before it knew what the name held.
 fn shared_size(data: &OwnedFd, name: &OsStr) -> Option<u64> {
-    let file = openat(data, name, OFlags::empty()).ok()?;
-    let stat = rustix::fs::fstat(&file).ok()?;
+    let stat = rustix::fs::statat(data, name, AtFlags::SYMLINK_NOFOLLOW).ok()?;
     if !FileType::from_raw_mode(stat.st_mode).is_file() {
         return None;
     }
@@ -122,9 +123,17 @@ fn give_back(data: &OwnedFd, partial: &Path, name: &OsStr, hash: Hash, size: u64
         return;
     };
     let copy = OsString::from(format!("{stem}.store"));
-    let Ok(source) = openat(data, name, OFlags::empty()) else {
+    // The name was a regular file when the folder was listed; a name swapped for a fifo since then
+    // is not the blob. `NONBLOCK` means the open cannot wait for a writer even if it is one.
+    let Ok(source) = openat(data, name, OFlags::NONBLOCK) else {
         return;
     };
+    let regular = rustix::fs::fstat(&source)
+        .map(|stat| FileType::from_raw_mode(stat.st_mode).is_file())
+        .unwrap_or(false);
+    if !regular {
+        return;
+    }
     let Ok(target) = create_copy(data, &copy) else {
         return;
     };
