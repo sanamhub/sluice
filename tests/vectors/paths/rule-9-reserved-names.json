@@ -38,6 +38,8 @@
     { "path": ".\ufff0sluice-partial-x", "valid": false, "rule": 9 },
     { "path": ".ｓluice-partial-x", "valid": false, "rule": 9 },
     { "path": "a\ufff0b.txt", "valid": true },
-    { "path": ".　sluice-partial-x", "valid": true }
+    { "path": ".　sluice-partial-x", "valid": true },
+    { "path": ".\u180esluice-partial-x", "valid": false, "rule": 9 },
+    { "path": "a\u180eb.txt", "valid": true }
   ]
 }

@@ -9,6 +9,10 @@ use unicode_normalization::{UnicodeNormalization, is_nfc};
 
 use crate::Error;
 
+mod ignorable;
+
+use ignorable::is_ignorable;
+
 /// The longest path, in UTF-8 bytes (rule 1).
 pub(super) const MAX_PATH_BYTES: usize = 4096;
 /// The longest component, in UTF-8 bytes (rule 5). It is the NTFS and ext4 limit.
@@ -303,37 +307,6 @@ pub(crate) fn fold_key(name: &str) -> String {
     folded.nfkc().collect()
 }
 
-/// The Unicode default-ignorable code points, which are the `Default_Ignorable_Code_Point` property
-/// of Unicode 18.0.0: a name may carry one and a file system may compare it as though it were not
-/// there, which HFS+ does and another volume may. The bidirectional controls in the set are already
-/// refused by rule 6; skipping them here costs nothing and keeps one list.
-fn is_ignorable(c: char) -> bool {
-    matches!(
-        c,
-        '\u{ad}'
-            | '\u{34f}'
-            | '\u{61c}'
-            | '\u{115f}'
-            | '\u{1160}'
-            | '\u{17b4}'
-            | '\u{17b5}'
-            | '\u{180b}'..='\u{180d}'
-            | '\u{180f}'
-            | '\u{200b}'..='\u{200f}'
-            | '\u{202a}'..='\u{202e}'
-            | '\u{2060}'..='\u{206f}'
-            | '\u{3164}'
-            | '\u{fe00}'..='\u{fe0f}'
-            | '\u{feff}'
-            | '\u{ffa0}'
-            | '\u{fff0}'..='\u{fff8}'
-            | '\u{1bca0}'..='\u{1bca3}'
-            | '\u{1d173}'..='\u{1d17a}'
-            | '\u{e0000}'..='\u{e00ff}'
-            | '\u{e0100}'..='\u{e01ef}'
-    )
-}
-
 /// The cheap check for a prefix that is already ASCII and usually matches that way.
 fn starts_with_ignore_ascii_case(name: &str, prefix: &str) -> bool {
     name.len() >= prefix.len()
@@ -401,6 +374,8 @@ fn is_reserved_device_name(component: &str) -> bool {
     })
 }
 
+#[cfg(test)]
+mod ignorable_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

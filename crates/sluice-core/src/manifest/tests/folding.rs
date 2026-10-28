@@ -28,48 +28,23 @@ fn the_dotless_i_is_read_as_i() {
 }
 
 /// The code points a name may not show are read away, because a file system may compare a name as
-/// though they were not there. U+FFF0 to U+FFF8 are in the set, and U+180E and the unassigned code
-/// points after U+E01EF are not.
+/// though they were not there. The whole set is in the generated table's own test; these are one
+/// from each corner of it, including U+180E and the tag range.
 #[test]
 fn a_default_ignorable_code_point_is_read_away() {
-    for name in ["a\u{200d}b", "a\u{feff}b", "a\u{ad}b", "a\u{fff0}b"] {
+    for name in [
+        "a\u{200d}b",
+        "a\u{feff}b",
+        "a\u{ad}b",
+        "a\u{fff0}b",
+        "a\u{180e}b",
+        "a\u{e01f0}b",
+    ] {
         assert_eq!(key(name), key("ab"), "{name:?}");
     }
     // Not every code point that looks invisible is ignorable: U+00A0 is a space, and the key keeps
     // it, so a name that carries one is not the name without it.
     assert_ne!(key("a\u{a0}b"), key("ab"));
-}
-
-/// The key is the `Default_Ignorable_Code_Point` set of Unicode 18.0.0, walked in full. A code
-/// point that a file system drops and the key keeps would make two names one on that volume and two
-/// here, and the receiver would write one over the other.
-#[test]
-fn every_default_ignorable_code_point_is_read_away() {
-    let mut set = vec![
-        0xad, 0x34f, 0x61c, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x3164, 0xfeff, 0xffa0, 0x180f,
-    ];
-    for range in [
-        0x180b..=0x180d,
-        0x200b..=0x200f,
-        0x202a..=0x202e,
-        0x2060..=0x206f,
-        0xfe00..=0xfe0f,
-        0xfff0..=0xfff8,
-        0x1bca0..=0x1bca3,
-        0x1d173..=0x1d17a,
-        0xe0000..=0xe00ff,
-        0xe0100..=0xe01ef,
-    ] {
-        set.extend(range);
-    }
-    assert_eq!(set.len(), 573, "the set is not the one Unicode 18 names");
-    for code in set {
-        let name = char::from_u32(code).expect("a code point");
-        assert_eq!(key(&format!("a{name}b")), key("ab"), "U+{code:04X}");
-    }
-    // The code points on either side of the last ranges are not ignorable.
-    assert_ne!(key("a\u{180e}b"), key("ab"));
-    assert_ne!(key("a\u{e0fff}b"), key("ab"));
 }
 
 #[test]

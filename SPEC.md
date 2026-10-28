@@ -556,7 +556,7 @@ stranger, and file names stay out of logs.
 answered by one key, and a decoder MUST use this one and no other. The key of a name is:
 
 1. every code point with the `Default_Ignorable_Code_Point` property of Unicode 18.0.0 dropped, such
-   as U+200B, U+200D, U+FEFF and U+FFF0 to U+FFF8
+   as U+180E, U+200B, U+FEFF and U+E0000 to U+E0FFF
 2. U+0131 read as `i`, because NTFS upcases the dotless `ı` to `I`
 3. NFKC applied, because macOS composes and decomposes a name and a fullwidth letter is its plain
    one to it

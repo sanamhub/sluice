@@ -82,6 +82,7 @@
     { "path": "a\u2065b", "valid": true },
     { "path": "a\u206ab", "valid": true },
     { "path": "a\u2029b", "valid": true },
-    { "path": "a\u202fb", "valid": true }
+    { "path": "a\u202fb", "valid": true },
+    { "path": "a\u180eb", "valid": true }
   ]
 }
