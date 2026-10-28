@@ -49,11 +49,7 @@ pub(super) struct Bounds {
 impl Bounds {
     pub(super) fn new(options: &ReceiveOptions, store: &Path) -> Self {
         Self {
-            output: options
-                .out
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf(),
+            output: parent_of(&options.out),
             store: store.to_path_buf(),
             max_size: options.max_size,
             free: options.free_bytes.map(|bytes| (bytes, bytes)),
@@ -68,14 +64,17 @@ impl Bounds {
         free: (u64, u64),
     ) -> Self {
         Self {
-            output: output
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf(),
+            output: parent_of(output),
             store: store.to_path_buf(),
             max_size,
             free: Some(free),
         }
+    }
+
+    /// The folder the output file is written in, so a test can see where a bare name is measured.
+    #[cfg(test)]
+    pub(super) fn output(&self) -> &Path {
+        &self.output
     }
 
     /// Refuses a segment that would pass the size or leave too little room on either volume. The
@@ -114,9 +113,19 @@ impl Bounds {
     }
 }
 
+/// The folder that holds `path`, for a question about a volume. `Path::parent` answers `Some("")`
+/// for a bare file name, and an empty path is not a folder any volume call can be asked about, so a
+/// file written into the working folder is measured against the working folder itself.
+pub(super) fn parent_of(path: &Path) -> PathBuf {
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => PathBuf::from("."),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Bounds, FREE_FLOOR};
+    use super::{Bounds, FREE_FLOOR, parent_of};
     use std::path::Path;
 
     /// A live receive keeps every segment in the store until it is written out, and the store is
@@ -144,5 +153,29 @@ mod tests {
             .check(0, 16 * 1024)
             .unwrap_err();
         assert!(err.error.to_string().contains("out"), "{}", err.error);
+    }
+
+    /// `-o f` names a file in the working folder. Its parent is the empty path, which no volume call
+    /// can be asked about, so the folder the free space is read from has to be `.`.
+    #[test]
+    fn a_bare_output_name_is_measured_against_the_working_folder() {
+        assert_eq!(parent_of(Path::new("f")), Path::new("."));
+        assert_eq!(parent_of(Path::new("out/f")), Path::new("out"));
+        let options = crate::engine::ReceiveOptions {
+            out: Path::new("f").to_path_buf(),
+            force: false,
+            no_times: false,
+            links: false,
+            allow_hidden: false,
+            limits: crate::manifest::Limits::default(),
+            free_bytes: None,
+            max_size: None,
+            congestion: crate::engine::Congestion::Cubic,
+            rate: None,
+            write_limit: None,
+            max_network_failures: crate::queue::MAX_NETWORK_FAILURES,
+        };
+        let bounds = Bounds::new(&options, Path::new("home/tmp/store"));
+        assert_eq!(bounds.output(), Path::new("."));
     }
 }

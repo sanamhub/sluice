@@ -109,3 +109,44 @@ fn a_range_on_a_live_ticket_is_refused() {
     assert_eq!(result.status.code(), Some(6));
     assert!(String::from_utf8_lossy(&result.stderr).contains("not on a live one"));
 }
+
+/// `-o f` names a file in the folder the command runs in. The free-space floor is read from that
+/// folder, so the empty path a bare name's parent looks like must not reach the volume call.
+#[test]
+fn a_live_receive_writes_a_file_named_in_the_working_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let source = dir.path().join("grow.bin");
+    std::fs::write(&source, vec![1u8; 600 * 1024]).unwrap();
+    let (mut sender, ticket) = start_in(
+        dir.path(),
+        &home,
+        &[
+            "grow.bin",
+            "--live",
+            "--close-after",
+            "1",
+            "--expires",
+            "1h",
+        ],
+    );
+    let child = Command::new(EXE)
+        .current_dir(dir.path())
+        .env("SLUICE_HOME", &home)
+        .args(["recv", &ticket, "--out", "f"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start recv");
+    let result = child.wait_with_output().unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(
+        std::fs::read(dir.path().join("f")).unwrap(),
+        std::fs::read(&source).unwrap()
+    );
+    wait_for_sender(&mut sender);
+}

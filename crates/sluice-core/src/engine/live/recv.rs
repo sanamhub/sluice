@@ -72,13 +72,13 @@ async fn open(
     store_root: &Path,
 ) -> Result<Opened, Error> {
     check_target(&options.out, options.force)?;
-    let parent = options.out.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent).map_err(|e| storage::policy_path("create", parent, e))?;
+    let parent = limits::parent_of(&options.out);
+    fs::create_dir_all(&parent).map_err(|e| storage::policy_path("create", &parent, e))?;
     let relay = ticket.relay_url().map_or(RelayModeChoice::Disabled, |url| {
         RelayModeChoice::Url(url.to_string())
     });
     let receiver = Receiver::open(relay, options.congestion).await?;
-    let file_tmp = match storage::temp_dir(parent) {
+    let file_tmp = match storage::temp_dir(&parent) {
         Ok(tmp) => tmp,
         Err(e) => {
             let _ = receiver.shutdown().await;
