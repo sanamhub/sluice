@@ -161,7 +161,9 @@ broken one.
 
 Three active transfers by default, the rest queued in order. Per-transfer priority (`--priority
 high|normal|low`). Global and per-peer bandwidth caps, shared fairly. Pause, resume and cancel
-survive a daemon restart, since resume is content-addressed.
+survive a daemon restart, since resume is content-addressed. A size is written as `50M` (1024²) or
+`50MB` (1000²); `--limit-rate`, `--max-size` and `--range` share one parser, so a unit means the same
+in every flag.
 
 ## Storage
 

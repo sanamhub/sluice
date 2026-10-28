@@ -30,6 +30,9 @@ The transport, NAT traversal, and relay behaviour come from `iroh` and are out o
 - Paths in manifests are UTF-8, NFC-normalized, forward-slash separated, relative, and never begin
   with `/` or contain a `..` component, and pass the receiver rules in section 8.
 - Timestamps are UTC milliseconds since the Unix epoch, as `u64`.
+- Sizes and rates written on a command line are bytes unless a unit follows: `K`, `M`, `G` and `T`
+  alone or with `iB` are powers of 1024, the same letters with `B` are powers of 1000, and a bare
+  number is bytes. `--limit-rate`, `--max-size` and `--range` read sizes with the same parser.
 - "MUST", "SHOULD", "MAY" carry their RFC 2119 meaning.
 
 ---

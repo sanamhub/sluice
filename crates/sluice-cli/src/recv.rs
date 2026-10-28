@@ -52,10 +52,10 @@ pub struct RecvArgs {
     /// Where several tickets start among themselves: high, normal (default) or low
     #[arg(long, value_enum, default_value_t = PriorityArg::Normal, value_name = "LEVEL")]
     pub priority: PriorityArg,
-    /// Cap the bytes this command fetches per second, shared by its transfers, such as 50M
+    /// Cap the bytes this command fetches per second, shared by its transfers, such as 50M; a\n    /// `KB` is 1000 bytes and a `KiB` 1024
     #[arg(long, value_name = "RATE")]
     pub limit_rate: Option<String>,
-    /// Stop a live receive once the file would pass this size, such as 4G; what arrived stays
+    /// Stop a live receive once the file would pass this size, such as 4G or 4GiB; what arrived\n    /// stays. `KB` is a power of 1000 and `KiB` of 1024
     #[arg(long, value_name = "SIZE")]
     pub max_size: Option<String>,
 }

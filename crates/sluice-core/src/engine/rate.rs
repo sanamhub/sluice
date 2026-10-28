@@ -32,37 +32,12 @@ impl Rate {
         }))
     }
 
-    /// The cap in `text`, such as `50M` or `2MiB`. `K`, `M` and `G` are 1024, and a following `iB`
-    /// or `B` is accepted, as is no suffix for bytes.
+    /// The cap in `text`, such as `50M`, `50MB` or `2MiB`, read by the one size parser every size
+    /// flag uses: `K`, `M`, `G` and `T` alone or with `iB` are powers of 1024, the same letters
+    /// with `B` are powers of 1000, and a bare number is bytes.
     pub fn parse(text: &str) -> Result<std::sync::Arc<Self>, Error> {
-        let text = text.trim();
-        let (number, unit) = text.split_at(
-            text.find(|c: char| !c.is_ascii_digit())
-                .unwrap_or(text.len()),
-        );
-        let number: u64 = number.parse().map_err(|_| {
-            Error::Policy(format!(
-                "{text} is not a rate; write bytes such as 500K or 50M"
-            ))
-        })?;
-        let unit = unit.trim().to_ascii_lowercase();
-        let factor = match unit.as_str() {
-            "" | "b" | "ib" => 1,
-            "k" | "kb" | "kib" => 1024,
-            "m" | "mb" | "mib" => 1024 * 1024,
-            "g" | "gb" | "gib" => 1024 * 1024 * 1024,
-            _ => {
-                return Err(Error::Policy(format!(
-                    "{text} is not a rate; write bytes such as 500K or 50M"
-                )));
-            }
-        };
-        let bytes = number
-            .checked_mul(factor)
-            .ok_or_else(|| Error::Policy(format!("{text} is larger than this machine can hold")))?;
-        Self::new(bytes)
+        Self::new(crate::range::ByteSize::parse(text)?.bytes())
     }
-
     /// Waits until `bytes` more fit under the cap.
     pub async fn acquire(&self, bytes: u64) {
         if bytes == 0 {
@@ -123,6 +98,12 @@ mod tests {
         assert_eq!(
             Rate::parse("2MiB").unwrap().bytes_per_second(),
             2.0 * 1024.0 * 1024.0
+        );
+        // The one parser every size flag uses: with `B` the letter is a power of 1000.
+        assert_eq!(Rate::parse("2MB").unwrap().bytes_per_second(), 2_000_000.0);
+        assert_eq!(
+            Rate::parse("1GiB").unwrap().bytes_per_second(),
+            1_073_741_824.0
         );
         assert_eq!(Rate::parse("1234").unwrap().bytes_per_second(), 1234.0);
         assert!(Rate::parse("fast").is_err());
