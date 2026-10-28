@@ -197,7 +197,7 @@ async fn exchange(
         .await
         .map_err(|e| storage::storage("create", &incoming, e))?;
     let mut hasher = blake3::Hasher::new();
-    let bounds = Bounds::new(options);
+    let bounds = Bounds::new(options, opened.store_tmp.path());
     let outcome = records(
         &mut log,
         &mut recv,
@@ -266,28 +266,49 @@ impl From<Error> for Stop {
 const FREE_FLOOR: u64 = 1 << 30;
 
 /// The two limits a live stream stops at, checked before each segment is fetched: the free room the
-/// next segment must leave, and the size the file may not pass.
+/// next segment must leave on every volume it fills, and the size the file may not pass.
 struct Bounds {
-    volume: PathBuf,
+    /// The volume the output file is written on.
+    output: PathBuf,
+    /// The volume the temporary store of the segments is written on, which is the home's `tmp` and
+    /// may be a different disk.
+    store: PathBuf,
     max_size: Option<u64>,
-    /// Free bytes the caller gives instead of asking the volume, for a test that has no full disk.
-    free_bytes: Option<u64>,
+    /// Free bytes for the output and for the store, given instead of asking the volumes, for a test
+    /// that has no full disk.
+    free: Option<(u64, u64)>,
 }
 
 impl Bounds {
-    fn new(options: &ReceiveOptions) -> Self {
+    fn new(options: &ReceiveOptions, store: &Path) -> Self {
         Self {
-            volume: options
+            output: options
                 .out
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf(),
+            store: store.to_path_buf(),
             max_size: options.max_size,
-            free_bytes: options.free_bytes,
+            free: options.free_bytes.map(|bytes| (bytes, bytes)),
         }
     }
 
-    /// Refuses a segment that would pass the size or leave too little room.
+    #[cfg(test)]
+    fn with_free(output: &Path, store: &Path, max_size: Option<u64>, free: (u64, u64)) -> Self {
+        Self {
+            output: output
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf(),
+            store: store.to_path_buf(),
+            max_size,
+            free: Some(free),
+        }
+    }
+
+    /// Refuses a segment that would pass the size or leave too little room on either volume. The
+    /// store holds every segment until it is written out, so a stream can fill the disk the home is
+    /// on while the output's disk still has room.
     fn check(&self, total: u64, len: u32) -> Result<(), Stop> {
         let len = u64::from(len);
         if let Some(max) = self.max_size
@@ -298,16 +319,24 @@ impl Bounds {
                  the start of it"
             ))));
         }
-        let available = match self.free_bytes {
-            Some(bytes) => bytes,
-            None => storage::available_bytes(&self.volume).map_err(Stop::from)?,
-        };
-        if available.saturating_sub(len) < FREE_FLOOR {
-            return Err(Stop::keep(Error::Storage(format!(
-                "{} would have less than {FREE_FLOOR} bytes free after the next segment; the \
-                 {total} bytes that arrived are the start of the file",
-                self.volume.display()
-            ))));
+        for (index, volume) in [&self.output, &self.store].into_iter().enumerate() {
+            let available = match self.free {
+                Some((output, store)) => {
+                    if index == 0 {
+                        output
+                    } else {
+                        store
+                    }
+                }
+                None => storage::available_bytes(volume).map_err(Stop::from)?,
+            };
+            if available.saturating_sub(len) < FREE_FLOOR {
+                return Err(Stop::keep(Error::Storage(format!(
+                    "{} would have less than {FREE_FLOOR} bytes free after the next segment; the \
+                     {total} bytes that arrived are the start of the file",
+                    volume.display()
+                ))));
+            }
         }
         Ok(())
     }
@@ -424,5 +453,38 @@ fn close(
         other => Err(Error::Verify(format!(
             "the live close was refused: {other:?}"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Bounds, FREE_FLOOR};
+    use std::path::Path;
+
+    /// A live receive keeps every segment in the store until it is written out, and the store is
+    /// under the home's `tmp`, which may be another volume from the output. The floor belongs to
+    /// both: a stream that fills the home's disk cannot be read back either.
+    #[test]
+    fn the_store_volume_must_keep_the_floor_too() {
+        let out = Path::new("out/file.bin");
+        let store = Path::new("home/tmp/store");
+        let fixed = |free| Bounds::with_free(out, store, None, free);
+        let err = fixed((FREE_FLOOR * 4, FREE_FLOOR / 2))
+            .check(0, 16 * 1024)
+            .unwrap_err();
+        assert!(
+            err.error.to_string().contains("home/tmp/store"),
+            "{}",
+            err.error
+        );
+        assert!(
+            fixed((FREE_FLOOR * 2, FREE_FLOOR * 2))
+                .check(0, 16 * 1024)
+                .is_ok()
+        );
+        let err = fixed((FREE_FLOOR, FREE_FLOOR * 2))
+            .check(0, 16 * 1024)
+            .unwrap_err();
+        assert!(err.error.to_string().contains("out"), "{}", err.error);
     }
 }
