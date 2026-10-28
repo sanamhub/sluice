@@ -270,6 +270,31 @@ pub(super) fn create_private_folder(root: &Path, name: &str) -> Result<PathBuf, 
     Ok(folder)
 }
 
+/// Refuses `folder` unless it is a real folder of this user: not a link, and not another user's.
+/// Read before anything is read out of a folder that holds a store, because a link there would lead
+/// somewhere else and another user's folder can be changed after anything sluice writes in it.
+pub(crate) fn check_folder(folder: &Path) -> Result<(), Error> {
+    let meta = fs::symlink_metadata(folder).map_err(|e| storage("read", folder, e))?;
+    if !meta.is_dir() || meta.file_type().is_symlink() {
+        return Err(Error::Policy(format!(
+            "{} is a link or is not a folder, so it cannot hold a partial store; remove it",
+            folder.display()
+        )));
+    }
+    if !owned_by_this_user(folder).map_err(|e| storage("read the owner of", folder, e))? {
+        return Err(private::owned_by_other(folder));
+    }
+    Ok(())
+}
+
+/// Makes a folder this process just made private: mode 0700 on Unix, the private access list on
+/// Windows. The owner and the kind are checked through the same handle the access is set through,
+/// so the folder made private is the folder that was checked.
+pub(crate) fn restrict_folder(folder: &Path) -> Result<(), Error> {
+    check_folder(folder)?;
+    private::keep_home_private(folder)
+}
+
 /// Whether this user made the entry at `path`: on Unix its uid is the effective uid or root, and on
 /// Windows its owner is this user, `Administrators` or `SYSTEM`. The owner is read from a handle
 /// opened without following a link and without waiting, so it is the owner of the object the name

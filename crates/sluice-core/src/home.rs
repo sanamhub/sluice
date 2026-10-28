@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 
 pub(crate) use atomic::write_atomic_secret;
 pub use identity::Identity;
+pub(crate) use setup::{check_folder, restrict_folder};
 
 use crate::Error;
 

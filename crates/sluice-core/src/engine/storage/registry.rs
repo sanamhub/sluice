@@ -27,7 +27,7 @@ pub struct Record {
 pub fn remember(path: &Path, root: &str) -> Result<String, Error> {
     let dir = Home::partial_records()?;
     let id = random_id()?;
-    let text = format!("path {}\nroot {root}\n", absolute(path).display());
+    let text = format!("path {}\nroot {root}\n", canonical(path).display());
     fs::write(dir.join(&id), text).map_err(|e| storage("write a record in", &dir, e))?;
     Ok(id)
 }
@@ -40,7 +40,7 @@ pub fn find(path: &Path, root: &str) -> Result<Option<Record>, Error> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(storage("read", &dir, e)),
     };
-    let wanted = absolute(path);
+    let wanted = canonical(path);
     for entry in entries.flatten() {
         let Some(id) = entry.file_name().to_str().map(str::to_string) else {
             continue;
@@ -66,7 +66,7 @@ pub fn forget(path: &Path) {
     let Ok(dir) = Home::partial_records() else {
         return;
     };
-    let wanted = absolute(path);
+    let wanted = canonical(path);
     let Ok(entries) = fs::read_dir(&dir) else {
         return;
     };
@@ -98,6 +98,15 @@ pub fn clash(path: &Path) -> Error {
     ))
 }
 
+/// Records `path` under a given id, which a test uses to make the id a marker carries and the root
+/// a record names belong to two different transfers.
+#[cfg(test)]
+pub(crate) fn remember_as(path: &Path, root: &str, id: &str) -> Result<(), Error> {
+    let dir = Home::partial_records()?;
+    let text = format!("path {}\nroot {root}\n", canonical(path).display());
+    fs::write(dir.join(id), text).map_err(|e| storage("write a record in", &dir, e))
+}
+
 fn parse(id: &str, text: &str) -> Option<Record> {
     let mut path = None;
     let mut root = None;
@@ -113,6 +122,22 @@ fn parse(id: &str, text: &str) -> Option<Record> {
         path: path.filter(|path| path.is_absolute())?,
         root: root?,
     })
+}
+
+/// The form of `path` a record holds and is compared against. The folder that holds the store is
+/// resolved once, so the same store is recognized however its path was spelled, whether with a case
+/// Windows folds, a `\\?\` prefix, a `..` or a link in the output folder. Only the parent is
+/// resolved: the store itself may not exist yet, and a name that was swapped under the same path is
+/// caught by the marker's id rather than by this text.
+pub(super) fn canonical(path: &Path) -> PathBuf {
+    let Some(name) = path.file_name() else {
+        return absolute(path);
+    };
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    match fs::canonicalize(parent) {
+        Ok(real) => real.join(name),
+        Err(_) => absolute(path),
+    }
 }
 
 fn absolute(path: &Path) -> PathBuf {

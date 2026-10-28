@@ -51,6 +51,27 @@ pub(super) fn open_entry(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
+/// The volume number and file index of the entry at `path`, read from a handle opened without
+/// following a link. Both numbers come from the file system, not from the path, so a folder renamed
+/// away and another put under the same name are told apart. The stable `Metadata` accessors for
+/// them are still unstable, which is why this goes through the call.
+pub(crate) fn folder_id(path: &Path) -> io::Result<(u64, u64)> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+
+    let entry = open_entry(path)?;
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: the handle is open for the whole call and `info` is a valid place for the structure
+    // the call fills.
+    let ok = unsafe { GetFileInformationByHandle(entry.as_raw_handle(), &mut info) };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
+    Ok((u64::from(info.dwVolumeSerialNumber), index))
+}
+
 /// The owner of the object `file` is a handle to, as SID text.
 pub(super) fn owner_sid_of(file: &File) -> io::Result<String> {
     let (mut owner, mut descriptor) = (ptr::null_mut(), ptr::null_mut());

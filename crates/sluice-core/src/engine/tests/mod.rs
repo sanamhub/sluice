@@ -76,7 +76,17 @@ async fn prepared(dir: &TempDir, body: &[u8]) -> (super::Outgoing, String) {
 }
 
 async fn prepared_paths(dir: &TempDir, paths: &[std::path::PathBuf]) -> (super::Outgoing, String) {
-    let home = Home::open(&dir.path().join("home")).unwrap();
+    prepared_paths_in(dir, "home", paths).await
+}
+
+/// [`prepared_paths`] with the name of the home under `dir`, so a test can have two senders at once:
+/// one store is open to one process at a time.
+async fn prepared_paths_in(
+    dir: &TempDir,
+    home: &str,
+    paths: &[std::path::PathBuf],
+) -> (super::Outgoing, String) {
+    let home = Home::open(&dir.path().join(home)).unwrap();
     let outgoing = super::prepare_send_paths(
         &home,
         paths,

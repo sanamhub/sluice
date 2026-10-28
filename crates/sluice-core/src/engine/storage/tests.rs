@@ -13,8 +13,9 @@ fn a_hundred_gigabytes_needs_about_a_hundred_and_not_two_hundred() {
 
 #[test]
 fn the_partial_store_is_hidden_beside_the_output() {
-    let path = partial_dir(Path::new("/out"), "0123456789abcdef0123");
-    assert_eq!(path, Path::new("/out/.sluice-partial-0123456789abcdef"));
+    let root = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let path = partial_dir(Path::new("/out"), root);
+    assert_eq!(path, Path::new(&format!("/out/.sluice-partial-{root}")));
 }
 
 #[test]
@@ -125,7 +126,7 @@ fn a_marker_says_which_names_were_created_and_whether_the_run_was_forced() {
 /// refuses an existing target exactly as the rename would.
 #[test]
 fn the_link_fallback_installs_and_still_refuses_a_taken_name() {
-    use super::link_no_replace;
+    use super::install::link_no_replace;
     let dir = tempfile::tempdir().unwrap();
     let incoming = dir.path().join("incoming");
     let target = dir.path().join("target");
@@ -169,10 +170,136 @@ fn a_record_names_one_store_and_one_root() {
     let id = super::remember_record(&store, "root-one").unwrap();
     let found = super::find_record(&store, "root-one").unwrap().unwrap();
     assert_eq!(found.id, id);
-    assert_eq!(found.path, std::path::absolute(&store).unwrap());
+    assert!(
+        found.path.ends_with(".sluice-partial-0123456789abcdef"),
+        "{}",
+        found.path.display()
+    );
     assert_eq!(found.root, "root-one");
     assert!(super::find_record(&store, "root-two").unwrap().is_none());
     super::forget_record(&store);
     assert!(super::find_record(&store, "root-one").unwrap().is_none());
     assert!(store.is_dir(), "a forgotten record removed the store");
+}
+
+/// The store's name is the whole root, so two transfers that agree in the first 16 characters of
+/// their root cannot be handed one folder.
+#[test]
+fn the_store_name_carries_the_whole_root() {
+    let out = Path::new("out");
+    let one = format!("{}1", "a".repeat(63));
+    let two = format!("{}2", "a".repeat(63));
+    assert_ne!(partial_dir(out, &one), partial_dir(out, &two));
+    let name = partial_dir(out, &one)
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(name.ends_with(&one), "{name}");
+}
+
+/// The path a record holds is the folder the store really lands in, so the same store is found
+/// however the output was spelled: through `..` here, and through a link on Unix.
+#[test]
+fn a_record_path_is_resolved_through_the_folder_that_holds_it() {
+    use super::registry::canonical;
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let plain = out.join(".sluice-partial-x");
+    let odd = out.join("..").join("out").join(".sluice-partial-x");
+    assert_eq!(canonical(&plain), canonical(&odd));
+
+    #[cfg(unix)]
+    {
+        let link = dir.path().join("link-to-out");
+        std::os::unix::fs::symlink(&out, &link).unwrap();
+        assert_eq!(
+            canonical(&link.join(".sluice-partial-x")),
+            canonical(&plain)
+        );
+    }
+}
+
+/// A store that is a link would put this receive's bytes wherever the link leads, and its marker
+/// is not read at all: the folder is refused before anything in it is opened.
+#[cfg(unix)]
+#[test]
+fn a_store_that_is_a_link_is_never_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let elsewhere = dir.path().join("elsewhere");
+    std::fs::create_dir(&elsewhere).unwrap();
+    std::fs::write(elsewhere.join(super::MARKER), "root\nid x\n").unwrap();
+    let store = dir.path().join(".sluice-partial-x");
+    std::os::unix::fs::symlink(&elsewhere, &store).unwrap();
+    let err = super::recorded(&store).unwrap_err();
+    assert!(matches!(err, crate::Error::Policy(_)), "{err}");
+    assert!(store.is_symlink(), "the link was removed");
+}
+
+/// A store folder is made for this user alone: another user who can write in the output cannot read
+/// the marker through it, and cannot copy a store in.
+#[test]
+fn the_store_folder_is_private() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join(".sluice-partial-x");
+    super::claim(&store).unwrap();
+    assert!(store.is_dir());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&store).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+}
+
+/// A store is made with one `create_dir`, not a recursive create. A path whose parent is missing is
+/// refused, so a folder another process left somewhere above the store is never taken for its
+/// parent and no folder is created where the caller did not prepare one.
+#[test]
+fn the_store_folder_is_made_with_one_create() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join("missing").join(".sluice-partial-x");
+    let err = super::claim(&store).unwrap_err();
+    assert!(matches!(err, crate::Error::Storage(_)), "{err}");
+    assert!(!dir.path().join("missing").exists(), "the parent was made");
+}
+
+/// A store is never claimed over a folder that is already there: when the folder cannot be emptied,
+/// the name is taken by the time the store would be made, and what holds it is neither removed nor
+/// written into.
+#[test]
+fn the_store_folder_is_never_claimed_over_a_folder_it_cannot_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let blocked = dir.path().join(".sluice-partial-y");
+    std::fs::create_dir_all(blocked.join("keep")).unwrap();
+    // A name inside that this process cannot remove, so emptying the folder fails.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if rustix::process::geteuid().as_raw() == 0 {
+            eprintln!("SKIPPED: root can empty any folder");
+            return;
+        }
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o500)).unwrap();
+    }
+    // A file held open for reading only cannot be deleted through its name, so the folder stays.
+    #[cfg(windows)]
+    let _held = {
+        use std::os::windows::fs::OpenOptionsExt;
+        let file = blocked.join("keep").join("held");
+        std::fs::write(&file, b"held").unwrap();
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x1)
+            .open(&file)
+            .unwrap()
+    };
+    #[cfg(not(any(unix, windows)))]
+    return;
+    let err = super::claim(&blocked).unwrap_err();
+    assert!(matches!(err, crate::Error::Policy(_)), "{err}");
+    assert!(blocked.exists(), "a folder it did not make was changed");
 }

@@ -27,10 +27,14 @@ pub(super) async fn claim_store(
     let exists = std::fs::symlink_metadata(partial).is_ok();
     let found = match (record, exists) {
         // The record, and only the record, says this folder is a store. Its marker then has to be
-        // the one that record was written with.
+        // the one that record was written with, and it has to be this ticket's store: a marker
+        // under the right id for another root is another transfer's, which this receive must
+        // neither remove nor write into.
         (Some(record), true) => {
             let marker = storage::recorded(partial)?;
-            if marker.as_ref().and_then(|found| found.id.as_deref()) != Some(record.id.as_str()) {
+            let mine = marker.as_ref().and_then(|found| found.id.as_deref());
+            let right_root = marker.as_ref().is_some_and(|found| found.root == owner);
+            if mine != Some(record.id.as_str()) || !right_root {
                 return Err(storage::registry_clash(partial));
             }
             marker
@@ -43,7 +47,7 @@ pub(super) async fn claim_store(
         (None, true) => return Err(storage::registry_clash(partial)),
         (None, false) => None,
     };
-    let resume = found.as_ref().is_some_and(|found| found.root == owner);
+    let resume = found.is_some();
     // A run that was allowed to replace what was in the output was a deliberate choice, so the run
     // that continues it has to make the same one.
     if resume && !options.force && found.as_ref().is_some_and(|found| found.force) {
@@ -58,15 +62,21 @@ pub(super) async fn claim_store(
     };
     let (plan, created) = plan::check(manifest, ticket, options, resume, &ours)?;
     if !resume {
-        storage::claim(partial)?;
-        let id = storage::remember_record(partial, owner)?;
-        if let Err(e) = storage::remember(partial, owner, &created, options.force, &id) {
-            storage::discard(partial);
-            return Err(e);
-        }
+        start_store(partial, owner, &created, options)?;
     }
+    // The folder that was checked and the folder that is opened have to be one folder: another
+    // user who can write in the output can rename a store away and put one there under the same
+    // name between the two calls.
+    let before = storage::identify(partial)?;
     match FsStore::load(partial).await {
-        Ok(store) => Ok((store, resume, plan)),
+        Ok(store) if storage::identify(partial)? == before => Ok((store, resume, plan)),
+        Ok(store) => {
+            let _ = store.shutdown().await;
+            Err(Error::Policy(format!(
+                "the partial store folder {} changed while it was opened; look at what is there",
+                partial.display()
+            )))
+        }
         Err(e) => {
             // A store this receive could not open is not one a later one can resume.
             storage::discard(partial);
@@ -76,6 +86,24 @@ pub(super) async fn claim_store(
             )))
         }
     }
+}
+
+/// Makes this receive's store: the folder, the home's record of it, and the marker that ties the
+/// two together. A marker that cannot be written leaves no store and no record, so the next run
+/// starts from an empty folder rather than from one whose marker says something else.
+fn start_store(
+    partial: &std::path::Path,
+    owner: &str,
+    created: &std::collections::BTreeSet<String>,
+    options: &ReceiveOptions,
+) -> Result<(), Error> {
+    storage::claim(partial)?;
+    let id = storage::remember_record(partial, owner)?;
+    if let Err(e) = storage::remember(partial, owner, created, options.force, &id) {
+        storage::discard(partial);
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Reads the hash sequence and the manifest into a store of their own, which is removed when this
