@@ -47,19 +47,14 @@ pub(super) async fn write(
         &mut shared,
     )
     .await;
-    match &result {
-        // The caller removes the store once every file is in place, so the links were what made one
-        // large file cost one copy rather than two.
-        Ok(()) => shared.settled(),
-        Err(error) if super::keeps_store(error) => {
-            if let Err(e) = shared.release() {
-                shared.settled();
-                return Err(e);
-            }
-            shared.settled();
-        }
-        // A refusal or a bad byte discards the store, so it is not worth copying its bytes back.
-        Err(_) => shared.settled(),
+    // The caller removes the store once every file is in place, and a refusal or a bad byte
+    // discards it, so only a failure that keeps the store needs its bytes back. This is the one
+    // place the copy happens: a cancelled command leaves the work to the store's next claim, which
+    // is where it can be done without blocking the runtime.
+    if let Err(error) = &result
+        && super::keeps_store(error)
+    {
+        shared.release().await?;
     }
     result
 }
@@ -266,7 +261,7 @@ impl Writer<'_> {
             .unwrap_or_default()
             == 1;
         if once {
-            let source = shared::data_path(self.partial, &hash);
+            let source = storage::data_path(self.partial, &hash);
             // A hard link costs no space and leaves the store able to read the bytes it names.
             if fs::hard_link(&source, incoming).is_ok() {
                 return Ok(true);

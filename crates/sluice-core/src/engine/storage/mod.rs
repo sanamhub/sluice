@@ -5,6 +5,7 @@ mod install;
 mod meta;
 mod open;
 mod registry;
+mod repair;
 mod store;
 mod temp;
 
@@ -19,6 +20,8 @@ pub use registry::{
     clash as registry_clash, discard, find as find_record, forget as forget_record,
     remember as remember_record,
 };
+pub use repair::repair;
+pub(crate) use repair::{data_path, name_count};
 #[cfg(test)]
 pub use store::MARKER;
 pub use store::{FolderId, Owner, claim, identify, partial_dir, recorded, remember};

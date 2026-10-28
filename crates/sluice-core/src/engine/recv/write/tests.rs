@@ -219,12 +219,14 @@ async fn one_file_takes_a_link_and_leaves_the_store_readable() {
     store.shutdown().await.unwrap();
 }
 
-/// A transfer dropped in the middle, as an interrupt does, never returns an error the caller can act
-/// on, so the store has to be given its own bytes on the drop itself. Otherwise a file the user edits
-/// afterwards changes the blob the next run resumes from.
+/// A transfer dropped in the middle, as an interrupt does, never returns an error the caller can
+/// act on. Dropping it does not copy: a blob can be gigabytes, and a drop happens where nothing may
+/// block or wait. The store is left sharing its bytes with the output, and its next claim is what
+/// gives it a name of its own.
 #[tokio::test]
-async fn a_cancelled_write_gives_the_store_its_own_bytes_back() {
-    use super::shared::{Shared, data_path, same_file};
+async fn a_cancelled_write_leaves_the_copy_to_the_next_claim() {
+    use super::shared::{Shared, same_file};
+    use crate::engine::storage::{data_path, repair};
     let dir = tempfile::tempdir().unwrap();
     let partial = dir.path().join("store");
     let store = FsStore::load(&partial).await.unwrap();
@@ -240,11 +242,28 @@ async fn a_cancelled_write_gives_the_store_its_own_bytes_back() {
     drop(shared);
     let source = data_path(&partial, &hash);
     assert!(
+        same_file(&source, &target),
+        "the drop copied the store's bytes"
+    );
+    assert!(
+        !source.with_extension("store").exists(),
+        "the drop wrote a copy"
+    );
+
+    // The claim happens before the store is opened, so nothing holds the data file it replaces.
+    store.shutdown().await.unwrap();
+    repair(&partial).await;
+    assert!(
         !same_file(&source, &target),
-        "a cancelled write left the store sharing bytes with the output"
+        "the claim left the store sharing bytes with the output"
     );
     assert_eq!(fs::read(&source).unwrap(), body);
-    store.shutdown().await.unwrap();
+    let names =
+        crate::engine::storage::name_count(&source, &fs::metadata(&source).unwrap()).unwrap();
+    assert_eq!(
+        names, 1,
+        "the store's own name is shared with something else"
+    );
 }
 
 /// A blob whose data file an output file shares is hashed before it is exported. A run killed before
@@ -253,7 +272,7 @@ async fn a_cancelled_write_gives_the_store_its_own_bytes_back() {
 /// They must never be written out as the blob and reported as a success.
 #[tokio::test]
 async fn a_store_copy_linked_to_an_edited_file_is_not_exported() {
-    use super::shared::data_path;
+    use crate::engine::storage::data_path;
     let dir = tempfile::tempdir().unwrap();
     let partial = dir.path().join("store");
     let store = FsStore::load(&partial).await.unwrap();

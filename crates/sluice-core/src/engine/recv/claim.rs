@@ -44,6 +44,10 @@ pub(super) async fn claim_store(
         start_store(partial, owner, &created, options)?;
         storage::identify(partial)?
     };
+    // A store that a cancelled command left sharing an inode with a file in the output is given its
+    // own bytes before it is opened: the file is the user's now, and a resumed store must not read
+    // bytes that can be changed through it.
+    storage::repair(partial).await;
     let mut store = match storage::Store::open(partial, storage::Collector::Off).await {
         Ok(store) => store,
         Err(e) => {
