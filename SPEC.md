@@ -564,12 +564,14 @@ answered by one key, and a decoder MUST use this one and no other. The key of a 
    `CaseFolding.txt` and no other: `ß` becomes `ss`, `ﬃ` becomes `ffi`, and the Turkic entries of
    status `T` and the simple entries of status `S` are not used. Windows and macOS resolve a name
    regardless of case, and APFS folds some letters beyond ASCII
-4. NFKC applied again, because a fold can leave a composition undone: `ΐ` folds to three code
-   points, while `Ϊ́` folds to two that compose to the same letter, and a volume that compares
-   canonically equivalent names reads the two spellings as one
-5. U+0131 read as `i`, because NTFS upcases the dotless `ı` to `I`. This is the last step because
-   NFKC writes U+1D6A4, the mathematical italic dotless i, as U+0131: read any earlier, the two
-   spellings would key differently and a name could reach a reserved prefix with one of them
+4. U+0131 read as `i`, because NTFS upcases the dotless `ı` to `I`, and because step 2 writes
+   U+1D6A4, the mathematical italic dotless i, as U+0131. Read before NFKC, the two spellings would
+   key differently and a name could reach a reserved prefix with one of them
+5. NFKC applied again, for two reasons. A fold can leave a composition undone: `ΐ` folds to three
+   code points, while `Ϊ́` folds to two that compose to the same letter. The two spellings are equal
+   once case is folded, not canonically equivalent, and a volume that resolves case reads them as
+   one name. The read in step 4 can also put an `i` beside a combining mark, and composing it here
+   is what makes the key of a key the key
 
 Nothing follows the fifth step. The tables are those of Unicode 18.0.0. A later version adds pairs,
 and a receiver on newer tables would refuse a manifest that a sender on older ones built, so a
