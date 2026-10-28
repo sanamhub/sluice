@@ -132,6 +132,11 @@ pub(super) async fn bind_with_completion(
     bind_inner(secret, relay, congestion, port, Some(complete)).await
 }
 
+/// How long a closed connection's id stays the answer for its address, so a request event the
+/// provider reports after the close is still credited to the connection that made it. An event
+/// queued before a close is processed within milliseconds; a quarter of a second is a wide margin,
+/// and the address cannot be reused meanwhile because the close task holds the connection.
+const LINGER: Duration = Duration::from_millis(250);
 /// The completion watch of a provider: where a connection that closed with the code is reported,
 /// and the ids every accepted connection is given.
 #[derive(Clone, Debug)]
@@ -156,17 +161,27 @@ impl EndpointHooks for CompletionSignal {
             // Before this connection can send a request, so the policy never has to guess its id
             // from iroh's reusable address.
             let own = self.0.ids.assign(stable);
-            let closed = conn.weak_handle();
+            // `stable_id` is the address of an allocation that is handed to a later connection once
+            // this one is freed, and the policy resolves a request event by that address. Holding a
+            // handle of this connection keeps the address out of another connection's hands until
+            // the id is forgotten, so an event still queued for this one cannot be credited to the
+            // connection that follows it.
+            let held = conn.clone();
             let complete = self.0.clone();
             n0_future::task::spawn(async move {
-                if let Some(closed) = closed.closed().await
-                    && let iroh::endpoint::ConnectionError::ApplicationClosed(application) =
-                        closed.reason
+                let closed = held.closed().await;
+                if let iroh::endpoint::ConnectionError::ApplicationClosed(application) = closed
                     && application.error_code.into_inner() == u64::from(super::COMPLETE_CLOSE)
                 {
                     let _ = complete.sender.send(own);
                 }
+                // The provider reports a close from its own task while the request it read just
+                // before the close is reported by another, so the close can be processed first.
+                // The id stays the address's answer for a moment, which gives that event the
+                // connection that made it instead of the one that inherits the address.
+                tokio::time::sleep(LINGER).await;
                 complete.ids.closed(stable, own);
+                drop(held);
             });
         }
         AfterHandshakeOutcome::accept()
