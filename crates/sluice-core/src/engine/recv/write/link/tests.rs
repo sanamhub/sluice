@@ -191,11 +191,12 @@ fn a_target_in_another_spelling_of_the_key_is_refused() {
     );
 }
 
-/// Two spellings that are canonically equivalent are one name, because the key ends with NFKC. A
-/// fold can leave a composition undone, so without that step `Ϊ́` and `ΐ` would be two names here
-/// and one on a volume that composes them, and the target would step above the output.
+/// Two spellings that are equal once case is folded are one name, because the key ends with NFKC.
+/// They are not canonically equivalent: a fold can leave a composition undone, so without that step
+/// `Ϊ́` and `ΐ` would be two names here and one on a volume that resolves case, and the target would
+/// step above the output.
 #[test]
-fn a_canonically_equivalent_spelling_of_a_links_name_is_refused() {
+fn a_spelling_equal_once_case_is_folded_to_a_links_name_is_refused() {
     let accent = links(&[("sub/\u{3aa}\u{301}", ".."), ("sub/z", "\u{390}/../../x")]);
     let err = resolve(&accent, empty_out(), "sub/z", "\u{390}/../../x").unwrap_err();
     assert!(matches!(err, crate::Error::Policy(_)), "{err}");

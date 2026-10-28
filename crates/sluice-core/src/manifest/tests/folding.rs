@@ -20,9 +20,10 @@ fn full_folding_joins_a_string_with_its_expansion() {
 }
 
 /// The dotless i is read as `i`, because NTFS upcases it to `I`: a volume there finds one name where
-/// the text has two, so the key joins them and the receiver refuses the pair. The read is the last
-/// step, after the second NFKC: NFKC writes U+1D6A4 as U+0131, and a read before it would leave that
-/// spelling dotless and let rule 9 miss the store folder it names.
+/// the text has two, so the key joins them and the receiver refuses the pair. The read comes after
+/// the fold: NFKC writes U+1D6A4 as U+0131, so a read before NFKC would leave that spelling dotless
+/// and let rule 9 miss the store folder it names. The NFKC after the read composes an `i` put beside
+/// a mark, which is what keeps the key of a key the key.
 #[test]
 fn the_dotless_i_is_read_as_i() {
     assert_eq!(key("ı"), key("i"));
@@ -71,17 +72,21 @@ fn the_nfc_tables_are_those_of_unicode_18() {
     );
 }
 
-/// The key is NFKC, then the fold, then NFKC again. The last composition joins names that are
-/// canonically equivalent, which a volume that compares them reads as one name.
+/// The key is NFKC, the fold, the dotless-i read, then NFKC again. The last composition joins two
+/// spellings that are equal once case is folded, which a volume that resolves case reads as one.
 #[test]
-fn the_key_is_nfkc_then_the_fold_then_nfkc_again() {
+fn the_key_composes_after_the_fold_and_the_dotless_i_read() {
     assert_eq!(key("．sluice-partial-x"), key(".sluice-partial-x"));
     assert_eq!(key("\u{ff41}"), "a");
     // U+0390 folds to iota, diaeresis and acute; U+03AA U+0301 folds to U+03CA and an acute. The
-    // final NFKC composes both to U+0390, so the two names have one key.
+    // two spellings are not canonically equivalent: they are equal once case is folded. The final
+    // NFKC composes both to U+0390, so they have one key.
     assert_eq!(key("\u{390}"), key("\u{3aa}\u{301}"));
     assert_eq!(key("\u{390}"), "\u{390}");
     assert!(is_nfc("\u{390}"));
+    // The same pair as a lowercase letter and its uppercase form, so a case mapping is what makes
+    // the second spelling rather than a hand-written composition.
+    assert_eq!(key("\u{3ca}\u{301}"), key("\u{3aa}\u{301}"));
 }
 
 /// A character from a block whose characters NFKC or full case folding rewrites. Latin and its
@@ -119,7 +124,39 @@ fn a_name_character() -> impl Strategy<Value = char> {
     ]
 }
 
+/// A letter whose two case forms fold to texts that compose differently: one form keeps a
+/// precomposed letter and the other separates the marks. `ẞ` and `İ` fold to expansions rather than
+/// compositions, so a generated pair also covers the case where the last composition has nothing to
+/// do.
+fn a_composing_letter() -> impl Strategy<Value = char> {
+    prop::sample::select(vec![
+        '\u{3ca}', '\u{3cb}', '\u{390}', '\u{3b0}', '\u{3ac}', '\u{3ad}', '\u{3ae}', '\u{3af}',
+        '\u{386}', '\u{388}', '\u{389}', '\u{38a}', '\u{38c}', '\u{38e}', '\u{38f}', '\u{1e9e}',
+        '\u{130}',
+    ])
+}
+
+/// A mark that composes with a Greek letter, so appending it to both case forms is what makes the
+/// two folds differ in composition.
+fn a_composing_mark() -> impl Strategy<Value = char> {
+    prop::sample::select(vec!['\u{300}', '\u{301}', '\u{308}', '\u{327}', '\u{342}'])
+}
+
 proptest! {
+    /// A letter and its other case are one name once a combining mark is appended. Their folds
+    /// leave the composition undone differently, and only the last NFKC joins them. The NFC/NFD
+    /// test cannot see this, because the first NFKC already makes those two the same text.
+    #[test]
+    fn a_letter_and_its_other_case_get_one_key(
+        base in a_composing_letter(),
+        marks in prop::collection::vec(a_composing_mark(), 1..4),
+    ) {
+        let tail: String = marks.into_iter().collect();
+        let lower: String = base.to_lowercase().chain(tail.chars()).collect();
+        let upper: String = base.to_uppercase().chain(tail.chars()).collect();
+        prop_assert_eq!(key(&lower), key(&upper), "{:?} against {:?}", lower, upper);
+    }
+
     /// A name and its NFC and NFD forms are one name: the key is taken after a composition, so the
     /// order the sender wrote the marks in cannot decide whether two entries collide.
     #[test]
