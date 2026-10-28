@@ -295,6 +295,11 @@ pub(crate) fn fold_key(name: &str) -> String {
         .collect();
     let composed: String = kept.nfkc().collect();
     let folded = UniCase::unicode(&composed).to_folded_case();
+    // NFKC of ASCII is the same text, and a manifest's names are mostly ASCII, so the second
+    // composition runs only where it can change something.
+    if folded.is_ascii() {
+        return folded;
+    }
     folded.nfkc().collect()
 }
 
