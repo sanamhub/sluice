@@ -101,15 +101,27 @@ const COPY_SLACK: u64 = 1 << 20;
 /// used, because the store's own bookkeeping cannot see an edit made through another name.
 pub(super) fn store_holds(partial: &Path, hash: Hash, size: u64) -> Result<bool, Error> {
     let source = storage::data_path(partial, &hash);
-    let meta = match fs::symlink_metadata(&source) {
-        Ok(meta) => meta,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(true),
-        Err(e) => return Err(storage::storage("read", &source, e)),
-    };
-    if storage::name_count(&source, &meta)? <= 1 {
-        return Ok(true);
+    match names(&source)? {
+        None | Some(1) => Ok(true),
+        Some(_) => file::same_blob(&source, hash, size),
     }
-    file::same_blob(&source, hash, size)
+}
+
+/// Whether the store's data file for `hash` has a second name, so a file outside the store can
+/// change the bytes it holds. Such a blob is copied out and the copy is checked, not linked: the
+/// bytes have to answer for themselves at the moment they are written.
+pub(super) fn store_shares(partial: &Path, hash: Hash) -> Result<bool, Error> {
+    Ok(names(&storage::data_path(partial, &hash))?.is_some_and(|count| count > 1))
+}
+
+/// How many names the file at `path` has, or `None` when it is not there. A missing data file is a
+/// blob the store holds inline, which nothing outside the store can reach.
+fn names(path: &Path) -> Result<Option<u64>, Error> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) => storage::name_count(path, &meta).map(Some),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(storage::storage("read", path, e)),
+    }
 }
 
 /// Whether two names are the same file. The platform's own file identity answers it without reading

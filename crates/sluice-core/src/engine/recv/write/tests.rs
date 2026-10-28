@@ -219,6 +219,54 @@ async fn one_file_takes_a_link_and_leaves_the_store_readable() {
     store.shutdown().await.unwrap();
 }
 
+/// A data file that a file in the output shares is copied out rather than linked, and the copy is
+/// hashed against the blob. The check before an export cannot see an edit made after it, so the
+/// bytes that were written are the ones that answer for the root: a link would export whatever the
+/// other name holds at the moment it is read.
+#[tokio::test]
+async fn a_shared_blob_is_copied_out_and_the_bytes_that_were_written_are_checked() {
+    use super::shared::same_file;
+    use crate::engine::storage::data_path;
+    let dir = tempfile::tempdir().unwrap();
+    let partial = dir.path().join("store");
+    let store = FsStore::load(&partial).await.unwrap();
+    let body = vec![2u8; 1 << 20];
+    let hash = store.add_slice(&body).await.unwrap().hash;
+    let out = dir.path().join("out");
+    fs::create_dir_all(&out).unwrap();
+    // A file an earlier run left, still sharing the store's data file.
+    let earlier = out.join("earlier.bin");
+    fs::hard_link(data_path(&partial, &hash), &earlier).unwrap();
+
+    // Two entries name the root, so each target stands alone and the blob is copied out twice.
+    let manifest = Manifest::new(
+        vec![
+            file("one.bin", *hash.as_bytes(), body.len() as u64),
+            file("two.bin", *hash.as_bytes(), body.len() as u64),
+        ],
+        vec![],
+    )
+    .unwrap();
+    run(&manifest, &store, &partial, &out).await;
+    for name in ["one.bin", "two.bin"] {
+        let written = out.join(name);
+        assert_eq!(fs::read(&written).unwrap(), body);
+        assert!(
+            !same_file(&written, &earlier),
+            "{name} shares its bytes with the store"
+        );
+    }
+
+    // The decision itself: bytes that do not hash to the root are refused, and the ones that do
+    // are what a resume trusts.
+    let edited = out.join("edited.bin");
+    fs::write(&edited, vec![3u8; body.len()]).unwrap();
+    let err = super::check_written(&edited, hash, body.len() as u64).unwrap_err();
+    assert!(matches!(err, crate::Error::Verify(_)), "{err}");
+    super::check_written(&out.join("one.bin"), hash, body.len() as u64).unwrap();
+    store.shutdown().await.unwrap();
+}
+
 /// A transfer dropped in the middle, as an interrupt does, never returns an error the caller can
 /// act on. Dropping it does not copy: a blob can be gigabytes, and a drop happens where nothing may
 /// block or wait. The store is left sharing its bytes with the output, and its next claim is what

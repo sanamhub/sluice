@@ -119,6 +119,20 @@ fn blob_counts(manifest: &Manifest) -> BTreeMap<[u8; 32], u64> {
     counts
 }
 
+/// Whether the bytes written at `incoming` are the blob's. Every other export is the store's own
+/// file or a copy of one nothing else can reach; this one came from a data file that another name
+/// can change, so it is the written bytes that have to answer for the root.
+fn check_written(incoming: &std::path::Path, hash: Hash, size: u64) -> Result<(), Error> {
+    if file::same_blob(incoming, hash, size)? {
+        return Ok(());
+    }
+    Err(Error::Verify(format!(
+        "the blob written at {} changed while it was copied out, because a received file that \
+         shares its bytes was edited; the store cannot be resumed from",
+        incoming.display()
+    )))
+}
+
 struct Writer<'a> {
     store: &'a FsStore,
     options: &'a ReceiveOptions,
@@ -254,13 +268,17 @@ impl Writer<'_> {
                     .to_string(),
             ));
         }
+        // A data file with a second name can be changed through that name, so its bytes are copied
+        // out and the copy is what is checked. The check below cannot see an edit made after it,
+        // and a link would export whatever the other name holds at the moment it is read.
+        let reachable = shared::store_shares(self.partial, hash)?;
         let once = self
             .counts
             .get(hash.as_bytes())
             .copied()
             .unwrap_or_default()
             == 1;
-        if once {
+        if once && !reachable {
             let source = storage::data_path(self.partial, &hash);
             // A hard link costs no space and leaves the store able to read the bytes it names.
             if fs::hard_link(&source, incoming).is_ok() {
@@ -276,14 +294,17 @@ impl Writer<'_> {
             })
             .finish()
             .await
-            .map(|_| false)
             .map_err(|e| {
                 Error::Storage(format!(
                     "cannot write {}: {}",
                     incoming.display(),
                     crate::plain(&e)
                 ))
-            })
+            })?;
+        if reachable {
+            check_written(incoming, hash, size)?;
+        }
+        Ok(false)
     }
 
     /// Writes every file of one pack. The pack was fetched and checked before anything was written.
