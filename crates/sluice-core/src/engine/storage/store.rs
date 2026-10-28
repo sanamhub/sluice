@@ -36,15 +36,25 @@ pub struct Owner {
     pub id: Option<String>,
 }
 
+/// What a folder that may hold a store says: its marker, when it has one, and the identity of the
+/// folder read while that marker was read. The identity is taken inside the check, from the handle
+/// that checked the folder's kind and owner, so a caller can compare it with the folder the store
+/// was actually opened in.
+pub struct Found {
+    /// The marker.
+    pub owner: Owner,
+    pub id: Option<FolderId>,
+}
+
 /// Reads the marker of `dir` without changing anything, after checking that the folder is a real
 /// folder of this user. A folder with no marker, or one this user cannot read, is not a resume;
 /// the caller deals with it once every check has passed.
-pub fn recorded(dir: &Path) -> Result<Option<Owner>, Error> {
-    match fs::symlink_metadata(dir) {
-        Ok(_) => crate::home::check_folder(dir)?,
+pub fn recorded(dir: &Path) -> Result<Option<Found>, Error> {
+    let id = match fs::symlink_metadata(dir) {
+        Ok(_) => crate::home::check_folder_id(dir)?.map(FolderId::of),
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(storage("read", dir, e)),
-    }
+    };
     let marker = dir.join(MARKER);
     let text = match fs::read_to_string(&marker) {
         Ok(text) => text,
@@ -58,7 +68,7 @@ pub fn recorded(dir: &Path) -> Result<Option<Owner>, Error> {
         }
         Err(e) => return Err(storage("read", &marker, e)),
     };
-    Ok(parse_marker(&text))
+    Ok(parse_marker(&text).map(|owner| Found { owner, id }))
 }
 
 /// The first line is the root; every `name ` line after it is a top-level entry the transfer
@@ -141,9 +151,14 @@ pub struct FolderId {
     second: u64,
 }
 
-/// The identity of `dir`, or `None` on a platform with no call for it. Read once before a folder is
-/// checked and once after its store is opened, so the store that was opened is the store that was
-/// checked.
+impl FolderId {
+    fn of((first, second): (u64, u64)) -> Self {
+        Self { first, second }
+    }
+}
+
+/// The identity of `dir`, or `None` on a platform with no call for it. Used for a file as well as a
+/// folder: a followed file that was replaced is a different file, whatever its path says.
 pub fn identify(dir: &Path) -> Result<Option<FolderId>, Error> {
     imp::identity(dir).map_err(|e| storage("read", dir, e))
 }

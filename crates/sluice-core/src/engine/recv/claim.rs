@@ -23,25 +23,28 @@ pub(super) async fn claim_store(
     ticket: &Ticket,
     options: &ReceiveOptions,
 ) -> Result<(FsStore, bool, Plan), Error> {
-    let found = resumable_store(partial, owner)?;
-    let resume = found.is_some();
+    let (resumed, checked) = resumable_store(partial, owner)?;
+    let resume = resumed.is_some();
     // A run that was allowed to replace what was in the output was a deliberate choice, so the run
     // that continues it has to make the same one.
-    if resume && !options.force && found.as_ref().is_some_and(|found| found.force) {
+    if resume && !options.force && resumed.as_ref().is_some_and(|found| found.force) {
         return Err(Error::Policy(format!(
             "the store this transfer would resume was made with --force; pass --force to continue it into {}",
             options.out.display()
         )));
     }
-    let ours = found.map(|found| found.names).unwrap_or_default();
+    let ours = resumed.map(|found| found.names).unwrap_or_default();
     let (plan, created) = plan::check(manifest, ticket, options, resume, &ours)?;
-    if !resume {
+    // The folder that was checked and the folder that is opened have to be one folder: another user
+    // who can write in the output can rename a store away and put one there under the same name
+    // between the two calls. A resumed store's identity comes from the handle its marker was read
+    // through; a store this run makes is identified as soon as it exists.
+    let before = if resume {
+        checked
+    } else {
         start_store(partial, owner, &created, options)?;
-    }
-    // The folder that was checked and the folder that is opened have to be one folder: another
-    // user who can write in the output can rename a store away and put one there under the same
-    // name between the two calls.
-    let before = storage::identify(partial)?;
+        storage::identify(partial)?
+    };
     match FsStore::load(partial).await {
         Ok(store) if storage::identify(partial)? == before => Ok((store, resume, plan)),
         Ok(store) => {
@@ -62,7 +65,8 @@ pub(super) async fn claim_store(
     }
 }
 
-/// The marker of the store this transfer may resume, or `None` when the folder is not there.
+/// The marker of the store this transfer may resume and the identity of the folder it was read
+/// from, or `None` for both when the folder is not there.
 ///
 /// A folder is this transfer's store only when this home has a record of it, the marker in it is
 /// the one that record was written with, and that marker names this ticket's root. Anything else is
@@ -71,30 +75,29 @@ pub(super) async fn claim_store(
 fn resumable_store(
     partial: &std::path::Path,
     owner: &str,
-) -> Result<Option<storage::Owner>, Error> {
+) -> Result<(Option<storage::Owner>, Option<storage::FolderId>), Error> {
     let record = storage::find_record(partial, owner)?;
     let exists = std::fs::symlink_metadata(partial).is_ok();
     match (record, exists) {
         (Some(record), true) => {
-            let marker = storage::recorded(partial)?;
-            let mine = marker.as_ref().and_then(|found| found.id.as_deref());
-            let right_root = marker.as_ref().is_some_and(|found| found.root == owner);
-            if mine != Some(record.id.as_str()) || !right_root {
+            let found =
+                storage::recorded(partial)?.ok_or_else(|| storage::registry_clash(partial))?;
+            let mine = found.owner.id.as_deref();
+            if mine != Some(record.id.as_str()) || found.owner.root != owner {
                 return Err(storage::registry_clash(partial));
             }
-            Ok(marker)
+            Ok((Some(found.owner), found.id))
         }
         (Some(_), false) => {
             // A record of a store that is gone: this home left it behind, so drop it.
             storage::forget_record(partial);
-            Ok(None)
+            Ok((None, None))
         }
         // A folder with the store's name that this home did not record.
         (None, true) => Err(storage::registry_clash(partial)),
-        (None, false) => Ok(None),
+        (None, false) => Ok((None, None)),
     }
 }
-
 /// Makes this receive's store: the folder, the home's record of it, and the marker that ties the
 /// two together. A marker that cannot be written leaves no store and no record, so the next run
 /// starts from an empty folder rather than from one whose marker says something else.

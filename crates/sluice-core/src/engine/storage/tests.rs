@@ -111,9 +111,11 @@ fn a_marker_says_which_names_were_created_and_whether_the_run_was_forced() {
     let names = std::collections::BTreeSet::from(["made".to_string()]);
     remember(dir.path(), "abc123", &names, true, "id-1").unwrap();
     let found = recorded(dir.path()).unwrap().unwrap();
-    assert_eq!(found.root, "abc123");
-    assert_eq!(found.names, names);
-    assert!(found.force);
+    let marker = found.owner;
+    assert_eq!(marker.root, "abc123");
+    assert_eq!(marker.names, names);
+    assert!(marker.force);
+    assert!(found.id.is_some(), "the folder's identity was not taken");
 
     // A marker from a run that created nothing and was not forced records exactly that, and a
     // folder with no marker at all is not a resume.
@@ -126,13 +128,41 @@ fn a_marker_says_which_names_were_created_and_whether_the_run_was_forced() {
     )
     .unwrap();
     let found = recorded(dir.path()).unwrap().unwrap();
-    assert!(found.names.is_empty());
-    assert!(!found.force);
-    assert_eq!(found.id.as_deref(), Some("id-2"));
+    let marker = found.owner;
+    assert!(marker.names.is_empty());
+    assert!(!marker.force);
+    assert_eq!(marker.id.as_deref(), Some("id-2"));
     let empty = tempfile::tempdir().unwrap();
     assert!(recorded(empty.path()).unwrap().is_none());
 }
 
+/// The identity of a store is taken while its marker is read, from the handle that checked the
+/// folder, so a folder renamed away and another put under the same name is told apart even when the
+/// new one carries a marker that says the same thing. A compare against an identity taken later
+/// would compare two readings of the replacement.
+#[test]
+fn the_identity_read_with_the_marker_is_the_folders_own() {
+    use super::{identify, recorded, remember};
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("store");
+    std::fs::create_dir(&store).unwrap();
+    let none = std::collections::BTreeSet::new();
+    remember(&store, "abc123", &none, false, "id-1").unwrap();
+    let found = recorded(&store).unwrap().unwrap();
+    let id = found
+        .id
+        .expect("the folder has no identity on this platform");
+    assert_eq!(identify(&store).unwrap(), Some(id));
+
+    std::fs::rename(&store, root.path().join("gone")).unwrap();
+    std::fs::create_dir(&store).unwrap();
+    remember(&store, "abc123", &none, false, "id-1").unwrap();
+    assert_ne!(
+        identify(&store).unwrap(),
+        Some(id),
+        "a replacement folder carries the identity of the one it replaced"
+    );
+}
 /// A file system whose rename cannot refuse a name is installed with a link, and the link
 /// refuses an existing target exactly as the rename would.
 #[test]

@@ -51,6 +51,40 @@ pub(super) fn open_entry(path: &Path) -> io::Result<File> {
         .open(path)
 }
 
+/// What one opened handle to a folder says: whether it is a real folder of this user, and its
+/// identity.
+pub(in crate::home) enum Checked {
+    /// A folder of this user, named by its volume and file index.
+    Folder { first: u64, second: u64 },
+    /// A link, a junction, another reparse point, or something that is not a folder.
+    NotAFolder,
+    /// A real folder that another user made.
+    SomeoneElses,
+}
+
+/// Checks the entry at `path` for its kind and its owner and reads its identity, all from one handle
+/// opened without following a link. The three answers describe one object: a name swapped for
+/// another between two calls cannot make a check of one folder an identity of another.
+pub(in crate::home) fn checked_folder(path: &Path) -> io::Result<Checked> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+    };
+
+    let (entry, info) = information(path)?;
+    let attributes = info.dwFileAttributes;
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 || attributes & FILE_ATTRIBUTE_DIRECTORY == 0
+    {
+        return Ok(Checked::NotAFolder);
+    }
+    if !is_owned_by_us_handle(&entry)? {
+        return Ok(Checked::SomeoneElses);
+    }
+    Ok(Checked::Folder {
+        first: u64::from(info.dwVolumeSerialNumber),
+        second: index(&info),
+    })
+}
+
 /// The volume number and file index of the entry at `path`, read from a handle opened without
 /// following a link. Both numbers come from the file system, not from the path, so a folder renamed
 /// away and another put under the same name are told apart. The stable `Metadata` accessors for
