@@ -23,22 +23,26 @@ pub(super) fn write_all(
     options: &ReceiveOptions,
     resume: bool,
 ) -> Result<(), Error> {
-    let links: BTreeMap<&str, &str> = manifest
+    // Keyed by the name a filesystem may treat as equal to the path, not by the path itself: on a
+    // case-insensitive volume the operating system follows `sub/a` to `sub/A`, and a check that
+    // looked for `sub/a` in the manifest would miss the link and read the name as a plain folder.
+    let links: BTreeMap<String, (&str, &str)> = manifest
         .entries()
         .iter()
         .filter(|entry| entry.kind == Kind::Symlink)
         .filter_map(|entry| {
             let target = entry.link_target.as_ref()?;
-            Some((entry.path.as_str(), target.as_str()))
+            let path = entry.path.as_str();
+            Some((crate::manifest::folded_key(path), (path, target.as_str())))
         })
         .collect();
-    for (path, target) in &links {
+    for (path, target) in links.values() {
         let resolved = resolve(&links, &options.out, path, target)?;
         if !stays_inside(&options.out, &resolved)? {
             return Err(outside(path));
         }
     }
-    for (path, target) in &links {
+    for (path, target) in links.values() {
         write_one(path, target, options, resume)?;
     }
     Ok(())
@@ -89,7 +93,7 @@ fn write_one(
 /// Fails when a `..` would step above the output folder, a link points at an absolute path, a
 /// target cannot be read as a path this code can follow, or a chain is longer than the limit.
 fn resolve(
-    links: &BTreeMap<&str, &str>,
+    links: &BTreeMap<String, (&str, &str)>,
     out: &Path,
     link: &str,
     target: &str,
@@ -110,7 +114,9 @@ fn resolve(
             }
             name => {
                 parts.push(name.to_string());
-                let next = if let Some(next) = links.get(parts.join("/").as_str()) {
+                let next = if let Some((_, next)) =
+                    links.get(&crate::manifest::folded_key(&parts.join("/")))
+                {
                     (*next).to_string()
                 } else if let Some(next) = existing_link(out, &parts)? {
                     next
@@ -222,8 +228,13 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::Path;
 
-    fn links(pairs: &[(&'static str, &'static str)]) -> BTreeMap<&'static str, &'static str> {
-        pairs.iter().copied().collect()
+    fn links(
+        pairs: &[(&'static str, &'static str)],
+    ) -> BTreeMap<String, (&'static str, &'static str)> {
+        pairs
+            .iter()
+            .map(|&(path, target)| (crate::manifest::folded_key(path), (path, target)))
+            .collect()
     }
 
     /// An output folder that holds nothing on disk, so a check sees only the manifest's links.
@@ -262,6 +273,24 @@ mod tests {
         // The same chain with the links in the other path order, which is the other entry order.
         let second = links(&[("sub/m", "z/.."), ("sub/z", "..")]);
         assert!(resolve(&second, empty_out(), "sub/m", "z/..").is_err());
+    }
+
+    /// The manifest spells the link `A` and the target `a`. On a case-insensitive volume the disk
+    /// resolves the target's `a` to `A` and follows the link, so the check has to do the same on
+    /// every platform: otherwise `z` lands two folders above the output and the check sees the
+    /// output folder itself.
+    #[test]
+    fn a_target_through_a_link_spelled_in_another_case_is_resolved_through_it() {
+        let pair = links(&[("sub/A", ".."), ("sub/z", "a/../..")]);
+        assert!(resolve(&pair, empty_out(), "sub/z", "a/../..").is_err());
+        // One `..` fewer is the same hole with a different spelling: the check reads it as `sub`,
+        // and the operating system lands on the folder above the output.
+        let one = links(&[("sub/A", ".."), ("sub/z", "a/..")]);
+        assert!(resolve(&one, empty_out(), "sub/z", "a/..").is_err());
+        // A name that only differs outside ASCII case still matches, which is stricter than the
+        // disk on a volume that folds ASCII alone.
+        let folded = links(&[("sub/É", ".."), ("sub/z", "é/../..")]);
+        assert!(resolve(&folded, empty_out(), "sub/z", "é/../..").is_err());
     }
 
     #[test]
