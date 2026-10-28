@@ -1,13 +1,15 @@
 //! Writing a checked tree: folders first, then each file from its blob or its pack, then the links
 //! the user allowed, then the folder times, so creating a child does not overwrite them.
 
+mod dirs;
 mod file;
 mod link;
+mod range;
+mod shared;
 
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use iroh_blobs::{Hash, api::blobs::ExportMode, store::fs::FsStore};
-use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::{Event, ReceiveOptions, fetch, plan::Plan, storage};
@@ -16,7 +18,10 @@ use crate::{
     manifest::{Kind, Loc, Manifest},
 };
 
+use dirs::create_dirs;
 use file::Meta;
+pub(in crate::engine) use range::write_range;
+use shared::Shared;
 
 /// Writes the checked tree, and gives the store its own bytes back when a failure leaves it behind
 /// for a resume: a file that took the store's bytes by link is the user's now, and the store must not
@@ -30,7 +35,7 @@ pub(super) async fn write(
     resume: bool,
     events: &UnboundedSender<Event>,
 ) -> Result<(), Error> {
-    let mut shared = Shared::default();
+    let mut shared = Shared::new(partial);
     let result = tree(
         manifest,
         plan,
@@ -42,10 +47,19 @@ pub(super) async fn write(
         &mut shared,
     )
     .await;
-    if let Err(error) = &result
-        && super::keeps_store(error)
-    {
-        shared.release(partial);
+    match &result {
+        // The caller removes the store once every file is in place, so the links were what made one
+        // large file cost one copy rather than two.
+        Ok(()) => shared.settled(),
+        Err(error) if super::keeps_store(error) => {
+            if let Err(e) = shared.release() {
+                shared.settled();
+                return Err(e);
+            }
+            shared.settled();
+        }
+        // A refusal or a bad byte discards the store, so it is not worth copying its bytes back.
+        Err(_) => shared.settled(),
     }
     result
 }
@@ -63,7 +77,7 @@ async fn tree(
     shared: &mut Shared,
 ) -> Result<(), Error> {
     let counts = blob_counts(manifest);
-    let dirs = create_dirs(manifest, options, &plan.ours)?;
+    let dirs = create_dirs(manifest, &options.out, &plan.ours)?;
     let tmp = storage::temp_dir(&options.out)?;
     let mut writer = Writer {
         store,
@@ -194,12 +208,12 @@ impl Writer<'_> {
             file::create_empty(&incoming)?;
             false
         } else {
-            self.export(hash, &incoming).await?
+            self.export(hash, size, &incoming).await?
         };
         file::finish(&incoming, meta, self.options.no_times, self.events)?;
         storage::install(&incoming, &target, self.options.force)?;
         if linked {
-            self.shared.files.push((hash, target));
+            self.shared.took(hash, target);
         }
         Ok(())
     }
@@ -229,8 +243,22 @@ impl Writer<'_> {
     /// Puts the blob's bytes at `incoming`, and says whether they are the store's own file by link.
     /// A root that one entry names takes the store's data file by link, so the store keeps no second
     /// copy and one large file never needs twice its size; a root that several entries name is
-    /// copied, because each target must stand alone.
-    async fn export(&self, hash: Hash, incoming: &std::path::Path) -> Result<bool, Error> {
+    /// copied, because each target must stand alone. A stored blob that is linked to a file outside
+    /// the store is hashed before it is used: the link is how a kept store and the output can share
+    /// one inode, and an edit made through the output would otherwise be copied out as the blob.
+    async fn export(
+        &self,
+        hash: Hash,
+        size: u64,
+        incoming: &std::path::Path,
+    ) -> Result<bool, Error> {
+        if !shared::store_holds(self.partial, hash, size)? {
+            return Err(Error::Verify(
+                "the store's copy of a blob no longer matches its root, because a received file \
+                 that shares it was changed; the store cannot be resumed from"
+                    .to_string(),
+            ));
+        }
         let once = self
             .counts
             .get(hash.as_bytes())
@@ -238,10 +266,7 @@ impl Writer<'_> {
             .unwrap_or_default()
             == 1;
         if once {
-            // The default store layout, which `receive` opens with `FsStore::load`.
-            let source = iroh_blobs::store::fs::options::Options::new(self.partial)
-                .path
-                .data_path(&hash);
+            let source = shared::data_path(self.partial, &hash);
             // A hard link costs no space and leaves the store able to read the bytes it names.
             if fs::hard_link(&source, incoming).is_ok() {
                 return Ok(true);
@@ -318,125 +343,6 @@ impl Writer<'_> {
         }
         Err(storage::clash(target))
     }
-}
-
-/// Writes `len` bytes at `offset` of a blob in the store into `target`. The fetch that put those
-/// blocks in the store verified them against the root, so this only copies and installs them.
-#[allow(clippy::too_many_arguments)]
-pub(in crate::engine) async fn write_range(
-    store: &FsStore,
-    hash: Hash,
-    offset: u64,
-    len: u64,
-    target: &std::path::Path,
-    mtime_ms: u64,
-    mode: u32,
-    options: &ReceiveOptions,
-    events: &UnboundedSender<Event>,
-) -> Result<(), Error> {
-    let meta = Meta { mtime_ms, mode };
-    let tmp = storage::temp_dir(&options.out)?;
-    let incoming = storage::temp_path(tmp.path(), 0);
-    let mut reader = store.blobs().reader(hash);
-    reader
-        .seek(std::io::SeekFrom::Start(offset))
-        .await
-        .map_err(|e| storage::storage("read", target, e))?;
-    let mut file = tokio::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&incoming)
-        .await
-        .map_err(|e| storage::storage("create", &incoming, e))?;
-    let copied = tokio::io::copy(&mut reader.take(len), &mut file)
-        .await
-        .map_err(|e| storage::storage("write", &incoming, e))?;
-    file.flush()
-        .await
-        .map_err(|e| storage::storage("write", &incoming, e))?;
-    let file = file.into_std().await;
-    if copied != len {
-        return Err(Error::Verify(format!(
-            "the store gave {copied} bytes where the manifest says {len}"
-        )));
-    }
-    file::apply(&file, &incoming, meta, options.no_times, events)?;
-    file.sync_all()
-        .map_err(|e| storage::storage("sync", &incoming, e))?;
-    drop(file);
-    storage::install(&incoming, target, options.force)
-}
-
-/// The files that took the store's bytes by link. A hard link is one inode under two names, so a
-/// mode or a time set on the installed file is set on the store's copy too, and an edit to the user's
-/// file changes the blob the store would resume from. A store that is kept after a failure is given
-/// its own copy of each before anything reads it.
-#[derive(Default)]
-pub(super) struct Shared {
-    files: Vec<(Hash, PathBuf)>,
-}
-
-impl Shared {
-    /// Gives the store its own bytes for every file that still shares an inode with it. Called when
-    /// the transfer fails and the store is kept: on the success path the store is removed, and the
-    /// link was what made one large file cost one copy rather than two.
-    pub(super) fn release(&self, partial: &std::path::Path) {
-        for (hash, target) in &self.files {
-            let source = iroh_blobs::store::fs::options::Options::new(partial)
-                .path
-                .data_path(hash);
-            if !same_file(target, &source) {
-                continue;
-            }
-            // A copy beside it, renamed over the store's name: the store keeps an inode of its own
-            // and the installed file keeps the one it has.
-            let copy = source.with_extension("store");
-            if fs::copy(&source, &copy).is_ok() && fs::rename(&copy, &source).is_err() {
-                let _ = fs::remove_file(&copy);
-            }
-        }
-    }
-}
-
-/// Whether two names are the same file. The platform's own file identity answers it without reading
-/// either, so a large file is not hashed to find out.
-fn same_file(one: &std::path::Path, other: &std::path::Path) -> bool {
-    match (storage::identify(one), storage::identify(other)) {
-        (Ok(Some(one)), Ok(Some(other))) => one == other,
-        _ => false,
-    }
-}
-
-/// Every folder entry, in manifest order, and whether this transfer made it. Manifest order puts a
-/// parent before its children, so one `create_dir` each is enough. A folder that is already there
-/// belongs to this transfer when it lies under a top-level name this transfer made: the run that
-/// was cut off created it, so its mode and time are still due.
-fn create_dirs(
-    manifest: &Manifest,
-    options: &ReceiveOptions,
-    ours: &std::collections::BTreeSet<String>,
-) -> Result<Vec<(PathBuf, u64, u32, bool)>, Error> {
-    let mut dirs = Vec::new();
-    for entry in manifest.entries() {
-        if entry.kind != Kind::Dir {
-            continue;
-        }
-        let target = entry.path.under(&options.out);
-        let made_here = match fs::create_dir(&target) {
-            Ok(()) => true,
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && target.is_dir() => {
-                under_ours(entry.path.as_str(), ours)
-            }
-            Err(e) => return Err(storage::policy_path("create", &target, e)),
-        };
-        dirs.push((target, entry.mtime_ms, entry.mode, made_here));
-    }
-    Ok(dirs)
-}
-
-/// Whether `path` is inside a top-level name this transfer made.
-fn under_ours(path: &str, ours: &std::collections::BTreeSet<String>) -> bool {
-    ours.contains(path.split('/').next().unwrap_or(path))
 }
 
 #[cfg(test)]

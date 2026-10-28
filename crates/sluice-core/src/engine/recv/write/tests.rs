@@ -61,7 +61,7 @@ async fn run(
 /// reads; the writer copies the store's bytes back out when a failure leaves the store behind.
 #[tokio::test]
 async fn a_kept_store_is_given_its_own_bytes_back() {
-    use super::same_file;
+    use super::shared::same_file;
     let dir = tempfile::tempdir().unwrap();
     let partial = dir.path().join("store");
     let store = FsStore::load(&partial).await.unwrap();
@@ -216,5 +216,80 @@ async fn one_file_takes_a_link_and_leaves_the_store_readable() {
         let stored = fs::metadata(&data).unwrap();
         assert_eq!((target.dev(), target.ino()), (stored.dev(), stored.ino()));
     }
+    store.shutdown().await.unwrap();
+}
+
+/// A transfer dropped in the middle, as an interrupt does, never returns an error the caller can act
+/// on, so the store has to be given its own bytes on the drop itself. Otherwise a file the user edits
+/// afterwards changes the blob the next run resumes from.
+#[tokio::test]
+async fn a_cancelled_write_gives_the_store_its_own_bytes_back() {
+    use super::shared::{Shared, data_path, same_file};
+    let dir = tempfile::tempdir().unwrap();
+    let partial = dir.path().join("store");
+    let store = FsStore::load(&partial).await.unwrap();
+    let body = vec![9u8; 2 << 20];
+    let hash = store.add_slice(&body).await.unwrap().hash;
+    let out = dir.path().join("out");
+    fs::create_dir_all(&out).unwrap();
+    let target = out.join("one.bin");
+    fs::hard_link(data_path(&partial, &hash), &target).unwrap();
+    let mut shared = Shared::new(&partial);
+    shared.took(hash, target.clone());
+    // Dropping the future is what an interrupt does; the store is kept for a resume.
+    drop(shared);
+    let source = data_path(&partial, &hash);
+    assert!(
+        !same_file(&source, &target),
+        "a cancelled write left the store sharing bytes with the output"
+    );
+    assert_eq!(fs::read(&source).unwrap(), body);
+    store.shutdown().await.unwrap();
+}
+
+/// A blob whose data file an output file shares is hashed before it is exported. A run killed before
+/// it could copy the store's bytes back leaves that link in place, and the user can then edit the
+/// received file: the edited bytes have the same size, so the store still calls the blob complete.
+/// They must never be written out as the blob and reported as a success.
+#[tokio::test]
+async fn a_store_copy_linked_to_an_edited_file_is_not_exported() {
+    use super::shared::data_path;
+    let dir = tempfile::tempdir().unwrap();
+    let partial = dir.path().join("store");
+    let store = FsStore::load(&partial).await.unwrap();
+    let body = vec![4u8; 2 << 20];
+    let hash = store.add_slice(&body).await.unwrap().hash;
+    let out = dir.path().join("out");
+    fs::create_dir_all(&out).unwrap();
+    let target = out.join("one.bin");
+    fs::hard_link(data_path(&partial, &hash), &target).unwrap();
+    let edited = vec![5u8; body.len()];
+    fs::write(&target, &edited).unwrap();
+
+    let manifest = Manifest::new(
+        vec![file("one.bin", *hash.as_bytes(), body.len() as u64)],
+        vec![],
+    )
+    .unwrap();
+    let plan = Plan {
+        files: 1,
+        bytes: body.len() as u64,
+        ours: std::collections::BTreeSet::new(),
+    };
+    let mut options = options(&out);
+    options.force = true;
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let err = write(&manifest, &plan, &store, &options, &partial, true, &tx)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::Error::Verify(_)),
+        "the edited bytes were not refused: {err}"
+    );
+    assert_eq!(
+        fs::read(&target).unwrap(),
+        edited,
+        "the transfer reported a success over the user's edit"
+    );
     store.shutdown().await.unwrap();
 }

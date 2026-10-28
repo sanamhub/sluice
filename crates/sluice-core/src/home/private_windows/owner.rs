@@ -56,6 +56,26 @@ pub(super) fn open_entry(path: &Path) -> io::Result<File> {
 /// away and another put under the same name are told apart. The stable `Metadata` accessors for
 /// them are still unstable, which is why this goes through the call.
 pub(crate) fn folder_id(path: &Path) -> io::Result<(u64, u64)> {
+    let (_entry, info) = information(path)?;
+    Ok((u64::from(info.dwVolumeSerialNumber), index(&info)))
+}
+
+/// The number of names the entry at `path` has on its volume, read from a handle opened without
+/// following a link. A file that two names share can be written through either of them, so the
+/// count is what tells a store whose bytes it owns from one that shares them with an output file.
+pub(crate) fn link_count(path: &Path) -> io::Result<u32> {
+    let (_, info) = information(path)?;
+    Ok(info.nNumberOfLinks)
+}
+
+/// The handle and the file information of the entry at `path`, read in one open. The handle is kept
+/// until the information has been read, so both describe the object the name held at that moment.
+fn information(
+    path: &Path,
+) -> io::Result<(
+    File,
+    windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION,
+)> {
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
     };
@@ -68,8 +88,11 @@ pub(crate) fn folder_id(path: &Path) -> io::Result<(u64, u64)> {
     if ok == 0 {
         return Err(io::Error::last_os_error());
     }
-    let index = (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow);
-    Ok((u64::from(info.dwVolumeSerialNumber), index))
+    Ok((entry, info))
+}
+
+fn index(info: &windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION) -> u64 {
+    (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow)
 }
 
 /// The owner of the object `file` is a handle to, as SID text.
