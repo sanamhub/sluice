@@ -241,7 +241,7 @@ fn component_violation(component: &str) -> Option<Violation<'_>> {
     }
     if RESERVED_PREFIXES
         .iter()
-        .any(|prefix| component.starts_with(prefix))
+        .any(|prefix| starts_with_ignore_ascii_case(component, prefix))
     {
         return broken(9, "is reserved for sluice's own store folders");
     }
@@ -252,6 +252,14 @@ fn component_violation(component: &str) -> Option<Violation<'_>> {
 /// during a write. A manifest that could name one of them would let a sender write into, or plant,
 /// the folder a later receive resumes from.
 pub const RESERVED_PREFIXES: [&str; 2] = [".sluice-partial-", ".sluice-tmp-"];
+
+/// Rule 9 ignores ASCII case, because Windows and macOS resolve a name regardless of it: a folder a
+/// receive keeps its store in is the same folder under any spelling of its name. The prefixes are
+/// ASCII, so a component that starts with another character cannot match however its bytes are cut.
+fn starts_with_ignore_ascii_case(name: &str, prefix: &str) -> bool {
+    name.len() >= prefix.len()
+        && name.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+}
 
 /// Rule 6: the characters Windows refuses in a name, the two that mean something on some
 /// platform (`\` and `:`), the C0 and C1 controls, and the bidirectional controls. The last reorder

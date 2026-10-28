@@ -540,10 +540,12 @@ stranger, and file names stay out of logs.
    `0` to `9`, `¹`, `²` or `³`. The name is the text before the first `.`, spaces before that `.`
    are ignored, and U+0131 is compared as `I`. So `con`, `Nul.txt` and `LPT¹.log` are rejected, and
    `CONSOLE` is not
-9. a component starts with `.sluice-partial-` or `.sluice-tmp-`, the two prefixes a receive gives
-   the store it writes beside the output and a folder it writes through. The prefixes themselves are
-   reserved too. A sender MUST NOT put such a name in a manifest, and a receive writes its own
-   stores under names no manifest can claim
+9. a component starts with `.sluice-partial-` or `.sluice-tmp-`, compared case-insensitively, the two
+   prefixes a receive gives the store it writes beside the output and a folder it writes through. The
+   prefixes themselves are reserved too. A sender MUST NOT put such a name in a manifest, and a
+   receive writes its own stores under names no manifest can claim. The comparison ignores ASCII case
+   because Windows and macOS resolve a name regardless of it, so `.SLUICE-PARTIAL-x` names the same
+   store there
 
 With these rules no accepted path can leave the output root by its text alone, and a symlink already
 on disk is the writer's concern, not these rules'.

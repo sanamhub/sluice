@@ -236,6 +236,13 @@ fn rule_9_reserved_store_names() {
             "a/.sluice-partial-x",
             ".sluice-partial-x/b",
             "proj/.sluice-tmp-x/c.txt",
+            // Windows and macOS resolve a name whatever its case, so the same folder has these
+            // spellings too.
+            ".SLUICE-PARTIAL-X",
+            ".Sluice-Partial-0123456789ABCDEF",
+            ".SLUICE-TMP-X",
+            ".SlUiCe-TmP-",
+            "proj/.SLUICE-PARTIAL-x/c.txt",
         ],
     );
     accepts(&[
@@ -244,7 +251,7 @@ fn rule_9_reserved_store_names() {
         "sluice-partial-x",
         ".sluice-partials-x",
         ".sluice-tmpx",
-        ".SLUICE-PARTIAL-X",
+        ".SLUICE-PARTIALS-X",
     ]);
 }
 
