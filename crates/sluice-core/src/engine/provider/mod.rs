@@ -89,6 +89,11 @@ impl Provider {
                 }
             }
         }
+        // A stream that ended with an error is not a finished send: the bytes a reader takes are
+        // the ones sealed before it, so the sender reports the failure and stops.
+        if let Some(message) = log.error() {
+            return Err(Error::Storage(message));
+        }
         let roots = log.roots();
         if roots.is_empty() {
             // An empty stream has no segment to fetch, so there is no delivery event to wait for.

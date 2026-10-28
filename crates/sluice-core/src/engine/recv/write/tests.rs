@@ -30,6 +30,7 @@ fn options(out: &std::path::Path) -> ReceiveOptions {
         allow_hidden: false,
         limits: crate::manifest::Limits::default(),
         free_bytes: None,
+        max_size: None,
         congestion: crate::engine::Congestion::Cubic,
         rate: None,
         write_limit: None,

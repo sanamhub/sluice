@@ -50,6 +50,7 @@ fn options(out: &Path) -> super::ReceiveOptions {
         allow_hidden: false,
         limits: Limits::default(),
         free_bytes: None,
+        max_size: None,
         congestion: super::Congestion::Cubic,
         rate: None,
         write_limit: None,

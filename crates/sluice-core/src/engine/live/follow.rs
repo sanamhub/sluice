@@ -160,6 +160,10 @@ fn ticket_of(
 /// Reads the file in segments and pushes them into the log until it stops growing for
 /// `close_after`, then signs the close. A full segment is sealed the moment it is read; a short
 /// one is the tail and is sealed only when the stream ends.
+///
+/// A failure ends the stream with the error rather than leaving readers to wait for a close that
+/// will never come: the log carries the reason, the readers' streams are reset with it, and the
+/// sender stops with a storage error.
 async fn follow(
     path: PathBuf,
     store: FsStore,
@@ -167,7 +171,9 @@ async fn follow(
     sender: Sender,
     close_after: Duration,
 ) {
-    let _ = run(&path, &store, &log, sender, close_after).await;
+    if let Err(error) = run(&path, &store, &log, sender, close_after).await {
+        log.fail(&error.to_string());
+    }
 }
 
 async fn run(
@@ -180,16 +186,23 @@ async fn run(
     let mut file = tokio::fs::File::open(path)
         .await
         .map_err(|e| storage::storage("open", path, e))?;
+    // The file that is followed has to stay the same file: a path replaced by another file, or one
+    // that shrank, would make the close sign a hash of something that is no longer there.
+    let identity = storage::identify(path)?;
     let mut hasher = blake3::Hasher::new();
     let mut pending: Vec<u8> = Vec::with_capacity(SEGMENT_BYTES as usize);
     let mut chunk = vec![0u8; 64 * 1024];
     let mut last_growth = tokio::time::Instant::now();
+    let mut read_total = 0u64;
     loop {
         let read = file
             .read(&mut chunk)
             .await
             .map_err(|e| storage::storage("read", path, e))?;
         if read == 0 {
+            if let Some(error) = changed(path, identity, read_total)? {
+                return Err(error);
+            }
             if last_growth.elapsed() >= close_after {
                 break;
             }
@@ -198,11 +211,15 @@ async fn run(
         }
         hasher.update(&chunk[..read]);
         pending.extend_from_slice(&chunk[..read]);
+        read_total = read_total.saturating_add(read as u64);
         last_growth = tokio::time::Instant::now();
         while pending.len() >= SEGMENT_BYTES as usize {
             let rest = pending.split_off(SEGMENT_BYTES as usize);
             let segment = std::mem::replace(&mut pending, rest);
             seal(store, log, &mut sender, &segment).await?;
+            if let Some(error) = changed(path, identity, read_total)? {
+                return Err(error);
+            }
         }
     }
     if !pending.is_empty() {
@@ -211,6 +228,32 @@ async fn run(
     let close = sender.close(*hasher.finalize().as_bytes(), now_ms());
     log.finish(close);
     Ok(())
+}
+
+/// What it means that the followed file is not the one this stream started on, if it is not. A file
+/// that shrank below what was read, or a path that now names a different file, ends the stream: the
+/// close would sign bytes that are a consistent file but not the source.
+fn changed(
+    path: &Path,
+    identity: Option<storage::FolderId>,
+    read: u64,
+) -> Result<Option<Error>, Error> {
+    if storage::identify(path)? != identity {
+        return Ok(Some(Error::Storage(format!(
+            "{} was replaced while it was followed",
+            path.display()
+        ))));
+    }
+    let size = fs::metadata(path)
+        .map_err(|e| storage::storage("read", path, e))?
+        .len();
+    if size < read {
+        return Ok(Some(Error::Storage(format!(
+            "{} shrank from {read} bytes to {size} while it was followed",
+            path.display()
+        ))));
+    }
+    Ok(None)
 }
 
 /// Keeps one segment in the store under its root and signs the frame that names it.

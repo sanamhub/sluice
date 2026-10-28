@@ -163,6 +163,102 @@ async fn a_reordered_frame_stops_the_receive() {
     fixture.provider.shutdown().await.unwrap();
 }
 
+/// A live receive stops at `--max-size` with a `Storage` error, and the bytes that arrived stay as
+/// the start of the file: a stream that never closes has no other end.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_size_bound_stops_the_stream_and_keeps_the_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(&dir.path().join("home")).unwrap();
+    let mut fixture = fixture(&dir, &home).await;
+    let first = seal(&mut fixture, 3).await;
+    let second = seal(&mut fixture, 4).await;
+    fixture.log.push(first);
+    fixture.log.push(second);
+
+    let out = dir.path().join("out.bin");
+    let store_root = dir.path().join("live-store");
+    fs::create_dir(&store_root).unwrap();
+    let mut options = options(&out);
+    // One segment fits and the second would pass it.
+    options.max_size = Some((3 << 20) / 2);
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let err = receive_live(&fixture.ticket.encode(), &options, &store_root, &tx)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Storage(_)), "{err}");
+    assert!(err.to_string().contains("--max-size"), "{err}");
+    assert_eq!(
+        fs::read(&out).unwrap().len(),
+        1 << 20,
+        "the prefix that arrived was not kept"
+    );
+    assert!(
+        fs::read_dir(&store_root).unwrap().next().is_none(),
+        "a temporary store was kept"
+    );
+    fixture.provider.shutdown().await.unwrap();
+}
+
+/// The free-space floor stops a live receive through the same hook a fixed transfer uses, so a
+/// stream cannot fill the volume the file is written to.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_free_space_floor_stops_the_stream() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(&dir.path().join("home")).unwrap();
+    let mut fixture = fixture(&dir, &home).await;
+    let frame = seal(&mut fixture, 5).await;
+    fixture.log.push(frame);
+
+    let out = dir.path().join("out.bin");
+    let store_root = dir.path().join("live-store");
+    fs::create_dir(&store_root).unwrap();
+    let mut options = options(&out);
+    // Exactly the floor, so the next segment would leave less than it.
+    options.free_bytes = Some(1 << 30);
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let err = receive_live(&fixture.ticket.encode(), &options, &store_root, &tx)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Storage(_)), "{err}");
+    assert!(err.to_string().contains("free"), "{err}");
+    assert_eq!(fs::read(&out).unwrap().len(), 0);
+    fixture.provider.shutdown().await.unwrap();
+}
+
+/// A file that shrinks while it is followed ends the stream with a storage error instead of closing
+/// over bytes that are no longer the source, and the sender reports it rather than a finished send.
+/// A follower that failed otherwise leaves every reader waiting for a close that never comes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_file_that_shrank_while_followed_ends_the_stream_with_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(&dir.path().join("home")).unwrap();
+    let source = dir.path().join("shrink.bin");
+    fs::write(&source, vec![1u8; 2 << 20]).unwrap();
+    let outgoing = prepare_live(
+        &home,
+        &source,
+        RelayModeChoice::Disabled,
+        Congestion::Cubic,
+        None,
+        None,
+        Duration::from_secs(30),
+    )
+    .await
+    .unwrap();
+    let log = outgoing.live.as_ref().unwrap().log.clone();
+    // Let the follower read the file, then take bytes away under it.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    fs::write(&source, b"short").unwrap();
+
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let served = tokio::time::timeout(Duration::from_secs(10), outgoing.serve(false, &tx))
+        .await
+        .expect("the stream did not end");
+    assert!(matches!(served, Err(Error::Storage(_))));
+    let message = log.error().unwrap_or_default();
+    assert!(message.contains("shrank"), "{message}");
+}
+
 #[test]
 fn one_segment_is_the_size_the_spec_names() {
     assert_eq!(SEGMENT_BYTES, 8 << 20);

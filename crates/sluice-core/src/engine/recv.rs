@@ -68,6 +68,10 @@ pub struct ReceiveOptions {
     /// Use this many free bytes instead of asking the volume. A test sets it to simulate a full
     /// disk; a real caller leaves it as `None`.
     pub free_bytes: Option<u64>,
+    /// The largest file a live receive writes. A stream that would pass it stops with a `Storage`
+    /// error and leaves the bytes that arrived. A fixed transfer carries its own size, so this is
+    /// only for a live one.
+    pub max_size: Option<u64>,
     /// The congestion controller to run.
     pub congestion: Congestion,
     /// The byte rate this command may use. Every receive of the command shares it.

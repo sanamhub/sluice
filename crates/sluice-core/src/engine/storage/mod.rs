@@ -17,7 +17,7 @@ pub use registry::{
 };
 #[cfg(test)]
 pub use store::MARKER;
-pub use store::{Owner, claim, identify, partial_dir, recorded, remember};
+pub use store::{FolderId, Owner, claim, identify, partial_dir, recorded, remember};
 pub use temp::{Temp, sweep_temporary_store, temp_dir, temp_path};
 
 use std::{fs, io, path::Path};

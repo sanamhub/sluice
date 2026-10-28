@@ -87,7 +87,7 @@ fn two_identical_files_arrive_and_a_run_after_a_kill_finishes() {
         unreachable!("a folder ticket is static")
     };
     let owner: String = root.iter().map(|byte| format!("{byte:02x}")).collect();
-    let partial = out.join(format!(".sluice-partial-{}", &owner[..16]));
+    let partial = out.join(format!(".sluice-partial-{owner}"));
     std::fs::create_dir_all(&partial).unwrap();
     // A store is this receive's only when the home holds a record of it, and the record's id is in
     // the marker. The record also names the top-level entry the killed run made, through the
@@ -95,7 +95,9 @@ fn two_identical_files_arrive_and_a_run_after_a_kill_finishes() {
     let id = "0123456789abcdef0123456789abcdef";
     let records = home.join("partials");
     std::fs::create_dir_all(&records).unwrap();
-    let absolute = std::path::absolute(&partial).unwrap();
+    let absolute = std::fs::canonicalize(&out)
+        .unwrap()
+        .join(partial.file_name().unwrap());
     std::fs::write(
         records.join(id),
         format!("path {}\nroot {owner}\n", absolute.display()),

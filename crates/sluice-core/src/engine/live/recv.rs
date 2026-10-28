@@ -1,7 +1,11 @@
 //! Watching a live stream: every segment is fetched as its frame is accepted, appended to a
 //! private file, and the close proves the whole file before it takes its name.
 
-use std::{fs, path::Path, time::Instant};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use iroh_blobs::{Hash, store::fs::FsStore};
 use sluice_live::{Outcome, Receiver as LogReceiver};
@@ -193,26 +197,120 @@ async fn exchange(
         .await
         .map_err(|e| storage::storage("create", &incoming, e))?;
     let mut hasher = blake3::Hasher::new();
-    let total = records(
+    let bounds = Bounds::new(options);
+    let outcome = records(
         &mut log,
         &mut recv,
         &opened.store,
         &blobs,
         &mut file,
         &mut hasher,
+        &bounds,
         options.rate.as_deref(),
         events,
     )
-    .await?;
+    .await;
+    // Whatever arrived is flushed before anything is installed or reported: a stream stopped by the
+    // size bound keeps the bytes it wrote, so they have to be on disk first.
+    let flushed = flush(&mut file, &incoming).await;
+    match outcome {
+        Ok(total) => {
+            flushed?;
+            storage::install(&incoming, &options.out, options.force)?;
+            Ok(total)
+        }
+        Err(stop) => {
+            if stop.keep {
+                // The bytes that arrived are the start of the file, so they take its name; the
+                // temporary store around them is removed either way.
+                let _ = flushed;
+                let _ = storage::install(&incoming, &options.out, options.force);
+            }
+            Err(stop.error)
+        }
+    }
+}
+
+/// Flushes and syncs what was written, so an installed prefix is on disk.
+async fn flush(file: &mut tokio::fs::File, incoming: &Path) -> Result<(), Error> {
     file.flush()
         .await
-        .map_err(|e| storage::storage("write", &incoming, e))?;
-    let file = file.into_std().await;
+        .map_err(|e| storage::storage("write", incoming, e))?;
     file.sync_all()
-        .map_err(|e| storage::storage("sync", &incoming, e))?;
-    drop(file);
-    storage::install(&incoming, &options.out, options.force)?;
-    Ok(total)
+        .await
+        .map_err(|e| storage::storage("sync", incoming, e))
+}
+
+/// A live stream that stopped before the close: the error to report, and whether the bytes that
+/// arrived are the start of the file. Only the size bound leaves a prefix worth keeping; a broken
+/// chain or a failed fetch leaves nothing that can be trusted.
+struct Stop {
+    error: Error,
+    keep: bool,
+}
+
+impl Stop {
+    fn keep(error: Error) -> Self {
+        Self { error, keep: true }
+    }
+}
+
+impl From<Error> for Stop {
+    fn from(error: Error) -> Self {
+        Self { error, keep: false }
+    }
+}
+
+/// The room a live receive must leave free on the output's volume after the next segment. A live
+/// stream has no known end, so nothing else would stop it before the disk is full.
+const FREE_FLOOR: u64 = 1 << 30;
+
+/// The two limits a live stream stops at, checked before each segment is fetched: the free room the
+/// next segment must leave, and the size the file may not pass.
+struct Bounds {
+    volume: PathBuf,
+    max_size: Option<u64>,
+    /// Free bytes the caller gives instead of asking the volume, for a test that has no full disk.
+    free_bytes: Option<u64>,
+}
+
+impl Bounds {
+    fn new(options: &ReceiveOptions) -> Self {
+        Self {
+            volume: options
+                .out
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf(),
+            max_size: options.max_size,
+            free_bytes: options.free_bytes,
+        }
+    }
+
+    /// Refuses a segment that would pass the size or leave too little room.
+    fn check(&self, total: u64, len: u32) -> Result<(), Stop> {
+        let len = u64::from(len);
+        if let Some(max) = self.max_size
+            && total.saturating_add(len) > max
+        {
+            return Err(Stop::keep(Error::Storage(format!(
+                "the file would pass --max-size of {max} bytes; the {total} bytes that arrived are \
+                 the start of it"
+            ))));
+        }
+        let available = match self.free_bytes {
+            Some(bytes) => bytes,
+            None => storage::available_bytes(&self.volume).map_err(Stop::from)?,
+        };
+        if available.saturating_sub(len) < FREE_FLOOR {
+            return Err(Stop::keep(Error::Storage(format!(
+                "{} would have less than {FREE_FLOOR} bytes free after the next segment; the \
+                 {total} bytes that arrived are the start of the file",
+                self.volume.display()
+            ))));
+        }
+        Ok(())
+    }
 }
 
 /// Every record until the close: a frame adds its segment, and the close proves the whole file.
@@ -224,33 +322,34 @@ async fn records(
     blobs: &iroh::endpoint::Connection,
     file: &mut tokio::fs::File,
     hasher: &mut blake3::Hasher,
+    bounds: &Bounds,
     rate: Option<&crate::engine::Rate>,
     events: &UnboundedSender<Event>,
-) -> Result<u64, Error> {
+) -> Result<u64, Stop> {
     let mut total = 0u64;
     loop {
         let record = read_record(recv).await?;
         match record.len() {
             sluice_live::Frame::LEN => {
                 total = apply_frame(
-                    log, &record, store, blobs, file, hasher, events, rate, total,
+                    log, &record, store, blobs, file, hasher, bounds, events, rate, total,
                 )
                 .await?;
             }
             sluice_live::LogClose::LEN => {
-                return close(log, &record, total, hasher);
+                return close(log, &record, total, hasher).map_err(Stop::from);
             }
             _ => {
-                return Err(Error::Verify(
+                return Err(Stop::from(Error::Verify(
                     "a live record is not one of the three the stream carries".to_string(),
-                ));
+                )));
             }
         }
     }
 }
 
-/// One frame: fetch its segment and add it to the file. A repeated entry changes nothing; one
-/// that breaks the chain or comes out of order stops the transfer.
+/// One frame: check it against the limits, fetch its segment, and add it to the file. A repeated
+/// entry changes nothing; one that breaks the chain or comes out of order stops the transfer.
 #[allow(clippy::too_many_arguments)]
 async fn apply_frame(
     log: &mut LogReceiver,
@@ -259,10 +358,11 @@ async fn apply_frame(
     blobs: &iroh::endpoint::Connection,
     file: &mut tokio::fs::File,
     hasher: &mut blake3::Hasher,
+    bounds: &Bounds,
     events: &UnboundedSender<Event>,
     rate: Option<&crate::engine::Rate>,
     total: u64,
-) -> Result<u64, Error> {
+) -> Result<u64, Stop> {
     let outcome = log.frame(record);
     let Outcome::Accepted {
         segment_root, len, ..
@@ -270,17 +370,18 @@ async fn apply_frame(
     else {
         return match outcome {
             Outcome::Repeat { .. } => Ok(total),
-            Outcome::Refused(fault) => Err(Error::Verify(format!(
-                "the live chain refused a frame: {fault}"
-            ))),
-            Outcome::Aborted { seq, reason } => Err(Error::Verify(format!(
-                "the live chain was aborted at {seq}: {reason}"
-            ))),
-            _ => Err(Error::Verify(
-                "a live frame did not change the stream".to_string(),
-            )),
+            Outcome::Refused(fault) => {
+                Err(Error::Verify(format!("the live chain refused a frame: {fault}")).into())
+            }
+            Outcome::Aborted { seq, reason } => {
+                Err(Error::Verify(format!("the live chain was aborted at {seq}: {reason}")).into())
+            }
+            _ => Err(Error::Verify("a live frame did not change the stream".to_string()).into()),
         };
     };
+    // The limits are checked before the segment is fetched, so a stream that would pass one stops
+    // without spending the room or the bandwidth on bytes that cannot be written.
+    bounds.check(total, len)?;
     let hash = Hash::from(segment_root);
     fetch::content_blob(store, blobs, hash, u64::from(len), 0, 0, rate, events).await?;
     let bytes = fetch::complete_bytes(store, hash).await?.0;
@@ -290,7 +391,7 @@ async fn apply_frame(
     hasher.update(&bytes);
     total
         .checked_add(u64::from(len))
-        .ok_or_else(|| Error::Verify("the live file is longer than u64::MAX".to_string()))
+        .ok_or_else(|| Error::Verify("the live file is longer than u64::MAX".to_string()).into())
 }
 
 /// The close: the length and the root have to match everything that arrived.

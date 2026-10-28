@@ -36,6 +36,7 @@ async fn one_file_goes_out_and_arrives_with_its_name() {
             allow_hidden: false,
             limits: crate::manifest::Limits::default(),
             free_bytes: None,
+            max_size: None,
             congestion: super::Congestion::Cubic,
             rate: None,
             write_limit: None,

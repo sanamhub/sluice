@@ -8,6 +8,7 @@ use sluice_core::{
     engine::{Rate, ReceiveOptions, receive, receive_live, receive_range, receive_stdout},
     manifest::Limits,
     range::ByteRange,
+    range::ByteSize,
     ticket::{Body, Ticket},
 };
 use tokio::sync::mpsc::unbounded_channel;
@@ -54,17 +55,32 @@ pub struct RecvArgs {
     /// Cap the bytes this command fetches per second, shared by its transfers, such as 50M
     #[arg(long, value_name = "RATE")]
     pub limit_rate: Option<String>,
+    /// Stop a live receive once the file would pass this size, such as 4G; what arrived stays
+    #[arg(long, value_name = "SIZE")]
+    pub max_size: Option<String>,
 }
 
 pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
     let tickets = tickets_text(&args.tickets)?;
     let rate = args.limit_rate.as_deref().map(Rate::parse).transpose()?;
     if tickets.len() > 1 {
+        if args.max_size.is_some() {
+            return Err(Error::Policy(
+                "--max-size bounds one live stream, not a queue of transfers".to_string(),
+            ));
+        }
         return run_many(args, output, &tickets, rate);
     }
     let ticket = tickets.into_iter().next().unwrap_or_default();
     let decoded = Ticket::decode(&ticket)?;
     let range = args.range.as_deref().map(ByteRange::parse).transpose()?;
+    if args.max_size.is_some() && !matches!(decoded.body(), Body::Live { .. }) {
+        return Err(Error::Policy(
+            "--max-size bounds a live stream; a ticket for a fixed transfer already carries its \
+             size"
+                .to_string(),
+        ));
+    }
     if matches!(decoded.body(), Body::Live { .. }) {
         if args.out.as_path() == std::path::Path::new("-") {
             return Err(Error::Policy(
@@ -120,7 +136,7 @@ fn receive_one(
     runtime.block_on(async {
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "receiving");
-        let options = options(args, out, rate);
+        let options = options(args, out, rate)?;
         let result = until_interrupted(receive(ticket, &options, &tx)).await;
         drop(tx);
         let printed = printer
@@ -164,7 +180,7 @@ fn run_many(
     }
     let out = std::path::absolute(&args.out)
         .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", args.out.display())))?;
-    let mut options = options(args, out, rate);
+    let mut options = options(args, out, rate)?;
     // The queue owns retries for a command of several tickets: one failure comes back to it at
     // once, and its backoff schedules the next attempt from the store the last one left.
     options.max_network_failures = 1;
@@ -202,7 +218,7 @@ fn run_live(
     runtime.block_on(async {
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "receiving");
-        let options = options(args, out, rate);
+        let options = options(args, out, rate)?;
         let store = sluice_core::Home::temporary_store()?;
         let result = until_interrupted(receive_live(ticket, &options, &store, &tx)).await;
         drop(tx);
@@ -236,7 +252,7 @@ fn to_stdout(
         .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
     runtime.block_on(async {
         let (tx, _rx) = unbounded_channel();
-        let options = options(args, PathBuf::from("."), rate);
+        let options = options(args, PathBuf::from("."), rate)?;
         let store = sluice_core::Home::temporary_store()?;
         let bytes = until_interrupted(receive_stdout(ticket, &options, &store, &tx)).await?;
         output.write_stderr(&format!("wrote {bytes} bytes to standard output\n"));
@@ -260,15 +276,25 @@ fn run_range(
         .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
     runtime.block_on(async {
         let (tx, _rx) = unbounded_channel();
-        let options = options(args, out, rate);
+        let options = options(args, out, rate)?;
         let store = sluice_core::Home::temporary_store()?;
         let bytes = until_interrupted(receive_range(ticket, range, &options, &store, &tx)).await?;
         output.write_stderr(&format!("wrote {bytes} bytes from the range\n"));
         Ok(0)
     })
 }
-fn options(args: &RecvArgs, out: PathBuf, rate: Option<std::sync::Arc<Rate>>) -> ReceiveOptions {
-    ReceiveOptions {
+fn options(
+    args: &RecvArgs,
+    out: PathBuf,
+    rate: Option<std::sync::Arc<Rate>>,
+) -> Result<ReceiveOptions, Error> {
+    let max_size = args
+        .max_size
+        .as_deref()
+        .map(ByteSize::parse)
+        .transpose()?
+        .map(ByteSize::bytes);
+    Ok(ReceiveOptions {
         out,
         force: args.force,
         no_times: args.no_times,
@@ -276,11 +302,12 @@ fn options(args: &RecvArgs, out: PathBuf, rate: Option<std::sync::Arc<Rate>>) ->
         allow_hidden: args.allow_hidden,
         limits: Limits::default(),
         free_bytes: None,
+        max_size,
         congestion: args.congestion.into(),
         rate,
         write_limit: None,
         max_network_failures: sluice_core::queue::MAX_NETWORK_FAILURES,
-    }
+    })
 }
 
 /// The ticket as given, or the one line on standard input when the argument is `-`. A ticket on

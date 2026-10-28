@@ -37,6 +37,9 @@ pub struct LiveLog {
     signals: broadcast::Sender<()>,
     closed: watch::Sender<bool>,
     allowed: Arc<Mutex<BTreeSet<Hash>>>,
+    /// Why following the file stopped, when it was not the close. A reader's stream is ended with
+    /// it, and the sender reports it as a failure instead of a finished send.
+    error: Mutex<Option<String>>,
 }
 
 /// The log and the task that follows the file, held by a send so both end with it.
@@ -74,6 +77,7 @@ impl LiveLog {
             signals,
             closed,
             allowed,
+            error: Mutex::new(None),
         }
     }
 
@@ -95,6 +99,20 @@ impl LiveLog {
         *lock(&self.close) = Some(close);
         let _ = self.closed.send(true);
         let _ = self.signals.send(());
+    }
+
+    /// Ends the stream with an error instead of a close: the sender could not read or seal the file
+    /// it was following. Every reader's stream is reset with it, so a reader reports the failure
+    /// rather than waiting for a close that will never come.
+    pub(super) fn fail(&self, message: &str) {
+        *lock(&self.error) = Some(message.to_string());
+        let _ = self.closed.send(true);
+        let _ = self.signals.send(());
+    }
+
+    /// Why the stream stopped, when it did not reach its close.
+    pub(super) fn error(&self) -> Option<String> {
+        lock(&self.error).clone()
     }
 
     /// The roots of every segment, in chain order.
@@ -127,12 +145,17 @@ impl LiveLog {
     }
 
     /// Writes the opening record, every sealed frame and the close, in that order. A reader that
-    /// joins late gets the chain from the first segment, as section 6 requires.
+    /// joins late gets the chain from the first segment, as section 6 requires. A stream the sender
+    /// failed is reset instead, so the reader learns why it ended.
     pub(super) async fn write_to(&self, send: &mut SendStream) -> Result<(), Error> {
         write_record(send, &self.open.encode()).await?;
         let mut events = self.signals.subscribe();
         let mut sent = 0;
         loop {
+            if let Some(message) = self.error() {
+                let _ = send.reset(1u32.into());
+                return Err(Error::Storage(message));
+            }
             let (new_frames, close) = {
                 let frames = lock(&self.frames);
                 let new_frames = frames[sent..].to_vec();
@@ -147,10 +170,20 @@ impl LiveLog {
             }
             // A frame pushed between the copy above and this wait has left a signal behind, which
             // is received at once; nothing sealed is ever missed.
-            if events.recv().await.is_err() {
+            if !woke(&mut events).await {
                 return Ok(());
             }
         }
+    }
+}
+
+/// Waits for the next wake-up. A lagged signal is a missed wake-up and not the end of the stream:
+/// every sealed record is kept in the log, so the next pass copies the ones not sent yet. A closed
+/// channel means the log is gone, which cannot happen while a reader holds it, so the stream ends.
+async fn woke(events: &mut broadcast::Receiver<()>) -> bool {
+    match events.recv().await {
+        Ok(()) | Err(broadcast::error::RecvError::Lagged(_)) => true,
+        Err(broadcast::error::RecvError::Closed) => false,
     }
 }
 
@@ -198,4 +231,29 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::woke;
+
+    /// A reader that fell more than 16 signals behind used to read the lag as the end of the stream
+    /// and stop without a close, leaving its file unfinished. The records are all kept, so a lag is
+    /// just a wake-up that was missed.
+    #[tokio::test]
+    async fn a_lagged_reader_keeps_waiting() {
+        let (tx, mut rx) = tokio::sync::broadcast::channel(4);
+        for _ in 0..10 {
+            let _ = tx.send(());
+        }
+        assert!(
+            woke(&mut rx).await,
+            "a lag was read as the end of the stream"
+        );
+        let _ = tx.send(());
+        assert!(woke(&mut rx).await);
+        drop(tx);
+        while rx.try_recv().is_ok() {}
+        assert!(!woke(&mut rx).await, "a log that is gone is the end");
+    }
 }
