@@ -9,11 +9,12 @@ use std::{
 
 use iroh::{Endpoint, protocol::Router};
 use iroh_blobs::{BlobsProtocol, Hash, store::fs::FsStore};
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::unbounded_channel;
 
 use super::Provider;
 use crate::engine::{
-    ALPN, Congestion, Rate, RelayModeChoice, SluiceProtocol, endpoint, live::LiveLog, policy,
+    ALPN, Congestion, Rate, RelayModeChoice, SluiceProtocol, conn::ConnIds, endpoint,
+    live::LiveLog, policy,
 };
 use crate::{Error, Home};
 
@@ -25,7 +26,7 @@ async fn open_endpoint(
     relay: &RelayModeChoice,
     congestion: Congestion,
     port: Option<u16>,
-    complete: UnboundedSender<u64>,
+    complete: endpoint::Completion,
 ) -> Result<Endpoint, Error> {
     let seed = home.identity()?.secret_seed();
     let saved = home.saved_port().filter(|_| port.is_none());
@@ -153,7 +154,12 @@ impl Provider {
         rate: Option<Arc<Rate>>,
     ) -> Result<Self, Error> {
         let (complete, complete_rx) = unbounded_channel();
-        let endpoint = open_endpoint(home, &relay, congestion, port, complete.clone()).await?;
+        let ids = Arc::new(ConnIds::default());
+        let completion = endpoint::Completion {
+            sender: complete.clone(),
+            ids: Arc::clone(&ids),
+        };
+        let endpoint = open_endpoint(home, &relay, congestion, port, completion).await?;
         if let Some(port) = endpoint
             .bound_sockets()
             .first()
@@ -166,7 +172,7 @@ impl Provider {
         }
         endpoint::wait_for_direct_addr(&endpoint).await?;
         let (done, done_rx) = unbounded_channel();
-        let policy = policy::start_shared(allowed, expiry, done, store.clone(), rate);
+        let policy = policy::start_shared(allowed, expiry, done, store.clone(), rate, ids);
         let blobs = BlobsProtocol::new(store.deref(), Some(policy.events.clone()));
         let sluice = match live {
             Some(log) => SluiceProtocol::live(log),

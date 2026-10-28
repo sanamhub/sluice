@@ -18,6 +18,7 @@ use noq::congestion::{Bbr3Config, CubicConfig};
 use serde::Serialize;
 use tokio::sync::mpsc::UnboundedSender;
 
+use super::conn::ConnIds;
 use crate::Error;
 
 /// The warning printed when `--n0-relays` sends traffic to n0's public services.
@@ -119,28 +120,43 @@ pub async fn bind(
 
 /// [`bind`] for a provider whose one-download stop waits for the receiver's completion code.
 /// `complete` receives the connection that closed with it, which the provider checks against the
-/// roots that connection asked for.
+/// roots that connection asked for. `ids` gives each connection the id that check is keyed by, and
+/// is the same map the policy reads.
 pub(super) async fn bind_with_completion(
     secret: Option<[u8; 32]>,
     relay: &RelayModeChoice,
     congestion: Congestion,
     port: Option<u16>,
-    complete: UnboundedSender<u64>,
+    complete: Completion,
 ) -> Result<Endpoint, Error> {
     bind_inner(secret, relay, congestion, port, Some(complete)).await
+}
+
+/// The completion watch of a provider: where a connection that closed with the code is reported,
+/// and the ids every accepted connection is given.
+#[derive(Clone, Debug)]
+pub(super) struct Completion {
+    pub sender: UnboundedSender<u64>,
+    pub ids: Arc<ConnIds>,
 }
 
 /// A watcher that reports a connection closed with [`super::COMPLETE_CLOSE`]. Only the static
 /// content protocol carries the code, so a `sluice/1` connection that closes with it means
 /// nothing here.
 #[derive(Debug)]
-struct CompletionSignal(UnboundedSender<u64>);
+struct CompletionSignal(Completion);
 
 impl EndpointHooks for CompletionSignal {
     async fn after_handshake<'a>(&'a self, conn: &'a Connection) -> AfterHandshakeOutcome {
+        // Only the content protocol reaches the policy, so only its connections need an id, and
+        // only they are given one: the map stays the size of the content connections that are
+        // alive, and a handshake cannot grow it without limit.
         if conn.alpn() == iroh_blobs::ALPN {
+            let stable = conn.stable_id() as u64;
+            // Before this connection can send a request, so the policy never has to guess its id
+            // from iroh's reusable address.
+            let own = self.0.ids.assign(stable);
             let closed = conn.weak_handle();
-            let id = conn.stable_id() as u64;
             let complete = self.0.clone();
             n0_future::task::spawn(async move {
                 if let Some(closed) = closed.closed().await
@@ -148,8 +164,9 @@ impl EndpointHooks for CompletionSignal {
                         closed.reason
                     && application.error_code.into_inner() == u64::from(super::COMPLETE_CLOSE)
                 {
-                    let _ = complete.send(id);
+                    let _ = complete.sender.send(own);
                 }
+                complete.ids.closed(stable, own);
             });
         }
         AfterHandshakeOutcome::accept()
@@ -161,7 +178,7 @@ async fn bind_inner(
     relay: &RelayModeChoice,
     congestion: Congestion,
     port: Option<u16>,
-    complete: Option<UnboundedSender<u64>>,
+    complete: Option<Completion>,
 ) -> Result<Endpoint, Error> {
     let mut builder = Endpoint::builder(presets::Empty)
         .crypto_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))

@@ -1,6 +1,7 @@
 //! The session layer: endpoints, the provider's access policy, the `sluice/1` greeting and the
 //! events a transfer reports. Commands start a runtime; this module only provides futures.
 
+mod conn;
 mod endpoint;
 mod events;
 mod expiry;

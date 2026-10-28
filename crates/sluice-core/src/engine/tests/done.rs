@@ -88,6 +88,61 @@ async fn a_peer_without_the_ticket_cannot_end_the_sender() {
     probe.close().await;
 }
 
+/// Asking for every root is what makes a connection's completion code count, and the record
+/// belongs to that connection. A later connection that asks for nothing cannot use it: iroh's id
+/// for the closed connection is handed on to the next one, and a sender that believed the code of
+/// the id rather than the connection would stop for a peer that received nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_later_connection_cannot_use_the_record_of_the_one_before_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = vec![7u8; 64 << 10];
+    let (outgoing, text) = prepared(&dir, &body).await;
+    let root = Hash::from(outgoing.roots[0]);
+    let roots = outgoing.roots.clone();
+    let addr = outgoing.provider.addr();
+    let mut serve =
+        tokio::spawn(async move { outgoing.provider.serve(Stop::OneDownload(roots)).await });
+
+    // One connection asks for a byte of the root, which is recorded, and goes away without the
+    // code, as a killed receive does.
+    let (probe, _store) = client(&dir).await;
+    let conn = probe.connect(addr.clone(), iroh_blobs::ALPN).await.unwrap();
+    let store = MemStore::new();
+    store
+        .remote()
+        .execute_get(
+            conn.clone(),
+            GetRequest::blob_ranges(root, ChunkRanges::bytes(0..1024)),
+        )
+        .complete()
+        .await
+        .unwrap();
+    conn.close(0u32.into(), b"stopped");
+    conn.closed().await;
+
+    // A second connection asks for nothing and says the transfer is complete.
+    let conn = probe.connect(addr.clone(), iroh_blobs::ALPN).await.unwrap();
+    conn.close(crate::engine::COMPLETE_CLOSE.into(), b"complete");
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(2_500), &mut serve)
+            .await
+            .is_err(),
+        "the record of a closed connection ended the sender for another one"
+    );
+
+    let out = dir.path().join("out");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    super::receive(&text, &options(&out), &tx).await.unwrap();
+    let end = tokio::time::timeout(Duration::from_secs(10), serve)
+        .await
+        .expect("the sender did not stop after the transfer")
+        .unwrap()
+        .unwrap();
+    assert_eq!(end, ServeEnd::Downloaded);
+    probe.close().await;
+}
+
 /// A peer that asked for one root of a two-root transfer has not received the transfer, so its
 /// completion code is ignored. Asking one connection for both roots and saying so is what ends it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

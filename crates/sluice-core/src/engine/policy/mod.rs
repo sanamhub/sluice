@@ -21,17 +21,44 @@ mod delivery;
 use delivery::{add, covers, credited, requested};
 use tokio::sync::mpsc::UnboundedSender;
 
+use super::conn::ConnIds;
+
 /// The byte ranges of one root this process has served, merged and in ascending order. A range
 /// asked for twice counts once, so two requests for the first half are not the whole file.
 type Served = BTreeMap<Hash, Vec<(u64, u64)>>;
 
 /// The roots each connection asked for and was allowed to read. The completion code is believed
 /// only from a connection whose set holds every root of the transfer.
-type Asked = BTreeMap<u64, BTreeSet<Hash>>;
+#[derive(Debug, Default)]
+struct Asked {
+    /// Keyed by the id [`ConnIds`] gave the connection, which only grows, so the lowest key is the
+    /// connection that asked first.
+    by: BTreeMap<u64, BTreeSet<Hash>>,
+}
 
 /// How many connections the provider remembers. Past this the oldest record goes, so a peer that
 /// opens thousands of connections can only make the sender serve longer, never shorter.
 const MAX_ASKED: usize = 1024;
+
+impl Asked {
+    /// Notes that `connection` asked for `hash`. A full map loses the record of the connection
+    /// that asked first: ids grow with time, so that is the oldest insertion and not merely the
+    /// lowest number a peer happened to land on.
+    fn remember(&mut self, connection: u64, hash: Hash) {
+        if self.by.len() >= MAX_ASKED
+            && !self.by.contains_key(&connection)
+            && let Some(oldest) = self.by.keys().next().copied()
+        {
+            self.by.remove(&oldest);
+        }
+        self.by.entry(connection).or_default().insert(hash);
+    }
+
+    /// The roots `connection` asked for and was allowed to read.
+    fn of(&self, connection: u64) -> BTreeSet<Hash> {
+        self.by.get(&connection).cloned().unwrap_or_default()
+    }
+}
 
 /// The provider's policy and the task that answers its request events.
 pub struct Policy {
@@ -59,10 +86,7 @@ impl Policy {
 
     /// The roots `connection` asked for and was allowed to read.
     pub fn asked_by(&self, connection: u64) -> BTreeSet<Hash> {
-        lock(&self.asked)
-            .get(&connection)
-            .cloned()
-            .unwrap_or_default()
+        lock(&self.asked).of(connection)
     }
 }
 
@@ -101,6 +125,7 @@ struct Gate {
     totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>>,
     served: Arc<Mutex<Served>>,
     asked: Arc<Mutex<Asked>>,
+    ids: Arc<ConnIds>,
     rate: Option<Arc<super::Rate>>,
 }
 
@@ -112,6 +137,7 @@ pub fn start_shared(
     done: UnboundedSender<ServeEvent>,
     store: FsStore,
     rate: Option<Arc<super::Rate>>,
+    ids: Arc<ConnIds>,
 ) -> Policy {
     let (events, mut rx) = EventSender::channel(32, mask(rate.is_some()));
     let totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>> = Arc::default();
@@ -124,6 +150,7 @@ pub fn start_shared(
         totals: Arc::clone(&totals),
         served: Arc::default(),
         asked: Arc::clone(&asked),
+        ids: Arc::clone(&ids),
         rate,
     };
     let task = AbortOnDropHandle::new(n0_future::task::spawn(async move {
@@ -173,13 +200,19 @@ impl Gate {
             ProviderMessage::GetRequestReceived(mut msg) => {
                 let hash = msg.request.hash;
                 let ok = self.may(hash);
-                let connection = msg.connection_id;
+                // The id this process gave the connection. A connection the handshake never saw
+                // has none, so its request is still checked against the allowlist but counted for
+                // no completion: an id inherited from a closed connection would let a peer end a
+                // send it never received.
+                let connection = self.ids.own(msg.connection_id).unwrap_or_default();
                 let whole = msg.request.ranges.is_all();
                 let asked = requested(&msg.request.ranges);
                 if msg.tx.send(answer(ok)).await.is_err() || !ok {
                     return;
                 }
-                self.remember(connection, hash);
+                if connection != 0 {
+                    lock(&self.asked).remember(connection, hash);
+                }
                 let done = self.done.clone();
                 let store = self.store.clone();
                 let totals = Arc::clone(&self.totals);
@@ -195,7 +228,9 @@ impl Gate {
                         let Some(covered) = sent.checked(hash, &asked, update, whole).await else {
                             continue;
                         };
-                        if covered {
+                        // Id 0 is no connection of this process, so a delivery on it is not one a
+                        // completion code can be matched to.
+                        if covered && connection != 0 {
                             let _ = done.send(ServeEvent::Downloaded { hash, connection });
                         }
                         break;
@@ -211,9 +246,9 @@ impl Gate {
                 msg.tx.send(answer(ok)).await.ok();
             }
             ProviderMessage::ConnectionClosed(msg) => {
-                let _ = self.done.send(ServeEvent::Closed {
-                    connection: msg.connection_id,
-                });
+                if let Some(connection) = self.ids.own(msg.connection_id) {
+                    let _ = self.done.send(ServeEvent::Closed { connection });
+                }
             }
             ProviderMessage::Throttle(msg) => {
                 if let Some(rate) = &self.rate {
@@ -228,20 +263,6 @@ impl Gate {
     /// The one access rule: an allowed hash, before the ticket's deadline.
     fn may(&self, hash: Hash) -> bool {
         !expired(self.expiry) && lock(&self.allowed).contains(&hash)
-    }
-
-    /// Notes that `connection` asked for `hash`, which is what a completion code is checked
-    /// against. A refused request is never noted, so a peer without the ticket cannot have the
-    /// code believed for a root it was not allowed to read.
-    fn remember(&self, connection: u64, hash: Hash) {
-        let mut asked = lock(&self.asked);
-        if asked.len() >= MAX_ASKED
-            && !asked.contains_key(&connection)
-            && let Some(oldest) = asked.keys().next().copied()
-        {
-            asked.remove(&oldest);
-        }
-        asked.entry(connection).or_default().insert(hash);
     }
 
     /// The same rule for a request that names several hashes at once: every one has to be allowed,
@@ -323,7 +344,9 @@ fn expired_at(expiry: Option<u64>, now: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::expired_at;
+    use super::{Asked, MAX_ASKED, expired_at};
+    use crate::engine::conn::ConnIds;
+    use iroh_blobs::Hash;
 
     #[test]
     fn the_boundary_is_the_ticket_boundary() {
@@ -332,5 +355,39 @@ mod tests {
         assert!(!expired_at(Some(10), 9));
         assert!(expired_at(Some(10), 10));
         assert!(expired_at(Some(10), 11));
+    }
+
+    /// A peer with no ticket that lands on a closed connection's iroh id must not inherit the
+    /// record of the connection it replaced: it would otherwise have its completion code believed
+    /// for roots it never asked for.
+    #[test]
+    fn a_connection_that_reuses_an_id_inherits_nothing() {
+        let ids = ConnIds::default();
+        let mut asked = Asked::default();
+        let root = Hash::from([1u8; 32]);
+        let first = ids.assign(9);
+        asked.remember(first, root);
+        assert!(asked.of(first).contains(&root));
+        ids.closed(9, first);
+        let second = ids.assign(9);
+        assert_ne!(first, second);
+        assert!(asked.of(second).is_empty());
+    }
+
+    /// The cap drops the connection that asked first. Ids grow with time, so that is the lowest
+    /// key and not whichever id a peer happened to land on.
+    #[test]
+    fn the_cap_evicts_the_oldest_connection() {
+        let mut asked = Asked::default();
+        let root = Hash::from([2u8; 32]);
+        for connection in 1..=MAX_ASKED as u64 {
+            asked.remember(connection, root);
+        }
+        assert_eq!(asked.by.len(), MAX_ASKED);
+        asked.remember(MAX_ASKED as u64 + 1, root);
+        assert_eq!(asked.by.len(), MAX_ASKED);
+        assert!(asked.of(1).is_empty(), "the first connection was kept");
+        assert!(!asked.of(MAX_ASKED as u64 + 1).is_empty());
+        assert!(!asked.of(2).is_empty());
     }
 }
