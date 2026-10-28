@@ -27,7 +27,8 @@ impl MetaStore {
     /// [`open`] in a folder the caller names, which must already be private.
     pub(super) async fn open_in(parent: &Path) -> Result<Self, Error> {
         let dir = temp_dir(parent)?;
-        let store = match super::open_store(&dir.path().join("store")).await {
+        let store = match super::open_store(&dir.path().join("store"), super::Collector::Off).await
+        {
             Ok(store) => store,
             Err(e) => {
                 return Err(Error::Storage(format!(

@@ -65,9 +65,9 @@ pub async fn prepare_live_with_rate(
     rate: Option<Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
     let (name, size) = checked_path(path)?;
-    let store = FsStore::load(home.path().join("blobs"))
-        .await
-        .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
+    // The live store is one of the two whose blobs are throwaway: the collector frees a segment as
+    // soon as the send drops its tag, so an hour of following does not leave an hour of segments.
+    let store = storage::open_store(&home.path().join("blobs"), storage::Collector::On).await?;
     let seed = home.identity()?.secret_seed();
     let key = SigningKey::from_bytes(&seed);
     let sender_key = key.verifying_key().to_bytes();

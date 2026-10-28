@@ -263,3 +263,84 @@ async fn a_file_that_shrank_while_followed_ends_the_stream_with_an_error() {
 fn one_segment_is_the_size_the_spec_names() {
     assert_eq!(SEGMENT_BYTES, 8 << 20);
 }
+
+/// Every byte the store folder holds, except its database: the blobs themselves.
+fn store_bytes(dir: &Path) -> u64 {
+    let mut total = 0;
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            total += store_bytes(&path);
+        } else if path.file_name().is_none_or(|name| name != "blobs.db") {
+            total += entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+        }
+    }
+    total
+}
+
+/// Waits until the store folder holds bytes matching `done`, and returns what it held then.
+async fn wait_for_store(dir: &Path, done: impl Fn(u64) -> bool) -> u64 {
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let bytes = store_bytes(dir);
+        if done(bytes) {
+            return bytes;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the store held {bytes} bytes and did not change"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// A live send keeps one copy of each segment it has sealed and no more, and gives every one of
+/// them back when the send stops: a send that follows a file all afternoon does not leave the
+/// afternoon on disk. The store's collector is the only thing that frees them, so this is also the
+/// check that the live store runs one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_live_send_store_is_bounded_while_it_runs_and_empty_after_it_stops() {
+    // Five full segments; the last, short one is the tail and is sealed only at the close.
+    const SEALED: u64 = 5 * (8 << 20);
+    const CONTENT: u64 = SEALED + (1 << 20);
+    let dir = tempfile::tempdir().unwrap();
+    let home = Home::open(&dir.path().join("home")).unwrap();
+    let source = dir.path().join("long.bin");
+    // Segments that differ from each other: five copies of one segment would be one blob.
+    let mut body = vec![0u8; CONTENT as usize];
+    for (at, byte) in body.iter_mut().enumerate() {
+        *byte = (at % 251) as u8;
+    }
+    fs::write(&source, body).unwrap();
+    let outgoing = prepare_live(
+        &home,
+        &source,
+        RelayModeChoice::Disabled,
+        Congestion::Cubic,
+        None,
+        None,
+        // Long enough that the follower seals every full segment and never closes the stream.
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+    let blobs = home.path().join("blobs");
+    // Five full segments, held for the readers that have not asked for them yet.
+    let sealed = wait_for_store(&blobs, |bytes| bytes >= SEALED).await;
+    assert!(
+        sealed < SEALED + (4 << 20),
+        "the store held {sealed} bytes for {SEALED} bytes of sealed segments"
+    );
+
+    // What a send that stops does: the follower goes, and with it the tags it held the segments by.
+    outgoing.live.as_ref().unwrap().stop();
+    drop(outgoing);
+    let left = wait_for_store(&blobs, |bytes| bytes < 1 << 20).await;
+    assert!(
+        left < 1 << 20,
+        "the store still held {left} bytes after the send stopped"
+    );
+}

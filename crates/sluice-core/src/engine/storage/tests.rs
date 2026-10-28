@@ -386,3 +386,10 @@ async fn a_blob_stays_while_a_tag_holds_it_and_goes_after_the_tag_is_dropped() {
     assert!(gone, "a blob no tag holds was kept by the collector");
     store.shutdown().await.unwrap();
 }
+
+/// A live stream's segments leave the store at the next sweep, so the whole bound on a live send is
+/// one sweep's worth of what it sealed, and the sweep is what the constant says it is.
+#[test]
+fn the_collector_sweeps_every_ten_seconds() {
+    assert_eq!(super::GC_INTERVAL, std::time::Duration::from_secs(10));
+}

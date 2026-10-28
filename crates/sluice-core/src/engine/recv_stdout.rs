@@ -39,7 +39,8 @@ pub async fn receive_stdout(
             return Err(e);
         }
     };
-    let store = match storage::open_store(&tmp.path().join("store")).await {
+    let store = match storage::open_store(&tmp.path().join("store"), storage::Collector::Off).await
+    {
         Ok(store) => store,
         Err(e) => {
             let _ = receiver.shutdown().await;
@@ -118,17 +119,6 @@ async fn raw(
     store_root: &Path,
 ) -> Result<u64, Error> {
     let hash = Hash::from(root);
-    // The collector runs in this store, so the bytes stay while they are fetched and copied out.
-    let _held = store
-        .tags()
-        .temp_tag(iroh_blobs::HashAndFormat::raw(hash))
-        .await
-        .map_err(|e| {
-            Error::Storage(format!(
-                "cannot hold a blob in the store: {}",
-                crate::plain(&e)
-            ))
-        })?;
     if size > 0 {
         let proven = fetch::verified_size(store, conn, hash).await?;
         if proven != size {
@@ -190,16 +180,6 @@ async fn stream_entry(
     match entry.loc {
         Loc::Blob { root } => {
             let hash = Hash::from(root);
-            let _held = store
-                .tags()
-                .temp_tag(iroh_blobs::HashAndFormat::raw(hash))
-                .await
-                .map_err(|e| {
-                    Error::Storage(format!(
-                        "cannot hold a blob in the store: {}",
-                        crate::plain(&e)
-                    ))
-                })?;
             if entry.size > 0 {
                 fetch::content_blob(store, conn, hash, entry.size, 0, entry.size, rate, events)
                     .await?;
@@ -214,16 +194,6 @@ async fn stream_entry(
             let pack = manifest.packs().get(pack_index as usize).ok_or_else(|| {
                 Error::Policy("the manifest points at a pack that is not listed".to_string())
             })?;
-            let _held = store
-                .tags()
-                .temp_tag(iroh_blobs::HashAndFormat::raw(Hash::from(pack.root)))
-                .await
-                .map_err(|e| {
-                    Error::Storage(format!(
-                        "cannot hold a blob in the store: {}",
-                        crate::plain(&e)
-                    ))
-                })?;
             fetch::content_blob(
                 store,
                 conn,

@@ -45,7 +45,7 @@ pub async fn prepare_with_rate(
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
     let (shown, name, entry_path, before) = checked_file(path)?;
-    let store = storage::open_store(&home.path().join("blobs"))
+    let store = storage::open_store(&home.path().join("blobs"), storage::Collector::Off)
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
     let tag = import(path, &shown, &store).await?;
@@ -104,7 +104,7 @@ pub async fn prepare_stdin_with_rate(
     port: Option<u16>,
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
-    let store = storage::open_store(&home.path().join("blobs"))
+    let store = storage::open_store(&home.path().join("blobs"), storage::Collector::Off)
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
     let (tag, size) = import_stdin(home, &store).await?;

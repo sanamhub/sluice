@@ -48,7 +48,7 @@ pub async fn prepare_paths_with_rate(
         ));
     };
     let manifest = &built.manifest;
-    let store = storage::open_store(&home.path().join("blobs"))
+    let store = storage::open_store(&home.path().join("blobs"), storage::Collector::Off)
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
     let mut tags = Vec::new();

@@ -93,7 +93,7 @@ async fn open(
             return Err(e);
         }
     };
-    match storage::open_store(&store_tmp.path().join("store")).await {
+    match storage::open_store(&store_tmp.path().join("store"), storage::Collector::On).await {
         Ok(store) => Ok(Opened {
             receiver,
             store,
