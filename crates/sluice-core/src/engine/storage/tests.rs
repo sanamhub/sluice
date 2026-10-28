@@ -3,6 +3,7 @@
 
 use super::{install, needed_bytes, partial_dir, temp_dir};
 mod records;
+mod store;
 
 use std::path::Path;
 
@@ -376,117 +377,4 @@ fn the_store_folder_is_never_claimed_over_a_folder_it_cannot_empty() {
     let err = super::claim(&blocked).unwrap_err();
     assert!(matches!(err, crate::Error::Policy(_)), "{err}");
     assert!(blocked.exists(), "a folder it did not make was changed");
-}
-
-/// Only the two live stores collect, so a blob in a store that does not collect stays until that
-/// store is closed or removed. In a live store a segment's tag is dropped as soon as the segment is
-/// written out, and the bytes go at the next sweep instead of staying until the process ends.
-#[tokio::test]
-async fn a_blob_stays_while_a_tag_holds_it_and_goes_after_the_tag_is_dropped() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = super::open_store_after(dir.path(), std::time::Duration::from_millis(50))
-        .await
-        .unwrap();
-    let body = vec![1u8; 2 << 20];
-    let tag = store.blobs().add_slice(&body).temp_tag().await.unwrap();
-    let hash = tag.hash();
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-    assert!(
-        store.blobs().has(hash).await.unwrap(),
-        "a held blob was collected"
-    );
-    drop(tag);
-    let mut gone = false;
-    for _ in 0..60 {
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        if !store.blobs().has(hash).await.unwrap() {
-            gone = true;
-            break;
-        }
-    }
-    assert!(gone, "a blob no tag holds was kept by the collector");
-    store.shutdown().await.unwrap();
-}
-
-/// A live stream's segments leave the store at the next sweep, so the whole bound on a live send is
-/// one sweep's worth of what it sealed, and the sweep is what the constant says it is.
-#[test]
-fn the_collector_sweeps_every_ten_seconds() {
-    assert_eq!(super::GC_INTERVAL, std::time::Duration::from_secs(10));
-}
-
-/// A command that is cancelled has no future left to await a close with, and a store it leaves
-/// behind is handed to the next command in this process: a resume opens the same folder, and it
-/// would find the database still held by a task that was still using it.
-#[tokio::test]
-async fn a_store_a_cancelled_command_left_open_is_closed_by_the_next_open() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("store");
-    let guard = super::Store::open(&root, super::Collector::Off)
-        .await
-        .unwrap();
-    // A task that was serving the store when the command was cancelled holds one of these.
-    let held = guard.handle();
-    drop(guard);
-
-    let mut again = super::Store::open(&root, super::Collector::Off)
-        .await
-        .unwrap();
-    again.close().await.unwrap();
-    drop(held);
-}
-
-/// A command killed while it was copying a blob's bytes back leaves the half-written copy beside
-/// the data file, and leaves the data file sharing an inode with a file in the output. The store's
-/// next claim removes the copy, gives the store its own name back, and does not copy bytes that no
-/// longer hash to the blob: an edited file is the user's, and the store refuses it where it is used.
-#[tokio::test]
-async fn a_claim_repairs_what_a_killed_command_left() {
-    let dir = tempfile::tempdir().unwrap();
-    let partial = dir.path().join("store");
-    let mut store = super::Store::open(&partial, super::Collector::Off)
-        .await
-        .unwrap();
-    let body = vec![3u8; 1 << 20];
-    let tag = store.blobs().add_slice(&body).temp_tag().await.unwrap();
-    let hash = tag.hash();
-    drop(tag);
-    let edited = vec![5u8; 1 << 20];
-    let tag = store.blobs().add_slice(&edited).temp_tag().await.unwrap();
-    let edited_hash = tag.hash();
-    drop(tag);
-    store.close().await.unwrap();
-
-    let source = super::data_path(&partial, &hash);
-    let shared = dir.path().join("shared.bin");
-    std::fs::hard_link(&source, &shared).unwrap();
-    // The copy a kill can leave, and one that no blob names.
-    let leftover = source.with_extension("store");
-    std::fs::write(&leftover, b"half").unwrap();
-    let stray = source.parent().unwrap().join("nothing.store");
-    std::fs::write(&stray, b"x").unwrap();
-
-    super::repair(&partial).await;
-    assert!(!leftover.exists(), "a half-written copy was kept");
-    assert!(!stray.exists(), "a copy nothing names was kept");
-    let names = super::name_count(&source, &std::fs::metadata(&source).unwrap()).unwrap();
-    assert_eq!(names, 1, "the data file still shares its name");
-    assert_eq!(std::fs::read(&source).unwrap(), body);
-    assert_eq!(std::fs::read(&shared).unwrap(), body, "the output changed");
-
-    // The same repair on a file the user edited: the bytes no longer hash to the blob, so they are
-    // left where they are and the store's check is what refuses the blob.
-    let edited_source = super::data_path(&partial, &edited_hash);
-    let edited_out = dir.path().join("edited.bin");
-    std::fs::hard_link(&edited_source, &edited_out).unwrap();
-    std::fs::write(&edited_out, vec![6u8; edited.len()]).unwrap();
-
-    super::repair(&partial).await;
-    let names =
-        super::name_count(&edited_source, &std::fs::metadata(&edited_source).unwrap()).unwrap();
-    assert_eq!(names, 2, "an edited file was copied into the store");
-    assert_eq!(
-        std::fs::read(&edited_source).unwrap(),
-        vec![6u8; edited.len()]
-    );
 }

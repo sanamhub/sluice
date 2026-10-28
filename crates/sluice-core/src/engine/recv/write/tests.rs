@@ -300,7 +300,8 @@ async fn a_cancelled_write_leaves_the_copy_to_the_next_claim() {
 
     // The claim happens before the store is opened, so nothing holds the data file it replaces.
     store.shutdown().await.unwrap();
-    repair(&partial).await;
+    let before = crate::engine::storage::identify(&partial).unwrap();
+    repair(&partial, before).await.unwrap();
     assert!(
         !same_file(&source, &target),
         "the claim left the store sharing bytes with the output"

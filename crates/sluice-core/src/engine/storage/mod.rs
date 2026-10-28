@@ -21,7 +21,7 @@ pub use registry::{
     remember as remember_record,
 };
 pub use repair::repair;
-pub(crate) use repair::{data_path, name_count};
+pub(crate) use repair::{changed, data_path, name_count};
 #[cfg(test)]
 pub use store::MARKER;
 pub use store::{FolderId, Owner, claim, identify, partial_dir, recorded, remember};

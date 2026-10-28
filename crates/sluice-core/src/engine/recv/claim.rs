@@ -46,8 +46,10 @@ pub(super) async fn claim_store(
     };
     // A store that a cancelled command left sharing an inode with a file in the output is given its
     // own bytes before it is opened: the file is the user's now, and a resumed store must not read
-    // bytes that can be changed through it.
-    storage::repair(partial).await;
+    // bytes that can be changed through it. The folder's identity is checked again inside the
+    // repair, before it touches a file, because a folder swapped in since the check above is not
+    // this transfer's store.
+    storage::repair(partial, before).await?;
     let mut store = match storage::Store::open(partial, storage::Collector::Off).await {
         Ok(store) => store,
         Err(e) => {
@@ -61,10 +63,7 @@ pub(super) async fn claim_store(
     };
     if storage::identify(partial)? != before {
         let _ = store.close().await;
-        return Err(Error::Policy(format!(
-            "the partial store folder {} changed while it was opened; look at what is there",
-            partial.display()
-        )));
+        return Err(storage::changed(partial));
     }
     Ok((store, resume, plan))
 }
