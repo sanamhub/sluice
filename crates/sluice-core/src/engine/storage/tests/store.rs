@@ -243,3 +243,30 @@ async fn a_source_edited_while_it_is_copied_is_not_installed() {
         );
     }
 }
+
+/// An open that starts while another is closing a store it was handed waits for that close before
+/// it opens its own. A retry of a receive asks for the folder whose store a cancelled command left,
+/// and a store being closed still holds its database: without the wait, the retry finds the parked
+/// list empty, opens the same database, and is refused for a lock nobody is going to keep.
+#[tokio::test]
+async fn an_open_waits_for_a_close_that_is_still_running() {
+    let dir = tempfile::tempdir().unwrap();
+    let waiting = dir.path().join("waiting");
+    let retry = dir.path().join("retry");
+    // The store a cancelled command left open, in the folder the retry asks for.
+    let cancelled = Store::open(&retry, Collector::Off).await.unwrap();
+    let held = cancelled.handle();
+    drop(cancelled);
+
+    // Both opens are polled on one thread in this order, which is the order the race was lost in:
+    // the first takes the parked store and starts closing it, the second asks for that folder.
+    let (first, second) = tokio::join!(
+        Store::open(&waiting, Collector::Off),
+        Store::open(&retry, Collector::Off),
+    );
+    let first = first.unwrap();
+    let second = second.unwrap();
+    first.close().await.unwrap();
+    second.close().await.unwrap();
+    drop(held);
+}
