@@ -80,6 +80,15 @@ fn an_unknown_kind_of_access_is_refused() {
 }
 
 #[test]
+fn a_key_with_spaces_around_its_dots_is_named_without_them() {
+    refused(
+        &m("access.httpr .ul = \"x\"\n"),
+        Mode::Closed,
+        "line 2: `access.httpr.ul` is not a setting or value",
+    );
+}
+
+#[test]
 fn each_closed_mode_starts_without_open_and_is_refused_with_it() {
     let closed = [
         format!("[access]\nallowlist = [\"{ID}\"]\n"),

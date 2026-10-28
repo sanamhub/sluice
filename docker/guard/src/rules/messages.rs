@@ -86,8 +86,9 @@ fn printable(name: &str) -> Option<&str> {
 }
 
 /// The key that starts the line an error points at, if the line is `key = ...` or `[table]`, and
-/// each part of the key, between dots, is [`printable`].
-fn key_on_line<'a>(text: &'a str, err: &toml::de::Error) -> Option<&'a str> {
+/// each part of the key, between dots, is [`printable`]. TOML allows spaces around the dots, so the
+/// parts are joined again without them: the name printed is only ever the printable parts.
+fn key_on_line(text: &str, err: &toml::de::Error) -> Option<String> {
     let start = err.span()?.start.min(text.len());
     // Bytes, not str slicing, so a span inside a character cannot panic.
     let line_start = text.as_bytes()[..start]
@@ -100,6 +101,6 @@ fn key_on_line<'a>(text: &'a str, err: &toml::de::Error) -> Option<&'a str> {
         None => line.split('=').next()?,
     }
     .trim();
-    let parts_printable = key.split('.').all(|part| printable(part.trim()).is_some());
-    parts_printable.then_some(key)
+    let parts: Option<Vec<&str>> = key.split('.').map(|part| printable(part.trim())).collect();
+    parts.map(|parts| parts.join("."))
 }
