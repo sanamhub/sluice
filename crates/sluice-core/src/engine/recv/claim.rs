@@ -45,7 +45,7 @@ pub(super) async fn claim_store(
         start_store(partial, owner, &created, options)?;
         storage::identify(partial)?
     };
-    match FsStore::load(partial).await {
+    match storage::open_store(partial).await {
         Ok(store) if storage::identify(partial)? == before => Ok((store, resume, plan)),
         Ok(store) => {
             let _ = store.shutdown().await;

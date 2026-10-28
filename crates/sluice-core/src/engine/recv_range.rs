@@ -40,7 +40,7 @@ pub async fn receive_range(
             return Err(e);
         }
     };
-    let store = match FsStore::load(tmp.path().join("store")).await {
+    let store = match storage::open_store(&tmp.path().join("store")).await {
         Ok(store) => store,
         Err(e) => {
             let _ = receiver.shutdown().await;
@@ -93,6 +93,18 @@ async fn fetch_and_write(
     let resolved = range.resolve(entry.size)?;
     let plan = resolved.plan();
     let request = plan_fetch(&manifest, &entry, &plan)?;
+    // The collector runs in this store, so the bytes are held from the fetch until they are copied
+    // out; a range of a large pack can take longer than one sweep.
+    let _held = store
+        .tags()
+        .temp_tag(iroh_blobs::HashAndFormat::raw(request.hash))
+        .await
+        .map_err(|e| {
+            Error::Storage(format!(
+                "cannot hold a blob in the store: {}",
+                crate::plain(&e)
+            ))
+        })?;
     storage::ensure_space(store_root, request.need)?;
     fetch::fetch_range(
         store,

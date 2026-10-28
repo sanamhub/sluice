@@ -10,7 +10,7 @@ use std::{
 };
 
 use ed25519_dalek::SigningKey;
-use iroh_blobs::store::fs::FsStore;
+use iroh_blobs::{api::TempTag, store::fs::FsStore};
 use sluice_live::{SEGMENT_BYTES, Sender};
 use tokio::io::AsyncReadExt;
 
@@ -92,12 +92,16 @@ pub async fn prepare_live_with_rate(
     )
     .await?;
     let ticket = ticket_of(&provider, sender_key, stream_id, expiry_ms)?;
+    // The segments stay in the home store while the stream is served, and are given back to the
+    // collector when the send stops; the vector is shared with the task that seals them.
+    let tags: Arc<Mutex<Vec<TempTag>>> = Arc::default();
     let task = tokio::spawn(follow(
         path.to_path_buf(),
         store,
         log.clone(),
         sender,
         close_after,
+        Arc::clone(&tags),
     ));
     Ok(Outgoing {
         provider,
@@ -107,7 +111,7 @@ pub async fn prepare_live_with_rate(
         files: 1,
         bytes: size,
         congestion,
-        live: Some(LiveSend::new(log, task)),
+        live: Some(LiveSend::new(log, task, tags)),
         _tags: Vec::new(),
     })
 }
@@ -170,8 +174,9 @@ async fn follow(
     log: Arc<LiveLog>,
     sender: Sender,
     close_after: Duration,
+    tags: Arc<Mutex<Vec<TempTag>>>,
 ) {
-    if let Err(error) = run(&path, &store, &log, sender, close_after).await {
+    if let Err(error) = run(&path, &store, &log, sender, close_after, &tags).await {
         log.fail(&error.to_string());
     }
 }
@@ -182,6 +187,7 @@ async fn run(
     log: &LiveLog,
     mut sender: Sender,
     close_after: Duration,
+    tags: &Mutex<Vec<TempTag>>,
 ) -> Result<(), Error> {
     let mut file = tokio::fs::File::open(path)
         .await
@@ -216,14 +222,14 @@ async fn run(
         while pending.len() >= SEGMENT_BYTES as usize {
             let rest = pending.split_off(SEGMENT_BYTES as usize);
             let segment = std::mem::replace(&mut pending, rest);
-            seal(store, log, &mut sender, &segment).await?;
+            seal(store, log, &mut sender, &segment, tags).await?;
             if let Some(error) = changed(path, identity, read_total)? {
                 return Err(error);
             }
         }
     }
     if !pending.is_empty() {
-        seal(store, log, &mut sender, &pending).await?;
+        seal(store, log, &mut sender, &pending, tags).await?;
     }
     let close = sender.close(*hasher.finalize().as_bytes(), now_ms());
     log.finish(close);
@@ -262,17 +268,22 @@ async fn seal(
     log: &LiveLog,
     sender: &mut Sender,
     bytes: &[u8],
+    tags: &Mutex<Vec<TempTag>>,
 ) -> Result<(), Error> {
-    let tag = store
-        .add_slice(bytes)
-        .await
-        .map_err(|e| Error::Storage(format!("cannot keep a live segment: {}", crate::plain(&e))))?;
-    let root = *tag.hash.as_bytes();
+    let tag =
+        store.add_slice(bytes).temp_tag().await.map_err(|e| {
+            Error::Storage(format!("cannot keep a live segment: {}", crate::plain(&e)))
+        })?;
+    let root = *tag.hash().as_bytes();
     let frame = sender
         .seal(root, bytes.len() as u32)
         .map_err(|e| Error::Storage(format!("cannot seal a live segment: {e}")))?;
     log.push(frame);
-    // The store has no collection task, so the bytes stay after the tag is dropped.
+    // Held until the send stops: a reader may ask for any sealed segment until then, so the
+    // collector must not free one, and when the send stops all of them go at once.
+    tags.lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(tag);
     Ok(())
 }
 

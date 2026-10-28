@@ -84,11 +84,19 @@ async fn apply_frame(
     // without spending the room or the bandwidth on bytes that cannot be written.
     bounds.check(total, len)?;
     let hash = Hash::from(segment_root);
+    // Held only until this segment is written out. The collector frees it after that, so a long
+    // stream keeps one segment beside the file it is writing and not every segment it has seen.
+    let held = store
+        .tags()
+        .temp_tag(iroh_blobs::HashAndFormat::raw(hash))
+        .await
+        .map_err(|e| Error::Storage(format!("cannot hold a live segment: {}", crate::plain(&e))))?;
     fetch::content_blob(store, blobs, hash, u64::from(len), 0, 0, rate, events).await?;
     let bytes = fetch::complete_bytes(store, hash).await?.0;
     file.write_all(&bytes)
         .await
         .map_err(|e| storage::storage("write", Path::new("the live file"), e))?;
+    drop(held);
     hasher.update(&bytes);
     total
         .checked_add(u64::from(len))

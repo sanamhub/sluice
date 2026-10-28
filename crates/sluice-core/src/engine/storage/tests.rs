@@ -356,3 +356,33 @@ fn the_store_folder_is_never_claimed_over_a_folder_it_cannot_empty() {
     assert!(matches!(err, crate::Error::Policy(_)), "{err}");
     assert!(blocked.exists(), "a folder it did not make was changed");
 }
+
+/// The collector runs in every store this tree opens, so a blob stays only while a tag holds it.
+/// That is what bounds a live stream: a segment's tag is dropped as soon as the segment is written
+/// out, and the bytes go at the next sweep instead of staying until the process ends.
+#[tokio::test]
+async fn a_blob_stays_while_a_tag_holds_it_and_goes_after_the_tag_is_dropped() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = super::open_store_after(dir.path(), std::time::Duration::from_millis(50))
+        .await
+        .unwrap();
+    let body = vec![1u8; 2 << 20];
+    let tag = store.blobs().add_slice(&body).temp_tag().await.unwrap();
+    let hash = tag.hash();
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    assert!(
+        store.blobs().has(hash).await.unwrap(),
+        "a held blob was collected"
+    );
+    drop(tag);
+    let mut gone = false;
+    for _ in 0..60 {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        if !store.blobs().has(hash).await.unwrap() {
+            gone = true;
+            break;
+        }
+    }
+    assert!(gone, "a blob no tag holds was kept by the collector");
+    store.shutdown().await.unwrap();
+}

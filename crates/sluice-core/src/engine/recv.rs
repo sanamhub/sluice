@@ -18,7 +18,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use super::{Congestion, Event, Receiver, RelayModeChoice, emit, fetch, storage};
 use crate::{
     Error,
-    manifest::{Kind, Limits, Manifest, parse_sequence},
+    manifest::{Kind, Limits, Loc, Manifest, parse_sequence},
     ticket::{Body, Format, Ticket},
 };
 
@@ -140,10 +140,15 @@ async fn run(
     let conn = receiver.connect(ticket, events.clone()).await?;
     let manifest = read_manifest(&conn, ticket, options, events).await?;
     let (store, resume, plan) = claim_store(&partial, &owner, &manifest, ticket, options).await?;
+    // The collector runs in this store, so every blob the transfer still needs is held by its own
+    // temporary tag until the tree is written: a long receive must not lose content it fetched but
+    // has not exported yet.
+    let held = hold_content(&store, &manifest).await?;
     let outcome = exchange(
         receiver, ticket, &manifest, plan, &store, &partial, options, resume, conn, events,
     )
     .await;
+    drop(held);
     let closed = store.shutdown().await;
     let endpoint = receiver.shutdown().await;
     match outcome {
@@ -231,6 +236,44 @@ async fn exchange(
     ))
 }
 
+/// Holds every content blob and pack this transfer will write with a temporary tag, so the store's
+/// collector leaves it alone until the tag is dropped. A blob another entry shares is held once.
+async fn hold_content(
+    store: &FsStore,
+    manifest: &Manifest,
+) -> Result<Vec<iroh_blobs::api::TempTag>, Error> {
+    let mut roots: Vec<Hash> = manifest
+        .packs()
+        .iter()
+        .map(|pack| Hash::from(pack.root))
+        .collect();
+    for entry in manifest.entries() {
+        if entry.kind == Kind::File
+            && let Loc::Blob { root } = entry.loc
+        {
+            roots.push(Hash::from(root));
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    let mut held = Vec::new();
+    for hash in roots {
+        if !seen.insert(hash) {
+            continue;
+        }
+        let tag = store
+            .tags()
+            .temp_tag(iroh_blobs::HashAndFormat::raw(hash))
+            .await
+            .map_err(|e| {
+                Error::Storage(format!(
+                    "cannot hold a blob in the partial store: {}",
+                    crate::plain(&e)
+                ))
+            })?;
+        held.push(tag);
+    }
+    Ok(held)
+}
 /// Fetches the hash sequence and the manifest and checks that one names the other. The store is
 /// open by now because the manifest lives in it; nothing here looks at the output folder.
 pub(super) async fn fetch_manifest(
@@ -241,15 +284,34 @@ pub(super) async fn fetch_manifest(
     events: &UnboundedSender<Event>,
 ) -> Result<Manifest, Error> {
     let sequence_root = static_root(ticket)?;
-    let sequence_bytes =
-        fetch::bounded_blob(store, conn, Hash::from(sequence_root), limits, events).await?;
+    // The meta store's collector may run while the manifest and the sequence are read, so both are
+    // held until their bytes have been decoded.
+    let sequence = Hash::from(sequence_root);
+    let sequence_tag = store
+        .tags()
+        .temp_tag(iroh_blobs::HashAndFormat::raw(sequence))
+        .await
+        .map_err(|e| {
+            Error::Storage(format!(
+                "cannot hold the hash sequence: {}",
+                crate::plain(&e)
+            ))
+        })?;
+    let sequence_bytes = fetch::bounded_blob(store, conn, sequence, limits, events).await?;
     let sequence = parse_sequence(&sequence_bytes, limits)?;
     let manifest_root = *sequence
         .first()
         .ok_or_else(|| Error::Policy("the hash sequence names no manifest root".to_string()))?;
-    let manifest_bytes =
-        fetch::bounded_blob(store, conn, Hash::from(manifest_root), limits, events).await?;
+    let manifest_hash = Hash::from(manifest_root);
+    let manifest_tag = store
+        .tags()
+        .temp_tag(iroh_blobs::HashAndFormat::raw(manifest_hash))
+        .await
+        .map_err(|e| Error::Storage(format!("cannot hold the manifest: {}", crate::plain(&e))))?;
+    let manifest_bytes = fetch::bounded_blob(store, conn, manifest_hash, limits, events).await?;
     let manifest = Manifest::decode(&manifest_bytes, limits)?;
+    drop(sequence_tag);
+    drop(manifest_tag);
     if manifest.hash_sequence() != sequence {
         return Err(Error::Policy(
             "the hash sequence does not match the manifest".to_string(),

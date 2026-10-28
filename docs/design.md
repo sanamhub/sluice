@@ -179,6 +179,12 @@ file is in place; after a failure it is kept for resume. The receiver checks fre
 whole tree before it fetches content and refuses with `Storage` when the volume cannot hold it.
 ADR 0006.
 
+**The stores collect what no tag holds.** Every store is opened with `iroh-blobs`' collector on, so a
+blob lives only while a tag holds it. A send holds its content, packs and manifest until it stops; a
+receive holds every content root until the tree is written; a live stream holds each segment until it
+is written out (receiver) or until the send stops (sender). The interval is ten seconds, so a live
+stream keeps about that much beside its output instead of a second copy of everything it has already
+written. ADR 0027.
 **The source can change underneath us.** Size, mtime and inode (file id on Windows) are recorded at
 import and checked again before serving starts. A change after that is caught by the receiver: the
 ticket's root names the version that was hashed, so bytes read from the changed file do not verify

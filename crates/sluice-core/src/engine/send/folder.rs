@@ -5,7 +5,7 @@
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
 use iroh_blobs::{
-    BlobFormat, Hash,
+    BlobFormat,
     api::{
         TempTag,
         blobs::{AddPathOptions, ImportMode},
@@ -13,7 +13,7 @@ use iroh_blobs::{
     store::fs::FsStore,
 };
 
-use super::{Congestion, Outgoing, Provider, RelayModeChoice};
+use super::{Congestion, Outgoing, Provider, RelayModeChoice, storage};
 use crate::{
     Error, Home,
     manifest::{Build, Built, Kind, Loc, Manifest},
@@ -48,16 +48,16 @@ pub async fn prepare_paths_with_rate(
         ));
     };
     let manifest = &built.manifest;
-    let store = FsStore::load(home.path().join("blobs"))
+    let store = storage::open_store(&home.path().join("blobs"))
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
     let mut tags = Vec::new();
     import_blobs(&store, &built, manifest, &mut tags).await?;
     for index in 0..manifest.packs().len() {
-        add_pack(&store, &built, manifest, index).await?;
+        add_pack(&store, &built, manifest, index, &mut tags).await?;
     }
-    add_manifest(&store, manifest).await?;
-    let sequence_root = add_sequence(&store, manifest).await?;
+    add_manifest(&store, manifest, &mut tags).await?;
+    let sequence_root = add_sequence(&store, manifest, &mut tags).await?;
     let mut allowed: BTreeSet<[u8; 32]> = manifest.hash_sequence().into_iter().collect();
     allowed.insert(sequence_root);
     let provider = Provider::start_with_rate(
@@ -125,6 +125,7 @@ async fn add_pack(
     built: &Built,
     manifest: &Manifest,
     index: usize,
+    tags: &mut Vec<TempTag>,
 ) -> Result<(), Error> {
     let pack = manifest
         .packs()
@@ -156,39 +157,52 @@ async fn add_pack(
             "a pack's files do not add up to its size".to_string(),
         ));
     }
-    let added = store
+    let tag = store
         .blobs()
         .add_bytes(bytes)
+        .temp_tag()
         .await
         .map_err(|e| Error::Storage(format!("cannot keep a pack: {}", crate::plain(&e))))?;
-    if *added.hash.as_bytes() != pack.root {
+    if *tag.hash().as_bytes() != pack.root {
         return Err(Error::Verify(
             "a packed file changed between the manifest build and the import".to_string(),
         ));
     }
+    tags.push(tag);
     Ok(())
 }
 
 /// Adds the manifest bytes and checks the store gave them the root the manifest computed.
-async fn add_manifest(store: &FsStore, manifest: &Manifest) -> Result<(), Error> {
-    let added = store
+async fn add_manifest(
+    store: &FsStore,
+    manifest: &Manifest,
+    tags: &mut Vec<TempTag>,
+) -> Result<(), Error> {
+    let tag = store
         .blobs()
         .add_bytes(manifest.encode())
+        .temp_tag()
         .await
         .map_err(|e| Error::Storage(format!("cannot keep the manifest: {}", crate::plain(&e))))?;
-    if added.hash != Hash::from(manifest.root()) {
+    if *tag.hash().as_bytes() != manifest.root() {
         return Err(Error::Bug(
             "the store gave the manifest a root other than its BLAKE3 hash".to_string(),
         ));
     }
+    tags.push(tag);
     Ok(())
 }
 
 /// Adds the sequence blob and returns the root a ticket names.
-async fn add_sequence(store: &FsStore, manifest: &Manifest) -> Result<[u8; 32], Error> {
-    let added = store
+async fn add_sequence(
+    store: &FsStore,
+    manifest: &Manifest,
+    tags: &mut Vec<TempTag>,
+) -> Result<[u8; 32], Error> {
+    let tag = store
         .blobs()
         .add_bytes(manifest.sequence_bytes())
+        .temp_tag()
         .await
         .map_err(|e| {
             Error::Storage(format!(
@@ -197,11 +211,12 @@ async fn add_sequence(store: &FsStore, manifest: &Manifest) -> Result<[u8; 32], 
             ))
         })?;
     let root = manifest.sequence_root();
-    if added.hash != Hash::from(root) {
+    if *tag.hash().as_bytes() != root {
         return Err(Error::Bug(
             "the store gave the hash sequence a root other than its BLAKE3 hash".to_string(),
         ));
     }
+    tags.push(tag);
     Ok(root)
 }
 

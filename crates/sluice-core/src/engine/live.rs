@@ -47,11 +47,23 @@ pub struct LiveSend {
     /// The stream the provider serves.
     pub log: Arc<LiveLog>,
     task: tokio::task::JoinHandle<()>,
+    /// The segments sealed so far, held until this send stops. The store's collector frees them
+    /// after that, so a long stream keeps only the file it is reading and one copy of each segment
+    /// while it is served.
+    _tags: Arc<Mutex<Vec<iroh_blobs::api::TempTag>>>,
 }
 
 impl LiveSend {
-    pub(super) fn new(log: Arc<LiveLog>, task: tokio::task::JoinHandle<()>) -> Self {
-        Self { log, task }
+    pub(super) fn new(
+        log: Arc<LiveLog>,
+        task: tokio::task::JoinHandle<()>,
+        tags: Arc<Mutex<Vec<iroh_blobs::api::TempTag>>>,
+    ) -> Self {
+        Self {
+            log,
+            task,
+            _tags: tags,
+        }
     }
 
     /// Stops following the file. The provider is closed separately.

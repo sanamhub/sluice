@@ -45,7 +45,7 @@ pub async fn prepare_with_rate(
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
     let (shown, name, entry_path, before) = checked_file(path)?;
-    let store = FsStore::load(home.path().join("blobs"))
+    let store = storage::open_store(&home.path().join("blobs"))
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
     let tag = import(path, &shown, &store).await?;
@@ -56,7 +56,7 @@ pub async fn prepare_with_rate(
         )));
     }
     let manifest = one_entry_manifest(entry_path, &before, hash)?;
-    keep_metadata(&store, &manifest).await?;
+    let metadata = keep_metadata(&store, &manifest).await?;
     let relay_text = relay_text(&relay);
     let allowed = allowed_roots(&manifest);
     let provider = Provider::start_with_rate(
@@ -74,7 +74,11 @@ pub async fn prepare_with_rate(
         bytes: before.size,
         congestion,
         live: None,
-        _tags: vec![tag],
+        _tags: {
+            let mut tags = vec![tag];
+            tags.extend(metadata);
+            tags
+        },
     })
 }
 
@@ -100,7 +104,7 @@ pub async fn prepare_stdin_with_rate(
     port: Option<u16>,
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
-    let store = FsStore::load(home.path().join("blobs"))
+    let store = storage::open_store(&home.path().join("blobs"))
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store: {e}")))?;
     let (tag, size) = import_stdin(home, &store).await?;
@@ -271,20 +275,22 @@ fn one_entry_manifest(
 
 /// Keeps the manifest and the hash sequence, and checks the store gave each the root its bytes
 /// hash to, which is what the ticket and the receiver will name.
-async fn keep_metadata(store: &FsStore, manifest: &Manifest) -> Result<(), Error> {
-    let added = store
+async fn keep_metadata(store: &FsStore, manifest: &Manifest) -> Result<Vec<TempTag>, Error> {
+    let manifest_tag = store
         .blobs()
         .add_bytes(manifest.encode())
+        .temp_tag()
         .await
         .map_err(|e| Error::Storage(format!("cannot keep the manifest: {}", crate::plain(&e))))?;
-    if added.hash != Hash::from(manifest.root()) {
+    if *manifest_tag.hash().as_bytes() != manifest.root() {
         return Err(Error::Bug(
             "the store gave the manifest a root other than its BLAKE3 hash".to_string(),
         ));
     }
-    let added = store
+    let sequence_tag = store
         .blobs()
         .add_bytes(manifest.sequence_bytes())
+        .temp_tag()
         .await
         .map_err(|e| {
             Error::Storage(format!(
@@ -292,12 +298,14 @@ async fn keep_metadata(store: &FsStore, manifest: &Manifest) -> Result<(), Error
                 crate::plain(&e)
             ))
         })?;
-    if added.hash != Hash::from(manifest.sequence_root()) {
+    if *sequence_tag.hash().as_bytes() != manifest.sequence_root() {
         return Err(Error::Bug(
             "the store gave the hash sequence a root other than its BLAKE3 hash".to_string(),
         ));
     }
-    Ok(())
+    // Temporary tags: the collector may free both as soon as this send stops. A named tag would
+    // keep them for ever, and every send would add another.
+    Ok(vec![manifest_tag, sequence_tag])
 }
 
 /// The roots the provider answers for: every content blob and pack, and the sequence itself.
