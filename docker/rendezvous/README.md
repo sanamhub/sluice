@@ -1,5 +1,9 @@
 # rendezvous
 
+**Retired by ADR 0028.** Address discovery alone does not let two peers behind NATs punch a hole:
+iroh coordinates the punch through a relay connection. Run the [`relay`](../relay/README.md) image
+as a meeting point instead. This image stays until the release pipeline next changes.
+
 The `rendezvous` image runs `iroh-relay` 1.4.1 with the relay half turned off. Peers behind NATs ask
 it for their own public address over QUIC and it answers. It carries no transfer bytes, so the
 smallest VPS runs it (ADR 0013). `iroh-relay` is the upstream binary, built from crates.io with

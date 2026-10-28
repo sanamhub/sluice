@@ -80,6 +80,15 @@ fn an_unknown_kind_of_access_is_refused() {
 }
 
 #[test]
+fn a_key_with_spaces_around_its_dots_is_named_without_them() {
+    refused(
+        &m("access.httpr .ul = \"x\"\n"),
+        Mode::Closed,
+        "line 2: `access.httpr.ul` is not a setting or value",
+    );
+}
+
+#[test]
 fn each_closed_mode_starts_without_open_and_is_refused_with_it() {
     let closed = [
         format!("[access]\nallowlist = [\"{ID}\"]\n"),
@@ -229,6 +238,13 @@ fn the_shipped_configs_start_only_as_the_readme_says() {
     );
     refused(&open, Mode::Closed, "`access` is \"everyone\"");
     assert_eq!(check_config(&open, Mode::Open, None, false), Ok(()));
+    let meeting = super::read(&super::relay_dir().join("meeting-point.toml"));
+    assert_eq!(check_config(&meeting, Mode::Closed, None, false), Ok(()));
+    refused(
+        &meeting,
+        Mode::Open,
+        "--open was given, but `access` is an allowlist",
+    );
 }
 
 #[test]

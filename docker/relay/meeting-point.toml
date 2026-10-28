@@ -1,0 +1,28 @@
+# The relay as a meeting point (ADR 0028): closed like relay.toml, and each client may send at most
+# 64 KiB/s into it. Two peers coordinate their hole punch through it and the file goes direct; a pair
+# that cannot punch a hole still connects, at that rate. Mount it over /etc/relay/relay.toml. Only
+# the endpoint ids in `access.allowlist` may use it, and the list ships empty.
+enable_relay = true
+enable_quic_addr_discovery = true
+
+# The metrics server defaults to on and listens on [::]:9090 with no authentication.
+enable_metrics = false
+
+# Plain HTTP. With TLS on it serves only the captive portal check, `/generate_204`.
+http_bind_addr = "0.0.0.0:80"
+
+[access]
+allowlist = []
+
+# Coordination is a few kilobytes per connection. The burst lets a handshake through at once.
+[limits.client.rx]
+bytes_per_second = 65536
+max_burst_bytes = 262144
+
+[tls]
+https_bind_addr = "0.0.0.0:443"
+quic_bind_addr = "0.0.0.0:7842"
+cert_mode = "Manual"
+# Mount a directory holding default.crt and default.key here. The certificate has to name the host
+# the clients dial, and it is read once at start, so restart the container after a renewal.
+cert_dir = "/etc/relay/certs"

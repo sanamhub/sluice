@@ -2,9 +2,14 @@
 
 The `relay` image runs `iroh-relay` 1.4.1 with both halves on: address discovery over QUIC, and the
 relay over HTTPS that carries the traffic of two peers that cannot reach each other directly.
-**This is the image with the bandwidth bill.** Every relayed byte of a transfer passes through the
-host that runs it, in and out again (ADR 0013). For address discovery alone, run
-[`rendezvous`](../rendezvous/README.md), which carries no transfer bytes.
+Two peers behind NATs coordinate their hole punch through it, so across the internet it is needed
+even when the file goes direct. It runs one of two ways (ADR 0028):
+
+- **as a meeting point**, with [meeting-point.toml](meeting-point.toml): each client may send at
+  most 64 KiB/s into it, enough to coordinate and too slow to carry files. A pair that cannot punch
+  a hole still connects, at that rate. See [Meeting point](#meeting-point).
+- **as a full relay**, with [relay.toml](relay.toml) and a per-client limit you set: every relayed
+  byte of a transfer passes through the host, in and out again, and the host pays for both.
 
 `iroh-relay` is the upstream binary, built the way `rendezvous` builds it: from crates.io with
 `--locked`, at the version `Cargo.lock` resolves for `iroh`, on the same two base images pinned by
@@ -160,6 +165,23 @@ container's root read-only, and came out the same again, with `iroh-relay` start
 start as the config they were given with a read-only root, what PID 1 is, and that `docker stop`
 returns in under a second with exit 0, because the Dockerfile sends SIGINT. CI runs it on every
 build of either image.
+
+## Meeting point
+
+[meeting-point.toml](meeting-point.toml) is [relay.toml](relay.toml) with a per-client limit of
+64 KiB/s and a burst of 256 KiB. Mount it over the shipped config:
+
+```
+docker run -d --name relay -p 443:443 -p 80:80 -p 7842:7842/udp \
+  -v "$PWD/certs:/etc/relay/certs:ro" \
+  -v "$PWD/docker/relay/meeting-point.toml:/etc/relay/relay.toml:ro" sluice-relay
+```
+
+It is closed, so the allowlist works as described above. The two numbers are chosen, not measured:
+coordination takes a few kilobytes per connection. A transfer that finds no direct path 10 seconds
+in prints one line naming the relay and goes on at 64 KiB/s. For a usable speed on those pairs, run
+a full relay instead, with `bytes_per_second` set from the host's bandwidth, keeping in mind that a
+relayed transfer crosses the host twice.
 
 ## Open mode
 

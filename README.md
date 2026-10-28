@@ -31,7 +31,7 @@ and no server in the middle that you did not choose.
 - **Every piece is checked.** The file is split into small blocks. A damaged block is caught before
   it is written, not after the file is opened.
 - **You own the path.** No account, no plan limit, no telemetry, and no relay you did not configure.
-  The relay and rendezvous images are in this repository.
+  The relay image is in this repository.
 
 ## Try it
 
@@ -111,29 +111,31 @@ control API and an MCP server are planned in this repository.
 
 ## Connectivity
 
-Two computers behind NATs need help to find each other.
+Two computers behind NATs need help to find each other. Across the internet that help is a relay
+you run: the two ends coordinate a hole punch through it, and the file then goes direct.
 
 | Where | What you need |
 |---|---|
 | Same network | Nothing |
-| Internet, and either router supports PCP, NAT-PMP or UPnP | Nothing |
-| Internet, otherwise | A rendezvous server you run. It fits on the smallest VPS and carries no file data |
-| Internet, when hole punching fails | A relay you run, which does carry the data |
+| Internet, and the sender's router supports PCP, NAT-PMP or UPnP | Nothing |
+| Internet, otherwise | A relay you run as a meeting point. It fits on the smallest VPS, and when hole punching works it carries no file data |
+| Internet, when hole punching fails | A relay you run as a full relay, which carries the data |
 
 Sluice never falls back to someone else's relay. When no relay is configured, the cases that need
 one fail and say why. The browser build is always relayed, because iroh in a tab has no UDP socket,
 so it needs a relay you run as well. [ADR 0011](docs/adr/0011-browser-is-relay-bound.md) and
-[ADR 0013](docs/adr/0013-rendezvous-and-relay-are-two-tiers.md).
+[ADR 0028](docs/adr/0028-one-relay-image-two-recipes.md).
 
 ## Run your own
 
-The `rendezvous` image answers address discovery and moves no transfer bytes. The `relay` image
-carries the traffic and ships with an allowlist, so nobody relays until you add an endpoint id. Both
-run through a guard that refuses a config that would open them by mistake.
+One image, `relay`, run one of two ways. As a meeting point it limits each client to 64 KiB/s, so
+it coordinates hole punches and is too slow to carry files. As a full relay it carries the
+transfers that cannot go direct, at a limit you set. It ships with an allowlist, so nobody uses it
+until you add an endpoint id, and it starts through a guard that refuses a config that would open it
+by mistake.
 
-- [`docker/rendezvous/README.md`](docker/rendezvous/README.md) has the certificate, the build and
-  the `docker run`.
-- [`docker/relay/README.md`](docker/relay/README.md) has the same, plus the allowlist and open mode.
+- [`docker/relay/README.md`](docker/relay/README.md) has the certificate, the build, the
+  `docker run` for both ways, the allowlist and open mode.
 - [`docker/guard/README.md`](docker/guard/README.md) lists every rule the guard enforces.
 
 ## Built on

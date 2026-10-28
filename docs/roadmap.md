@@ -19,7 +19,8 @@ anything depends on it:
 
 It also measures:
 
-- the direct-connection rate with only a rendezvous server and no relay (ADR 0013)
+- the direct-connection rate through a meeting-point relay, and that its 64 KiB/s limit leaves hole
+  punching working (ADR 0028)
 - BLAKE3 WASM throughput in Chrome, Firefox and Safari, desktop and iOS (ADR 0014)
 - the negotiated key exchange group, asserted to be `X25519MLKEM768` (ADR 0018)
 
@@ -38,14 +39,14 @@ is revised in [`performance.md`](performance.md) with the measurement attached.
 - directory manifest and small-file packing
 - the transfer queue with priorities and bandwidth caps
 - direct or relayed shown on every transfer, and `sluice doctor`
-- the `rendezvous` and `relay` container images
+- the `relay` container image, with the meeting-point and full-relay recipes
 - signed releases for Linux, macOS and Windows through `dist`
 - `SPEC.md` with test vectors and a conformance runner
 - the benchmark page with S1 to S9 results
 
 **Exit:** the [`performance.md`](performance.md) targets for LAN, WAN, small files and resume are
-met or revised in public. A 100 GB transfer completes between two NATs with only a self-hosted
-rendezvous. Every at-rest budget is enforced in CI.
+met or revised in public. A 100 GB transfer completes between two NATs that can hole punch, through
+a self-hosted meeting point that carries none of the file. Every at-rest budget is enforced in CI.
 
 ## 1.1: programmable
 
@@ -96,7 +97,7 @@ needs a discussion first.
 ## Open questions
 
 1. The `noq` throughput numbers, from the transport measurement.
-2. The direct-connection rate with a rendezvous only, from the same measurement.
+2. The direct-connection rate through a meeting point, from the same measurement.
 3. Live segment size and pack size. 8 MiB and 64 MiB are unmeasured. Both must be multiples of the
    16 KiB block, and they are (512 and 4096 blocks), so keeping them until measured costs nothing.
 4. The 64 KiB chunk group rule in `SPEC.md` section 5. It would cut outboard overhead from about

@@ -1,10 +1,10 @@
 ---
 import {
     ADRS,
-    ADR_0013,
+    ADR_0028,
     PERFORMANCE,
     RELAY_README,
-    RENDEZVOUS_README,
+    MEETING_POINT,
     SPEC,
     SPEC_STATIC,
     SPEC_TICKET,
@@ -27,19 +27,19 @@ const terms = [
     },
     {
         name: "Hole punching",
-        body: "Two computers ask their routers for a path at the same time, so packets can pass without a relay.",
-        href: ADR_0013,
-        link: "ADR 0013",
+        body: "Two computers swap addresses through a relay, then send to each other at the same time, so their routers open a path and the file skips the relay.",
+        href: ADR_0028,
+        link: "ADR 0028",
     },
     {
-        name: "Rendezvous",
-        body: "A small server you run that tells each computer the other's public address. It carries no file data.",
-        href: RENDEZVOUS_README,
-        link: "the rendezvous README",
+        name: "Meeting point",
+        body: "The relay with a 64 KiB/s limit per computer. Enough to set up a direct path, too slow to carry files, so the smallest server runs it.",
+        href: MEETING_POINT,
+        link: "the meeting point recipe",
     },
     {
         name: "Relay",
-        body: "A server you run that forwards bytes when a direct path fails. It starts closed and serves only the endpoint ids you allow.",
+        body: "A server you run. It sets up every connection across the internet, and as a full relay it also forwards the bytes when a direct path fails. It starts closed and serves only the endpoint ids you allow.",
         href: RELAY_README,
         link: "the relay README",
     },
@@ -90,12 +90,12 @@ const path = [
         body: "Tried first: local discovery, port mapping and hole punching over QUIC. Only the two ends hold the file.",
     },
     {
-        name: "Rendezvous",
-        body: "Answers one question: what is this computer's public address? It is signalling only, so the smallest server is enough.",
+        name: "Meeting point",
+        body: "Your relay, used to swap addresses and time the hole punch. Its low limit keeps it to that job, so the smallest server is enough.",
     },
     {
         name: "Relay",
-        body: "Carries the whole transfer when hole punching fails. It is yours: the image starts closed and relays only the endpoint ids you list.",
+        body: "The same image with a higher limit. It carries the whole transfer when hole punching fails, starts closed and relays only the endpoint ids you list.",
     },
     {
         name: "No relay, no fallback",
@@ -153,7 +153,7 @@ const path = [
 
                 <div class="sub">
                     <h3>How the path is chosen</h3>
-                    <p>Direct first, a rendezvous only to meet, and a relay only if you run one.</p>
+                    <p>Direct first, your relay to meet, and the relay for data only if you allow it the speed.</p>
                     <dl class="how">
                         {path.map((row) => (
                             <div class="how-row">

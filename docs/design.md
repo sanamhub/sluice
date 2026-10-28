@@ -62,7 +62,7 @@ would put the parts where transfer tools corrupt data into new code. ADR 0001.
 | QUIC, multipath, hole punching, relay, mDNS, port mapping | `iroh`, `noq` |
 | Verified streaming tree, range sets | `bao-tree`, `range-collections` |
 | Content-addressed store, partial files, resume, multi-provider download | `iroh-blobs` |
-| Relay and rendezvous servers | `iroh-relay`, packaged as two containers |
+| Relay server | `iroh-relay`, packaged as one container |
 | TLS 1.3, hybrid post-quantum key exchange | `rustls` with `aws-lc-rs` |
 | Content-defined chunking, compression, PAKE, FUSE, WinFsp, MCP, gRPC | `fastcdc`, `zstd`, `spake2`, `fuse3`, `winfsp`, `rmcp`, `tonic` |
 | Live transfer of a growing file | **ours** |
@@ -220,21 +220,23 @@ An older binary refuses a newer layout rather than writing to it.
 
 ## Connectivity
 
-Two NATs cannot find each other without help: neither knows the other's mapped port. Something
-reachable has to tell them. That is the rendezvous role, and it is separate from relaying traffic.
+Two NATs cannot find each other without help: neither knows the other's mapped port. An iroh
+endpoint coordinates a hole punch through its relay connection, where the two peers swap candidate
+addresses and then send toward each other at once. Address discovery alone tells a peer its own
+address and nobody else's, so it connects only a sender whose router accepts the first packet.
 
 | Role | Bandwidth | Needed when |
 |---|---|---|
 | Discovery | none | Always, unless addresses are in the ticket |
-| Rendezvous | signalling only | NAT to NAT across the internet |
-| Relay | the whole transfer | When hole punching fails, and always for the browser |
+| Relay as a meeting point | coordination, capped at 64 KiB/s per client | NAT to NAT across the internet |
+| Relay as a full relay | the whole transfer | When hole punching fails, and always for the browser |
 
 | Setup | Infrastructure | Direct connections |
 |---|---|---|
 | Same LAN | none, mDNS | all |
-| Internet, router supports PCP, NAT-PMP or UPnP-IGD | none | most |
-| Internet, rendezvous you run | one small VPS | about 90%, iroh's published figure, not yet measured by us |
-| Internet, rendezvous and relay | a VPS with bandwidth | all transfers complete |
+| Internet, sender's router supports PCP, NAT-PMP or UPnP-IGD | none | most |
+| Internet, meeting point you run | one small VPS | about 90%, iroh's published figure with a relay, not yet measured by us; the rest run at 64 KiB/s |
+| Internet, full relay you run | a VPS with bandwidth | all, at the relay's speed when not direct |
 
 **Defaults.** Ticket addresses, mDNS and port mapping are on. n0's public relays, n0 DNS discovery
 and the mainline DHT are off. In iroh terms that is `RelayMode::Disabled` until an operator names a
@@ -249,13 +251,15 @@ A restart tries that port first, so a ticket printed before it still dials the s
 if the port is taken the sender takes any port and the ticket needs reprinting unless a relay is
 configured. The home's identity key is why the id itself survives.
 
-**Two containers.** `iroh-relay`'s server config has independent halves for address discovery and
-relaying. The `rendezvous` image runs only the first and moves no transfer bytes. The `relay` image
-runs both and carries the bandwidth bill. ADR 0013.
+**One container, two recipes.** The `relay` image runs both halves of `iroh-relay`. As a meeting
+point its per-client limit is 64 KiB/s, enough to coordinate and too little to carry files. As a
+full relay the operator sets the limit from the host's bandwidth and carries the bill. A transfer
+with no direct path 10 seconds in prints one line naming the relay and goes on. ADR 0028, which
+retires the `rendezvous` image of ADR 0013.
 
 **Relays run closed.** A leaked relay URL is free bandwidth for anyone, so our relay image ships
 with authorization on. `open` mode needs a flag and a per-client byte rate limit; `iroh-relay` has
-no working connection-accept limit, so byte limits are all we document. Both images start through
+no working connection-accept limit, so byte limits are all we document. The image starts through
 [`sluice-relay-guard`](../docker/guard/README.md), which refuses a config that would open more than
 it says. ADR 0019, ADR 0020.
 

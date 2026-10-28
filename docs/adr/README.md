@@ -21,7 +21,7 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0010](0010-measure-noq-first.md) | Measure the transport before building on it | Accepted |
 | [0011](0011-browser-is-relay-bound.md) | The browser is always relayed, and relay mode is never chosen silently | Accepted |
 | [0012](0012-crypto-provider-is-chosen.md) | The TLS crypto provider is chosen explicitly | Superseded by 0018 |
-| [0013](0013-rendezvous-and-relay-are-two-tiers.md) | Rendezvous and relay ship as two separate images | Accepted |
+| [0013](0013-rendezvous-and-relay-are-two-tiers.md) | Rendezvous and relay ship as two separate images | Superseded by 0028 |
 | [0014](0014-browser-build-is-single-threaded.md) | The browser build hashes on one thread and needs no special headers | Accepted |
 | [0015](0015-bbrv3-by-default.md) | BBRv3 is the default congestion controller | Accepted |
 | [0016](0016-parallel-connections-and-tcp-bulk-path.md) | Shard large transfers across connections, with a TCP bulk path for direct peers | Accepted |
@@ -36,4 +36,5 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0025](0025-receiver-says-when-complete.md) | A receiver says when the transfer is complete | Accepted, corrected by 0026 |
 | [0026](0026-completion-code-needs-every-root.md) | The completion code counts only for a connection that asked for every root | Accepted, corrects 0025 |
 | [0027](0027-stores-run-their-collector.md) | Every blob store runs its collector, and a tag holds each blob while it is used | Accepted |
+| [0028](0028-one-relay-image-two-recipes.md) | One relay image, run either as a meeting point or as a full relay | Accepted |
 | [0029](0029-only-the-live-stores-collect.md) | Only the live stores collect, and every store is closed on the way out | Accepted, corrects 0027 |
