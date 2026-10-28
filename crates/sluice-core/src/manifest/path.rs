@@ -277,10 +277,16 @@ fn starts_with_reserved(name: &str, prefix: &str) -> bool {
 }
 
 /// The one key two names are compared by when the question is whether they are the same name: the
-/// manifest's collision rule, the link check and rule 9 all use this. It is what a file system may
-/// compare, without the code points it may ignore and with the dotless i read as `i`, in NFKC and
-/// full case folding. Folding can leave text that is not in NFKC (`U+0130` gives `i` and a combining
-/// dot), so the fold itself is the last step and no composition follows it.
+/// manifest's collision rule, the link check and rule 9 all use this. It is the form Unicode's
+/// `NFKC_Casefold` is built to give: the code points a name may not show are dropped, the dotless i
+/// is read as `i`, and NFKC, full case folding and NFKC again are applied in that order.
+///
+/// The second NFKC is what joins names a volume treats as one. A fold can leave a composition
+/// undone: U+0390 folds to iota, diaeresis and acute, while U+03AA U+0301 folds to the precomposed
+/// small iota with diaeresis and an acute, and only NFKC makes the two the same text. A volume that
+/// compares canonically equivalent names, such as APFS or a casefold folder on Linux, reads the two
+/// as one, so a key that kept them apart would let two entries write one file and let a link target
+/// step above the output.
 pub(crate) fn fold_key(name: &str) -> String {
     let kept: String = name
         .chars()
@@ -288,7 +294,8 @@ pub(crate) fn fold_key(name: &str) -> String {
         .map(|c| if c == '\u{131}' { 'i' } else { c })
         .collect();
     let composed: String = kept.nfkc().collect();
-    UniCase::unicode(&composed).to_folded_case()
+    let folded = UniCase::unicode(&composed).to_folded_case();
+    folded.nfkc().collect()
 }
 
 /// The Unicode default-ignorable code points, which are the `Default_Ignorable_Code_Point` property

@@ -1,7 +1,8 @@
 //! The one key a name is compared by: `SPEC.md` section 8 path rule 9 defines it, and the collision
 //! rule and the link check use it.
 
-use unicode_normalization::{UNICODE_VERSION, is_nfc};
+use proptest::prelude::*;
+use unicode_normalization::{UNICODE_VERSION, UnicodeNormalization, is_nfc};
 
 use super::common::*;
 use crate::manifest::path::fold_key as key;
@@ -90,16 +91,50 @@ fn the_nfc_tables_are_those_of_unicode_18() {
     );
 }
 
-/// The key is what NFKC gives and then the fold, and nothing after the fold: the rules are the same
-/// for both names of a pair, so a fold that leaves a composition undone is a key and not a fault.
+/// The key is NFKC, then the fold, then NFKC again. The last composition joins names that are
+/// canonically equivalent, which a volume that compares them reads as one name.
 #[test]
-fn the_key_is_nfkc_and_then_the_fold() {
+fn the_key_is_nfkc_then_the_fold_then_nfkc_again() {
     assert_eq!(key("．sluice-partial-x"), key(".sluice-partial-x"));
     assert_eq!(key("\u{ff41}"), "a");
-    // U+0390 folds to the three code points of a decomposed iota, while U+03AA folds to U+03CA and
-    // takes the combining acute with it. The keys differ, so the two names are two names here.
-    assert_ne!(key("\u{390}"), key("\u{3aa}\u{301}"));
+    // U+0390 folds to iota, diaeresis and acute; U+03AA U+0301 folds to U+03CA and an acute. The
+    // final NFKC composes both to U+0390, so the two names have one key.
+    assert_eq!(key("\u{390}"), key("\u{3aa}\u{301}"));
+    assert_eq!(key("\u{390}"), "\u{390}");
     assert!(is_nfc("\u{390}"));
+}
+
+/// Characters whose folding, composition or case is subtle, so a generated name reaches the parts
+/// of the key the examples above do not. Latin, Greek, Cyrillic and Hangul are the scripts a name
+/// is likely to be in, and the combining marks let a random name be canonically equivalent to
+/// another without being the same text.
+fn a_name_character() -> impl Strategy<Value = char> {
+    prop::sample::select(vec![
+        'a', 'A', 'z', 'Z', ' ', '0', 'ß', 'ẞ', 'é', 'E', 'İ', 'ı', '\u{ff41}', '\u{ff21}',
+        '\u{301}', '\u{300}', '\u{308}', '\u{327}', '\u{390}', '\u{3aa}', '\u{3ca}', '\u{3b9}',
+        '\u{3b1}', '\u{3a9}', '\u{3c2}', '\u{3c3}', '\u{410}', '\u{415}', '\u{435}', '\u{401}',
+        '\u{ac00}', '\u{1100}', '\u{1161}', '\u{1112}', '\u{1175}', '\u{a7ce}', '\u{200d}',
+    ])
+}
+
+proptest! {
+    /// A name and its NFC and NFD forms are one name: the key is taken after a composition, so the
+    /// order the sender wrote the marks in cannot decide whether two entries collide.
+    #[test]
+    fn canonically_equivalent_names_get_one_key(chars in prop::collection::vec(a_name_character(), 1..8)) {
+        let text: String = chars.into_iter().collect();
+        let composed: String = text.nfc().collect();
+        let decomposed: String = text.nfd().collect();
+        prop_assert_eq!(key(&composed), key(&decomposed), "{:?}", text);
+    }
+
+    /// The key of a key is the key. The decoder compares keys and the collision set holds their
+    /// hashes, so a key that changed when it was keyed again would be two answers to one question.
+    #[test]
+    fn the_key_does_not_change_when_it_is_keyed_again(chars in prop::collection::vec(a_name_character(), 1..8)) {
+        let text: String = chars.into_iter().collect();
+        prop_assert_eq!(key(&key(&text)), key(&text), "{:?}", text);
+    }
 }
 
 #[test]

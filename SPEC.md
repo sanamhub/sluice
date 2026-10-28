@@ -564,10 +564,12 @@ answered by one key, and a decoder MUST use this one and no other. The key of a 
    `CaseFolding.txt` and no other: `ß` becomes `ss`, `ﬃ` becomes `ffi`, and the Turkic entries of
    status `T` and the simple entries of status `S` are not used. Windows and macOS resolve a name
    regardless of case, and APFS folds some letters beyond ASCII
+5. NFKC applied again, because a fold can leave a composition undone: `ΐ` folds to three code
+   points, while `Ϊ́` folds to two that compose to the same letter, and a volume that compares
+   canonically equivalent names reads the two spellings as one
 
-Nothing follows the fourth step: the key of a name is not normalized again, so a fold that leaves a
-composition undone is part of the key. The tables are those of Unicode 18.0.0. A later version adds
-pairs, and a receiver on newer tables would refuse a manifest that a sender on older ones built, so a
+Nothing follows the fifth step. The tables are those of Unicode 18.0.0. A later version adds pairs,
+and a receiver on newer tables would refuse a manifest that a sender on older ones built, so a
 change of version is a change of this document, with new vectors.
 
 With these rules no accepted path can leave the output root by its text alone, and a symlink already
