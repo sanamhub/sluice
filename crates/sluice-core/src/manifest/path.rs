@@ -273,12 +273,15 @@ fn starts_with_reserved(name: &str, prefix: &str) -> bool {
     if name.is_ascii() {
         return false;
     }
-    reserved_key(name).starts_with(prefix)
+    fold_key(name).starts_with(prefix)
 }
 
-/// The name rule 9 compares: what a file system may compare, without the code points it may ignore
-/// and with the dotless i read as `i`, in NFKC and full case folding.
-fn reserved_key(name: &str) -> String {
+/// The one key two names are compared by when the question is whether they are the same name: the
+/// manifest's collision rule, the link check and rule 9 all use this. It is what a file system may
+/// compare, without the code points it may ignore and with the dotless i read as `i`, in NFKC and
+/// full case folding. Folding can leave text that is not in NFKC (`U+0130` gives `i` and a combining
+/// dot), so the fold itself is the last step and no composition follows it.
+pub(crate) fn fold_key(name: &str) -> String {
     let kept: String = name
         .chars()
         .filter(|c| !is_ignorable(*c))
@@ -288,9 +291,10 @@ fn reserved_key(name: &str) -> String {
     UniCase::unicode(&composed).to_folded_case()
 }
 
-/// The Unicode default-ignorable code points: a name may carry one and a file system may compare it
-/// as though it were not there, which HFS+ does and another volume may. The bidirectional controls
-/// in the set are already refused by rule 6; skipping them here costs nothing and keeps one list.
+/// The Unicode default-ignorable code points, which are the `Default_Ignorable_Code_Point` property
+/// of Unicode 18.0.0: a name may carry one and a file system may compare it as though it were not
+/// there, which HFS+ does and another volume may. The bidirectional controls in the set are already
+/// refused by rule 6; skipping them here costs nothing and keeps one list.
 fn is_ignorable(c: char) -> bool {
     matches!(
         c,
@@ -301,7 +305,8 @@ fn is_ignorable(c: char) -> bool {
             | '\u{1160}'
             | '\u{17b4}'
             | '\u{17b5}'
-            | '\u{180b}'..='\u{180f}'
+            | '\u{180b}'..='\u{180d}'
+            | '\u{180f}'
             | '\u{200b}'..='\u{200f}'
             | '\u{202a}'..='\u{202e}'
             | '\u{2060}'..='\u{206f}'
@@ -309,9 +314,11 @@ fn is_ignorable(c: char) -> bool {
             | '\u{fe00}'..='\u{fe0f}'
             | '\u{feff}'
             | '\u{ffa0}'
+            | '\u{fff0}'..='\u{fff8}'
             | '\u{1bca0}'..='\u{1bca3}'
             | '\u{1d173}'..='\u{1d17a}'
-            | '\u{e0000}'..='\u{e0fff}'
+            | '\u{e0000}'..='\u{e00ff}'
+            | '\u{e0100}'..='\u{e01ef}'
     )
 }
 

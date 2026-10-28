@@ -195,8 +195,9 @@ fn rule_12_through_a_folder() {
 
 #[test]
 fn rule_12_does_not_reject_names_that_differ() {
-    // `i` and `ı` (dotless) are two letters: only a Turkic folding joins them.
-    assert!(decode(&manifest(&[file("i"), file("ı")])).is_ok());
+    // `i` and `ı` (dotless) are two letters to a Turkic fold and one to the key a file system
+    // compares by, because NTFS upcases the dotless i to `I`: the manifest is refused.
+    assert_eq!(broken(&manifest(&[file("i"), file("ı")])), Some((12, None)));
     assert!(decode(&manifest(&[dir("a"), file("a/x"), file("a/y")])).is_ok());
     assert!(decode(&manifest(&[file("ss"), file("sss")])).is_ok());
     // Same letters at different depths are different paths.

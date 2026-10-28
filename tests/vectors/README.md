@@ -212,9 +212,9 @@ Some points a reader cannot see from the rules alone:
   of kind `dir` before it.
 - Entries are in byte order, so `a`, `a-b`, `a/b` is sorted (`-` is 0x2D and `/` is 0x2F) and `a`,
   `B` is not.
-- Rule 12 folds the whole path. `A` and `a` are the same name, so `A/x` and `a/y` break it through
-  their folders. `straße` and `STRASSE` break it through the full folding of `ß`, and the pair
-  U+0390 and U+03AA U+0301 only through the NFC step that follows the fold.
+- Rule 12 compares whole paths by the comparison key of path rule 9. `A` and `a` are the same name,
+  so `A/x` and `a/y` break it through their folders. `straße` and `STRASSE` break it through the
+  full folding of `ß`, and `i` and `ı` break it because the key reads the dotless i as `i`.
 - A path in a rejected case of rule 9 has no entry for its parent, so it breaks rule 8 as well. The
   case names rule 9, because a decoder reads the path before it looks for the parent. Whichever it
   names, it rejects the case, and the verdict is all a runner compares.

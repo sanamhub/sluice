@@ -5,15 +5,15 @@ use std::collections::HashMap;
 
 use super::walk::Item;
 use super::{Finding, Reason};
-use crate::manifest::rules::collision_key;
+use crate::manifest::path::fold_key;
 
-/// Every item that shares its path with another after case folding and NFC, each with its own
-/// path as the sender sees it.
+/// Every item that shares its path with another under the one key a name is compared by, each with
+/// its own path as the sender sees it.
 pub(super) fn find(items: &[Item]) -> Vec<Finding> {
     let mut groups: HashMap<String, Vec<&Item>> = HashMap::new();
     for item in items {
         groups
-            .entry(collision_key(item.path.as_str()))
+            .entry(fold_key(item.path.as_str()))
             .or_default()
             .push(item);
     }

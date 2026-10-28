@@ -1,22 +1,74 @@
-//! The collision key of `SPEC.md` section 8 rule 12: full Unicode case folding, then NFC.
+//! The one key a name is compared by: `SPEC.md` section 8 path rule 9 defines it, and the collision
+//! rule and the link check use it.
 
-use unicode_normalization::is_nfc;
+use unicode_normalization::{UNICODE_VERSION, is_nfc};
 
 use super::common::*;
-use crate::manifest::rules::collision_key;
+use crate::manifest::path::fold_key as key;
 
 #[test]
 fn full_folding_joins_a_string_with_its_expansion() {
-    assert_eq!(collision_key("Readme.md"), collision_key("README.md"));
-    assert_eq!(collision_key("straße"), "strasse");
-    assert_eq!(collision_key("STRASSE"), "strasse");
+    assert_eq!(key("Readme.md"), key("README.md"));
+    assert_eq!(key("straße"), "strasse");
+    assert_eq!(key("STRASSE"), "strasse");
     // U+1E9E and U+00DF both fold to `ss`.
-    assert_eq!(collision_key("ẞ"), "ss");
+    assert_eq!(key("ẞ"), "ss");
     // A ligature folds to the letters it stands for, which are three.
-    assert_eq!(collision_key("ﬃ"), "ffi");
-    assert_ne!(collision_key("a"), collision_key("b"));
-    // The dotless i is not the lower case of `I` outside Turkic locales, and Sluice has none.
-    assert_ne!(collision_key("ı"), collision_key("i"));
+    assert_eq!(key("ﬃ"), "ffi");
+    assert_ne!(key("a"), key("b"));
+}
+
+/// The dotless i is read as `i` before the fold, because NTFS upcases it to `I`: a volume there
+/// finds one name where the text has two, so the key joins them and the receiver refuses the pair.
+#[test]
+fn the_dotless_i_is_read_as_i() {
+    assert_eq!(key("ı"), key("i"));
+    assert_eq!(key("\u{131}"), "i");
+}
+
+/// The code points a name may not show are read away, because a file system may compare a name as
+/// though they were not there. U+FFF0 to U+FFF8 are in the set, and U+180E and the unassigned code
+/// points after U+E01EF are not.
+#[test]
+fn a_default_ignorable_code_point_is_read_away() {
+    for name in ["a\u{200d}b", "a\u{feff}b", "a\u{ad}b", "a\u{fff0}b"] {
+        assert_eq!(key(name), key("ab"), "{name:?}");
+    }
+    // Not every code point that looks invisible is ignorable: U+00A0 is a space, and the key keeps
+    // it, so a name that carries one is not the name without it.
+    assert_ne!(key("a\u{a0}b"), key("ab"));
+}
+
+/// The key is the `Default_Ignorable_Code_Point` set of Unicode 18.0.0, walked in full. A code
+/// point that a file system drops and the key keeps would make two names one on that volume and two
+/// here, and the receiver would write one over the other.
+#[test]
+fn every_default_ignorable_code_point_is_read_away() {
+    let mut set = vec![
+        0xad, 0x34f, 0x61c, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x3164, 0xfeff, 0xffa0, 0x180f,
+    ];
+    for range in [
+        0x180b..=0x180d,
+        0x200b..=0x200f,
+        0x202a..=0x202e,
+        0x2060..=0x206f,
+        0xfe00..=0xfe0f,
+        0xfff0..=0xfff8,
+        0x1bca0..=0x1bca3,
+        0x1d173..=0x1d17a,
+        0xe0000..=0xe00ff,
+        0xe0100..=0xe01ef,
+    ] {
+        set.extend(range);
+    }
+    assert_eq!(set.len(), 573, "the set is not the one Unicode 18 names");
+    for code in set {
+        let name = char::from_u32(code).expect("a code point");
+        assert_eq!(key(&format!("a{name}b")), key("ab"), "U+{code:04X}");
+    }
+    // The code points on either side of the last ranges are not ignorable.
+    assert_ne!(key("a\u{180e}b"), key("ab"));
+    assert_ne!(key("a\u{e0fff}b"), key("ab"));
 }
 
 #[test]
@@ -24,36 +76,37 @@ fn the_tables_are_those_of_unicode_18() {
     // U+A7CE and U+A7CF were added in Unicode 18.0.0 and U+A7CB in 16.0.0. Tables from before
     // 18 would leave the first one alone, and a manifest of two names that differ in it would be
     // accepted here and rejected by a receiver on the right tables.
-    assert_eq!(collision_key("\u{a7ce}"), "\u{a7cf}");
-    assert_eq!(collision_key("\u{a7cb}"), "\u{264}");
+    assert_eq!(key("\u{a7ce}"), "\u{a7cf}");
+    assert_eq!(key("\u{a7cb}"), "\u{264}");
 }
 
 #[test]
 fn the_nfc_tables_are_those_of_unicode_18() {
     assert_eq!(
-        unicode_normalization::UNICODE_VERSION,
+        UNICODE_VERSION,
         (18, 0, 0),
         "unicode-normalization moved to other tables. They decide which paths are NFC (path \
          rule 2), so a change of version is a change of SPEC.md section 8, with new vectors"
     );
 }
 
+/// The key is what NFKC gives and then the fold, and nothing after the fold: the rules are the same
+/// for both names of a pair, so a fold that leaves a composition undone is a key and not a fault.
 #[test]
-fn nfc_follows_the_fold_because_a_fold_can_leave_nfc() {
-    // U+0390 folds to three code points, which are not NFC. `Ϊ` and a combining acute fold to two
-    // code points that NFC composes into U+0390. The names are one name only if NFC comes last.
-    let precomposed = "\u{390}";
-    let separate = "\u{3aa}\u{301}";
-    assert!(is_nfc(precomposed) && is_nfc(separate));
-    assert_eq!(collision_key(precomposed), collision_key(separate));
-    assert!(is_nfc(&collision_key(precomposed)));
+fn the_key_is_nfkc_and_then_the_fold() {
+    assert_eq!(key("．sluice-partial-x"), key(".sluice-partial-x"));
+    assert_eq!(key("\u{ff41}"), "a");
+    // U+0390 folds to the three code points of a decomposed iota, while U+03AA folds to U+03CA and
+    // takes the combining acute with it. The keys differ, so the two names are two names here.
+    assert_ne!(key("\u{390}"), key("\u{3aa}\u{301}"));
+    assert!(is_nfc("\u{390}"));
 }
 
 #[test]
 fn a_key_is_made_of_whole_paths_so_slashes_decide_nothing() {
-    assert_ne!(collision_key("a/b"), collision_key("ab"));
-    assert_eq!(collision_key("A/B"), collision_key("a/b"));
-    assert_ne!(collision_key("a/x"), collision_key("a/y"));
+    assert_ne!(key("a/b"), key("ab"));
+    assert_eq!(key("A/B"), key("a/b"));
+    assert_ne!(key("a/x"), key("a/y"));
 }
 
 #[test]

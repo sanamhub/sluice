@@ -23,15 +23,15 @@ pub use build::{Build, Built, DiskPaths, Finding, Reason, Refusal};
 pub use entry::{Entry, Kind, Loc, PackRef};
 pub use sequence::parse as parse_sequence;
 
-/// The key two path spellings share when a filesystem may treat them as one name: full Unicode
-/// case folding, then NFC. Rule 12 uses it to refuse a manifest that names one file twice.
+/// The key two path spellings share when a file system may treat them as one name, which is the one
+/// key path rule 9 defines and every question about the same name is answered by.
 ///
-/// A receiver also uses it wherever it has to look a path up in the manifest while the operating
-/// system will look it up on disk: on a case-insensitive volume the disk finds `A` when asked for
-/// `a`, so a check that looked for the exact text would see a plain folder where the operating
-/// system follows a link.
+/// A receiver uses it wherever it has to look a path up in the manifest while the operating system
+/// will look it up on disk: on a case-insensitive volume the disk finds `A` when asked for `a`, so a
+/// check that looked for the exact text would see a plain folder where the operating system follows
+/// a link.
 pub(crate) fn folded_key(path: &str) -> String {
-    rules::collision_key(path)
+    path::fold_key(path)
 }
 
 /// How much a receiver reads before it refuses a manifest.

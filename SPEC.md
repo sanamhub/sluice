@@ -548,13 +548,27 @@ stranger, and file names stay out of logs.
 9. a component starts with `.sluice-partial-` or `.sluice-tmp-`, the two prefixes a receive gives the
    store it writes beside the output and a folder it writes through. The prefixes themselves are
    reserved too. A sender MUST NOT put such a name in a manifest, and a receive writes its own stores
-   under names no manifest can claim. The comparison first drops the code points a file system may
-   ignore in a name (the Unicode default-ignorable ones, such as U+200B and U+FEFF) and reads
-   U+0131 as `i`, because NTFS upcases the dotless `ı` to `I`; then it applies NFKC and full Unicode
-   case folding, because Windows and macOS resolve a name regardless of case, macOS composes and
-   decomposes it, and APFS folds some letters beyond ASCII. So `.SLUICE-PARTIAL-x`,
-   `．sluice-partial-x`, `.ſluice-partial-x`, `.sluıce-partial-x` and the same name with a
-   zero-width space after `slu` all name the same store there
+   under names no manifest can claim. The comparison is by **the comparison key**, below, so
+   `.SLUICE-PARTIAL-x`, `．sluice-partial-x`, `.ſluice-partial-x`, `.sluıce-partial-x` and the same
+   name with a zero-width space after `slu` all name the same store there
+
+**The comparison key.** Every question in this section about whether two names are the same name is
+answered by one key, and a decoder MUST use this one and no other. The key of a name is:
+
+1. every code point with the `Default_Ignorable_Code_Point` property of Unicode 18.0.0 dropped, such
+   as U+200B, U+200D, U+FEFF and U+FFF0 to U+FFF8
+2. U+0131 read as `i`, because NTFS upcases the dotless `ı` to `I`
+3. NFKC applied, because macOS composes and decomposes a name and a fullwidth letter is its plain
+   one to it
+4. full Unicode case folding applied to the result, by the entries of status `C` and `F` in
+   `CaseFolding.txt` and no other: `ß` becomes `ss`, `ﬃ` becomes `ffi`, and the Turkic entries of
+   status `T` and the simple entries of status `S` are not used. Windows and macOS resolve a name
+   regardless of case, and APFS folds some letters beyond ASCII
+
+Nothing follows the fourth step: the key of a name is not normalized again, so a fold that leaves a
+composition undone is part of the key. The tables are those of Unicode 18.0.0. A later version adds
+pairs, and a receiver on newer tables would refuse a manifest that a sender on older ones built, so a
+change of version is a change of this document, with new vectors.
 
 With these rules no accepted path can leave the output root by its text alone, and a symlink already
 on disk is the writer's concern, not these rules'.
@@ -569,23 +583,20 @@ on disk is the writer's concern, not these rules'.
 5. resolved from the folder that holds the link, one component at a time, a `..` would step above
    the output root. So `a/link -> ../b` is accepted and `link -> ../x` is rejected
 
+A target is resolved through the links the transfer makes by **the comparison key** of path rule 9. A
+component whose key is a link's key, but whose spelling is not the link's, is refused with both names
+in the message: the receiver cannot know whether the volume it writes on reads the two as one name,
+and following the link would be wrong where it does not.
+
 These rules look at the text only. A target that passes them can still reach another symlink on
 disk, which is the writer's concern, as for paths.
 
-**Case collision.** Two paths collide when they are equal after full case folding followed by NFC.
-Full case folding maps every code point of the whole path by the entries of status `C` and `F` in
-`CaseFolding.txt` and no other: `ß` becomes `ss` and `ﬃ` becomes `ffi`, and the Turkic entries of
-status `T` and the simple entries of status `S` are not used. NFC comes last because a fold can
-leave NFC: U+0390 folds to three code points, and U+03AA followed by U+0301 folds to two, and NFC
-makes both the one code point U+0390. So `Readme.md` and `README.md` collide, and so do `straße` and
-`STRASSE`.
+**Case collision.** Two paths collide when they are equal under **the comparison key** of path rule 9,
+applied to the whole path. So `Readme.md` and `README.md` collide, and so do `straße` and `STRASSE`,
+and so does a name with a default-ignorable code point in it with the same name without one.
 
 Every pair of entries is compared, on every platform, whether or not the receiver's filesystem
 ignores case. A folder `A` and a folder `a` collide, so `A/x` and `a/y` are refused through them.
-The tables are those of Unicode 18.0.0, for the folding and for the NFC of path rule 2. A decoder
-MUST use those and no other: a later version adds pairs, and a receiver on newer tables would refuse
-a manifest that a sender on older ones built. A change of version is a change of this document, with
-new vectors.
 
 **Entries.**
 

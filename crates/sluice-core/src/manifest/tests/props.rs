@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use proptest::prelude::*;
 
 use super::common::path;
-use crate::manifest::rules::collision_key;
+use crate::manifest::path::fold_key as collision_key;
 use crate::manifest::{Entry, Kind, Limits, Loc, Manifest, PackRef, link::LinkTarget, wire};
 
 /// Names that never collide with each other, so a tree made from them is always valid. There is

@@ -6,10 +6,8 @@
 
 use std::collections::HashSet;
 
-use unicase::UniCase;
-use unicode_normalization::UnicodeNormalization;
-
 use super::entry::{Entry, Kind, Loc, PackRef};
+use super::path::fold_key;
 use crate::Error;
 
 /// The numbers of the decoding rules in `SPEC.md` section 8.
@@ -83,7 +81,7 @@ fn describe(rule: u8) -> &'static str {
             "has a link_target on an entry that is not a symlink, or none on one"
         }
         rule::LINK_TARGET => "has an entry whose link_target breaks a link target rule",
-        rule::COLLISION => "has two paths that are the same after case folding",
+        rule::COLLISION => "has two paths that are the same name under the comparison key",
         rule::KIND_LOC => "has an entry whose kind, loc and size disagree",
         rule::PACKED => "has a packed entry that does not fit its pack",
         rule::MODE => "has a mode above 0o7777",
@@ -91,14 +89,7 @@ fn describe(rule: u8) -> &'static str {
     }
 }
 
-/// The key two paths share when they collide: full Unicode case folding, then NFC. Folding can
-/// produce text that is not in NFC (U+0130 gives `i` and a combining dot), and two names whose
-/// folds differ only in how they are composed would be one name on a filesystem that normalizes.
-pub(super) fn collision_key(path: &str) -> String {
-    UniCase::unicode(path).to_folded_case().nfc().collect()
-}
-
-/// The checks that compare an entry with the ones before it. It holds a hash of the folded path of
+/// The checks that compare an entry with the ones before it. It holds a hash of the collision key of
 /// every entry accepted so far, so each new entry costs one lookup and the whole list is linear.
 ///
 /// The set holds the first 16 bytes of the BLAKE3 hash of each key, and not the key, because the
@@ -124,7 +115,9 @@ impl Checker {
         }
         parent_is_a_folder(before, next)?;
         next.check()?;
-        let key = short_hash(&collision_key(next.path.as_str()));
+        // The key is the one path rule 9 defines, so `A` and `a`, `ß` and `ss`, and a name with a
+        // default-ignorable code point in it are one name here as they are there.
+        let key = short_hash(&fold_key(next.path.as_str()));
         if !self.folded.insert(key) {
             return Err(Fault::new(rule::COLLISION));
         }

@@ -34,6 +34,10 @@
     { "path": ".\u00adsluice-partial-x", "valid": false, "rule": 9 },
     { "path": ".sluıce-partials-x", "valid": true },
     { "path": "a\u200bb.txt", "valid": true },
-    { "path": ".sluıce", "valid": true }
+    { "path": ".sluıce", "valid": true },
+    { "path": ".\ufff0sluice-partial-x", "valid": false, "rule": 9 },
+    { "path": ".ｓluice-partial-x", "valid": false, "rule": 9 },
+    { "path": "a\ufff0b.txt", "valid": true },
+    { "path": ".　sluice-partial-x", "valid": true }
   ]
 }
