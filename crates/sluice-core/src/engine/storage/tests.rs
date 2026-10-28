@@ -272,16 +272,37 @@ fn the_errnos_that_mean_a_rename_flag_is_unsupported_are_known() {
 }
 
 /// A device path names a device, not a file, and building a verbatim path from one names something
-/// else entirely. It is refused before any call.
+/// else entirely. Every prefix that reaches a device namespace is refused, with either separator,
+/// and a verbatim file path is still a file path.
 #[cfg(windows)]
 #[test]
 fn a_device_path_is_not_a_file_path() {
     use std::path::Path;
 
-    assert!(super::install::is_device_path(Path::new(r"\\.\C:\x")));
-    assert!(super::install::is_device_path(Path::new(r"\\.\pipe\name")));
-    assert!(!super::install::is_device_path(Path::new(r"C:\out\file")));
-    assert!(!super::install::is_device_path(Path::new(r"\\?\C:\x")));
+    for device in [
+        r"\\.\C:\x",
+        r"\\.\pipe\name",
+        "//./pipe/name",
+        r"\??\C:\x",
+        r"\\?\GLOBALROOT\Device\HarddiskVolume1",
+        "//?/GLOBALROOT/Device/HarddiskVolume1",
+        r"\\?\Volume{00000000-0000-0000-0000-000000000000}\x",
+        r"\\?\",
+    ] {
+        assert!(
+            super::install::is_device_path(Path::new(device)),
+            "{device}"
+        );
+    }
+    for file in [
+        r"C:\out\file",
+        r"\\?\C:\x",
+        "//?/c:/x",
+        r"\\?\UNC\server\share\x",
+        r"\\server\share\x",
+    ] {
+        assert!(!super::install::is_device_path(Path::new(file)), "{file}");
+    }
 
     let dir = tempfile::tempdir().unwrap();
     let incoming = dir.path().join("incoming");

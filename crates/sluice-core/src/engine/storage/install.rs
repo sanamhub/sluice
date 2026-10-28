@@ -229,26 +229,54 @@ fn move_file(from: &Path, target: &Path, replace: bool) -> io::Result<()> {
     }
 }
 
-/// Whether `path` names a device rather than a file: a Windows device path starts with `\\.\`, as in
-/// `\\.\C:` or `\\.\pipe\name`. Windows reads `/` as a separator too, so `//./pipe/name` names the
-/// same device and is refused in the same way; the check normalises the separators before comparing,
+/// Whether `path` names a device rather than a file. A device path is one of the Windows prefixes
+/// that reach a device namespace: `\\.\`, as in `\\.\C:` or `\\.\pipe\name`; `\??\`, which is what
+/// that prefix becomes in the object manager; `\\?\GLOBALROOT\`; and any other `\\?\` form whose
+/// next component is not a drive letter or `UNC\`. Windows reads `/` as a separator too, so
+/// `//./pipe/name` names the same device; the check normalises the separators before comparing,
 /// which is the order the rename below uses when it turns the path into its verbatim form.
 #[cfg(windows)]
 pub(super) fn is_device_path(path: &Path) -> bool {
     use std::os::windows::ffi::OsStrExt;
 
-    let mut wide = path.as_os_str().encode_wide().map(|c| {
-        if c == u16::from(b'/') {
-            u16::from(b'\\')
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .map(|c| {
+            if c == u16::from(b'/') {
+                u16::from(b'\\')
+            } else {
+                c
+            }
+        })
+        .collect();
+    let starts = |prefix: &str| wide.starts_with(&prefix.encode_utf16().collect::<Vec<u16>>());
+    // The three prefixes that name a device whatever follows them.
+    if starts(r"\\.\") || starts(r"\??\") || starts(r"\\?\GLOBALROOT\") {
+        return true;
+    }
+    // A verbatim path names a file only when it starts with a drive letter and a colon or with
+    // `UNC\`. `\\?\Volume{...}`, `\\?\GLOBALROOT\` and the rest of the namespace are devices.
+    if !starts(r"\\?\") {
+        return false;
+    }
+    let rest = &wide[4..];
+    let upper = |c: u16| {
+        if (u16::from(b'a')..=u16::from(b'z')).contains(&c) {
+            c - 32
         } else {
             c
         }
+    };
+    let unc = rest.get(..4).is_some_and(|part| {
+        upper(part[0]) == u16::from(b'U')
+            && upper(part[1]) == u16::from(b'N')
+            && upper(part[2]) == u16::from(b'C')
+            && part[3] == u16::from(b'\\')
     });
-    let device = [
-        u16::from(b'\\'),
-        u16::from(b'\\'),
-        u16::from(b'.'),
-        u16::from(b'\\'),
-    ];
-    device.iter().all(|want| wide.next() == Some(*want))
+    let drive = rest.first().is_some_and(|c| {
+        (u16::from(b'A')..=u16::from(b'Z')).contains(c)
+            || (u16::from(b'a')..=u16::from(b'z')).contains(c)
+    }) && rest.get(1) == Some(&u16::from(b':'));
+    !unc && !drive
 }
