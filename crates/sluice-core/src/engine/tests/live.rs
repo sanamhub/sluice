@@ -281,9 +281,11 @@ fn store_bytes(dir: &Path) -> u64 {
     total
 }
 
-/// Waits until the store folder holds bytes matching `done`, and returns what it held then.
+/// Waits until the store folder holds bytes matching `done`, and returns what it held then. The
+/// deadline is generous because a machine running the whole suite at once schedules the store's
+/// collector late; what this waits for is the bound, not a speed.
 async fn wait_for_store(dir: &Path, done: impl Fn(u64) -> bool) -> u64 {
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let deadline = std::time::Instant::now() + Duration::from_secs(90);
     loop {
         let bytes = store_bytes(dir);
         if done(bytes) {
