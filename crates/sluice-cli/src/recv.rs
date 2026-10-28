@@ -92,6 +92,18 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
     receive_one(args, output, &ticket, rate)
 }
 
+/// Runs a transfer until it finishes or the user interrupts it. An interrupt drops the future, which
+/// is what removes the private temporary folders the receive made; the partial store beside the
+/// output is left, so the transfer can be continued.
+pub(crate) async fn until_interrupted<T>(
+    work: impl std::future::Future<Output = Result<T, Error>>,
+) -> Result<T, Error> {
+    tokio::select! {
+        result = work => result,
+        _ = tokio::signal::ctrl_c() => Err(Error::Cancelled),
+    }
+}
+
 /// One static ticket into the output folder, with the usual events and final line.
 fn receive_one(
     args: &RecvArgs,
@@ -109,7 +121,7 @@ fn receive_one(
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "receiving");
         let options = options(args, out, rate);
-        let result = receive(ticket, &options, &tx).await;
+        let result = until_interrupted(receive(ticket, &options, &tx)).await;
         drop(tx);
         let printed = printer
             .await
@@ -192,7 +204,7 @@ fn run_live(
         let printer = events::printer(*output, rx, "receiving");
         let options = options(args, out, rate);
         let store = sluice_core::Home::temporary_store()?;
-        let result = receive_live(ticket, &options, &store, &tx).await;
+        let result = until_interrupted(receive_live(ticket, &options, &store, &tx)).await;
         drop(tx);
         let printed = printer
             .await
@@ -226,7 +238,7 @@ fn to_stdout(
         let (tx, _rx) = unbounded_channel();
         let options = options(args, PathBuf::from("."), rate);
         let store = sluice_core::Home::temporary_store()?;
-        let bytes = receive_stdout(ticket, &options, &store, &tx).await?;
+        let bytes = until_interrupted(receive_stdout(ticket, &options, &store, &tx)).await?;
         output.write_stderr(&format!("wrote {bytes} bytes to standard output\n"));
         Ok(0)
     })
@@ -250,7 +262,7 @@ fn run_range(
         let (tx, _rx) = unbounded_channel();
         let options = options(args, out, rate);
         let store = sluice_core::Home::temporary_store()?;
-        let bytes = receive_range(ticket, range, &options, &store, &tx).await?;
+        let bytes = until_interrupted(receive_range(ticket, range, &options, &store, &tx)).await?;
         output.write_stderr(&format!("wrote {bytes} bytes from the range\n"));
         Ok(0)
     })

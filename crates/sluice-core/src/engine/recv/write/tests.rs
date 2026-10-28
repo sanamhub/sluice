@@ -55,6 +55,103 @@ async fn run(
         .unwrap();
 }
 
+/// A store that is kept has to keep its own bytes. A file that took them by link is one inode under
+/// two names while the store lives, so an edit to the installed file would change the blob a resume
+/// reads; the writer copies the store's bytes back out when a failure leaves the store behind.
+#[tokio::test]
+async fn a_kept_store_is_given_its_own_bytes_back() {
+    use super::same_file;
+    let dir = tempfile::tempdir().unwrap();
+    let partial = dir.path().join("store");
+    let store = FsStore::load(&partial).await.unwrap();
+    // Large enough that the store keeps the bytes in a file rather than in its metadata, which is
+    // what makes a link possible at all.
+    let one = vec![1u8; 1 << 20];
+    let two = vec![2u8; 8 << 20];
+    let root_one = *store.add_slice(&one).await.unwrap().hash.as_bytes();
+    let root_two = *store.add_slice(&two).await.unwrap().hash.as_bytes();
+    let manifest = Manifest::new(
+        vec![
+            file("a.bin", root_one, one.len() as u64),
+            file("b.bin", root_two, two.len() as u64),
+        ],
+        vec![],
+    )
+    .unwrap();
+    let out = dir.path().join("out");
+    fs::create_dir_all(&out).unwrap();
+    let plan = Plan {
+        files: 2,
+        bytes: (one.len() + two.len()) as u64,
+        ours: std::collections::BTreeSet::new(),
+    };
+    let mut options = options(&out);
+    // The first file fits and the second does not, so the transfer fails with the store kept.
+    options.write_limit = Some(2 << 20);
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let err = write(&manifest, &plan, &store, &options, &partial, false, &tx)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, crate::Error::Storage(_)), "{err}");
+
+    let data = iroh_blobs::store::fs::options::Options::new(&partial)
+        .path
+        .data_path(&iroh_blobs::Hash::from(root_one));
+    let written = out.join("a.bin");
+    assert!(
+        !same_file(&data, &written),
+        "the kept store still shares its bytes with the file"
+    );
+    assert_eq!(fs::read(&data).unwrap(), one);
+    fs::write(&written, b"the user's own edit of the file").unwrap();
+    assert_eq!(
+        fs::read(&data).unwrap(),
+        one,
+        "the store followed the user's edit"
+    );
+    store.shutdown().await.unwrap();
+}
+
+/// A received file always keeps owner read and write. Without them the receive that wrote it could
+/// not read it back to compare on a resume, so a sender mode of `000` arrives as `600` and a
+/// read-only `444` arrives as `644`; on Windows neither makes the file read-only.
+#[tokio::test]
+async fn a_mode_without_owner_access_keeps_owner_read_and_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    for given in [0o000, 0o444, 0o750] {
+        let path = dir.path().join(format!("mode-{given:o}.bin"));
+        fs::write(&path, b"bytes").unwrap();
+        let file = std::fs::File::options().write(true).open(&path).unwrap();
+        super::file::apply(
+            &file,
+            &path,
+            super::file::Meta {
+                mtime_ms: 0,
+                mode: given,
+            },
+            true,
+            &tx,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let expected = given | 0o600;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                expected,
+                "mode {given:o}"
+            );
+        }
+        #[cfg(windows)]
+        assert!(
+            !fs::metadata(&path).unwrap().permissions().readonly(),
+            "mode {given:o}"
+        );
+    }
+}
+
 /// A root that two files name is copied out once per file: taking the store's file for the
 /// first would leave the second with no bytes to read.
 #[tokio::test]

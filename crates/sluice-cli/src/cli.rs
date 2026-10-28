@@ -88,6 +88,9 @@ pub enum Command {
     /// Send files and folders, print a ticket, and serve until one complete download
     Send(send::SendArgs),
     /// Receive what a ticket names, writing it under the current folder by default
+    ///
+    /// A received file always keeps owner read and write, whatever the sender recorded: a file the
+    /// sender marked read-only arrives writable, and one it marked unreadable arrives readable.
     Recv(recv::RecvArgs),
     /// Check the home, who can reach it, its lock and identity key, and say how to fix a problem
     ///

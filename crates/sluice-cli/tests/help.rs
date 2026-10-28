@@ -29,3 +29,11 @@ fn sluice_id_help() {
 fn sluice_doctor_help() {
     insta::assert_snapshot!(help(&["doctor", "--help"]));
 }
+
+/// What a received file's mode becomes is a rule a user has to be able to read before they rely on
+/// it, so `recv --help` says it.
+#[test]
+fn recv_help_says_which_mode_a_received_file_keeps() {
+    let text = help(&["recv", "--help"]);
+    assert!(text.contains("owner read and write"), "{text}");
+}

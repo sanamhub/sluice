@@ -1,11 +1,7 @@
 //! Watching a live stream: every segment is fetched as its frame is accepted, appended to a
 //! private file, and the close proves the whole file before it takes its name.
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    time::Instant,
-};
+use std::{fs, path::Path, time::Instant};
 
 use iroh_blobs::{Hash, store::fs::FsStore};
 use sluice_live::{Outcome, Receiver as LogReceiver};
@@ -62,8 +58,8 @@ fn live_ids(ticket: &Ticket) -> Result<([u8; 16], [u8; 32]), Error> {
 struct Opened {
     receiver: Receiver,
     store: FsStore,
-    file_tmp: Temp,
-    store_tmp: Temp,
+    file_tmp: storage::Temp,
+    store_tmp: storage::Temp,
 }
 
 /// Opens everything a live receive needs, refusing a target that is a folder or a link first.
@@ -80,20 +76,20 @@ async fn open(
     });
     let receiver = Receiver::open(relay, options.congestion).await?;
     let file_tmp = match storage::temp_dir(parent) {
-        Ok(path) => Temp(path),
+        Ok(tmp) => tmp,
         Err(e) => {
             let _ = receiver.shutdown().await;
             return Err(e);
         }
     };
     let store_tmp = match storage::temp_dir(store_root) {
-        Ok(path) => Temp(path),
+        Ok(tmp) => tmp,
         Err(e) => {
             let _ = receiver.shutdown().await;
             return Err(e);
         }
     };
-    match FsStore::load(store_tmp.0.join("store")).await {
+    match FsStore::load(store_tmp.path().join("store")).await {
         Ok(store) => Ok(Opened {
             receiver,
             store,
@@ -176,7 +172,7 @@ async fn exchange(
     options: &ReceiveOptions,
     events: &UnboundedSender<Event>,
 ) -> Result<u64, Error> {
-    let incoming = opened.file_tmp.0.join("incoming");
+    let incoming = opened.file_tmp.path().join("incoming");
     let conn = opened.receiver.connect(ticket, events.clone()).await?;
     let (theirs, _send, mut recv) = hello::greet_stream(&conn)
         .await
@@ -327,14 +323,5 @@ fn close(
         other => Err(Error::Verify(format!(
             "the live close was refused: {other:?}"
         ))),
-    }
-}
-
-/// The file and the store folder, removed however the transfer ends.
-struct Temp(PathBuf);
-
-impl Drop for Temp {
-    fn drop(&mut self) {
-        storage::remove_quietly(&self.0);
     }
 }

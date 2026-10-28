@@ -93,7 +93,9 @@ pub(super) fn check_space(options: &ReceiveOptions, bytes: u64) -> Result<(), Er
         Some(bytes) => bytes,
         None => super::storage::available_bytes(&options.out)?,
     };
-    let needed = super::storage::needed_bytes(bytes);
+    // A volume that cannot link a finished file out of the store has to copy it while the store
+    // still holds the blob, so the whole content is there twice.
+    let needed = super::storage::needed_bytes(bytes, super::storage::supports_links(&options.out));
     if available < needed {
         return Err(Error::Storage(format!(
             "{} has {available} bytes free and this transfer needs about {needed}",

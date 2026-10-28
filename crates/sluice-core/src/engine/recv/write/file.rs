@@ -296,8 +296,10 @@ fn set_mode(file: &fs::File, path: &Path, mode: u32) -> Result<(), Error> {
     if mode == 0 {
         return Ok(());
     }
-    // Setuid and setgid are never applied, whatever the sender wrote.
-    let mode = mode & 0o777;
+    // Setuid and setgid are never applied, whatever the sender wrote. Owner read and write always
+    // are: a file without them cannot be read back for a resumed receive to compare, and a resume
+    // that cannot read what it wrote would fail on a file that is already correct.
+    let mode = (mode & 0o777) | 0o600;
     file.set_permissions(fs::Permissions::from_mode(mode))
         .map_err(|e| storage::policy_path("set the mode of", path, e))
 }
@@ -307,6 +309,9 @@ fn set_mode(file: &fs::File, path: &Path, mode: u32) -> Result<(), Error> {
     if mode == 0 {
         return Ok(());
     }
+    // A mode with owner write is never made read-only, for the same reason as the Unix clamp: the
+    // file has to stay readable and replaceable by the receive that wrote it.
+    let mode = mode | 0o600;
     let mut permissions = file
         .metadata()
         .map_err(|e| storage::policy_path("read the mode of", path, e))?

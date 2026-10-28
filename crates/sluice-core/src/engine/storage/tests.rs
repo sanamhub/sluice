@@ -6,9 +6,20 @@ use std::path::Path;
 
 #[test]
 fn a_hundred_gigabytes_needs_about_a_hundred_and_not_two_hundred() {
-    let need = needed_bytes(100 << 30);
+    let need = needed_bytes(100 << 30, true);
     assert!(need > 100 << 30);
     assert!(need < 101 << 30, "{need}");
+}
+
+/// A volume that cannot link a finished file out of the store holds the whole content twice, so the
+/// room it needs before a transfer starts is twice the content and not a little more than once.
+#[test]
+fn a_volume_without_links_needs_room_for_two_copies() {
+    let linked = needed_bytes(100 << 30, true);
+    let copied = needed_bytes(100 << 30, false);
+    assert!(copied > 200 << 30, "{copied}");
+    assert!(copied < 202 << 30, "{copied}");
+    assert!(copied > linked * 2 - (4 << 20), "{copied} vs {linked}");
 }
 
 #[test]
@@ -23,8 +34,8 @@ fn each_temporary_folder_has_its_own_name() {
     let dir = tempfile::tempdir().unwrap();
     let first = temp_dir(dir.path()).unwrap();
     let second = temp_dir(dir.path()).unwrap();
-    assert_ne!(first, second);
-    assert!(first.is_dir() && second.is_dir());
+    assert_ne!(first.path(), second.path());
+    assert!(first.path().is_dir() && second.path().is_dir());
 }
 
 #[test]

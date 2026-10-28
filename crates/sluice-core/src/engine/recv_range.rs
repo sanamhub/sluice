@@ -1,7 +1,7 @@
 //! One byte range of a one-file transfer. Only the blocks the range needs are fetched and verified
 //! against the root, and only the requested bytes are written.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use iroh_blobs::{Hash, protocol::ChunkRangesExt, store::fs::FsStore};
 use tokio::sync::mpsc::UnboundedSender;
@@ -34,13 +34,13 @@ pub async fn receive_range(
         .map_err(|e| storage::policy_path("create", &options.out, e))?;
     let receiver = Receiver::open(relay_of(&ticket), options.congestion).await?;
     let tmp = match storage::temp_dir(store_root) {
-        Ok(path) => Temp(path),
+        Ok(tmp) => tmp,
         Err(e) => {
             let _ = receiver.shutdown().await;
             return Err(e);
         }
     };
-    let store = match FsStore::load(tmp.0.join("store")).await {
+    let store = match FsStore::load(tmp.path().join("store")).await {
         Ok(store) => store,
         Err(e) => {
             let _ = receiver.shutdown().await;
@@ -163,13 +163,4 @@ fn plan_fetch(
 
 fn overflow() -> Error {
     Error::Policy("a byte range adds up past u64::MAX".to_string())
-}
-
-/// The temporary store, removed however the write ends.
-struct Temp(PathBuf);
-
-impl Drop for Temp {
-    fn drop(&mut self) {
-        storage::remove_quietly(&self.0);
-    }
 }

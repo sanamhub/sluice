@@ -1,10 +1,10 @@
 //! The store a receive reads the hash sequence and the manifest into before it may claim its own.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use iroh_blobs::store::fs::FsStore;
 
-use super::{remove_quietly, temp_dir};
+use super::{Temp, temp_dir};
 use crate::{Error, Home};
 
 /// The store a receive reads the hash sequence and the manifest into. Both are needed before the
@@ -13,7 +13,7 @@ use crate::{Error, Home};
 /// Unix, so another local user could read the names and sizes of the manifest there. A kill leaves
 /// the folder behind for the sweep of the next command.
 pub struct MetaStore {
-    dir: PathBuf,
+    _dir: Temp,
     /// The store inside the folder.
     pub store: FsStore,
 }
@@ -27,23 +27,22 @@ impl MetaStore {
     /// [`open`] in a folder the caller names, which must already be private.
     pub(super) async fn open_in(parent: &Path) -> Result<Self, Error> {
         let dir = temp_dir(parent)?;
-        let store = match FsStore::load(dir.join("store")).await {
+        let store = match FsStore::load(dir.path().join("store")).await {
             Ok(store) => store,
             Err(e) => {
-                remove_quietly(&dir);
                 return Err(Error::Storage(format!(
                     "cannot open a temporary store: {}",
                     crate::plain(&e)
                 )));
             }
         };
-        Ok(Self { dir, store })
+        Ok(Self { _dir: dir, store })
     }
 
     /// The folder this store owns, so a test can see where it went.
     #[cfg(test)]
     pub(super) fn dir(&self) -> &Path {
-        &self.dir
+        self._dir.path()
     }
 
     /// Closes the store and removes the folder.
@@ -54,11 +53,5 @@ impl MetaStore {
                 crate::plain(&e)
             ))
         })
-    }
-}
-
-impl Drop for MetaStore {
-    fn drop(&mut self) {
-        remove_quietly(&self.dir);
     }
 }

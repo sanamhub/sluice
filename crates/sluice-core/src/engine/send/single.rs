@@ -141,14 +141,8 @@ async fn import_stdin(home: &Home, store: &FsStore) -> Result<(TempTag, u64), Er
     fs::create_dir_all(&tmp_root)
         .map_err(|e| Error::Storage(format!("cannot create {}: {e}", tmp_root.display())))?;
     let tmp = storage::temp_dir(&tmp_root)?;
-    let path = tmp.join("input");
-    let size = match read_stdin(&path).await {
-        Ok(size) => size,
-        Err(e) => {
-            storage::remove_quietly(&tmp);
-            return Err(e);
-        }
-    };
+    let path = tmp.path().join("input");
+    let size = read_stdin(&path).await?;
     let copied = store
         .blobs()
         .add_path_with_opts(AddPathOptions {
@@ -158,7 +152,6 @@ async fn import_stdin(home: &Home, store: &FsStore) -> Result<(TempTag, u64), Er
         })
         .temp_tag()
         .await;
-    storage::remove_quietly(&tmp);
     let tag = copied
         .map_err(|e| Error::Storage(format!("cannot keep standard input: {}", crate::chain(&e))))?;
     Ok((tag, size))

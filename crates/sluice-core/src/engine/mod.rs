@@ -41,6 +41,7 @@ pub use send::{
     prepare_stdin as prepare_send_stdin, prepare_stdin_with_rate as prepare_send_stdin_with_rate,
     prepare_with_rate as prepare_send_with_rate,
 };
+pub use storage::sweep_temporary_store;
 
 mod provider;
 mod receiver;

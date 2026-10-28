@@ -64,7 +64,14 @@ pub fn run(
         .enable_all()
         .build()
         .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
-    runtime.block_on(drive(queue, texts, options, *output, pending))
+    runtime.block_on(async {
+        tokio::select! {
+            result = drive(queue, texts, options, *output, pending) => result,
+            // Dropping the driver drops its tasks, and each task's future removes the temporary
+            // folder its receive made.
+            _ = tokio::signal::ctrl_c() => Err(Error::Cancelled),
+        }
+    })
 }
 
 async fn drive(

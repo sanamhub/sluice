@@ -1,7 +1,7 @@
 //! Receiving to standard output: a raw blob, or a transfer whose manifest holds one file. A folder
 //! is refused, because a stream has no names. Nothing but content bytes goes to standard output.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use iroh_blobs::{Hash, store::fs::FsStore};
 use tokio::{
@@ -33,13 +33,13 @@ pub async fn receive_stdout(
     refuse_expired(&ticket)?;
     let receiver = Receiver::open(relay_of(&ticket), options.congestion).await?;
     let tmp = match storage::temp_dir(store_root) {
-        Ok(path) => Temp(path),
+        Ok(tmp) => tmp,
         Err(e) => {
             let _ = receiver.shutdown().await;
             return Err(e);
         }
     };
-    let store = match FsStore::load(tmp.0.join("store")).await {
+    let store = match FsStore::load(tmp.path().join("store")).await {
         Ok(store) => store,
         Err(e) => {
             let _ = receiver.shutdown().await;
@@ -237,13 +237,4 @@ async fn copy(store: &FsStore, hash: Hash, offset: u64, len: u64) -> Result<(), 
         )));
     }
     Ok(())
-}
-
-/// The temporary store, removed however the write ends.
-struct Temp(PathBuf);
-
-impl Drop for Temp {
-    fn drop(&mut self) {
-        storage::remove_quietly(&self.0);
-    }
 }
