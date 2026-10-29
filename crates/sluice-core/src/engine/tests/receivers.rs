@@ -68,10 +68,16 @@ async fn two_receivers_end_a_send_that_serves_that_many() {
         "a third receiver was served"
     );
 
+    assert_report_lines(&mut events, 2);
+}
+
+/// Drains the sender's receiver lines and checks them: one start and one finish per receiver, the
+/// same id on a receiver's two lines, and count receivers in all.
+fn assert_report_lines(events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>, count: usize) {
     let mut started = 0;
     let mut finished = 0;
     let mut ids = BTreeSet::new();
-    let mut reported = BTreeSet::new();
+    let mut closed = BTreeSet::new();
     while let Ok(event) = events.try_recv() {
         match event {
             Event::ReceiverStarted { endpoint, relayed } => {
@@ -90,14 +96,18 @@ async fn two_receivers_end_a_send_that_serves_that_many() {
                     "a receiver that took everything was reported as part"
                 );
                 finished += 1;
-                reported.insert(endpoint);
+                closed.insert(endpoint);
             }
             _ => {}
         }
     }
-    assert_eq!((started, finished), (2, 2), "one line per receiver and end");
-    assert_eq!(ids, reported, "a receiver's two lines name different ids");
-    assert_eq!(ids.len(), 2, "two receivers shared one id");
+    assert_eq!(
+        (started, finished),
+        (count, count),
+        "one line per receiver and end"
+    );
+    assert_eq!(ids, closed, "a receiver's two lines name different ids");
+    assert_eq!(ids.len(), count, "two receivers shared one id");
 }
 
 /// A receiver that reconnects is one receiver: two connections from one endpoint do not use up a
