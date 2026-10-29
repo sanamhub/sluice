@@ -6,6 +6,7 @@
 use std::{
     fs, io,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, Weak},
 };
 
 use super::remove_quietly;
@@ -85,8 +86,49 @@ pub fn forget(path: &Path) {
 
 /// Removes a partial store and the home's record of it, which are both this receive's.
 pub fn discard(path: &Path) {
+    with_hold(path, || discard_here(path));
+}
+
+/// [`discard`] for a caller that already holds the path, such as a claim that made a folder and
+/// then could not write its marker.
+pub(super) fn discard_here(path: &Path) {
     remove_quietly(path);
     forget(path);
+}
+
+/// One hold per partial folder this process is claiming or removing, by resolved path. The hold is
+/// taken by the blocking task that does the work, not by the future that waits for it: a receive
+/// that is cancelled while a removal is still being tried leaves that removal holding the path, so
+/// a later claim of the same output waits for the folder and its record to be gone instead of
+/// having them removed under it. A hold nobody is waiting on is forgotten by the next call, so a
+/// long-lived process does not keep one entry per transfer it has ever started.
+static HOLDS: Mutex<Vec<(PathBuf, Weak<Mutex<()>>)>> = Mutex::new(Vec::new());
+
+/// Runs `work` with the one hold on `path` taken, releasing it when `work` returns or unwinds.
+pub fn with_hold<T>(path: &Path, work: impl FnOnce() -> T) -> T {
+    let slot = hold(path);
+    // A removal that panicked while it held the path leaves the mutex poisoned. The hold itself is
+    // gone, so the next claim takes it rather than waiting for a task that is not coming.
+    let _held = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    work()
+}
+
+fn hold(path: &Path) -> Arc<Mutex<()>> {
+    let key = canonical(path);
+    let mut holds = HOLDS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    holds.retain(|(_, slot)| slot.strong_count() > 0);
+    if let Some(slot) = holds
+        .iter()
+        .find(|(at, _)| *at == key)
+        .and_then(|(_, slot)| slot.upgrade())
+    {
+        return slot;
+    }
+    let slot = Arc::new(Mutex::new(()));
+    holds.push((key, Arc::downgrade(&slot)));
+    slot
 }
 
 /// [`discard`] for an async caller. The removal waits for a file another process may still hold,

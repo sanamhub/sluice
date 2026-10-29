@@ -22,7 +22,7 @@ pub(super) async fn claim_store(
     ticket: &Ticket,
     options: &ReceiveOptions,
 ) -> Result<(storage::Store, bool, Plan), Error> {
-    let (resumed, checked) = resumable_store(partial, owner)?;
+    let (resumed, checked) = decide(partial, owner).await?;
     let resume = resumed.is_some();
     // A run that was allowed to replace what was in the output was a deliberate choice, so the run
     // that continues it has to make the same one.
@@ -68,6 +68,24 @@ pub(super) async fn claim_store(
     Ok((store, resume, plan))
 }
 
+/// [`resumable_store`] on a blocking thread, with the store's path held.
+///
+/// The hold is what makes the answer worth anything: a removal another receive started before it
+/// was cancelled can still be trying to delete this folder and its record, and that work belongs
+/// to a blocking task that outlives the future which asked for it. Taking the hold here means this
+/// decision is made about the folder that is there once that removal is over, so a store this run
+/// resumes cannot be taken away under it.
+async fn decide(
+    partial: &std::path::Path,
+    owner: &str,
+) -> Result<(Option<storage::Owner>, Option<storage::FolderId>), Error> {
+    let dir = partial.to_owned();
+    let root = owner.to_owned();
+    tokio::task::spawn_blocking(move || storage::with_hold(&dir, || resumable_store(&dir, &root)))
+        .await
+        .map_err(|error| Error::Storage(format!("cannot read {}: {error}", partial.display())))?
+}
+
 /// The marker of the store this transfer may resume and the identity of the folder it was read
 /// from, or `None` for both when the folder is not there.
 ///
@@ -102,28 +120,21 @@ fn resumable_store(
     }
 }
 /// Makes this receive's store: the folder, the home's record of it, and the marker that ties the
-/// two together. A marker that cannot be written leaves no store and no record, so the next run
-/// starts from an empty folder rather than from one whose marker says something else.
+/// two together, as one blocking task. A command that is cancelled while this is queued cannot stop
+/// it between the folder and the record, so what it leaves is a store the next run resumes.
 async fn start_store(
     partial: &std::path::Path,
     owner: &str,
     created: &std::collections::BTreeSet<String>,
     options: &ReceiveOptions,
 ) -> Result<(), Error> {
-    // Claiming removes a folder left under the store's name, which can wait for a held file; the
-    // waits are taken on a blocking thread so a receive does not hold its runtime while they run.
     let dir = partial.to_owned();
-    tokio::task::spawn_blocking(move || storage::claim(&dir))
+    let root = owner.to_owned();
+    let names = created.clone();
+    let force = options.force;
+    tokio::task::spawn_blocking(move || storage::begin(&dir, &root, &names, force))
         .await
-        .map_err(|error| {
-            Error::Storage(format!("cannot claim {}: {error}", partial.display()))
-        })??;
-    let id = storage::remember_record(partial, owner)?;
-    if let Err(e) = storage::remember(partial, owner, created, options.force, &id) {
-        storage::discard_apart(partial).await;
-        return Err(e);
-    }
-    Ok(())
+        .map_err(|error| Error::Storage(format!("cannot claim {}: {error}", partial.display())))?
 }
 
 /// Reads the hash sequence and the manifest into a store of their own, which is removed when this

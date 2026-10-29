@@ -27,6 +27,7 @@ use crate::{
     ticket::{Body, Format, Ticket},
 };
 
+mod cancel;
 mod checks;
 mod done;
 mod lifecycle;
