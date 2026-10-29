@@ -194,7 +194,7 @@ async fn a_partial_receive_does_not_end_a_one_time_send() {
     fs::write(tree.join("small.txt"), b"small").unwrap();
     let (outgoing, text) = prepared_paths(&dir, &[tree]).await;
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let serving = tokio::spawn(async move { outgoing.serve(false, &tx).await });
+    let serving = tokio::spawn(async move { outgoing.serve(Keep::One, &tx).await });
 
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let part = dir.path().join("part");

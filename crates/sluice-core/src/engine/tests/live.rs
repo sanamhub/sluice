@@ -31,7 +31,7 @@ async fn a_file_that_grows_is_followed_until_its_close() {
     .unwrap();
     let text = outgoing.ticket.encode();
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let serving = tokio::spawn(async move { outgoing.serve(false, &tx).await });
+    let serving = tokio::spawn(async move { outgoing.serve(Keep::One, &tx).await });
 
     let out = dir.path().join("out.bin");
     let store_root = dir.path().join("live-store");
@@ -251,7 +251,7 @@ async fn a_file_that_shrank_while_followed_ends_the_stream_with_an_error() {
     fs::write(&source, b"short").unwrap();
 
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let served = tokio::time::timeout(Duration::from_secs(10), outgoing.serve(false, &tx))
+    let served = tokio::time::timeout(Duration::from_secs(10), outgoing.serve(Keep::One, &tx))
         .await
         .expect("the stream did not end");
     assert!(matches!(served, Err(Error::Storage(_))));
@@ -349,7 +349,7 @@ async fn a_live_send_keeps_its_segments_in_its_own_folder_and_leaves_none_behind
     // the store and removes the folder.
     let text = outgoing.ticket.encode();
     let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
-    let serving = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let serving = tokio::spawn(async move { outgoing.serve(Keep::One, &serve_tx).await });
     let out = dir.path().join("out.bin");
     let store_root = dir.path().join("receive-store");
     fs::create_dir(&store_root).unwrap();

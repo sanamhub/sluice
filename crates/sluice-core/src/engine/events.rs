@@ -37,7 +37,8 @@ impl fmt::Display for PathKind {
 /// One thing that happened during a transfer.
 ///
 /// The variant name is the `event` field in JSON, so a consumer reads `planned`, `started`,
-/// `connected`, `path_changed`, `progress`, `verified` or `done`. No event carries a ticket.
+/// `connected`, `path_changed`, `progress`, `retry`, `warning`, `verified`, `done`,
+/// `receiver_started` or `receiver_finished`. No event carries a ticket.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
@@ -131,6 +132,25 @@ pub enum Event {
         bytes: u64,
         /// Seconds from the first request to the last verified byte.
         seconds: f64,
+    },
+    /// A receiver's content connection was accepted. `endpoint` is the endpoint id as 64 lower-case
+    /// hex characters, so a script can tell receivers apart; the text line shortens it.
+    ReceiverStarted {
+        /// The receiver's endpoint id, in hex.
+        endpoint: String,
+        /// Whether the connection reaches it through a relay.
+        relayed: bool,
+    },
+    /// A receiver's content connection closed. `whole` says whether it took every entry: only a
+    /// receiver that finished sends the completion code, and only a connection that asked for every
+    /// root has it believed.
+    ReceiverFinished {
+        /// The receiver's endpoint id, in hex.
+        endpoint: String,
+        /// Whether the connection reached it through a relay.
+        relayed: bool,
+        /// Whether it took the whole transfer.
+        whole: bool,
     },
 }
 

@@ -29,8 +29,12 @@ async fn the_completion_code_ends_a_sender_that_was_asked_for_every_root() {
     let root = Hash::from(outgoing.roots[0]);
     let roots = outgoing.roots.clone();
     let addr = outgoing.provider.addr();
-    let serve =
-        tokio::spawn(async move { outgoing.provider.serve(Stop::OneDownload(roots)).await });
+    let serve = tokio::spawn(async move {
+        outgoing
+            .provider
+            .serve(Stop::OneDownload(roots), &no_events())
+            .await
+    });
 
     // A client that holds the ticket reads the whole content blob and then says the transfer is
     // complete. That is the signal a sender waits for on a resumed transfer, where its own byte
@@ -61,8 +65,12 @@ async fn a_peer_without_the_ticket_cannot_end_the_sender() {
     let (outgoing, text) = prepared(&dir, &body).await;
     let roots = outgoing.roots.clone();
     let addr = outgoing.provider.addr();
-    let mut serve =
-        tokio::spawn(async move { outgoing.provider.serve(Stop::OneDownload(roots)).await });
+    let mut serve = tokio::spawn(async move {
+        outgoing
+            .provider
+            .serve(Stop::OneDownload(roots), &no_events())
+            .await
+    });
 
     let (probe, _store) = client(&dir).await;
     let conn = probe.connect(addr, iroh_blobs::ALPN).await.unwrap();
@@ -100,8 +108,12 @@ async fn a_later_connection_cannot_use_the_record_of_the_one_before_it() {
     let root = Hash::from(outgoing.roots[0]);
     let roots = outgoing.roots.clone();
     let addr = outgoing.provider.addr();
-    let mut serve =
-        tokio::spawn(async move { outgoing.provider.serve(Stop::OneDownload(roots)).await });
+    let mut serve = tokio::spawn(async move {
+        outgoing
+            .provider
+            .serve(Stop::OneDownload(roots), &no_events())
+            .await
+    });
 
     // One connection asks for a byte of the root, which is recorded, and goes away without the
     // code, as a killed receive does.
@@ -166,7 +178,8 @@ async fn a_peer_that_asked_for_one_root_of_two_cannot_end_the_sender() {
     .unwrap();
     let addr = provider.addr();
     let roots = vec![*one.as_bytes(), *two.as_bytes()];
-    let mut serve = tokio::spawn(async move { provider.serve(Stop::OneDownload(roots)).await });
+    let mut serve =
+        tokio::spawn(async move { provider.serve(Stop::OneDownload(roots), &no_events()).await });
 
     let (probe, store) = client(&dir).await;
     let conn = probe.connect(addr.clone(), iroh_blobs::ALPN).await.unwrap();
@@ -210,8 +223,12 @@ async fn the_same_half_twice_does_not_count_as_the_whole_file() {
     let hash = content_root(&outgoing, &text);
     let roots = outgoing.roots.clone();
     let addr = outgoing.provider.addr();
-    let mut serve =
-        tokio::spawn(async move { outgoing.provider.serve(Stop::OneDownload(roots)).await });
+    let mut serve = tokio::spawn(async move {
+        outgoing
+            .provider
+            .serve(Stop::OneDownload(roots), &no_events())
+            .await
+    });
 
     let (probe, _store) = client(&dir).await;
     for _ in 0..2 {
@@ -247,8 +264,12 @@ async fn a_range_receive_leaves_the_sender_serving() {
     let body: Vec<u8> = (0..256 * 1024).map(|i| (i % 251) as u8).collect();
     let (outgoing, text) = prepared(&dir, &body).await;
     let roots = outgoing.roots.clone();
-    let mut serve =
-        tokio::spawn(async move { outgoing.provider.serve(Stop::OneDownload(roots)).await });
+    let mut serve = tokio::spawn(async move {
+        outgoing
+            .provider
+            .serve(Stop::OneDownload(roots), &no_events())
+            .await
+    });
 
     let out = dir.path().join("out.bin");
     let store_root = dir.path().join("tmp");
@@ -301,7 +322,12 @@ async fn a_receive_that_resumes_against_a_new_sender_ends_that_sender() {
 
     let (second, text) = prepared(&dir, &body).await;
     let roots = second.roots.clone();
-    let serve = tokio::spawn(async move { second.provider.serve(Stop::OneDownload(roots)).await });
+    let serve = tokio::spawn(async move {
+        second
+            .provider
+            .serve(Stop::OneDownload(roots), &no_events())
+            .await
+    });
     super::receive(&text, &options(&out), &tx).await.unwrap();
     assert_eq!(fs::read(out.join("source.bin")).unwrap(), body);
 

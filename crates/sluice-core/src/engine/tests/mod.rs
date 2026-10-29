@@ -35,6 +35,7 @@ mod lifecycle;
 mod live;
 mod names;
 mod pack;
+mod receivers;
 mod refusal;
 mod resume;
 mod rules;
@@ -43,9 +44,14 @@ mod server;
 mod transfer;
 
 use super::{
-    ALPN, Congestion, Event, Hello, ReceiveOptions, Selection, ServeEnd, Stop, StopEnd, greet,
-    hello, now_ms, prepare_send, receive,
+    ALPN, Congestion, Event, Hello, Keep, ReceiveOptions, Selection, ServeEnd, Stop, StopEnd,
+    greet, hello, now_ms, prepare_send, receive,
 };
+
+/// An events channel nobody reads, for a test that does not watch the lines a serve prints.
+fn no_events() -> tokio::sync::mpsc::UnboundedSender<Event> {
+    tokio::sync::mpsc::unbounded_channel().0
+}
 
 /// Every byte a send left in the home: what is under its temporary area and in the `blobs` folder an
 /// older home kept its imports in. The home's own files are not a send's.

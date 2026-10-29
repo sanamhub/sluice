@@ -65,7 +65,10 @@ async fn a_range_request_leaves_the_sender_serving() {
     .unwrap();
     let mut serve = tokio::spawn(async move {
         provider
-            .serve(super::Stop::OneDownload(vec![*hash.as_bytes()]))
+            .serve(
+                super::Stop::OneDownload(vec![*hash.as_bytes()]),
+                &no_events(),
+            )
             .await
     });
     assert!(
@@ -252,7 +255,7 @@ async fn a_probe_only_client_leaves_the_sender_serving() {
     let mut serve = tokio::spawn(async move {
         outgoing
             .provider
-            .serve(super::Stop::OneDownload(roots))
+            .serve(super::Stop::OneDownload(roots), &no_events())
             .await
     });
     assert!(
@@ -290,7 +293,7 @@ async fn a_client_that_keeps_reconnecting_does_not_hold_the_sender_past_its_grac
     let serve = tokio::spawn(async move {
         outgoing
             .provider
-            .serve(super::Stop::OneDownload(serving))
+            .serve(super::Stop::OneDownload(serving), &no_events())
             .await
     });
 

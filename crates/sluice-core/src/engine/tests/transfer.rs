@@ -22,7 +22,7 @@ async fn one_file_goes_out_and_arrives_with_its_name() {
     .unwrap();
     let text = outgoing.ticket.encode();
     let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
-    let serve = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &serve_tx).await });
 
     let out = dir.path().join("received");
     let (recv_tx, _recv_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -67,7 +67,7 @@ async fn a_folder_arrives_with_packs_and_empty_folders() {
 
     let (outgoing, text) = prepared_paths(&dir, &[source]).await;
     let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
-    let serve = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &serve_tx).await });
     let out = dir.path().join("received");
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let received = super::receive(&text, &options(&out), &tx).await.unwrap();
@@ -96,7 +96,7 @@ async fn several_paths_keep_their_names() {
 
     let (outgoing, text) = prepared_paths(&dir, &[one, folder]).await;
     let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
-    let serve = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &serve_tx).await });
     let out = dir.path().join("received");
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let received = super::receive(&text, &options(&out), &tx).await.unwrap();
@@ -116,7 +116,7 @@ async fn an_empty_folder_crosses_and_stops_the_sender() {
     fs::create_dir(&source).unwrap();
     let (outgoing, text) = prepared_paths(&dir, &[source]).await;
     let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
-    let serve = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &serve_tx).await });
     let out = dir.path().join("received");
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let received = super::receive(&text, &options(&out), &tx).await.unwrap();
@@ -156,7 +156,7 @@ async fn a_static_send_leaves_none_of_its_bytes_in_the_home() {
     );
     let text = outgoing.ticket.encode();
     let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
-    let serve = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &serve_tx).await });
     let out = dir.path().join("received");
     let (recv_tx, _recv_rx) = tokio::sync::mpsc::unbounded_channel();
     let received = super::receive(&text, &options(&out), &recv_tx)
@@ -193,7 +193,7 @@ async fn a_stdin_send_leaves_none_of_its_bytes_in_the_home() {
         Body::Live { .. } => panic!("a live ticket"),
     };
     let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
-    let serve = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &serve_tx).await });
 
     // A receiver takes the whole raw blob, which is the download the send waits for.
     let receiver = Receiver::open(RelayModeChoice::Disabled, Congestion::Cubic)
@@ -259,8 +259,8 @@ async fn two_sends_in_one_home_both_finish() {
     let two_text = two.ticket.encode();
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let tx_one = tx.clone();
-    let serving_one = tokio::spawn(async move { one.serve(false, &tx_one).await });
-    let serving_two = tokio::spawn(async move { two.serve(false, &tx).await });
+    let serving_one = tokio::spawn(async move { one.serve(Keep::One, &tx_one).await });
+    let serving_two = tokio::spawn(async move { two.serve(Keep::One, &tx).await });
 
     let (recv_tx, _recv_rx) = tokio::sync::mpsc::unbounded_channel();
     let one_options = options(&dir.path().join("out-one"));

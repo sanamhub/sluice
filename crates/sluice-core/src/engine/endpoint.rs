@@ -137,17 +137,35 @@ pub(super) async fn bind_with_completion(
 /// queued before a close is processed within milliseconds; a quarter of a second is a wide margin,
 /// and the address cannot be reused meanwhile because the close task holds the connection.
 const LINGER: Duration = Duration::from_millis(250);
-/// The completion watch of a provider: where a connection that closed with the code is reported,
-/// and the ids every accepted connection is given.
+/// What a content connection reported: that a receiver opened it, or that it closed and whether the
+/// reason was the completion code. The endpoint id is the peer's, so a receiver that reconnects is
+/// the same receiver; the connection id is the one the policy knows, so the provider can check what
+/// that connection asked for before it believes a completion.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Receiver {
+    /// A receiver's content connection is up.
+    Opened { endpoint: [u8; 32], relayed: bool },
+    /// A receiver's content connection closed. `claimed_whole` is only what the peer said; it is
+    /// believed only by a provider that saw the connection ask for every root.
+    Closed {
+        connection: u64,
+        endpoint: [u8; 32],
+        relayed: bool,
+        claimed_whole: bool,
+    },
+}
+
+/// The completion watch of a provider: every content connection that opens and closes, and the ids
+/// the policy knows connections by.
 #[derive(Clone, Debug)]
 pub(super) struct Completion {
-    pub sender: UnboundedSender<u64>,
+    pub sender: UnboundedSender<Receiver>,
     pub ids: Arc<ConnIds>,
 }
 
-/// A watcher that reports a connection closed with [`super::COMPLETE_CLOSE`]. Only the static
-/// content protocol carries the code, so a `sluice/1` connection that closes with it means
-/// nothing here.
+/// A watcher that reports every content connection, and whether it closed with
+/// [`super::COMPLETE_CLOSE`]. Only the static content protocol carries the code, so a `sluice/1`
+/// connection that closes with it means nothing here.
 #[derive(Debug)]
 struct CompletionSignal(Completion);
 
@@ -161,31 +179,48 @@ impl EndpointHooks for CompletionSignal {
             // Before this connection can send a request, so the policy never has to guess its id
             // from iroh's reusable address.
             let own = self.0.ids.assign(stable);
+            let endpoint = *conn.remote_id().as_bytes();
+            let _ = self.0.sender.send(Receiver::Opened {
+                endpoint,
+                relayed: relayed(conn),
+            });
             // `stable_id` is the address of an allocation that is handed to a later connection once
             // this one is freed, and the policy resolves a request event by that address. Holding a
             // handle of this connection keeps the address out of another connection's hands until
             // the id is forgotten, so an event still queued for this one cannot be credited to the
             // connection that follows it.
             let held = conn.clone();
-            let complete = self.0.clone();
+            let reports = self.0.clone();
             n0_future::task::spawn(async move {
                 let closed = held.closed().await;
-                if let iroh::endpoint::ConnectionError::ApplicationClosed(application) = closed
-                    && application.error_code.into_inner() == u64::from(super::COMPLETE_CLOSE)
-                {
-                    let _ = complete.sender.send(own);
-                }
+                let claimed_whole = matches!(
+                    &closed,
+                    iroh::endpoint::ConnectionError::ApplicationClosed(application)
+                        if application.error_code.into_inner() == u64::from(super::COMPLETE_CLOSE)
+                );
+                let _ = reports.sender.send(Receiver::Closed {
+                    connection: own,
+                    endpoint,
+                    relayed: relayed(&held),
+                    claimed_whole,
+                });
                 // The provider reports a close from its own task while the request it read just
                 // before the close is reported by another, so the close can be processed first.
                 // The id stays the address's answer for a moment, which gives that event the
                 // connection that made it instead of the one that inherits the address.
                 tokio::time::sleep(LINGER).await;
-                complete.ids.closed(stable, own);
+                reports.ids.closed(stable, own);
                 drop(held);
             });
         }
         AfterHandshakeOutcome::accept()
     }
+}
+
+/// Whether the connection reaches its peer through a relay: no path of it is a direct one.
+fn relayed(conn: &Connection) -> bool {
+    let paths = conn.paths();
+    !paths.iter().any(|path| !path.is_relay())
 }
 
 async fn bind_inner(

@@ -334,7 +334,7 @@ async fn a_cancelled_receive_is_resumed_in_the_same_process() {
     let (outgoing, text) = prepared(&dir, &body).await;
     let out = dir.path().join("out");
     let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
-    let serving = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let serving = tokio::spawn(async move { outgoing.serve(Keep::One, &serve_tx).await });
 
     let mut slow = options(&out);
     slow.rate = Some(crate::engine::Rate::new(256 * 1024).unwrap());

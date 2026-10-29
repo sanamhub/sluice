@@ -6,7 +6,7 @@ use clap::Args;
 use sluice_core::{
     Error, Home,
     engine::{
-        N0_WARNING, Outgoing, Rate, RelayModeChoice, StopEnd, deadline, now_ms, parse_expiry,
+        Keep, N0_WARNING, Outgoing, Rate, RelayModeChoice, StopEnd, deadline, now_ms, parse_expiry,
         prepare_send_paths_with_rate, prepare_send_with_rate,
     },
 };
@@ -32,9 +32,11 @@ pub struct SendArgs {
     pub expires: String,
     /// Keep serving until Ctrl+C instead of stopping after one download. Without this, a sender
     /// stops once every byte is delivered and the receiver has closed its connection, or 30
-    /// seconds after the last byte if the receiver keeps the connection open
-    #[arg(long)]
-    pub keep: bool,
+    /// seconds after the last byte if the receiver keeps the connection open. With a number, stop
+    /// after that many receivers have each taken the whole transfer: `--keep 2` serves two
+    /// receivers, and one that reconnects is still the same receiver
+    #[arg(long, value_name = "N", num_args = 0..=1)]
+    pub keep: Option<Option<u32>>,
     /// The UDP port to listen on, so a firewall rule can name it. Without it the port this home
     /// used last is tried first
     #[arg(long, value_name = "PORT")]
@@ -60,6 +62,22 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
     if args.n0_relays {
         output.write_stderr(&format!("{N0_WARNING}\n"));
     }
+    let keep = match args.keep {
+        None => Keep::One,
+        Some(None) => Keep::UntilStopped,
+        Some(Some(0)) => {
+            return Err(Error::Policy(
+                "--keep N counts receivers, so N has to be at least 1".to_string(),
+            ));
+        }
+        Some(Some(count)) => Keep::Receivers(count),
+    };
+    if args.live && matches!(keep, Keep::Receivers(_)) {
+        return Err(Error::Policy(
+            "--keep N counts receivers of a fixed transfer, and a live send reads one stream"
+                .to_string(),
+        ));
+    }
     let rate = args.limit_rate.as_deref().map(Rate::parse).transpose()?;
     let seconds = parse_expiry(&args.expires)?;
     let expiry = deadline(now_ms(), seconds);
@@ -84,7 +102,7 @@ pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
     } else {
         absolute_paths(&args.paths)?
     };
-    serve(args, output, relay, expiry, stdin, &paths, rate)
+    serve(args, output, relay, expiry, stdin, &paths, rate, keep)
 }
 
 /// Opens the home, prepares the transfer and serves it, printing the ticket first.
@@ -97,6 +115,7 @@ fn serve(
     stdin: bool,
     paths: &[PathBuf],
     rate: Option<std::sync::Arc<Rate>>,
+    keep: Keep,
 ) -> Result<u8, Error> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -132,7 +151,7 @@ fn serve(
         events::ticket(*output, &outgoing.ticket.encode())?;
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "sending");
-        let end = outgoing.serve(args.keep, &tx).await;
+        let end = outgoing.serve(keep, &tx).await;
         drop(tx);
         let printed = printer
             .await

@@ -28,6 +28,33 @@ fn refuse(reason: &str) -> Error {
     Error::Policy(format!("ticket {reason}"))
 }
 
+/// The short form of an endpoint id: its first ten base32 characters, in the alphabet a ticket is
+/// written in, so a fingerprint and a ticket read alike. `hex` is the 64-character form `sluice id`
+/// prints; text that is not that is shortened as it is, because a fingerprint is for a person to
+/// read and never for a lookup.
+///
+/// # Examples
+///
+/// ```
+/// use sluice_core::ticket::fingerprint;
+///
+/// assert_eq!(fingerprint(&"00".repeat(32)), "0000000000");
+/// assert_eq!(fingerprint(&"ff".repeat(32)), "zzzzzzzzzz");
+/// ```
+pub fn fingerprint(hex: &str) -> String {
+    let bytes: Option<Vec<u8>> = hex
+        .as_bytes()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok())
+        .collect();
+    match bytes {
+        Some(bytes) if !bytes.is_empty() => base32::encode(&bytes).chars().take(10).collect(),
+        _ => hex.chars().take(10).collect(),
+    }
+}
+
 /// How the bytes of a [`Body::Static`] are laid out.
 ///
 /// # Examples

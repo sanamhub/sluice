@@ -91,6 +91,22 @@ second. A receive that took only part of a folder does not count as the one down
 keeps serving after it, so a sender that expects receivers taking a part uses `--keep`, and ends it
 with Ctrl+C.
 
+A ticket is a read capability, not a pairing: anyone holding it can take the content for as long as
+it lives and the send is serving. `--keep N` serves at most N receivers that each took the whole
+transfer, and stops when the last of them finishes; a receiver that reconnects is still one
+receiver, and one that is already transferring finishes. Plain `--keep` has no such limit, so a
+ticket shared with several people works until the send is stopped. Either way the sender prints a
+line when a receiver connects and one when it finishes or drops, naming it by the first ten
+characters of its endpoint id in the base32 a ticket is written in, with whether the connection is
+direct or relayed and whether it took the whole transfer or part of it:
+
+```
+receiver 3f9k2m0q4x connected directly
+receiver 3f9k2m0q4x finished, the whole transfer (directly)
+```
+
+A receiver nobody expected is a reason to press Ctrl-C: the ticket is what lets it in.
+
 `send --live FILE` follows one regular file that is still being written: each segment is sealed and
 signed as it fills, and a receiver can fetch it while the writer keeps going. The stream closes
 after the file has not grown for two seconds; `--close-after SECONDS` changes that. A live ticket
