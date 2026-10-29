@@ -302,6 +302,8 @@ async fn a_receive_that_resumes_against_a_new_sender_ends_that_sender() {
     let out = dir.path().join("out");
     let mut cut = options(&out);
     cut.max_network_failures = 1;
+    // Paced, so the first sender is gone long before the whole file could arrive from it.
+    cut.rate = Some(crate::engine::Rate::new(256 * 1024).unwrap());
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let text_for_task = text.clone();
     let options_for_task = cut.clone();

@@ -235,7 +235,8 @@ async fn a_file_that_shrank_while_followed_ends_the_stream_with_an_error() {
     let dir = tempfile::tempdir().unwrap();
     let home = Home::open(&dir.path().join("home")).unwrap();
     let source = dir.path().join("shrink.bin");
-    fs::write(&source, vec![1u8; 2 << 20]).unwrap();
+    // One whole segment and a little more, so the follower seals a segment it can be seen to have read.
+    fs::write(&source, vec![1u8; SEGMENT_BYTES as usize + (1 << 20)]).unwrap();
     let outgoing = prepare_live(
         &home,
         &source,
@@ -248,8 +249,15 @@ async fn a_file_that_shrank_while_followed_ends_the_stream_with_an_error() {
     .await
     .unwrap();
     let log = outgoing.live.as_ref().unwrap().log.clone();
-    // Let the follower read the file, then take bytes away under it.
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Let the follower read the file, then take bytes away under it. A sealed segment proves it read
+    // more than the five bytes the file shrinks to, however slow the machine.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while log.roots().is_empty() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the follower sealed no segment");
     fs::write(&source, b"short").unwrap();
 
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
