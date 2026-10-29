@@ -148,7 +148,7 @@ async fn mode_bits_are_applied_without_setuid_or_setgid() {
     .unwrap();
     let text = outgoing.ticket.encode();
     let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
-    let serve = tokio::spawn(async move { outgoing.serve(false, &serve_tx).await });
+    let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &serve_tx).await });
     let out = dir.path().join("out");
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let received = super::receive(&text, &options(&out), &tx).await.unwrap();

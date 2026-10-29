@@ -58,14 +58,25 @@ impl Outgoing {
     }
 }
 
+/// How long a send serves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Keep {
+    /// Until one receiver has taken the whole transfer.
+    One,
+    /// Until Ctrl+C or the ticket expiry.
+    UntilStopped,
+    /// Until this many distinct receivers have each taken the whole transfer.
+    Receivers(u32),
+}
+
 /// Imports `path` in place and starts a provider for it. `expiry` is UTC milliseconds or none.
 ///
 impl Outgoing {
-    /// Serves once, or until Ctrl+C when `keep`. Emits `started`, then a progress line is the
-    /// provider's business; the sender does not count bytes.
+    /// Serves until `keep` says to stop. Emits `started` and a line for every receiver; a progress
+    /// line is the provider's business, and the sender does not count bytes.
     pub async fn serve(
         self,
-        keep: bool,
+        keep: Keep,
         events: &UnboundedSender<Event>,
     ) -> Result<StopEnd, Error> {
         emit(
@@ -77,22 +88,24 @@ impl Outgoing {
                 congestion: self.congestion,
             },
         );
-        let stop = match (&self.live, keep) {
-            (_, true) => Stop::Keep,
-            (Some(live), false) => Stop::Live(live.log.clone()),
-            (None, false) => {
-                let roots = if self.roots.is_empty() {
-                    match self.ticket.body() {
-                        Body::Static { root, .. } => vec![*root],
-                        Body::Live { .. } => Vec::new(),
-                    }
-                } else {
-                    self.roots.clone()
-                };
-                Stop::OneDownload(roots)
+        let roots = if self.roots.is_empty() {
+            match self.ticket.body() {
+                Body::Static { root, .. } => vec![*root],
+                Body::Live { .. } => Vec::new(),
             }
+        } else {
+            self.roots.clone()
         };
-        let end = self.provider.serve(stop).await;
+        let stop = match (&self.live, keep) {
+            (_, Keep::UntilStopped) => Stop::Keep { limit: None, roots },
+            (_, Keep::Receivers(limit)) => Stop::Keep {
+                limit: Some(limit),
+                roots,
+            },
+            (Some(live), Keep::One) => Stop::Live(live.log.clone()),
+            (None, Keep::One) => Stop::OneDownload(roots),
+        };
+        let end = self.provider.serve(stop, events).await;
         if let Some(live) = &self.live {
             live.stop();
         }

@@ -153,10 +153,10 @@ impl Provider {
         port: Option<u16>,
         rate: Option<Arc<Rate>>,
     ) -> Result<Self, Error> {
-        let (complete, complete_rx) = unbounded_channel();
+        let (receivers, receivers_rx) = unbounded_channel();
         let ids = Arc::new(ConnIds::default());
         let completion = endpoint::Completion {
-            sender: complete.clone(),
+            sender: receivers.clone(),
             ids: Arc::clone(&ids),
         };
         let endpoint = open_endpoint(home, &relay, congestion, port, completion).await?;
@@ -188,8 +188,7 @@ impl Provider {
             store,
             policy,
             done: done_rx,
-            complete: complete_rx,
-            _complete: complete,
+            receivers: receivers_rx,
             expiry,
             _dir: None,
         })

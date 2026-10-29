@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use sluice_core::{
     Error,
     engine::{Event, PathKind},
+    ticket::fingerprint,
 };
 use tokio::{sync::mpsc::UnboundedReceiver, task::JoinHandle};
 
@@ -105,6 +106,36 @@ fn human(event: &Event, verb: &str) -> String {
         Event::Done { bytes, seconds } => {
             format!("done, {} in {seconds:.1} s", bytes_text(*bytes))
         }
+        Event::ReceiverStarted { endpoint, relayed } => format!(
+            "receiver {} connected {}",
+            fingerprint(endpoint),
+            path_words(*relayed)
+        ),
+        Event::ReceiverFinished {
+            endpoint,
+            relayed,
+            whole,
+        } => {
+            let what = if *whole {
+                "finished, the whole transfer"
+            } else {
+                "dropped, part of the transfer"
+            };
+            format!(
+                "receiver {} {what} ({})",
+                fingerprint(endpoint),
+                path_words(*relayed)
+            )
+        }
+    }
+}
+
+/// How a receiver reached us, for a line that already says it is about a receiver.
+fn path_words(relayed: bool) -> &'static str {
+    if relayed {
+        "through a relay"
+    } else {
+        "directly"
     }
 }
 

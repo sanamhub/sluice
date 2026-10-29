@@ -199,7 +199,10 @@ async fn a_request_for_the_last_chunk_leaves_the_sender_serving() {
 
     let mut serve = tokio::spawn(async move {
         provider
-            .serve(super::Stop::OneDownload(vec![*hash.as_bytes()]))
+            .serve(
+                super::Stop::OneDownload(vec![*hash.as_bytes()]),
+                &no_events(),
+            )
             .await
     });
     assert!(
@@ -261,7 +264,17 @@ async fn an_expiry_cuts_off_a_get_that_started_before_it() {
     .await
     .unwrap();
     let addr = provider.addr();
-    let serve = tokio::spawn(async move { provider.serve(super::Stop::Keep).await });
+    let serve = tokio::spawn(async move {
+        provider
+            .serve(
+                super::Stop::Keep {
+                    limit: None,
+                    roots: vec![],
+                },
+                &no_events(),
+            )
+            .await
+    });
     let conn = client.connect(addr, iroh_blobs::ALPN).await.unwrap();
     let err = client_store
         .remote()
@@ -305,7 +318,17 @@ async fn a_paced_chunk_does_not_hold_up_another_connection() {
     .await
     .unwrap();
     let addr = provider.addr();
-    let serve = tokio::spawn(async move { provider.serve(super::Stop::Keep).await });
+    let serve = tokio::spawn(async move {
+        provider
+            .serve(
+                super::Stop::Keep {
+                    limit: None,
+                    roots: vec![],
+                },
+                &no_events(),
+            )
+            .await
+    });
 
     let (client, client_store) = client_of(&dir).await;
     // One connection asks for the allowed blob, whose first chunk is paced.

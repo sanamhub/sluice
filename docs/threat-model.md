@@ -59,7 +59,15 @@ caller that cares pipes it.
   sessions are always relayed, so this applies to every one of them.
 - **Endpoint ids staying private.** Relays and discovery services see them. Nothing in Sluice
   depends on an endpoint id being secret; the content root and the allowlist protect the content.
-- **Anyone you gave a ticket to.** There is no revocation beyond expiry and one-time use.
+- **Anyone you gave a ticket to.** A ticket is a read capability for as long as it lives: there is
+  no revocation beyond the expiry, and a ticket given to two people works for both. A plain `send`
+  serves one receiver that took the whole transfer and then stops; `--keep` serves anyone holding
+  the ticket until Ctrl+C or the expiry; `--keep N` serves at most N distinct receivers that each
+  took the whole transfer, counting a receiver that reconnects once. The sender prints a line when
+  a receiver connects and when it finishes or drops, with a short fingerprint of the receiver's
+  endpoint id and whether the path is direct or relayed, so a user who sees a receiver they did not
+  expect can stop the send with Ctrl-C. A ticket is not bound to one receiver: binding it was
+  considered and not done, because it would break a ticket shared with several people.
 - **Connection floods against an `open` relay.** `iroh-relay` has no working connection-accept
   limit, and until we build one, `open` mode is limited by bytes only.
 - **An operator who skips the guard.** `docker run --entrypoint /usr/local/bin/iroh-relay` runs the

@@ -43,7 +43,7 @@ pub(crate) use send::Scratch;
 #[cfg(test)]
 pub(super) use send::prepare_stdin_from as prepare_send_stdin_from;
 pub use send::{
-    Outgoing, StopEnd, default_expiry, prepare as prepare_send,
+    Keep, Outgoing, StopEnd, default_expiry, prepare as prepare_send,
     prepare_paths as prepare_send_paths, prepare_paths_with_rate as prepare_send_paths_with_rate,
     prepare_stdin as prepare_send_stdin, prepare_stdin_with_rate as prepare_send_stdin_with_rate,
     prepare_with_rate as prepare_send_with_rate,

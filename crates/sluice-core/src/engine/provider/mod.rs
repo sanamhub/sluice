@@ -22,10 +22,9 @@ pub struct Provider {
     store: FsStore,
     policy: policy::Policy,
     done: tokio::sync::mpsc::UnboundedReceiver<policy::ServeEvent>,
-    /// One message per connection that a receiver closed with the completion code, holding that
-    /// connection. The sender end is kept so the channel never closes while this provider is alive.
-    complete: tokio::sync::mpsc::UnboundedReceiver<u64>,
-    _complete: tokio::sync::mpsc::UnboundedSender<u64>,
+    /// Every content connection a receiver opened or closed, in the order it happened. The sender
+    /// end lives in the endpoint's hook, so the channel ends with the endpoint.
+    receivers: tokio::sync::mpsc::UnboundedReceiver<endpoint::Receiver>,
     expiry: Option<u64>,
     /// The send's own folder, removed after this provider has closed its store. A provider that is
     /// dropped without being shut down hands the folder on with the store, so the two go in the
@@ -81,17 +80,25 @@ impl Provider {
         self._dir.as_ref().map(storage::Temp::path)
     }
 
-    /// Serves until the requested stop. The router is shut down before this returns, so a closed
-    /// provider is not still accepting connections, and the store is closed after it, so the
-    /// database is free for the next command that opens the same home.
-    pub async fn serve(mut self, stop: Stop) -> Result<ServeEnd, Error> {
+    /// Serves until the requested stop, reporting every receiver as a line of its own. The router is
+    /// shut down before this returns, so a closed provider is not still accepting connections, and
+    /// the store is closed after it, so the database is free for the next command that opens the
+    /// same home.
+    pub async fn serve(
+        mut self,
+        stop: Stop,
+        events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
+    ) -> Result<ServeEnd, Error> {
         let end = match stop {
             Stop::OneDownload(roots) => {
-                self.one_download(roots.into_iter().map(Hash::from).collect())
+                self.one_download(roots.into_iter().map(Hash::from).collect(), events)
                     .await
             }
-            Stop::Live(log) => self.live(log).await,
-            Stop::Keep => self.keep().await,
+            Stop::Live(log) => self.live(log, events).await,
+            Stop::Keep { limit, roots } => {
+                self.keep(limit, roots.into_iter().map(Hash::from).collect(), events)
+                    .await
+            }
         };
         let closed = self.close().await;
         let end = end?;
@@ -102,7 +109,11 @@ impl Provider {
     /// Serves a live stream until its close is signed, then waits for the segments the way a
     /// static send waits for its roots. A reader can fetch a segment before the close, so the
     /// delivery events that arrived earlier are still in the channel when the wait starts.
-    async fn live(&mut self, log: Arc<LiveLog>) -> Result<ServeEnd, Error> {
+    async fn live(
+        &mut self,
+        log: Arc<LiveLog>,
+        events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
+    ) -> Result<ServeEnd, Error> {
         loop {
             let left = self.expiry_ms_left();
             if left == 0 && self.expiry.is_some() {
@@ -112,6 +123,11 @@ impl Provider {
             tokio::pin!(deadline);
             tokio::select! {
                 _ = log.wait_closed() => break,
+                reported = self.receivers.recv() => {
+                    if let Some(reported) = reported {
+                        self.report(reported, &BTreeSet::new(), events);
+                    }
+                }
                 _ = &mut deadline => {
                     if self.expiry.is_none_or(|expiry| now_ms() >= expiry) {
                         return Ok(ServeEnd::Expired);
@@ -131,7 +147,7 @@ impl Provider {
             tokio::time::sleep(GRACE).await;
             return Ok(ServeEnd::Downloaded);
         }
-        self.one_download(roots.into_iter().map(Hash::from).collect())
+        self.one_download(roots.into_iter().map(Hash::from).collect(), events)
             .await
     }
 
@@ -163,7 +179,11 @@ impl Provider {
         Ok(())
     }
 
-    async fn one_download(&mut self, roots: Vec<Hash>) -> Result<ServeEnd, Error> {
+    async fn one_download(
+        &mut self,
+        roots: Vec<Hash>,
+        events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
+    ) -> Result<ServeEnd, Error> {
         let mut wait = Waiting::new(roots)?;
         let left = self.expiry_ms_left();
         if left == 0 {
@@ -172,12 +192,15 @@ impl Provider {
         let mut deadline = Box::pin(tokio::time::sleep(Duration::from_millis(left)));
         loop {
             tokio::select! {
-                // The receiver verified and installed every file, which is the signal that says so.
-                // It ends the wait even when a byte count would not: a resumed receive takes only
-                // what the first one was missing, so this process never sees the whole blob.
-                Some(connection) = self.complete.recv() => {
-                    if self.believed(connection, &wait.wanted) {
-                        return Ok(ServeEnd::Downloaded);
+                // A receiver that verified and installed every file says so with the completion
+                // code. It ends the wait even when a byte count would not: a resumed receive takes
+                // only what the first one was missing, so this process never sees the whole blob.
+                reported = self.receivers.recv() => {
+                    if let Some(reported) = reported {
+                        let whole = self.report(reported, &wait.wanted, events);
+                        if whole {
+                            return Ok(ServeEnd::Downloaded);
+                        }
                     }
                 }
                 event = self.done.recv() => match event {
@@ -207,7 +230,18 @@ impl Provider {
         wanted.is_subset(&self.policy.asked_by(connection))
     }
 
-    async fn keep(&mut self) -> Result<ServeEnd, Error> {
+    /// Serves until Ctrl+C, the expiry, or — with a limit — until this many distinct receivers have
+    /// each taken the whole transfer. It reports every receiver, and a receiver already transferring
+    /// when the limit is reached is waited for.
+    async fn keep(
+        &mut self,
+        limit: Option<u32>,
+        roots: Vec<Hash>,
+        events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
+    ) -> Result<ServeEnd, Error> {
+        let roots: BTreeSet<Hash> = roots.into_iter().collect();
+        let mut done: BTreeSet<[u8; 32]> = BTreeSet::new();
+        let mut open: BTreeSet<u64> = BTreeSet::new();
         loop {
             let left = self.expiry_ms_left();
             if left == 0 && self.expiry.is_some() {
@@ -217,6 +251,18 @@ impl Provider {
             tokio::pin!(deadline);
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => return Ok(ServeEnd::Interrupted),
+                reported = self.receivers.recv() => {
+                    let Some(reported) = reported else { continue };
+                    self.note(&reported, &roots, &mut done, &mut open);
+                    let whole = self.report(reported, &roots, events);
+                    if whole {
+                        // A receiver that reconnects is one receiver: the endpoint id is what is
+                        // counted, so a second connection from it does not use up the limit.
+                        if limit.is_some_and(|limit| done.len() >= limit as usize) {
+                            return self.drained(open, &roots, events).await;
+                        }
+                    }
+                }
                 _ = &mut deadline => {
                     // The timer is not the clock: a sleep can end early across a clock change.
                     if self.expiry.is_none_or(|expiry| now_ms() >= expiry) {
@@ -225,6 +271,101 @@ impl Provider {
                 }
             }
         }
+    }
+
+    /// What a receiver's report adds: a completion this provider believes counts the receiver once by
+    /// endpoint id, and connections still open are tracked so the limit can wait for them.
+    fn note(
+        &self,
+        reported: &endpoint::Receiver,
+        roots: &BTreeSet<Hash>,
+        done: &mut BTreeSet<[u8; 32]>,
+        open: &mut BTreeSet<u64>,
+    ) {
+        match reported {
+            endpoint::Receiver::Opened { .. } => {}
+            endpoint::Receiver::Closed {
+                connection,
+                endpoint,
+                claimed_whole,
+                ..
+            } => {
+                open.remove(connection);
+                if *claimed_whole && self.believed(*connection, roots) {
+                    done.insert(*endpoint);
+                }
+            }
+        }
+    }
+
+    /// Waits, after the limit is reached, for the receivers that are still transferring. A new
+    /// connection can no longer count, because the set it would join is full, and the wait ends at
+    /// the ticket's expiry or after [`GRACE`] at the latest.
+    async fn drained(
+        &mut self,
+        mut open: BTreeSet<u64>,
+        roots: &BTreeSet<Hash>,
+        events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
+    ) -> Result<ServeEnd, Error> {
+        let deadline = tokio::time::sleep(GRACE);
+        tokio::pin!(deadline);
+        while !open.is_empty() {
+            tokio::select! {
+                _ = &mut deadline => break,
+                _ = tokio::signal::ctrl_c() => return Ok(ServeEnd::Interrupted),
+                reported = self.receivers.recv() => {
+                    if let Some(reported) = reported {
+                        if let endpoint::Receiver::Closed { connection, .. } = &reported {
+                            open.remove(connection);
+                        }
+                        self.report(reported, roots, events);
+                    }
+                }
+            }
+        }
+        Ok(ServeEnd::Downloaded)
+    }
+
+    /// Reports a receiver as its line, and says whether the provider believes it took the whole
+    /// transfer. A partial receive closes without the code, so it is part of the transfer.
+    fn report(
+        &self,
+        reported: endpoint::Receiver,
+        roots: &BTreeSet<Hash>,
+        events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
+    ) -> bool {
+        let (event, whole) = match reported {
+            endpoint::Receiver::Opened { endpoint, relayed } => (
+                crate::engine::Event::ReceiverStarted {
+                    endpoint: Self::hex(&endpoint),
+                    relayed,
+                },
+                false,
+            ),
+            endpoint::Receiver::Closed {
+                connection,
+                endpoint,
+                relayed,
+                claimed_whole,
+            } => {
+                let whole = claimed_whole && self.believed(connection, roots);
+                (
+                    crate::engine::Event::ReceiverFinished {
+                        endpoint: Self::hex(&endpoint),
+                        relayed,
+                        whole,
+                    },
+                    whole,
+                )
+            }
+        };
+        crate::engine::emit(events, event);
+        whole
+    }
+
+    /// An endpoint id as the 64 lower-case hex characters a ticket and `sluice id` spell it with.
+    fn hex(bytes: &[u8; 32]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
     /// Milliseconds until the ticket deadline, or the far future when the ticket has none.
