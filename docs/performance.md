@@ -43,7 +43,7 @@ Each of these is checked in CI on every pull request.
 
 | Surface | Budget | How |
 |---|---|---|
-| `sluice` binary | under 12 MB stripped | LTO, `panic = "abort"`, optional parts behind features, `cargo bloat` |
+| `sluice` binary | under 12 MB stripped | The `dist` profile below, stripping when an archive is packaged, optional parts behind features, `cargo bloat` |
 | Cold start to a printed ticket | under 30 ms | No work before it is needed: no config parse, store open or network probe a command does not use |
 | `sluice serve` idle RSS | under 12 MB | No preallocated pools; the store opens lazily |
 | `sluice serve` idle wakeups | 0 per second | Event-driven throughout, no polling |
@@ -53,6 +53,34 @@ Each of these is checked in CI on every pull request.
 | Bindings | no background threads, no per-chunk allocation | They carry control and events only |
 | Metrics and tracing exporters | off unless enabled | |
 | Telemetry | none | There is no code that sends any |
+
+### The release profile
+
+`[profile.dist]`, which builds the released binaries, is measured rather than inherited. These
+numbers are from one Windows machine, one clean build at a time: `cargo clean`, then `cargo build
+--profile dist -p sluice-cli`, timed. The binary is the one cargo wrote, before the strip cargo-dist
+does when it packages an archive.
+
+| `[profile.dist]` | Binary | Clean build | `sluice id` | `sluice --version` | 1 GiB on loopback |
+|---|---|---|---|---|---|
+| `lto = "thin"` | 25,902,080 B (24.7 MiB) | 316 s | 29.8 ms | 23.4 ms | 9.36 s (9.62, 9.33, 9.36) |
+| `lto = "fat"` | 21,446,144 B (20.5 MiB) | 426 s | 29.0 ms | 21.4 ms | 9.19 s (9.36, 9.19, 8.96) |
+| `lto = "fat"`, `codegen-units = 1` | 18,521,600 B (17.7 MiB) | 435 s | 29.1 ms | 21.1 ms | 9.89 s (10.00, 9.89, 9.36) |
+
+The profile is `lto = "fat"` with one codegen unit: the smallest binary of the three, for a clean
+build a minute or two longer than thin LTO. That cost is paid once per release and not by a local
+build, because `[profile.release]` keeps its defaults. Throughput was within the spread of the runs
+for all three: the three runs of one profile differ from each other by more than the profiles differ
+from each other, so the choice is on size and build time and not on speed. `panic = "abort"` would
+be smaller still and cannot be used: `sluice-cli/src/bug.rs` catches a panic to report it as this
+project's bug rather than as Rust's.
+
+Cold start here was timed from PowerShell, which adds the shell's own process start to both ends, so
+it is about ten milliseconds above what `cargo xtask cold-start` reports from Rust for a release
+binary. The method is the same for all three, so the comparison holds. The transfer is one 1 GiB
+generated file between a sender and a receiver on loopback, three runs per profile; both files were
+hashed with SHA-256 and were equal in every run. The store's import was warm for the second and third
+run of each profile, as it is for a second transfer of one file.
 
 ## How it is measured
 
