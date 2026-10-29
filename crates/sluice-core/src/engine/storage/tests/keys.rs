@@ -1,0 +1,58 @@
+//! The form of a store's path that a record and a hold share.
+
+use super::super::registry::canonical;
+
+/// The path a record holds is the folder the store really lands in, so the same store is found
+/// however the output was spelled: through `..` here, and through a link on Unix. A path whose
+/// folder is not there has no resolved form, and the caller is told instead of given a second
+/// spelling that would get a hold of its own.
+#[test]
+fn a_record_path_is_resolved_through_the_folder_that_holds_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let plain = out.join(".sluice-partial-x");
+    let odd = out.join("..").join("out").join(".sluice-partial-x");
+    assert_eq!(canonical(&plain).unwrap(), canonical(&odd).unwrap());
+
+    #[cfg(unix)]
+    {
+        let link = dir.path().join("link-to-out");
+        std::os::unix::fs::symlink(&out, &link).unwrap();
+        assert_eq!(
+            canonical(&link.join(".sluice-partial-x")).unwrap(),
+            canonical(&plain).unwrap()
+        );
+    }
+
+    let missing = dir.path().join("missing").join(".sluice-partial-x");
+    let err = canonical(&missing).unwrap_err();
+    assert!(matches!(err, crate::Error::Storage(_)), "{err}");
+    assert!(err.to_string().contains("missing"), "{err}");
+}
+
+/// A volume that cannot resolve a folder still gives it one key: the verbatim form and the plain
+/// form of an absolute path meet, whatever case the drive letter is written in, and so do the two
+/// forms of a share.
+#[cfg(windows)]
+#[test]
+fn a_volume_that_cannot_be_resolved_still_gives_one_key() {
+    use std::path::PathBuf;
+
+    use super::super::registry::one_form;
+
+    for spelling in [r"C:\out", r"c:\out", r"\\?\C:\out", r"\\?\c:\out"] {
+        assert_eq!(
+            one_form(PathBuf::from(spelling)),
+            PathBuf::from(r"c:\out"),
+            "{spelling}"
+        );
+    }
+    for spelling in [r"\\server\share\out", r"\\?\UNC\server\share\out"] {
+        assert_eq!(
+            one_form(PathBuf::from(spelling)),
+            PathBuf::from(r"\\server\share\out"),
+            "{spelling}"
+        );
+    }
+}

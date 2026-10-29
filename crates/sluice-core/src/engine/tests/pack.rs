@@ -58,39 +58,7 @@ async fn provider_with_a_pack(dir: &TempDir) -> (Provider, String) {
         }],
     )
     .unwrap();
-    store.blobs().add_bytes(manifest.encode()).await.unwrap();
-    store
-        .blobs()
-        .add_bytes(manifest.sequence_bytes())
-        .await
-        .unwrap();
-    let mut allowed: BTreeSet<[u8; 32]> = manifest.hash_sequence().into_iter().collect();
-    allowed.insert(manifest.sequence_root());
-    let provider = Provider::start(
-        &home,
-        store,
-        allowed,
-        RelayModeChoice::Disabled,
-        super::Congestion::Cubic,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-    let addr = provider.addr();
-    let ticket = Ticket::new(
-        *addr.id.as_bytes(),
-        addr.ip_addrs().copied().collect(),
-        None,
-        None,
-        Body::Static {
-            root: manifest.sequence_root(),
-            size: 5 + 7 + 20,
-            format: Format::HashSequence,
-        },
-    )
-    .unwrap();
-    (provider, ticket.encode())
+    provider_of(&home, store, manifest, 5 + 7 + 20).await
 }
 
 /// The room a run needs is the bytes it fetches: the pack's twelve, not the five it writes and not
