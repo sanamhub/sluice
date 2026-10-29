@@ -33,6 +33,10 @@ jobs:
       # deprecating the implicit install on first use.
       - run: rustup toolchain install --profile minimal
       - run: cargo fmt --all --check
+      # A build that was given a target path in another form once wrote a folder into the checkout,
+      # and it was committed. The command is the one that runs locally, and the top-level entries it
+      # accepts are listed in it.
+      - run: cargo xtask tree
 
   clippy:
     strategy:
