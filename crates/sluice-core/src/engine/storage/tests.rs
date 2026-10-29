@@ -175,6 +175,32 @@ fn a_record_path_is_resolved_through_the_folder_that_holds_it() {
     assert!(err.to_string().contains("missing"), "{err}");
 }
 
+/// A volume that cannot resolve a folder still gives it one key: the verbatim form and the plain
+/// form of an absolute path meet, whatever case the drive letter is written in, and so do the two
+/// forms of a share.
+#[cfg(windows)]
+#[test]
+fn a_volume_that_cannot_be_resolved_still_gives_one_key() {
+    use std::path::PathBuf;
+
+    use super::registry::one_form;
+
+    for spelling in [r"C:\out", r"c:\out", r"\\?\C:\out", r"\\?\c:\out"] {
+        assert_eq!(
+            one_form(PathBuf::from(spelling)),
+            PathBuf::from(r"c:\out"),
+            "{spelling}"
+        );
+    }
+    for spelling in [r"\\server\share\out", r"\\?\UNC\server\share\out"] {
+        assert_eq!(
+            one_form(PathBuf::from(spelling)),
+            PathBuf::from(r"\\server\share\out"),
+            "{spelling}"
+        );
+    }
+}
+
 /// A store that is a link would put this receive's bytes wherever the link leads, and its marker
 /// is not read at all: the folder is refused before anything in it is opened.
 #[cfg(unix)]

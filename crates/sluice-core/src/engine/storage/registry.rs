@@ -252,7 +252,23 @@ fn parse(id: &str, text: &str) -> Option<Record> {
 /// between a `\\?\` path and one without it, which name one folder and compare as two.
 pub(super) fn canonical(path: &Path) -> Result<PathBuf, Error> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let real = fs::canonicalize(parent).map_err(|e| storage("resolve", parent, e))?;
+    let real = match fs::canonicalize(parent) {
+        Ok(real) => real,
+        // Some volumes, among them RAM disks and encrypted or virtual drives, answer no Win32 name
+        // for a folder that is there: `GetFinalPathNameByHandleW` fails with ERROR_INVALID_FUNCTION,
+        // and Rust's own fallback by device path fails with it. The folder's absolute form is then
+        // the one form it has: `absolute` settles `.` and `..` without a disk, and [`one_form`]
+        // folds the verbatim prefix and the drive letter, so the ways of spelling that folder meet
+        // on one key.
+        Err(error) => match fs::symlink_metadata(parent) {
+            Ok(_) => std::path::absolute(parent)
+                .map(one_form)
+                .map_err(|_| storage("resolve", parent, error))?,
+            // The folder is not there: that is the same refusal as before, and a folder that does
+            // not exist must not get a key that another spelling could meet.
+            Err(_) => return Err(storage("resolve", parent, error)),
+        },
+    };
     match path.file_name() {
         Some(name) => Ok(real.join(name)),
         // A root has no name to put under a resolved parent, and is never a store.
@@ -261,6 +277,46 @@ pub(super) fn canonical(path: &Path) -> Result<PathBuf, Error> {
             path.display()
         ))),
     }
+}
+
+/// The one form of an absolute path on a volume [`canonical`] could not resolve: the Windows
+/// verbatim prefix removed and the drive letter written in one case. `C:\out` and `\\?\C:\out` name
+/// one folder on such a volume, and so do their spellings with another case for the drive, so they
+/// have to reach one key. Every other system's absolute path is already the one form it has.
+#[cfg(windows)]
+pub(super) fn one_form(path: PathBuf) -> PathBuf {
+    use std::path::{Component, Prefix};
+
+    let mut components = path.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        return path;
+    };
+    let mut out = match prefix.kind() {
+        Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+            PathBuf::from(format!("{}:\\", letter.to_ascii_lowercase() as char))
+        }
+        Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => {
+            let mut out = PathBuf::from(r"\\");
+            out.push(server);
+            out.push(share);
+            out
+        }
+        // A device, a pipe or another namespace has no drive letter to fold, and no second spelling
+        // this function could prove to be the same place.
+        _ => return path,
+    };
+    for component in components {
+        // The root is already in the form above; pushing it again would replace what is there.
+        if component != Component::RootDir {
+            out.push(component.as_os_str());
+        }
+    }
+    out
+}
+
+#[cfg(not(windows))]
+fn one_form(path: PathBuf) -> PathBuf {
+    path
 }
 
 fn random_id() -> Result<String, Error> {
