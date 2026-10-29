@@ -11,5 +11,5 @@ fuzz_target!(|data: &[u8]| {
     };
     let encoded = encode_hello(hello);
     assert_eq!(encoded, data, "second spelling");
-    assert_eq!(decode_hello(&encoded), Ok(hello));
+    assert_eq!(decode_hello(&encoded).ok(), Some(hello));
 });

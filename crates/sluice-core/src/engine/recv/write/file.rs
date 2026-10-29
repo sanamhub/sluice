@@ -213,7 +213,7 @@ pub(super) fn same_blob(target: &Path, hash: Hash, size: u64) -> Result<bool, Er
 
 #[cfg(all(test, unix))]
 mod tests {
-    use super::{open_no_follow, same_blob};
+    use super::same_blob;
     use iroh_blobs::Hash;
     use std::fs;
 
@@ -237,6 +237,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn a_fifo_is_refused_instead_of_waited_on() {
+        use super::open_no_follow;
         use rustix::fs::{CWD, Mode, mkfifoat};
 
         let dir = tempfile::tempdir().unwrap();

@@ -94,10 +94,10 @@ jobs:
         with:
           persist-credentials: false
       # Keep in step with rust-version in the root Cargo.toml.
-      - run: rustup toolchain install 1.90 --profile minimal
+      - run: rustup toolchain install 1.91 --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-      # iroh 1.4.1 and iroh-blobs 0.103.1 need Rust 1.91, and the probe is not a product crate.
-      - run: cargo +1.90 check --all-targets --workspace --exclude sluice-probe
+      # The probe is not a product crate, so it may need a newer Rust than the one users build with.
+      - run: cargo +1.91 check --all-targets --workspace --exclude sluice-probe
 
   # The browser build of the live log (ADR 0014). Nothing else builds sluice-live for wasm32, so
   # without this job a change that breaks the browser would pass every other check.
