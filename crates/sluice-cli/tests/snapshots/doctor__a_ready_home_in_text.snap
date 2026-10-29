@@ -9,4 +9,4 @@ ok       layout     version 1
 ok       lock       free
 ok       key        32 bytes, readable only by this user
 <status> space      <free>
-skipped  transport  the transport checks are not built yet
+skipped  transport  pass --network to check UDP, the relay, the public address, NAT and port mapping

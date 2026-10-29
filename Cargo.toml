@@ -46,13 +46,16 @@ getrandom = "0.4"
 insta = { version = "1", default-features = false }
 # tls-aws-lc-rs and not the default tls-ring: ADR 0012. metrics turns on the socket counters,
 # which are no-ops without it.
-iroh = { version = "1.4", default-features = false, features = ["metrics", "tls-aws-lc-rs"] }
+iroh = { version = "1.4", default-features = false, features = ["metrics", "portmapper", "tls-aws-lc-rs"] }
 # iroh does not re-export RelayQuicConfig, which names the UDP port of address discovery. Same
 # release as iroh, so the probe and the server in the rendezvous image come from one version. The
 # probe tests add its server feature.
 iroh-relay = { version = "1.4", default-features = false }
 # 0.94.0 to 0.103.0 accept unauthenticated push and are yanked.
 iroh-blobs = "0.103.1"
+# mDNS lookup for the local network, which iroh keeps out of the base crate. Its only iroh
+# dependency is the same 1.x range, so the tree gets no second iroh.
+iroh-mdns-address-lookup = "0.6.1"
 # iroh re-exports neither the congestion controllers nor the rustls handshake data.
 noq = { version = "1.4", default-features = false, features = ["rustls"] }
 # Only for StreamExt on iroh-blobs' GetProgress stream. The version Cargo.lock already resolves
@@ -89,7 +92,7 @@ serde_json = "1"
 # Home folders for tests, removed on drop.
 tempfile = "3"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1", features = ["io-std", "macros", "rt-multi-thread", "signal", "time"] }
 # Reads the bench harness's scenarios and hosts files.
 toml = "1.1"
 tracing = "0.1"

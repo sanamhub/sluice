@@ -11,6 +11,7 @@ pub mod link;
 pub mod pack;
 pub mod path;
 mod rules;
+mod sequence;
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -20,6 +21,18 @@ use rules::{Fault, check_all, rule};
 
 pub use build::{Build, Built, DiskPaths, Finding, Reason, Refusal};
 pub use entry::{Entry, Kind, Loc, PackRef};
+pub use sequence::parse as parse_sequence;
+
+/// The key two path spellings share when a file system may treat them as one name, which is the one
+/// key path rule 9 defines and every question about the same name is answered by.
+///
+/// A receiver uses it wherever it has to look a path up in the manifest while the operating system
+/// will look it up on disk: on a case-insensitive volume the disk finds `A` when asked for `a`, so a
+/// check that looked for the exact text would see a plain folder where the operating system follows
+/// a link.
+pub(crate) fn folded_key(path: &str) -> String {
+    path::fold_key(path)
+}
 
 /// How much a receiver reads before it refuses a manifest.
 ///

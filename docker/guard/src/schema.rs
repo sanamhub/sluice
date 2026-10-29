@@ -1,8 +1,8 @@
-//! iroh-relay 1.4.0's config file, as `src/main.rs` of that crate reads it, with every unknown key
+//! iroh-relay 1.4.1's config file, as `src/main.rs` of that crate reads it, with every unknown key
 //! refused at every level. iroh-relay itself ignores a key it does not know, so `[acess]` would be
 //! read there as no access setting at all, which it runs as open (ADR 0019).
 //!
-//! Each type names the lines of `iroh-relay-1.4.0/src/main.rs` it mirrors. The field names, the
+//! Each type names the lines of `iroh-relay-1.4.1/src/main.rs` it mirrors. The field names, the
 //! types, which fields may be left out and the serde shape of the enums are copied from there. Two
 //! types differ, and parse the same TOML: `EndpointId` and `Url` are read as strings, so that the
 //! guard checks them itself, with messages that never print them. Each field with a default that

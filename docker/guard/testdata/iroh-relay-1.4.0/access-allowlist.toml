@@ -1,5 +1,0 @@
-# iroh-relay 1.4.0, src/main.rs:844-849, test_access_config. The test formats a random id
-# there, and this one is made up.
-access.allowlist = [
-  "0f56e7a1c0d9b8a4e23f5d6c7b8a9e0f1d2c3b4a5968778695a4b3c2d1e0f9a8",
-]

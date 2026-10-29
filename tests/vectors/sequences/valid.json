@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "sequence": "2f26438ffa6570a5098f2605c8e7477241e14062abd9eb45af24a979b9010d5eabababababababababababababababababababababababababababababababab",
+      "name": "one file, one blob",
+      "valid": true,
+      "manifest": "010105612e747874000580a0f1c2b134a40300abababababababababababababababababababababababababababababababab0000"
+    },
+    {
+      "sequence": "71bdd4b6ef01ac7ecaea6d738e098f24c152ae8000c8d57ab8a22cb47d61e2661111111111111111111111111111111111111111111111111111111111111111",
+      "name": "one packed file",
+      "valid": true,
+      "manifest": "010109736d616c6c2e747874006480a0f1c2b134a403010000640001111111111111111111111111111111111111111111111111111111111111111164"
+    },
+    {
+      "sequence": "6195eee9a5ead2af4ab84f23482c53d14682305cbb4401c92378b9c29ad4a05eabababababababababababababababababababababababababababababababab",
+      "name": "two blob entries with the same root name it once",
+      "valid": true,
+      "manifest": "01040164010080a0f1c2b134ed03020003642f66000380a0f1c2b134a40300abababababababababababababababababababababababababababababababab0003642f6c020080a0f1c2b134000201016603746f70000080a0f1c2b134a40300abababababababababababababababababababababababababababababababab0000"
+    },
+    {
+      "sequence": "dca0d06d97aa958e18aaf1f700b6ec0514c217280d793b906f8fa88a41105bf911111111111111111111111111111111111111111111111111111111111111112222222222222222222222222222222222222222222222222222222222222222",
+      "name": "packs come before blob roots, in pack order",
+      "valid": true,
+      "manifest": "01050161002880a0f1c2b134a40301000028000162003c80a0f1c2b134a4030100283c000163000080a0f1c2b134a40301010000000164006480a0f1c2b134a40301010064000165000080a0f1c2b134a403010164000002111111111111111111111111111111111111111111111111111111111111111164222222222222222222222222222222222222222222222222222222222222222264"
+    },
+    {
+      "sequence": "2ec2395e36a6ba2eff085bbc1a0575c558fe2906a53a54882042ea4c06c214583333333333333333333333333333333333333333333333333333333333333333abababababababababababababababababababababababababababababababab",
+      "name": "a pack and a blob, whatever the entry order",
+      "valid": true,
+      "manifest": "01040164010080a0f1c2b134ed03020005642f62696700808080800480a0f1c2b134a40300abababababababababababababababababababababababababababababababab0003642f6c020080a0f1c2b1340002010362696707642f736d616c6c001480a0f1c2b134a403010000140001333333333333333333333333333333333333333333333333333333333333333314"
+    }
+  ],
+  "description": "The hash sequence a static ticket names: the manifest root, then pack roots in order, then each distinct blob root in manifest order. `sequence` is the bytes of the sequence blob as hex."
+}

@@ -84,7 +84,7 @@ fn a_key_with_a_backtick_is_not_printed_in_part() {
 }
 
 /// A letter-only token is the one thing the rule cannot tell from a setting, so it is printed. A
-/// digit, a capital or a `-` in a key is enough to keep it out, and every iroh-relay 1.4.0 key
+/// digit, a capital or a `-` in a key is enough to keep it out, and every iroh-relay 1.4.1 key
 /// has none.
 #[test]
 fn a_key_is_printed_only_when_it_is_lower_case_letters_and_underscores() {

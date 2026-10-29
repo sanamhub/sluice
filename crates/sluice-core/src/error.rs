@@ -92,9 +92,57 @@ pub enum ErrorKind {
     Bug,
 }
 
+/// The last cause below `error`, with none of the wrappers above it. A library that names its own
+/// variants in `Display` would otherwise put `Error::Io` in a message a person reads, and the
+/// deepest cause is the one that says what went wrong: a missing file, a full disk, a locked one.
+/// An error with no cause below it is its own message, prefix and all.
+///
+/// # Examples
+///
+/// ```
+/// use sluice_core::Error;
+///
+/// let err = Error::Storage("cannot write a file".to_string());
+/// assert_eq!(sluice_core::plain(&err), "storage error: cannot write a file");
+/// ```
+pub fn plain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        text = cause.to_string();
+        source = cause.source();
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Error, ErrorKind};
+
+    #[test]
+    fn a_message_is_the_last_cause() {
+        #[derive(Debug)]
+        struct Outer(Inner);
+        #[derive(Debug)]
+        struct Inner;
+        impl std::fmt::Display for Outer {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("the outer call failed")
+            }
+        }
+        impl std::fmt::Display for Inner {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("the file is not there")
+            }
+        }
+        impl std::error::Error for Outer {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+        impl std::error::Error for Inner {}
+        assert_eq!(super::plain(&Outer(Inner)), "the file is not there");
+    }
 
     #[test]
     fn display_is_stable() {

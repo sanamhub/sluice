@@ -18,6 +18,8 @@ tests/vectors/
   tickets/      ticket text and bytes, SPEC.md section 4
   manifests/    directory manifests as bytes, SPEC.md section 8
   packs/        small-file packing, SPEC.md section 9
+  sequences/    the hash sequence of a folder ticket, SPEC.md section 8
+  writer/       the top-level rules a receiver applies before it writes, SPEC.md section 8
   live/         the signed segment log, SPEC.md section 6
   delta/        not written yet
 ```
@@ -210,9 +212,9 @@ Some points a reader cannot see from the rules alone:
   of kind `dir` before it.
 - Entries are in byte order, so `a`, `a-b`, `a/b` is sorted (`-` is 0x2D and `/` is 0x2F) and `a`,
   `B` is not.
-- Rule 12 folds the whole path. `A` and `a` are the same name, so `A/x` and `a/y` break it through
-  their folders. `straße` and `STRASSE` break it through the full folding of `ß`, and the pair
-  U+0390 and U+03AA U+0301 only through the NFC step that follows the fold.
+- Rule 12 compares whole paths by the comparison key of path rule 9. `A` and `a` are the same name,
+  so `A/x` and `a/y` break it through their folders. `straße` and `STRASSE` break it through the
+  full folding of `ß`, and `i` and `ı` break it because the key reads the dotless i as `i`.
 - A path in a rejected case of rule 9 has no entry for its parent, so it breaks rule 8 as well. The
   case names rule 9, because a decoder reads the path before it looks for the parent. Whichever it
   names, it rejects the case, and the verdict is all a runner compares.
@@ -348,3 +350,45 @@ The files are `clean.json` (whole chains), `open.json` (the opening record and e
 one byte short and one byte long). A second implementation in Python wrote them, from section 6 with
 its own Ed25519 from RFC 8032, checked against the test vectors of its section 7.1, and the BLAKE3
 of the `manifests/` vectors.
+
+## `sequences/`
+
+These vectors test the hash sequence a Static ticket with `format` 1 names. A case gives a
+manifest and the bytes of its sequence blob:
+
+```json
+{ "name": "one file, one blob", "manifest": "0101...", "sequence": "2f26...abab...", "valid": true }
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | What the case is. A runner prints it next to a failure and does not compare it |
+| `manifest` | string | The manifest as lower-case hex |
+| `sequence` | string | The sequence blob as lower-case hex |
+| `valid` | boolean | `true` if the sequence is the one the manifest yields, `false` if a receiver MUST refuse it |
+| `reason` | string | Rejected cases. What is wrong with it, for people |
+
+To check an implementation, decode `manifest`, compute the sequence its rules give, and compare the
+bytes with `sequence`. A receiver must refuse the whole transfer when they differ. The rules are the
+manifest root first, the pack roots in pack order, then every distinct `Blob` root of a `File` entry
+in manifest order. The sequence is the ticket's `root`; this directory checks the bytes, not the
+ticket that carries their hash.
+
+## `writer/`
+
+The `writer/` cases cover the receiver's rules for a top-level name, which `SPEC.md` section 8
+states after the entries: a hidden name needs `--allow-hidden`, and a name already in the output
+folder is a clash unless the caller asked to replace it or the transfer is resuming. A case is:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | A path from the manifest |
+| `exists` | bool | Something already stands at that top-level name in the output |
+| `allow_hidden` | bool | `--allow-hidden` was given |
+| `replace` | bool | `--force` was given |
+| `resume` | bool | An interrupted receive of the same ticket is continuing |
+| `expect` | string | `accept`, `hidden` or `clash` |
+
+Only the top-level name is a rule of this kind. A nested path is accepted here; its ancestors and
+its own target are checked against the output folder, which needs a file system and is covered by
+the engine tests.

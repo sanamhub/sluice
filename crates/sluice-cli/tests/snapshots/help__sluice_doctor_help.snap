@@ -12,6 +12,9 @@ Options:
       --json
           Print JSON, one object per line, instead of text. A failure is then a JSON line on stderr
 
+      --network
+          Also check the network: whether UDP can be bound, the relay, the public address, the NAT mapping and whether a router can open a port. With a relay that relay is contacted; without one two checks stay on the local network, an mDNS query on every interface and a port-mapping request to the router. The plain report stays local and quick
+
       --color <WHEN>
           When to colour help, errors and other output. NO_COLOR set to anything turns it off
 
@@ -21,6 +24,12 @@ Options:
           - never:  Never colour
           
           [default: auto]
+
+      --relay <URL>
+          The relay the network checks use and ask for a net report
+
+      --n0-relays
+          Use n0's public relays for the network checks (not run by this project)
 
   -h, --help
           Print help (see a summary with '-h')

@@ -19,7 +19,7 @@ JSON line from `serve` for every connection that closes, and everything else on 
 
 **Notes:**
 
-- It needs Rust 1.91, because `iroh` 1.4.0 and `iroh-blobs` 0.103.1 do. The msrv job leaves it out.
+- It needs Rust 1.91, because `iroh` 1.4.1 and `iroh-blobs` 0.103.1 do. The msrv job leaves it out.
 - `serve` holds the test data in memory in `blobs` mode unless `--store fs` is given, so `--size`
   has to fit in RAM by default. Raw mode keeps only a 64 MiB block in memory.
 - `raw` mode repeats a 64 MiB block of seeded data to fill each stream. QUIC neither compresses nor
@@ -167,7 +167,7 @@ any link. On Windows `cpu_user_s` and `cpu_sys_s` are `null` and no GRO batches 
                            "bbr_app_limited":false}}]}],
  "path":"direct","rtt_ms":0.07114300000000001,"cpu_user_s":null,"cpu_sys_s":null,
  "key_exchange_group":"X25519MLKEM768","gso_segments":null,"gro_segments":null,
- "recv_datagrams":761309,"recv_gro_batches":0,"iroh_version":"1.4.0","iroh_blobs_version":"0.103.1",
+ "recv_datagrams":761309,"recv_gro_batches":0,"iroh_version":"1.4.1","iroh_blobs_version":"0.103.1",
  "verified_hash":"7b343701fd41de622e1208b9490efd7f5a54eee0fe68c052e522500f55aa0fbc"}
 ```
 

@@ -15,7 +15,7 @@ FROM rust:1.99.1-slim-trixie@sha256:4df2ae8cfdfebdfc13a65da7f253b73d68983dc0339f
 # The release Cargo.lock resolves for iroh-relay, so the server and the probe's iroh come from the
 # same release, and the guard's schema is that release's: a test of the guard fails if this line
 # names another. Move it with docker/relay, and review the guard's schema first.
-ARG IROH_RELAY_VERSION=1.4.0
+ARG IROH_RELAY_VERSION=1.4.1
 
 # --locked uses the lockfile the crate was published with. The binary needs the server feature.
 # The same line as docker/relay's, so the two images share this layer.

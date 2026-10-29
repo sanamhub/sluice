@@ -59,8 +59,10 @@ mod admin;
 
 pub(in crate::home) use links::{links_of, links_of_path};
 pub(in crate::home) use lists::{is_private_dir, is_private_file};
+pub(in crate::home) use owner::{Checked, checked_folder};
+pub(crate) use owner::{folder_id, handle_id, handle_kind, link_count};
 pub(in crate::home) use owner::{is_owned_by_this_user, is_owned_by_us_handle};
-pub(in crate::home) use space::free_bytes;
+pub(crate) use space::free_bytes;
 
 /// Object and container inherit: a folder's entries reach the files and folders made inside it.
 const INHERIT: &str = "OICI";

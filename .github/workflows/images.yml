@@ -64,7 +64,10 @@ jobs:
           mkdir -p "$RUNNER_TEMP/image"
           for arch in amd64 arm64; do
             docker tag "sluice-$IMAGE:ci" "sluice-$IMAGE:$arch"
-            docker save "sluice-$IMAGE:$arch" | gzip > "$RUNNER_TEMP/image/$arch.tar.gz"
+            # Written to a file and compressed in two steps: a pipe hides a failed `docker save`
+            # behind gzip's exit status, and the empty archive it leaves fails later as a load.
+            docker save --output "$RUNNER_TEMP/image/$arch.tar" "sluice-$IMAGE:$arch"
+            gzip --force "$RUNNER_TEMP/image/$arch.tar"
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -135,7 +138,8 @@ jobs:
           for arch in amd64 arm64; do
             docker buildx build --platform "linux/$arch" --tag "sluice-$IMAGE:$arch" --load \
               --file docker/push-test/Dockerfile docker/push-test
-            docker save "sluice-$IMAGE:$arch" | gzip > "$RUNNER_TEMP/image/$arch.tar.gz"
+            docker save --output "$RUNNER_TEMP/image/$arch.tar" "sluice-$IMAGE:$arch"
+            gzip --force "$RUNNER_TEMP/image/$arch.tar"
             id="$(docker image inspect "sluice-$IMAGE:$arch" --format '{{.Id}}')"
             echo "$arch=$id" >> "$GITHUB_OUTPUT"
           done

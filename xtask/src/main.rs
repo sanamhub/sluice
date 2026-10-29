@@ -5,6 +5,7 @@ mod cold_start;
 mod conformance;
 mod fuzz_seeds;
 mod man;
+mod unicode_ignorable;
 mod wasm_features;
 mod wasm_hash;
 
@@ -40,6 +41,13 @@ enum Command {
         /// The folder to write `sluice.1` and one page per subcommand into
         dir: PathBuf,
     },
+    /// Write one Unicode property's ranges from the character database as Rust source
+    UnicodeIgnorable {
+        /// The `DerivedCoreProperties.txt` file of the Unicode version the tables are pinned to
+        source: PathBuf,
+        /// The Rust file to write the ranges into
+        out: PathBuf,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -49,5 +57,6 @@ fn main() -> anyhow::Result<()> {
         Command::ColdStart => cold_start::run(),
         Command::FuzzSeeds { target, dir } => fuzz_seeds::run(target, &dir),
         Command::Man { dir } => man::run(&dir),
+        Command::UnicodeIgnorable { source, out } => unicode_ignorable::run(&source, &out),
     }
 }

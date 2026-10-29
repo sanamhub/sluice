@@ -30,6 +30,11 @@ The transport, NAT traversal, and relay behaviour come from `iroh` and are out o
 - Paths in manifests are UTF-8, NFC-normalized, forward-slash separated, relative, and never begin
   with `/` or contain a `..` component, and pass the receiver rules in section 8.
 - Timestamps are UTC milliseconds since the Unix epoch, as `u64`.
+- Sizes and rates written on a command line are bytes unless a unit follows: `K`, `M`, `G` and `T`
+  alone or with `iB` are powers of 1024, the same letters with `B` are powers of 1000, and a bare
+  number is bytes. Surrounding whitespace is not accepted: a size is read exactly as written, so a
+  count cannot quietly mean something other than what it looks like. `--limit-rate`, `--max-size`
+  and `--range` read sizes with the same parser.
 - "MUST", "SHOULD", "MAY" carry their RFC 2119 meaning.
 
 ---
@@ -69,6 +74,23 @@ listener registers or prefers them never decides which protocol runs. Static con
 use separate connections. A listener MAY close a connection that offers more than one.
 
 Wire-breaking changes bump the ALPN to `sluice/2`. Additive changes take a new capability bit.
+
+**Completion close.** The application close code `0x534C0001` on a static content connection means
+"the whole transfer is here". A receiver MUST close its content connection with that code, and a
+reason it may choose, exactly when it has verified and installed every file of the transfer, and it
+MUST NOT send that code on a receive that failed, on a receive of a byte range, or on a receive that
+writes only part of a transfer to standard output. A sender MAY stop serving a one-download ticket
+when it sees the code, and it MUST NOT treat it as anything other than a finished download. It MUST
+accept the code only from a connection that this process allowed a request from and that asked for
+every content root the ticket names; a code from any other connection leaves the sender serving. The
+code is not authenticated by the transfer, and the identity a sender's ticket names is persistent, so
+without that rule a past holder of any of its tickets, or a host that learned its endpoint id from
+mDNS, could end a send and have it report success. For a connection that asked for every root, the
+code grants only what taking every byte already granted, because delivery is counted by the bytes
+served and taking them ends the same sender. A sender that stops on the code has the receiver's word
+for the receiver's disk and nothing else, so it stops without changing what it promised; a transfer
+that ended early is finished by asking the sender for a new ticket. A sender that never sees the code
+stops by counting bytes, as **Static content** and the provider implementation describe.
 
 ---
 
@@ -165,10 +187,10 @@ because decoding reads no clock.
 bytes and 190 characters. A Live ticket with the IPv4 pair is 101 bytes and 169 characters.
 Implementations MUST accept tickets up to 4096 bytes of text and MUST NOT write longer ones.
 
-**Short codes.** Where a rendezvous is configured, a ticket MAY be published under a short code. The
-code is a SPAKE2 password; the rendezvous stores only the ciphertext and MUST rate-limit attempts
-per code. Short codes are optional, and the SPAKE2 implementation in use has no independent audit,
-which implementations MUST state in their documentation.
+**Short codes.** Where a relay is configured, a ticket MAY be published under a short code. The code
+is a SPAKE2 password; the relay stores only the ciphertext and MUST rate-limit attempts per code.
+Short codes are optional, and the SPAKE2 implementation in use has no independent audit, which
+implementations MUST state in their documentation.
 
 ---
 
@@ -220,6 +242,13 @@ padding, so a record has one spelling.
 | `LogEntry` | `seq` as a `u64` in 8, `segment_root` 32, `len` as a `u32` in 4, `prev_entry_hash` 32 | 76 |
 | `Frame` | the 76 bytes of its `LogEntry`, then `sig` 64 | 140 |
 | `LogClose` | `final_root` 32, `total_len` as a `u64` in 8, `closed` as a `u64` in 8, `last_entry_hash` 32, `sig` 64 | 144 |
+
+**Stream.** A record travels on the `sluice/1` connection after its length as a varint, and the
+receiver reads one record at a time. The length MUST be exactly the one the table gives for that
+record, so the three lengths 124, 140 and 144 are the only ones a receiver accepts, and the length
+is how it knows which record it has. A sender MUST write every record on the same stream, in the
+order **The chain** gives: the `LogOpen`, then the frames in `seq` order, then the `LogClose`.
+Nothing else is written on that stream, and the close ends it.
 
 `segment_bytes` is the size of a full segment. It is a multiple of 16,384 from 1,048,576 (1 MiB) to
 67,108,864 (64 MiB), and a sender uses 8,388,608 (8 MiB) unless it is told another. 16,384 is the
@@ -431,6 +460,23 @@ The empty manifest is the three bytes `01 00 00`.
 gives the manifest as a blob. The `root` of a `Blob` is the BLAKE3 hash of the file's content, which
 is the root `iroh-blobs` gives it as a raw blob.
 
+**Hash sequence.** A Static ticket with `format` 1 names one more blob, the hash sequence. Its
+content is 32-byte roots, in this order:
+
+1. the manifest root
+2. the root of every pack, in pack order
+3. the root of every `Blob` `File` entry, in manifest order, each distinct root once
+
+The ticket's `root` is the BLAKE3 hash of that sequence blob, and its `size` is the sum of the
+`size` of every `File` entry. A receiver fetches the sequence, then the manifest, decodes it, and
+computes the sequence the manifest yields. It MUST reject the transfer unless the two are equal:
+no root may be missing, extra, repeated or in another place. It does this before the first content
+request. An empty sequence, or one whose length is not a multiple of 32, is refused.
+
+A sequence names the manifest before the content, so a receiver learns every path and every size
+without fetching a file. A single file is sent as a manifest with one entry, which is why its name
+travels with it. Format 0 is a raw blob for pipes and has no sequence.
+
 **Decoding.** A receiver MUST reject a manifest when:
 
 1. it is longer than the byte limit, 256 MiB unless the receiver sets another. This is checked
@@ -447,8 +493,7 @@ is the root `iroh-blobs` gives it as a raw blob.
 7. the paths are not in strictly ascending order, compared byte by byte. A repeated path is not in
    order, so the sort has no ties
 8. an entry has a parent folder and no earlier entry has that path with `kind` Dir. The parent is
-   the path up to its last `/`. An entry with no `/` has none, because the folder that was sent is
-   not an entry
+   the path up to its last `/`. A top-level entry, which has no `/`, has none
 9. a `path` breaks a path rule below
 10. `link_target` is absent on a Symlink or present on another kind
 11. a `link_target` breaks a link target rule below
@@ -500,6 +545,37 @@ stranger, and file names stay out of logs.
    `0` to `9`, `¹`, `²` or `³`. The name is the text before the first `.`, spaces before that `.`
    are ignored, and U+0131 is compared as `I`. So `con`, `Nul.txt` and `LPT¹.log` are rejected, and
    `CONSOLE` is not
+9. a component starts with `.sluice-partial-` or `.sluice-tmp-`, the two prefixes a receive gives the
+   store it writes beside the output and a folder it writes through. The prefixes themselves are
+   reserved too. A sender MUST NOT put such a name in a manifest, and a receive writes its own stores
+   under names no manifest can claim. The comparison is by **the comparison key**, below, so
+   `.SLUICE-PARTIAL-x`, `．sluice-partial-x`, `.ſluice-partial-x`, `.sluıce-partial-x`,
+   `.slu𝚤ce-partial-x` and the same name with a zero-width space after `slu` all name the same
+   store there
+
+**The comparison key.** Every question in this section about whether two names are the same name is
+answered by one key, and a decoder MUST use this one and no other. The key of a name is:
+
+1. every code point with the `Default_Ignorable_Code_Point` property of Unicode 18.0.0 dropped, such
+   as U+180E, U+200B, U+FEFF and U+E0000 to U+E0FFF
+2. NFKC applied, because macOS composes and decomposes a name and a fullwidth letter is its plain
+   one to it
+3. full Unicode case folding applied to the result, by the entries of status `C` and `F` in
+   `CaseFolding.txt` and no other: `ß` becomes `ss`, `ﬃ` becomes `ffi`, and the Turkic entries of
+   status `T` and the simple entries of status `S` are not used. Windows and macOS resolve a name
+   regardless of case, and APFS folds some letters beyond ASCII
+4. U+0131 read as `i`, because NTFS upcases the dotless `ı` to `I`, and because step 2 writes
+   U+1D6A4, the mathematical italic dotless i, as U+0131. Read before NFKC, the two spellings would
+   key differently and a name could reach a reserved prefix with one of them
+5. NFKC applied again, for two reasons. A fold can leave a composition undone: `ΐ` folds to three
+   code points, while `Ϊ́` folds to two that compose to the same letter. The two spellings are equal
+   once case is folded, not canonically equivalent, and a volume that resolves case reads them as
+   one name. The read in step 4 can also put an `i` beside a combining mark, and composing it here
+   is what makes the key of a key the key
+
+Nothing follows the fifth step. The tables are those of Unicode 18.0.0. A later version adds pairs,
+and a receiver on newer tables would refuse a manifest that a sender on older ones built, so a
+change of version is a change of this document, with new vectors.
 
 With these rules no accepted path can leave the output root by its text alone, and a symlink already
 on disk is the writer's concern, not these rules'.
@@ -514,41 +590,81 @@ on disk is the writer's concern, not these rules'.
 5. resolved from the folder that holds the link, one component at a time, a `..` would step above
    the output root. So `a/link -> ../b` is accepted and `link -> ../x` is rejected
 
+A target is resolved through the links the transfer makes by **the comparison key** of path rule 9. A
+component whose key is a link's key, but whose spelling is not the link's, is refused with both names
+in the message: the receiver cannot know whether the volume it writes on reads the two as one name,
+and following the link would be wrong where it does not.
+
 These rules look at the text only. A target that passes them can still reach another symlink on
 disk, which is the writer's concern, as for paths.
 
-**Case collision.** Two paths collide when they are equal after full case folding followed by NFC.
-Full case folding maps every code point of the whole path by the entries of status `C` and `F` in
-`CaseFolding.txt` and no other: `ß` becomes `ss` and `ﬃ` becomes `ffi`, and the Turkic entries of
-status `T` and the simple entries of status `S` are not used. NFC comes last because a fold can
-leave NFC: U+0390 folds to three code points, and U+03AA followed by U+0301 folds to two, and NFC
-makes both the one code point U+0390. So `Readme.md` and `README.md` collide, and so do `straße` and
-`STRASSE`.
+**Case collision.** Two paths collide when they are equal under **the comparison key** of path rule 9,
+applied to the whole path. So `Readme.md` and `README.md` collide, and so do `straße` and `STRASSE`,
+and so does a name with a default-ignorable code point in it with the same name without one.
 
 Every pair of entries is compared, on every platform, whether or not the receiver's filesystem
 ignores case. A folder `A` and a folder `a` collide, so `A/x` and `a/y` are refused through them.
-The tables are those of Unicode 18.0.0, for the folding and for the NFC of path rule 2. A decoder
-MUST use those and no other: a later version adds pairs, and a receiver on newer tables would refuse
-a manifest that a sender on older ones built. A change of version is a change of this document, with
-new vectors.
 
 **Entries.**
 
 - Entries MUST be sorted by `path`, byte by byte and strictly, so a manifest is deterministic and
   dedupable.
-- Every folder under the one that was sent has a `Dir` entry, empty or not, so its `mode` and
-  `mtime_ms` are kept. An entry comes after the `Dir` entry of its parent. The folder that was sent
-  is not an entry.
+- Every folder under a top-level entry has a `Dir` entry, empty or not, so its `mode` and
+  `mtime_ms` are kept. An entry comes after the `Dir` entry of its parent.
 - `mtime_ms` is restored by default. Implementations MUST offer a way to skip it.
 - `mode` holds permission bits only, at most `0o7777`: the nine bits of owner, group and others, and
   the setuid, setgid and sticky bits. It is applied on Unix. A receiver MUST NOT apply the setuid or
   setgid bit (`0o6000`) to anything it writes, whatever `mode` says, because a hostile sender could
-  otherwise plant a setuid binary. On Windows only the read-only bit is honored, and a file is
-  read-only when `0o200` is clear.
+  otherwise plant a setuid binary. A receiver MUST always keep owner read and write on a file it
+  writes, so a `mode` without them gains them: `400` becomes `600` and `444` becomes `644`. Without
+  them the receive could not read back a file it already wrote to compare it on a resume. A `mode` of
+  `0` means the sender did not know one, and the file keeps the mode the receive makes it with, which
+  has owner read and write too. On Windows only the read-only bit is honored, and a file is read-only
+  when `0o200` is clear after that rule, so a received file is never read-only.
 - **Symlinks are recorded and never followed during send.** A receiver MUST NOT create a symlink
   unless explicitly enabled.
 - `link_target` is present exactly when `kind` is Symlink, which is rule 10.
 - Hard links are not preserved. Implementations MUST document this.
+
+**Top-level entries.** Every path given to `send` is one top-level entry: a file is a `File` entry
+and a folder is a `Dir` entry with its contents beneath it, so `sluice send proj/` writes
+`OUT/proj/...` and `sluice send a.mov photos/` writes `a.mov` and `photos/...`. A folder given on
+its own therefore arrives inside a folder of its own name, as copying it in a file manager does.
+Two arguments with the same final name are refused by the sender, which names both.
+
+**Receiver writer rules.** A receiver MUST apply these to the manifest before it requests any
+content blob:
+
+1. A top-level entry whose name starts with `.` is refused unless the user explicitly allows hidden
+   top-level names. Hidden names below the top are ordinary entries.
+2. A top-level name that already exists in the output folder refuses the whole transfer unless the
+   user asked to replace an existing path. The check uses the file system's own kind of each entry
+   and never follows a link. An existing folder of that name counts as a clash. A resumed receive
+   may write into a top-level name only when its partial store records that this receive made it;
+   any other existing name is a clash like any other.
+3. When replacing is allowed, a clashing file or link is replaced after its content verifies, and an
+   existing folder of the same name is written into. A link at any target is replaced as an entry
+   and never followed, so no byte is ever written through it. A folder is never replaced by a file
+   or by a link, even when replacing is allowed: a rename cannot do it, and the transfer refuses
+   that target before any content is fetched.
+4. A file already at a target whose content matches the manifest exactly is skipped, which is how a
+   resumed receive recognises what it wrote. Any other existing target without rule 2's permission
+   is a clash, and the error names the first one.
+
+A resume runs every check a first run runs, and the two rules above are the only differences. Its
+partial store records the top-level names that run created, and no others: an entry the first run
+found in the output belongs to the user and is a clash for a resume that is not allowed to replace
+it. A store made by a run that was allowed to replace what was there records that too, and a resume
+of it needs the same permission again. It never changes the mode or the modification time of a folder
+that was already there when it wrote into it, and it never deletes a folder it did not make.
+
+**The home's record of a partial store.** A receive keeps a record of each partial store it makes,
+in the `partials` folder of the home, named by a random id that is also a line in the store's
+marker. The record holds the store's absolute path and the ticket root. A receive treats a
+`.sluice-partial-*` folder as its own only when a record names that folder and that root and the
+marker carries the record's id; a folder with that name and no such record is refused with a
+`Policy` error that names it, and is never read, changed or removed. The record is removed with the
+store. A sender MUST NOT name a path that the path rules reserve for these folders.
 
 **Sender.** A sender builds the entries from the folder it is given. It MUST:
 
@@ -629,8 +745,9 @@ disk or holding it in memory.
 **Receiver.** Rule 16 of section 8 means every byte of a pack belongs to exactly one file, so a
 receiver knows from the manifest which file each byte goes to.
 
-- A receiver MUST stream out of a pack while it fetches it, writing each run of bytes to its file,
-  and MUST NOT stage a whole pack in memory.
+- A receiver MAY fetch a whole pack into its per-transfer store and then copy each file's bytes
+  out of it, or stream out of a pack while it fetches it. It MUST NOT stage a whole pack in memory,
+  and MUST NOT write any file from a pack before that pack has verified.
 - A pack that gives more bytes than its `size`, or ends before it, MUST fail.
 - A file of 0 bytes needs no fetch, whether it is a `Blob` or a `Packed` entry.
 - A receiver does not check that the sender followed the algorithm above, as section 8 says after
@@ -677,6 +794,15 @@ require TLS and token authentication.
 It is a control plane. **No file bytes ever traverse this API.** A client asks the engine to move
 bytes and observes progress; it never carries them.
 
+The progress events an implementation reports are named here, in the order a transfer may report
+them: `started`, `connected`, `path_changed`, `relayed`, `progress`, `retrying`, `warning`,
+`verified`, `done`. `--json` writes one object per line with the name in `event`. `connected` names
+the chosen path and, when it is relayed, the relay; `path_changed` reports every later move. Both are
+taken back as soon as a direct path is in use. `relayed` is said at most once per connection, ten
+seconds after it came up and only if the path is still relayed then, and names the relay and the
+seconds waited; it is information and not a failure, and a path that goes direct after it is reported
+by `path_changed` like any other move.
+
 Store access is single-writer. A client MUST take an exclusive lock on the store directory, and if
 the lock is held by a live process it MUST connect to that process instead of opening the store.
 
@@ -691,9 +817,11 @@ the lock is held by a live process it MUST connect to that process instead of op
 | `tickets/` | Encoded tickets with expected decoded fields, including malformed ones that MUST be rejected |
 | `manifests/` | Encoded manifests with expected fields and root, including ones that MUST be rejected |
 | `packs/` | Files in manifest order with their sizes, and the `loc` of each and the size of each pack that section 9 gives. Some also give the contents, the pack roots and the manifest root |
+| `sequences/` | A manifest and the hash sequence a ticket for it must name |
 | `live/` | A ticket's `stream_id` and `sender_key`, the records of section 6 in the order a receiver gets them, the receiver's answer to each, and the state of the stream at the end, including streams that MUST be refused or aborted |
 | `delta/` | File pairs with expected chunk boundaries and resulting need-ranges |
 | `paths/` | Hostile paths that MUST be rejected by a receiver |
+| `writer/` | Top-level names a receiver must accept, refuse as hidden, or refuse as a clash, with the flags and the output state that decide it |
 
 `cargo xtask conformance` runs every vector against the local implementation. A third-party
 implementation that passes these vectors is compatible with ours.

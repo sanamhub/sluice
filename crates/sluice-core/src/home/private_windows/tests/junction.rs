@@ -33,7 +33,6 @@ fn a_junction_has_a_list_of_its_own_and_doctor_reads_its_targets() {
     restrict_dir(&link).unwrap();
     assert!(is_private_dir(&link).unwrap(), "the junction's own list");
     assert!(!is_private_dir(&target).unwrap(), "the target is untouched");
-    fs::create_dir(target.join("blobs")).unwrap();
     fs::create_dir(target.join("db")).unwrap();
     fs::create_dir(target.join("logs")).unwrap();
     assert_eq!(access_check(&link), Finding::AccessAclNotPrivate);

@@ -1,2 +1,0 @@
-# iroh-relay 1.4.0, src/main.rs:880-882, test_access_config.
-access.http = { url = "https://example.com/foo" }

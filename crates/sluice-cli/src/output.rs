@@ -42,6 +42,7 @@ impl Outcome {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Output {
     format: Format,
     colour: Colour,
@@ -94,6 +95,23 @@ impl Output {
                 "cannot write to standard output: {e}"
             ))),
         }
+    }
+
+    /// Writes text to stdout exactly as given. A broken pipe is not a failure.
+    pub fn write_stdout(&self, text: &str) -> Result<(), Error> {
+        let mut out = io::stdout().lock();
+        match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+            Err(e) => Err(Error::Storage(format!(
+                "cannot write to standard output: {e}"
+            ))),
+        }
+    }
+
+    /// Writes text to stderr. Nothing a person reads on stderr is worth failing a transfer for.
+    pub fn write_stderr(&self, text: &str) {
+        let _ = io::stderr().lock().write_all(text.as_bytes());
     }
 
     /// Writes a failure to stderr and returns the exit code for it. In text it is

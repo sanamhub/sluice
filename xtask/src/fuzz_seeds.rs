@@ -31,6 +31,8 @@ pub enum Target {
     ManifestPath,
     /// `sluice-live`: the records of a live stream after its open.
     Log,
+    /// `sluice-core`: the `Hello` record of `sluice/1`.
+    Hello,
     /// `sluice-core`: byte ranges as a person writes them.
     Range,
     /// `sluice-relay-guard`: the text of an iroh-relay config.
@@ -51,7 +53,7 @@ impl Target {
             Target::Manifest => Some("manifests"),
             Target::ManifestPath => Some("paths"),
             Target::Log => Some("live"),
-            Target::Range | Target::RelayConfig | Target::RelayDifferential => None,
+            Target::Hello | Target::Range | Target::RelayConfig | Target::RelayDifferential => None,
         }
     }
 }
@@ -78,6 +80,65 @@ const RANGES: [&str; 11] = [
     "0.33333333333333333333K:2kib",
 ];
 
+/// Greetings: three that are valid and six that break one rule each. `Hello` has no vector folder
+/// because it is three varints, and these seeds are short enough to read here. The fuzzer checks
+/// that every byte string it decodes has exactly one spelling.
+fn hello_seeds() -> Vec<Seed> {
+    let mut bad = vec![
+        // proto_version 2.
+        hello(2, 0, 16 << 20),
+        // A frame limit of zero.
+        hello(1, 0, 0),
+        // A byte after the greeting.
+        {
+            let mut bytes = hello(1, 0, 16 << 20);
+            bytes.push(0);
+            bytes
+        },
+        // The version as a three-byte varint, which is not its shortest spelling.
+        vec![0x81, 0x80, 0x00, 0x00, 0x80, 0x80, 0x10],
+        // A ten-byte varint whose tenth byte carries more than the last bit of a u64.
+        vec![
+            0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02, 0x00, 0x80, 0x80, 0x10,
+        ],
+        // The greeting ends before its third varint.
+        {
+            let bytes = hello(1, 0, 16 << 20);
+            bytes[..bytes.len() - 1].to_vec()
+        },
+    ];
+    let mut seeds: Vec<Seed> = [
+        hello(1, 0, 16 << 20),
+        hello(1, (1 << 2) | (1 << 3), 16 << 20),
+        hello(1, u64::MAX, 1),
+    ]
+    .into_iter()
+    .map(|bytes| Seed { file: None, bytes })
+    .collect();
+    seeds.extend(bad.drain(..).map(|bytes| Seed { file: None, bytes }));
+    seeds
+}
+
+/// The three fields of a greeting, each as its shortest varint.
+fn hello(version: u64, capabilities: u64, limit: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    for value in [version, capabilities, limit] {
+        push_varint(&mut out, value);
+    }
+    out
+}
+
+fn push_varint(out: &mut Vec<u8>, mut value: u64) {
+    loop {
+        let low = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(low);
+            break;
+        }
+        out.push(low | 0x80);
+    }
+}
 pub fn run(target: Target, dir: &Path) -> anyhow::Result<()> {
     let seeds = seeds(target, &vectors_dir())?;
     fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
@@ -114,6 +175,9 @@ pub fn seeds(target: Target, vectors: &Path) -> anyhow::Result<Vec<Seed>> {
             Target::RelayDifferential => with_selector(configs),
             _ => configs,
         });
+    }
+    if target == Target::Hello {
+        return Ok(hello_seeds());
     }
     let Some(folder) = target.folder() else {
         return Ok(RANGES
@@ -159,7 +223,7 @@ fn with_selector(configs: Vec<Seed>) -> Vec<Seed> {
         .collect()
 }
 
-/// The three configs the images ship, iroh-relay 1.4.0's own examples that the guard's tests
+/// The three configs the images ship, iroh-relay 1.4.1's own examples that the guard's tests
 /// parse, and [`NEAR_MISSES`]. No vector holds a relay config: it is iroh-relay's format, and not
 /// the wire's.
 fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
@@ -167,7 +231,7 @@ fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
     let examples = docker
         .join("guard")
         .join("testdata")
-        .join("iroh-relay-1.4.0");
+        .join("iroh-relay-1.4.1");
     let mut paths = vec![
         docker.join("relay").join("relay.toml"),
         docker.join("relay").join("open.toml"),
@@ -268,13 +332,19 @@ pub fn vector_files(dir: &Path) -> anyhow::Result<Vec<(String, Vec<Value>)>> {
 }
 
 /// The inputs one vector case gives a target.
+mod log_target;
+
+use log_target::log;
+
 fn from_case(target: Target, case: &Value) -> anyhow::Result<Vec<Vec<u8>>> {
     Ok(match target {
         Target::Ticket => vec![text(case, "ticket")?.into_bytes()],
         Target::ManifestPath => vec![text(case, "path")?.into_bytes()],
         Target::Manifest => manifest(case)?,
         Target::Log => log(case)?.into_iter().collect(),
-        Target::Range | Target::RelayConfig | Target::RelayDifferential => Vec::new(),
+        Target::Hello | Target::Range | Target::RelayConfig | Target::RelayDifferential => {
+            Vec::new()
+        }
     })
 }
 
@@ -299,40 +369,6 @@ fn manifest(case: &Value) -> anyhow::Result<Vec<Vec<u8>>> {
         }
     }
     Ok(inputs)
-}
-
-/// The records after the case's open, in the target's framing, up to a second open, which the
-/// framing has no tag for. The target opens its stream itself, with `framing::OPEN`, so only a
-/// case that starts on those bytes gives a seed. Any other open has another stream, key or segment
-/// size, and the target would read its records against the wrong one, so the case is skipped and
-/// gives `None`. A case that does not start on an open, or a record longer than the framing takes,
-/// is an error naming the case, and never a seed that says something else.
-fn log(case: &Value) -> anyhow::Result<Option<Vec<u8>>> {
-    let name = text(case, "name")?;
-    let steps = case["steps"].as_array().context("no steps")?;
-    let first = steps.first().map(|step| text(step, "record")).transpose()?;
-    if first.as_deref() != Some("open") {
-        bail!("case {name:?} does not start with an open, which the log target takes as given");
-    }
-    if hex_bytes(&text(&steps[0], "bytes")?).map_err(anyhow::Error::msg)? != framing::OPEN {
-        return Ok(None);
-    }
-    let mut input = Vec::new();
-    for step in &steps[1..] {
-        let record = text(step, "record")?;
-        if record == "open" {
-            break;
-        }
-        let bytes = hex_bytes(&text(step, "bytes")?).map_err(anyhow::Error::msg)?;
-        framing::push(&mut input, record == "close", &bytes).map_err(|len| {
-            anyhow::anyhow!(
-                "case {name:?} has a {record} of {len} bytes, and the log target's records are \
-                 at most {} bytes",
-                framing::MAX_RECORD_BYTES
-            )
-        })?;
-    }
-    Ok(Some(input))
 }
 
 #[cfg(test)]

@@ -63,27 +63,116 @@ struct Folder {
     path: Option<String>,
 }
 
-/// Lists everything under `root`, which is followed if it is a symlink and is the only link that
-/// is.
-pub(super) fn walk(root: &Path) -> Result<Walk, Error> {
-    // `metadata` follows a link, and that is the one link the walk follows.
-    let meta = fs::metadata(root)
-        .map_err(|e| Error::Storage(format!("cannot read the folder to send: {}", e.kind())))?;
-    if !meta.is_dir() {
-        return Err(Error::Policy(
-            "the path to send is not a folder".to_string(),
-        ));
+/// Lists the arguments of one `send`. Each argument contributes its own name as a top-level entry,
+/// so `send DIR` writes `DIR/...` in the output and `send a.mov photos/` writes `a.mov` and
+/// `photos/...`. With `name_roots` false the folder is treated as a tree whose own name the caller
+/// already carries, which is what [`crate::manifest::Manifest::build`] does.
+pub(super) fn walk_paths(paths: &[PathBuf], name_roots: bool) -> Result<Walk, Error> {
+    if paths.is_empty() {
+        return Err(Error::Policy("there is nothing to send".to_string()));
     }
     let mut walker = Walker::default();
-    walker.stack.push(Folder {
-        disk: root.to_path_buf(),
-        shown: String::new(),
-        path: Some(String::new()),
-    });
+    let mut names: Vec<(String, String)> = Vec::new();
+    for path in paths {
+        add_argument(&mut walker, &mut names, path, name_roots)?;
+    }
     while let Some(folder) = walker.stack.pop() {
         walker.read_folder(&folder);
     }
     Ok(walker.out)
+}
+
+/// One argument of `send`: a file is a top-level entry of its own, a folder is walked with its
+/// name as the top-level entry when `name_roots` is set.
+fn add_argument(
+    walker: &mut Walker,
+    names: &mut Vec<(String, String)>,
+    path: &Path,
+    name_roots: bool,
+) -> Result<(), Error> {
+    let shown = path.display().to_string();
+    let before = fs::symlink_metadata(path)
+        .map_err(|e| Error::Storage(format!("cannot read the path to send: {}", e.kind())))?;
+    // `metadata` follows a link. A folder may be a link, a file may not: sending a file link
+    // would send a name whose content lives somewhere else.
+    let meta = fs::metadata(path)
+        .map_err(|e| Error::Storage(format!("cannot read the path to send: {}", e.kind())))?;
+    let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+        return Err(Error::Policy(format!("{shown} has no UTF-8 name")));
+    };
+    let name = unique_name(names, nfc_name(name)?, &shown)?;
+    if meta.is_dir() {
+        let prefix = if name_roots {
+            walker.root_dir(&name, path, &meta);
+            name.clone()
+        } else {
+            String::new()
+        };
+        walker.stack.push(Folder {
+            disk: path.to_path_buf(),
+            shown: if name_roots { name } else { String::new() },
+            path: Some(prefix),
+        });
+    } else {
+        walker
+            .out
+            .items
+            .push(file_item(&shown, &name, &before, path)?);
+    }
+    Ok(())
+}
+
+/// The top-level name, refused when another argument already carries it.
+fn unique_name(
+    names: &mut Vec<(String, String)>,
+    name: String,
+    shown: &str,
+) -> Result<String, Error> {
+    if let Some((_, other)) = names.iter().find(|(existing, _)| existing == &name) {
+        return Err(Error::Policy(format!(
+            "{other} and {shown} would both arrive as {name}; rename one of them or send \
+             them in separate transfers"
+        )));
+    }
+    names.push((name.clone(), shown.to_string()));
+    Ok(name)
+}
+
+/// One file argument as a top-level entry. A link is refused: its content lives somewhere else.
+fn file_item(shown: &str, name: &str, before: &fs::Metadata, path: &Path) -> Result<Item, Error> {
+    if before.file_type().is_symlink() {
+        return Err(Error::Policy(format!(
+            "{shown} is a symlink; send the file it points at by its real path"
+        )));
+    }
+    if !before.is_file() {
+        return Err(Error::Policy(format!(
+            "{shown} is not a regular file or a folder"
+        )));
+    }
+    let entry_path = ManifestPath::parse_rule(name).map_err(|rule| {
+        Error::Policy(format!(
+            "{shown} has a name a receiver would reject (rule {rule})"
+        ))
+    })?;
+    Ok(Item {
+        path: entry_path,
+        shown: name.to_string(),
+        what: What::File {
+            disk: path.to_path_buf(),
+        },
+    })
+}
+
+/// The name as the manifest carries it, after the checks a receiver applies to every component.
+fn nfc_name(name: &str) -> Result<String, Error> {
+    let nfc: String = name.nfc().collect();
+    match component_rule(&nfc) {
+        None => Ok(nfc),
+        Some(rule) => Err(Error::Policy(format!(
+            "a path to send has a name a receiver would reject (rule {rule})"
+        ))),
+    }
 }
 
 #[derive(Default)]
@@ -93,6 +182,22 @@ struct Walker {
 }
 
 impl Walker {
+    /// The folder an argument names, as its top-level entry. A caller that is given a tree whose
+    /// own name it already carries passes `name_roots` false and gets no entry here.
+    fn root_dir(&mut self, name: &str, disk: &Path, meta: &fs::Metadata) {
+        // `nfc_name` checked the component, so the path rule cannot fail here.
+        let path = ManifestPath::parse_rule(name).expect("a checked name");
+        let what = What::Dir {
+            mtime_ms: meta::mtime_ms(meta),
+            mode: meta::mode(meta),
+        };
+        self.out.items.push(Item {
+            path,
+            shown: disk.display().to_string(),
+            what,
+        });
+    }
+
     fn read_folder(&mut self, folder: &Folder) {
         // The folder that was sent has no name of its own, and a list shown to the user would
         // have a blank line for it.

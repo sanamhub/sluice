@@ -79,7 +79,7 @@ BLAKE3 segments and closes into an ordinary static root; ADR 0004 covers the dif
 | Crate | Version | Notes |
 |---|---|---|
 | `iroh`, `iroh-relay` | 1.4 | Wire-stable since 1.0. Negotiates ALPNs in `Router` registration order |
-| `noq` | 1.4 | n0's fork of quinn. Cubic, BBRv3 and NewReno ship; we select BBRv3 (ADR 0015). GSO and GRO on by default, with a silent fallback |
+| `noq` | 1.4 | n0's fork of quinn. Cubic, BBRv3 and NewReno ship; we select Cubic today (ADR 0023). GSO and GRO on by default, with a silent fallback |
 | `iroh-blobs` | 0.103.1 or later | Pre-1.0. Versions 0.94.0 to 0.103.0 accept unauthenticated push and are yanked |
 | `bao-tree`, `range-collections` | 0.16, 0.4 | Small and single-author; vendorable in days |
 | `rustls` | 0.23.46 or later | Earlier releases leak session secrets through `Debug` |
@@ -142,8 +142,9 @@ root. Hard links are not preserved.
 
 Files under 1 MiB are concatenated into pack blobs of at most 64 MiB, in path order, so identical
 trees produce identical packs. The sizes are fixed constants, not settings, and empty files are
-never packed. Large files stay standalone so ranges and mount work on them. The receiver unpacks
-while streaming. Without this, 100k small files spend more time on per-file overhead than on data.
+never packed. Large files stay standalone so ranges and mount work on them. A receiver may fetch a
+whole pack and unpack it from its store, or unpack it while streaming; it never holds a whole pack
+in memory. Without this, 100k small files spend more time on per-file overhead than on data.
 
 ### Tickets
 
@@ -160,18 +161,45 @@ broken one.
 
 Three active transfers by default, the rest queued in order. Per-transfer priority (`--priority
 high|normal|low`). Global and per-peer bandwidth caps, shared fairly. Pause, resume and cancel
-survive a daemon restart, since resume is content-addressed.
+survive a daemon restart, since resume is content-addressed. A size is written as `50M` (1024²) or
+`50MB` (1000²); `--limit-rate`, `--max-size` and `--range` share one parser, so a unit means the same
+in every flag.
 
 ## Storage
 
 **Reference in place.** Sending hashes the file where it lives. The store keeps only the outboard
 tree and metadata, about 0.4% of file size, so a 100 GB send costs about 400 MB. `--copy` imports
-into the store for volatile or removable sources. Receiving writes straight to the destination as a
-sparse `.part` with an outboard sidecar, then `fsync` and rename. ADR 0006.
+into the store for volatile or removable sources. ADR 0006.
 
+**A send keeps only what it copies, in a store of its own.** Standard input, the packs of small
+files, the manifest and the hash sequence, and the segments of a live stream are copied into a store
+in a private folder under the home's temporary area. The folder and its store are removed when the
+send ends, however it ends, and a folder a killed send left is removed by the sweep of temporary
+folders. So a home that sends keeps nothing of what was sent, and two sends in one home never share
+a store. Regular files are still sent where they live. ADR 0030.
+
+**Receiving uses a store beside the destination.** `iroh-blobs` keeps partial data in its own store,
+not in a sparse `.part` of ours, so a receive makes a hidden per-transfer store in the output folder,
+`.sluice-partial-<ticket root prefix>`. It is on the same filesystem as the destination, which lets
+a finished blob be exported by move rather than copied. A 100 GB receive therefore peaks at about
+100 GB of payload plus the outboard and metadata, not 200 GB. One store holds a whole folder, so a
+resumed folder receive asks only for the ranges it still lacks. The store is removed after every
+file is in place; after a failure it is kept for resume. The receiver checks free space for the
+whole tree before it fetches content and refuses with `Storage` when the volume cannot hold it.
+ADR 0006.
+
+**Only the live stores collect.** A store is opened with `iroh-blobs`' collector only where every
+blob in it is throwaway: the live send and the live receive. A live receive holds each segment until
+it is written out, and frees it at the next sweep, ten seconds later, so a stream keeps about that
+much beside its output instead of a second copy of everything it has written. A live send holds every
+segment until it stops, because a reader may ask for any of them until then, and what it leaves is
+bounded by its folder going away. Every other store keeps its bytes until the command is done with
+them: a resume store has to outlive the command, and a pack, a manifest or a range is in a folder
+that is removed when the command ends. ADR 0029, ADR 0030.
 **The source can change underneath us.** Size, mtime and inode (file id on Windows) are recorded at
-import and checked before each range read. A mismatch fails the transfer with a `Verify` error
-naming the file. `--rehash-on-change` restarts instead.
+import and checked again before serving starts. A change after that is caught by the receiver: the
+ticket's root names the version that was hashed, so bytes read from the changed file do not verify
+and the transfer fails with a `Verify` error. `--rehash-on-change` is not supported yet.
 
 **Layout.**
 
@@ -179,9 +207,10 @@ naming the file. `--rehash-on-change` restarts instead.
 $SLUICE_HOME/            XDG data dir, or Known Folders on Windows
   identity.key           Ed25519 secret, mode 0600
   VERSION                on-disk layout version
-  blobs/                 outboards, partial files, imported copies
   db/                    tags, jobs, peer trust list
+  last-port              UDP port of the last send, so a restart keeps its ticket working
   logs/
+  tmp/                   private folders of running commands, swept when nobody holds them
 ```
 
 Reclaimable content is capped at 10 GB by default, evicted least recently used unless tagged.
@@ -226,6 +255,11 @@ With no relay configured, LAN and port-mapped transfers work. A pair of symmetri
 of falling back, and the browser cannot connect at all. `sluice doctor` and the web UI's first
 screen name the relay in use, or say there is none and what that rules out.
 
+A sender keeps its endpoint id and remembers the UDP port it last bound in the home's `last-port`.
+A restart tries that port first, so a ticket printed before it still dials the same direct address;
+if the port is taken the sender takes any port and the ticket needs reprinting unless a relay is
+configured. The home's identity key is why the id itself survives.
+
 **One container, two recipes.** The `relay` image runs both halves of `iroh-relay`. As a meeting
 point its per-client limit is 64 KiB/s, enough to coordinate and too little to carry files. As a
 full relay the operator sets the limit from the host's bandwidth and carries the bill. A transfer
@@ -239,11 +273,15 @@ no working connection-accept limit, so byte limits are all we document. The imag
 it says. ADR 0019, ADR 0020.
 
 **Every transfer says how it is connected.** The progress line and `--json` output show direct or
-relayed, and through which relay. `sluice doctor` is to report NAT type, port mapping result, MTU,
-UDP egress, the chosen path, and the relay's reachability and authorization mode, in one block that
-can be pasted into an issue. Today it checks the local home only, and reports its `transport` check
-as skipped until the transport is measured; the [CLI README](../crates/sluice-cli/README.md) lists
-what it checks.
+relayed, and through which relay. A transfer that has no direct path ten seconds after its
+connection came up says so once: `no direct path after 10 s; relayed through <url>`, then which
+limits the two kinds of relay apply, because the client cannot tell a meeting point from a full
+relay. Nothing fails over a relayed path; a direct path that arrives later is the ordinary
+`path_changed`. `sluice doctor` is to report NAT type, port mapping result, MTU, UDP egress, the
+chosen path, and the relay's reachability and authorization mode, in one block that can be pasted
+into an issue. Today it checks the local home only, and reports its `transport` check as skipped
+until the transport is measured; the [CLI README](../crates/sluice-cli/README.md) lists what it
+checks.
 
 **The browser is always relayed.** iroh in a tab has no UDP socket, so it reaches peers over a
 WebSocket relay for the whole session. Browser throughput is relay throughput, and the web UI needs
@@ -254,8 +292,10 @@ a relay you run. The traffic stays end-to-end encrypted. ADR 0011, ADR 0014.
 QUIC carries discovery, hole punching, relay and control, and by default the data too. The settings
 that matter for throughput:
 
-- **BBRv3**, not the Cubic default. Loss-based control cannot meet the lossy-path targets, and Cubic
-  has measured pathologically on this stack. ADR 0015.
+- **Cubic** by default, with **BBRv3** selectable. ADR 0015 chose BBRv3, but `noq` 1.4.0's BBRv3
+  has a max bandwidth bug (noq#852, fix quinn-rs/quinn#2481) that is not in a release yet, so
+  ADR 0023 holds the default at Cubic until it is. Loss-based control cannot meet the lossy-path
+  targets, so the switch back follows a measurement on S5, not only the release.
 - **Windows sized to the bandwidth-delay product.** 1 Gbit/s at 100 ms needs 12.5 MB in flight. The
   defaults are far smaller.
 - **GSO and GRO.** On by default in `noq`, but a failed probe falls back silently to one segment per
@@ -276,11 +316,21 @@ Gbit/s.
 
 ## Durability
 
-A partial download is a sparse `.part` file plus a sidecar holding the verified range bitmap. Every
-64 MB, and on clean shutdown, both are `fsync`ed. After a crash, ranges up to the last barrier are
-trusted and anything after it is re-verified, so at most 64 MB is checked again. Completion is
-`fsync` then rename. A full disk, a permission error or a quota error leaves a resumable transfer,
-not a panic.
+A partial download lives in the per-transfer `iroh-blobs` store, which records verified ranges in its
+own database and partial data files. A receive fetches every content blob before it writes the
+first output file, so a lost connection is retried against the ranges the store already has and an
+interrupted download leaves the output untouched. A file that a previous attempt did write is
+recognised on resume by its content and is not treated as a clash. The process syncs the finished
+file before it moves it into place. After a crash, the store decides what to ask for again from
+its own record of verified ranges. This release adds no separate 64 MB barrier: `iroh-blobs`
+commits its records as it goes, so after a crash the store may ask again for the ranges it
+had not committed, which costs a re-read of part of the file, and no byte enters an output file
+without verifying against the root. A crash can only cost work, never trust. A full disk, a
+permission error or a quota error leaves the partial store and a `Storage` error, not a panic. A
+test hook fails the copy of a packed file partway through, which is the same failure as a disk
+that fills while bytes arrive, and the next receive finishes from the store it left.
+The partial store is kept after a network failure, so a second receive with the same ticket and
+`--out` continues from it, and it is removed once every file is in place.
 
 ## Errors
 

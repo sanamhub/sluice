@@ -2,7 +2,7 @@
 //! 0020). It checks the config that `iroh-relay` is about to start with, and refuses one that would
 //! open more than the operator wrote.
 //!
-//! iroh-relay 1.4.0 reads a missing `access` setting as everyone, ignores keys it does not know,
+//! iroh-relay 1.4.1 reads a missing `access` setting as everyone, ignores keys it does not know,
 //! and runs its open default when the config file is missing. Each gives a relay that anyone can
 //! use with no byte limit, and the server logs nothing that says so. The guard refuses all three,
 //! and every config that is open without `--open` and a per-client byte limit. In `--rendezvous`
@@ -30,9 +30,9 @@ pub use handover::{CONFIG_FD_PATH, MEMFD_NAME, hand_over, relay_args};
 /// guard does not know, so its schema has to be read again first.
 ///
 /// ```
-/// assert_eq!(sluice_relay_guard::IROH_RELAY_VERSION, "1.4.0");
+/// assert_eq!(sluice_relay_guard::IROH_RELAY_VERSION, "1.4.1");
 /// ```
-pub const IROH_RELAY_VERSION: &str = "1.4.0";
+pub const IROH_RELAY_VERSION: &str = "1.4.1";
 
 /// Where both images keep the relay the guard starts.
 ///
@@ -41,7 +41,7 @@ pub const IROH_RELAY_VERSION: &str = "1.4.0";
 /// ```
 pub const IROH_RELAY: &str = "/usr/local/bin/iroh-relay";
 
-/// The environment variable iroh-relay 1.4.0 replaces the whole `access.shared_token` list with,
+/// The environment variable iroh-relay 1.4.1 replaces the whole `access.shared_token` list with,
 /// if it is set and is UTF-8 (main.rs:43 and 236-241). The guard reads it the same way, and passes
 /// it to [`check_config`].
 ///
@@ -104,7 +104,7 @@ impl fmt::Display for Refusal {
 impl std::error::Error for Refusal {}
 
 /// Checks a config's text for the mode asked for, and for whether the relay stands behind a proxy
-/// that ends TLS. In every mode: every key is one iroh-relay 1.4.0 knows, every allowlist id is one
+/// that ends TLS. In every mode: every key is one iroh-relay 1.4.1 knows, every allowlist id is one
 /// iroh-relay accepts, `enable_metrics` is written out, and HTTPS is not turned off. In closed and
 /// open mode a config with no `[tls]` table is refused unless `behind_proxy` says a proxy in front
 /// ends TLS, and `behind_proxy` with a `[tls]` table is refused, because then iroh-relay ends TLS

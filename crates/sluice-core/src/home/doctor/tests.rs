@@ -265,7 +265,7 @@ fn a_doctor_run_writes_nothing_whatever_it_finds() {
     let dir = ready_home();
     fs::write(dir.path().join("lock.pid"), "4242\n").expect("write");
     fs::write(dir.path().join("VERSION"), "9\n").expect("write");
-    fs::remove_dir(dir.path().join("blobs")).expect("remove");
+    fs::remove_dir(dir.path().join("db")).expect("remove");
     let before = contents(dir.path());
     examine_at(dir.path(), false);
     assert_eq!(contents(dir.path()), before);
@@ -291,8 +291,8 @@ fn every_failure_has_a_kind_and_nothing_else_has_one() {
     ];
     let policy = [
         Finding::LayoutNewer { found: 2, known: 1 },
-        Finding::HomeFolderIsLink(location.clone(), "blobs"),
-        Finding::HomeFolderOwnedByOther(location.clone(), "blobs"),
+        Finding::HomeFolderIsLink(location.clone(), "db"),
+        Finding::HomeFolderOwnedByOther(location.clone(), "db"),
         Finding::KeyOpenToOthers(0o644),
         Finding::KeyIsLink,
         Finding::KeyNotAFile,

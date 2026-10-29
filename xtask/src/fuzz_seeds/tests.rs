@@ -238,7 +238,7 @@ fn the_relay_config_seeds_are_the_shipped_configs_and_every_iroh_example() {
     assert!(
         files[3..]
             .iter()
-            .all(|f| f.starts_with("docker/guard/testdata/iroh-relay-1.4.0/")),
+            .all(|f| f.starts_with("docker/guard/testdata/iroh-relay-1.4.1/")),
         "{files:?}"
     );
     let relay = fs::read(vectors_dir().join("../../docker/relay/relay.toml")).unwrap();
@@ -305,4 +305,14 @@ fn a_seed_file_is_named_by_its_content_and_a_second_run_adds_nothing() {
 fn a_vector_folder_that_is_not_there_is_an_error() {
     let dir = tempfile::tempdir().unwrap();
     assert!(seeds(Target::Log, dir.path()).is_err());
+}
+
+#[test]
+fn the_hello_seeds_are_three_valid_greetings_and_six_broken_ones() {
+    let seeds = seeds(Target::Hello, &vectors_dir()).unwrap();
+    assert_eq!(seeds.len(), 9);
+    assert!(seeds.iter().all(|seed| seed.file.is_none()));
+    // The first is this release's own greeting, and it is six bytes: three short varints.
+    assert_eq!(seeds[0].bytes.len(), 6);
+    assert_eq!(seeds[0].bytes[0], 1);
 }

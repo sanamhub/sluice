@@ -36,7 +36,7 @@ pub const MEMFD_NAME: &str = "sluice-relay-config";
 /// The arguments iroh-relay is started with after the sealed copy is on descriptor 0:
 /// `--config-path=/proc/self/fd/0`, and nothing from the command line the guard was given.
 ///
-/// In rendezvous mode `--dev` comes first. iroh-relay 1.4.0 gives the QUIC server of address
+/// In rendezvous mode `--dev` comes first. iroh-relay 1.4.1 gives the QUIC server of address
 /// discovery a certificate only on the path `--dev` takes when the relay half is off
 /// (main.rs:593-600 and 703-721), and without it refuses the config with `TLS not configured`.
 /// Its other effects, plain HTTP for the relay and a default HTTP port, have nothing to act on

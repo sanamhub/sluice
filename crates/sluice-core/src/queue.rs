@@ -44,7 +44,8 @@ const MAX_JOBS: usize = 1000;
 const MAX_PATH_UNITS: usize = 4096;
 /// The network failure in a row that fails a job. With the waits below, a job retries for about 34
 /// minutes before it fails, which outlasts a laptop moving between networks or a router restart.
-const MAX_NETWORK_FAILURES: u32 = 15;
+/// A receive uses the same count and waits.
+pub const MAX_NETWORK_FAILURES: u32 = 15;
 /// The wait after the first network failure, doubled after each one that follows.
 const FIRST_WAIT_MS: u64 = 1000;
 /// The longest wait before a retry.
@@ -238,7 +239,7 @@ impl Queue {
 /// The wait before the retry that follows network failure number `failures` in a row: 1 s, then
 /// twice as long each time, up to 5 minutes. The 9th wait is 256 s, and the 10th to the 14th are
 /// at the cap.
-fn backoff_ms(failures: u32) -> u64 {
+pub(crate) fn backoff_ms(failures: u32) -> u64 {
     // 2^20 seconds is far past the cap, and small enough that the shift cannot overflow.
     let doublings = failures.saturating_sub(1).min(20);
     (FIRST_WAIT_MS << doublings).min(MAX_WAIT_MS)

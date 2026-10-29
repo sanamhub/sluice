@@ -1,9 +1,9 @@
-//! The refusal for text that is TOML but not iroh-relay 1.4.0's config. It names the line, and the
+//! The refusal for text that is TOML but not iroh-relay 1.4.1's config. It names the line, and the
 //! key on it when the key looks like a setting's name, but never what toml quoted from a value.
 //!
 //! A key the guard does not know is text from the config, and may be a token pasted in the wrong
 //! place, or hold a newline or a terminal escape code. Its name is printed only when it is 1 to 32
-//! lower-case ASCII letters or `_`, as every iroh-relay 1.4.0 setting is. A hex or base64url token
+//! lower-case ASCII letters or `_`, as every iroh-relay 1.4.1 setting is. A hex or base64url token
 //! has digits or capitals, or is longer, so it is not printed. Any other is "a key", with the
 //! line.
 
@@ -18,7 +18,7 @@ pub(super) fn schema_error(text: &str, err: &toml::de::Error, readme: &str) -> R
             None => "a key".to_string(),
         };
         return Refusal::new(format!(
-            "{at}{key}: iroh-relay 1.4.0 has no such setting, and would ignore it; check the \
+            "{at}{key}: iroh-relay 1.4.1 has no such setting, and would ignore it; check the \
              spelling against {readme}"
         ));
     }
@@ -32,13 +32,13 @@ pub(super) fn schema_error(text: &str, err: &toml::de::Error, readme: &str) -> R
     if message.starts_with("unknown variant `") {
         let key = key.map_or("a key".to_string(), |key| format!("`{key}`"));
         return Refusal::new(format!(
-            "{at}{key} is not a setting or value iroh-relay 1.4.0 knows here; check the \
+            "{at}{key} is not a setting or value iroh-relay 1.4.1 knows here; check the \
              spelling against {readme} (the value is not printed, since it may be a token)"
         ));
     }
     let value = key.map_or("a value".to_string(), |key| format!("the value of `{key}`"));
     Refusal::new(format!(
-        "{at}{value} does not have the type iroh-relay 1.4.0 reads; check it against {readme} \
+        "{at}{value} does not have the type iroh-relay 1.4.1 reads; check it against {readme} \
          (the value is not printed, since it may be a token)"
     ))
 }
@@ -75,7 +75,7 @@ fn quoted_after<'a>(message: &'a str, prefix: &str) -> Option<&'a str> {
     (after == "`" || after.starts_with("`,")).then_some(name)
 }
 
-/// `name` if it is 1 to 32 lower-case ASCII letters or `_`, the way every iroh-relay 1.4.0 setting
+/// `name` if it is 1 to 32 lower-case ASCII letters or `_`, the way every iroh-relay 1.4.1 setting
 /// is written, and so cannot be a hex or base64url token, a newline or an escape code.
 fn printable(name: &str) -> Option<&str> {
     let plain = |b: u8| b.is_ascii_lowercase() || b == b'_';

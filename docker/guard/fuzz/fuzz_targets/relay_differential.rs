@@ -1,6 +1,6 @@
 #![no_main]
 
-//! The same text through the guard and through a loose mirror of how iroh-relay 1.4.0 reads it:
+//! The same text through the guard and through a loose mirror of how iroh-relay 1.4.1 reads it:
 //! no unknown key refused, a missing `access` read as everyone, `enable_relay` true unless written,
 //! and `enable_metrics` true unless written (main.rs:94-159 and 370-389). Whatever the guard lets
 //! start is what iroh-relay would run: closed means iroh-relay's own `access` is an allowlist, an
@@ -18,7 +18,7 @@ use serde::Deserialize;
 use sluice_relay_guard::{Mode, check_config};
 use url::Url;
 
-/// iroh-relay 1.4.0's `Config`, as loose as it is there. Only the fields the assertions read are
+/// iroh-relay 1.4.1's `Config`, as loose as it is there. Only the fields the assertions read are
 /// named, and every other key is ignored, as iroh-relay ignores keys it does not know.
 #[derive(Deserialize)]
 struct Loose {

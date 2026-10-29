@@ -2,7 +2,7 @@
 
 The entry point of both images, [`relay`](../relay/README.md) and
 [`rendezvous`](../rendezvous/README.md) (ADR 0019, ADR 0020, ADR 0021). It checks the config that
-`iroh-relay` 1.4.0 is about to start with, refuses one that would open more than the operator
+`iroh-relay` 1.4.1 is about to start with, refuses one that would open more than the operator
 wrote, and then replaces itself with `/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0`,
 with a sealed copy of the bytes it checked on descriptor 0, so the server runs as PID 1 and gets
 the container's signals.
@@ -23,7 +23,7 @@ table and a proxy in front ends TLS (ADR 0021). It is refused with `[tls]`, and 
 
 ## Why it exists
 
-`iroh-relay` 1.4.0 opens the relay to anyone, with no byte limit and nothing in its log, in three
+`iroh-relay` 1.4.1 opens the relay to anyone, with no byte limit and nothing in its log, in three
 ways (`src/main.rs` of that crate):
 
 - a missing `access` setting is read as everyone (`#[serde(default)]`, main.rs:157);
@@ -40,7 +40,7 @@ login on the metrics port.
 Every refusal is one line on stderr, starting `sluice-relay-guard:`, and exits with 64, `EX_USAGE`.
 No message prints a value from the config: a `shared_token` entry, `access.http.bearer_token` and
 the query of `access.http.url` can be secrets. A key the guard does not know is named only when it
-is 1 to 32 lower-case ASCII letters or `_`, which every iroh-relay 1.4.0 setting is; any other is
+is 1 to 32 lower-case ASCII letters or `_`, which every iroh-relay 1.4.1 setting is; any other is
 "a key", with its line, since it may be a token pasted in the wrong place. A hex or base64url key
 has digits or capitals, or is longer, so it is not printed. A token of lower-case letters alone, 32
 characters or fewer, would be: no rule can tell it from a setting. An unknown argument is named
@@ -56,7 +56,7 @@ path or an argument, is escaped, so a refusal is one line.
 | a FIFO at the config path, even one swapped in after the path was read | it is not a regular file, and the open must not wait for a writer |
 | `--dev`, and any argument but `--open`, `--rendezvous` and `--config-path` | `--dev` turns TLS off and runs on any config |
 | `--open` and `--rendezvous` together | a rendezvous server has nothing to open |
-| a key iroh-relay 1.4.0 does not have, at any level | iroh-relay would ignore it |
+| a key iroh-relay 1.4.1 does not have, at any level | iroh-relay would ignore it |
 | text that is not TOML, or a value of the wrong type | named by line and key, never by value |
 | `access` missing, `"everyone"` or a denylist, without `--open` | it lets in ids nobody listed |
 | `--open` without `limits.client.rx.bytes_per_second` | ADR 0011: open needs a per-client byte limit |
@@ -102,12 +102,12 @@ and exits with 69, and starts nothing. `/proc/self/fd/0` is a path of the kernel
 The guard starts the relay only on Linux, where `memfd_create` and its seals exist (Linux 3.17).
 Elsewhere it stops after the check with exit 69.
 
-iroh-relay 1.4.0 reads nothing from standard input: no line of its `src/` reads `stdin`.
+iroh-relay 1.4.1 reads nothing from standard input: no line of its `src/` reads `stdin`.
 
 ## `--dev` in rendezvous mode
 
 The guard refuses `--dev` on its command line, and passes it to iroh-relay itself in rendezvous
-mode, after checking that the relay half is off. iroh-relay 1.4.0 hands the address-discovery QUIC
+mode, after checking that the relay half is off. iroh-relay 1.4.1 hands the address-discovery QUIC
 server a certificate only on the path `--dev` takes (main.rs:593-600 and 703-721), and without it
 refuses a config with the relay half off: `Failed to bind QAD listener` and `TLS not configured`
 (see [the rendezvous README](../rendezvous/README.md)). Its other effects, plain HTTP for the
@@ -119,17 +119,17 @@ hands the certificate to QUIC. That is why the guard accepts it in this mode and
 
 - Change the config, or start iroh-relay with anything but the sealed copy of the bytes it checked.
 - Print a value from the config.
-- Accept a key because a newer iroh-relay might have it. The schema is 1.4.0's and no other.
+- Accept a key because a newer iroh-relay might have it. The schema is 1.4.1's and no other.
 - Pass `--dev` to a server whose relay half is on.
 
 ## Moving iroh-relay on
 
-`schema.rs` mirrors `Config` and every type it holds in `iroh-relay` 1.4.0's `src/main.rs`, and
+`schema.rs` mirrors `Config` and every type it holds in `iroh-relay` 1.4.1's `src/main.rs`, and
 names the lines of each. A new release may add a key, rename one, or change what a default means,
 so before moving `IROH_RELAY_VERSION`:
 
 1. Read the new release's `src/main.rs`, from `struct Cli` down to `build_relay_config`, and diff
-   it against 1.4.0's. Check that `--dev` still does nothing with the relay half off but hand the
+   it against 1.4.1's. Check that `--dev` still does nothing with the relay half off but hand the
    QUIC server its certificate.
 2. Bring `schema.rs` in line, field by field, with the new line numbers, and copy the release's own
    example configs into `testdata/iroh-relay-<version>/`.
@@ -159,7 +159,7 @@ without `--behind-proxy`, and as a command line split at each NUL. It asserts th
 a control character or prints a key or an argument outside the rules above, and that every
 backticked span of a config refusal is fixed text of the guard's or a dotted setting name of 1 to 32
 lower-case letters or `_`. `relay_differential` reads the same bytes through the guard and through a
-loose mirror of how iroh-relay 1.4.0 reads them, and asserts that whatever the guard lets start is
+loose mirror of how iroh-relay 1.4.1 reads them, and asserts that whatever the guard lets start is
 what iroh-relay would run: closed means a closed `access`, rendezvous means the relay half is off,
 `enable_metrics` was written, `dangerous_http_only` is not true, an open config has a per-client
 byte limit, a relay config's `[tls]` agrees with `--behind-proxy`, and an HTTP check's URL holds no

@@ -4,9 +4,14 @@
 //! checked only the rules of the OS it runs on would accept a tree on Linux that it rejects on
 //! Windows, and the two would write different folders from one manifest.
 
-use unicode_normalization::is_nfc;
+use unicase::UniCase;
+use unicode_normalization::{UnicodeNormalization, is_nfc};
 
 use crate::Error;
+
+mod ignorable;
+
+use ignorable::is_ignorable;
 
 /// The longest path, in UTF-8 bytes (rule 1).
 pub(super) const MAX_PATH_BYTES: usize = 4096;
@@ -101,6 +106,25 @@ impl ManifestPath {
     /// ```
     pub fn components(&self) -> std::str::Split<'_, char> {
         self.0.split('/')
+    }
+
+    /// This path joined under `root`, one component at a time. A single `join` of the whole text
+    /// would keep the `/` separators on Windows, which then print beside `\` in one path and make
+    /// a message hard to read and a long-path call refuse the name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::path::Path;
+    /// use sluice_core::manifest::path::ManifestPath;
+    ///
+    /// let path = ManifestPath::parse("a/b.txt")?;
+    /// assert_eq!(path.under(Path::new("out")), Path::new("out").join("a").join("b.txt"));
+    /// # Ok::<(), sluice_core::Error>(())
+    /// ```
+    pub fn under(&self, root: &std::path::Path) -> std::path::PathBuf {
+        self.components()
+            .fold(root.to_path_buf(), |at, name| at.join(name))
     }
 }
 
@@ -220,7 +244,81 @@ fn component_violation(component: &str) -> Option<Violation<'_>> {
     if is_reserved_device_name(component) {
         return broken(8, "is a Windows reserved device name");
     }
+    if RESERVED_PREFIXES
+        .iter()
+        .any(|prefix| starts_with_reserved(component, prefix))
+    {
+        return broken(9, "is reserved for sluice's own store folders");
+    }
     None
+}
+
+/// Rule 9: the names a receive gives the store it writes beside the output and a temporary folder
+/// during a write. A manifest that could name one of them would let a sender write into, or plant,
+/// the folder a later receive resumes from.
+pub const RESERVED_PREFIXES: [&str; 2] = [".sluice-partial-", ".sluice-tmp-"];
+
+/// Rule 9 folds case and compatibility the way a file system may, because a folder a receive keeps
+/// its store in is one name whatever spelling of it the file system resolves: Windows and macOS
+/// resolve case, macOS also resolves the composed and decomposed forms, and APFS folds some letters
+/// beyond ASCII, such as `ſ` to `s`.
+///
+/// Two things are read away before folding, because a file system may read them away too: the code
+/// points a name may not show (the default-ignorable ones, which HFS+ drops when it compares) and
+/// U+0131, which NTFS upcases to `I` although NFKC and case folding leave it alone. A name that only
+/// reaches the prefix once those are gone would open the store folder on such a volume.
+fn starts_with_reserved(name: &str, prefix: &str) -> bool {
+    if starts_with_ignore_ascii_case(name, prefix) {
+        return true;
+    }
+    // A name of only ASCII cannot fold to a prefix the exact comparison above did not already see,
+    // so the tables run for a name with a character outside ASCII and not for every component of a
+    // manifest.
+    if name.is_ascii() {
+        return false;
+    }
+    fold_key(name).starts_with(prefix)
+}
+
+/// The one key two names are compared by when the question is whether they are the same name: the
+/// manifest's collision rule, the link check and rule 9 all use this. It is the form Unicode's
+/// `NFKC_Casefold` is built to give: the code points a name may not show are dropped, NFKC, full
+/// case folding, the dotless-i read and NFKC again are applied in that order.
+///
+/// The last NFKC is what joins names a volume treats as one. A fold can leave a composition undone:
+/// U+0390 folds to iota, diaeresis and acute, while U+03AA U+0301 folds to the precomposed small
+/// iota with diaeresis and an acute, and only NFKC makes the two the same text. The two are equal
+/// once case is folded, not canonically equivalent, and a volume that resolves case, such as APFS or
+/// a casefold folder on Linux, reads them as one name. A key that kept them apart would let two
+/// entries write one file and let a link target step above the output.
+///
+/// The dotless i is read after the fold because NFKC writes U+1D6A4, the mathematical italic dotless
+/// i, as U+0131. Read before the first NFKC, the key of that character would still be dotless while
+/// the key of U+0131 was `i`, and rule 9 would miss a store folder spelled with it. The read comes
+/// before the last NFKC so that an `i` put beside a combining mark composes with it: read after it,
+/// the key of `𝚤` and a grave accent would be `i` and a grave, and keying that again would give the
+/// precomposed letter. A key of ASCII text cannot hold U+0131, so the common case returns early.
+pub(crate) fn fold_key(name: &str) -> String {
+    let kept: String = name.chars().filter(|c| !is_ignorable(*c)).collect();
+    let composed: String = kept.nfkc().collect();
+    let folded = UniCase::unicode(&composed).to_folded_case();
+    let read: String = if folded.contains('\u{131}') {
+        folded.replace('\u{131}', "i")
+    } else {
+        folded
+    };
+    // NFKC of ASCII is the same text, and a manifest's names are mostly ASCII, so the last
+    // composition runs only where it can change something.
+    if read.is_ascii() {
+        return read;
+    }
+    read.nfkc().collect()
+}
+
+/// The cheap check for a prefix that is already ASCII and usually matches that way.
+fn starts_with_ignore_ascii_case(name: &str, prefix: &str) -> bool {
+    name.len() >= prefix.len()
+        && name.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
 }
 
 /// Rule 6: the characters Windows refuses in a name, the two that mean something on some
@@ -284,6 +382,8 @@ fn is_reserved_device_name(component: &str) -> bool {
     })
 }
 
+#[cfg(test)]
+mod ignorable_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

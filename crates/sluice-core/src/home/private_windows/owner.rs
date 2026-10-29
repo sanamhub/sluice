@@ -43,12 +43,121 @@ pub(in crate::home) fn is_owned_by_us_handle(file: &File) -> io::Result<bool> {
 }
 
 /// A handle to an entry with the access that reading its owner needs. `BACKUP_SEMANTICS` is what
-/// lets a folder be opened at all.
-pub(super) fn open_entry(path: &Path) -> io::Result<File> {
+/// lets a folder be opened at all. The handle names the entry at `path` and never what a link there
+/// leads to, which is what lets a caller check the folder it is about to work in.
+pub(crate) fn open_entry(path: &Path) -> io::Result<File> {
     OpenOptions::new()
         .access_mode(READ_CONTROL)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
+}
+
+/// What one opened handle to a folder says: whether it is a real folder of this user, and its
+/// identity.
+pub(in crate::home) enum Checked {
+    /// A folder of this user, named by its volume and file index.
+    Folder { first: u64, second: u64 },
+    /// A link, a junction, another reparse point, or something that is not a folder.
+    NotAFolder,
+    /// A real folder that another user made.
+    SomeoneElses,
+}
+
+/// Checks the entry at `path` for its kind and its owner and reads its identity, all from one handle
+/// opened without following a link. The three answers describe one object: a name swapped for
+/// another between two calls cannot make a check of one folder an identity of another.
+pub(in crate::home) fn checked_folder(path: &Path) -> io::Result<Checked> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+    };
+
+    let (entry, info) = information(path)?;
+    let attributes = info.dwFileAttributes;
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 || attributes & FILE_ATTRIBUTE_DIRECTORY == 0
+    {
+        return Ok(Checked::NotAFolder);
+    }
+    if !is_owned_by_us_handle(&entry)? {
+        return Ok(Checked::SomeoneElses);
+    }
+    Ok(Checked::Folder {
+        first: u64::from(info.dwVolumeSerialNumber),
+        second: index(&info),
+    })
+}
+
+/// The volume number and file index of the entry at `path`, read from a handle opened without
+/// following a link. Both numbers come from the file system, not from the path, so a folder renamed
+/// away and another put under the same name are told apart. The stable `Metadata` accessors for
+/// them are still unstable, which is why this goes through the call.
+pub(crate) fn folder_id(path: &Path) -> io::Result<(u64, u64)> {
+    let (_entry, info) = information(path)?;
+    Ok((u64::from(info.dwVolumeSerialNumber), index(&info)))
+}
+
+/// The number of names the entry at `path` has on its volume, read from a handle opened without
+/// following a link. A file that two names share can be written through either of them, so the
+/// count is what tells a store whose bytes it owns from one that shares them with an output file.
+pub(crate) fn link_count(path: &Path) -> io::Result<u32> {
+    let (_, info) = information(path)?;
+    Ok(info.nNumberOfLinks)
+}
+
+/// The handle and the file information of the entry at `path`, read in one open. The handle is kept
+/// until the information has been read, so both describe the object the name held at that moment.
+fn information(
+    path: &Path,
+) -> io::Result<(
+    File,
+    windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION,
+)> {
+    let entry = open_entry(path)?;
+    let info = information_of(&entry)?;
+    Ok((entry, info))
+}
+
+/// What an open handle says about its object, without asking the name again.
+fn information_of(
+    entry: &File,
+) -> io::Result<windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: the handle is open for the whole call and `info` is a valid place for the structure
+    // the call fills.
+    let ok = unsafe { GetFileInformationByHandle(entry.as_raw_handle(), &mut info) };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(info)
+}
+
+/// The volume number and file index of the object `file` is a handle to. The caller keeps the
+/// handle open, so these numbers describe the object it checked and not a name that may have moved.
+pub(crate) fn handle_id(file: &File) -> io::Result<(u64, u64)> {
+    let info = information_of(file)?;
+    Ok((u64::from(info.dwVolumeSerialNumber), index(&info)))
+}
+
+/// Whether the object `file` is a handle to is a reparse point, and whether it is a folder, from
+/// the attributes the file system reports for that handle.
+pub(crate) fn handle_kind(file: &File) -> io::Result<(bool, bool)> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+    };
+
+    let info = information_of(file)?;
+    let attributes = info.dwFileAttributes;
+    Ok((
+        attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0,
+        attributes & FILE_ATTRIBUTE_DIRECTORY != 0,
+    ))
+}
+
+fn index(info: &windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION) -> u64 {
+    (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow)
 }
 
 /// The owner of the object `file` is a handle to, as SID text.

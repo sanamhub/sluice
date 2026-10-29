@@ -1,6 +1,6 @@
 # relay
 
-The `relay` image runs `iroh-relay` 1.4.0 with both halves on: address discovery over QUIC, and the
+The `relay` image runs `iroh-relay` 1.4.1 with both halves on: address discovery over QUIC, and the
 relay over HTTPS that carries the traffic of two peers that cannot reach each other directly.
 Two peers behind NATs coordinate their hole punch through it, so across the internet it is needed
 even when the file goes direct. It runs one of two ways (ADR 0028):
@@ -34,10 +34,10 @@ Checked on 2026-10-23 in WSL with Docker 29.1.3, by [smoke-test.sh](../smoke-tes
 from the host, is `/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0`, and its descriptor 0
 is a `memfd:` whose bytes are the shipped `relay.toml`. The relay presented the certificate that
 was mounted, on HTTPS 443, logged `QUIC server listening`, and had port 9090 closed. Those three
-are what only that config asks for: with no config, iroh-relay 1.4.0 serves plain HTTP on 80, which
+are what only that config asks for: with no config, iroh-relay 1.4.1 serves plain HTTP on 80, which
 answers `/generate_204` all the same, and metrics on 9090, and no HTTPS or QUIC.
 
-`iroh-relay` 1.4.0 runs open, with no byte limit and nothing in its log, when `access` is left out,
+`iroh-relay` 1.4.1 runs open, with no byte limit and nothing in its log, when `access` is left out,
 when a key is misspelled (it ignores keys it does not know), and when the config file is missing.
 The guard refuses each of these, and any config that lets in ids nobody listed, unless the
 operator passes `--open` and the config sets a per-client byte limit. A refusal is one line on
@@ -46,7 +46,7 @@ prints them:
 
 | Started with | stderr |
 |---|---|
-| a mounted `relay.toml` that says `[acess]` | ``sluice-relay-guard: line 1: unknown key `acess`: iroh-relay 1.4.0 has no such setting, and would ignore it; check the spelling against docker/relay/README.md`` |
+| a mounted `relay.toml` that says `[acess]` | ``sluice-relay-guard: line 1: unknown key `acess`: iroh-relay 1.4.1 has no such setting, and would ignore it; check the spelling against docker/relay/README.md`` |
 | `--config-path /etc/relay/open.toml` | ``sluice-relay-guard: `access` is "everyone", which lets anyone relay: list the ids that may relay in `[access] allowlist`, or start with --open to run it open on purpose`` |
 
 It also refuses `--dev`, every argument but `--open`, `--rendezvous`, `--behind-proxy` and
@@ -68,7 +68,7 @@ or leave the entry point alone.
 
 ## Environment variables
 
-`iroh-relay` 1.4.0 reads four variables that change what the config says (`src/main.rs`, lines
+`iroh-relay` 1.4.1 reads four variables that change what the config says (`src/main.rs`, lines
 41-47 and where each is read). A `docker run -e` sets them past the file the guard checked.
 
 | Variable | What it changes |
@@ -150,7 +150,7 @@ connects, and the server logs a warning with the client's address. The list cont
 Address discovery on UDP 7842 answers anyone.
 
 **How this was checked**, on 2026-10-22 in WSL with Docker 29.1.3, with a throwaway client built on
-`iroh-relay` 1.4.0's own `ClientBuilder` and three random keys:
+`iroh-relay` 1.4.1's own `ClientBuilder` and three random keys:
 
 - with the image as shipped, the first key was refused with the line above;
 - with the first two keys on the list, the first sent a datagram to the second through the relay
@@ -199,7 +199,7 @@ flag and the config always agree. An open config of the operator's own must set
 `[limits.client.rx] bytes_per_second`, or the guard refuses it.
 
 What it costs: anyone who finds the URL, in a ticket, a log or a screenshot, can use the operator's
-bandwidth up to that rate, as many clients at once as care to. `iroh-relay` 1.4.0 has no working
+bandwidth up to that rate, as many clients at once as care to. `iroh-relay` 1.4.1 has no working
 limit on connections (`accept_conn_limit` and `accept_conn_burst` are documented upstream as not
 implemented, ADR 0013), so the per-client byte limit is the only limit there is. The limit on
 connections and on total bandwidth has to come from the host, such as a firewall or the provider's
@@ -208,7 +208,7 @@ traffic cap.
 ## Certificates
 
 The image takes `Manual` certificates, as `rendezvous` does. With the relay half on, `iroh-relay`
-1.4.0 can also fetch a LetsEncrypt certificate itself: set `cert_mode = "LetsEncrypt"`, `hostname`
+1.4.1 can also fetch a LetsEncrypt certificate itself: set `cert_mode = "LetsEncrypt"`, `hostname`
 and `contact` in `[tls]`, and keep `cert_dir` on a mounted volume, where it caches the certificate.
 Its challenge is TLS-ALPN-01, answered on the HTTPS listener (`src/server/http_server.rs:1095`), so
 TCP 443 must be reachable from the internet. TCP 80 is not used for the challenge. This mode was

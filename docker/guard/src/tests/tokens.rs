@@ -1,4 +1,4 @@
-//! Shared tokens and `IROH_RELAY_ACCESS_TOKEN`: iroh-relay 1.4.0 refuses an empty list or an empty
+//! Shared tokens and `IROH_RELAY_ACCESS_TOKEN`: iroh-relay 1.4.1 refuses an empty list or an empty
 //! token at start, and a set variable replaces the whole list (main.rs:236-244).
 
 use super::m;

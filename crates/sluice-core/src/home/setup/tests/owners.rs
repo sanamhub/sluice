@@ -14,15 +14,15 @@ fn the_home_and_every_folder_of_it_are_checked_for_their_owner_on_every_open() {
     fn ours(_: &Path) -> io::Result<bool> {
         Ok(true)
     }
-    fn blobs_not_ours(path: &Path) -> io::Result<bool> {
-        Ok(!path.ends_with("blobs"))
+    fn db_not_ours(path: &Path) -> io::Result<bool> {
+        Ok(!path.ends_with("db"))
     }
     let dir = tempfile::tempdir().unwrap();
-    let Err(Error::Policy(message)) = prepare_with(dir.path(), false, |_| Ok(()), blobs_not_ours)
+    let Err(Error::Policy(message)) = prepare_with(dir.path(), false, |_| Ok(()), db_not_ours)
     else {
-        panic!("a blobs folder another user owns was opened");
+        panic!("a db folder another user owns was opened");
     };
-    assert!(message.contains("blobs"), "{message}");
+    assert!(message.contains("db"), "{message}");
     assert!(message.contains("belongs to another user"), "{message}");
     // The home itself, before anything in it is looked at.
     let dir = tempfile::tempdir().unwrap();

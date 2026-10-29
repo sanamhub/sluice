@@ -6,9 +6,14 @@ mod cli;
 mod colour;
 mod completions;
 mod doctor;
+mod events;
 mod exit;
 mod id;
+mod network;
 mod output;
+mod queue;
+mod recv;
+mod send;
 
 use std::ffi::OsString;
 use std::process::ExitCode;
@@ -71,9 +76,18 @@ pub fn run(args: Vec<OsString>) -> ExitCode {
 fn execute(command: Command, output: &Output) -> Result<u8, sluice_core::Error> {
     #[cfg(debug_assertions)]
     bug::panic_if_asked();
+    // A command that was killed cannot remove the temporary folder it made. Its own `tmp` folder is
+    // private to this user, so sweeping it by age is safe, and it is never done to the output
+    // folder. Only the two commands that make such folders sweep it: `doctor` promises to create
+    // nothing, and `id` and `completions` never make one. Best effort, and tried again next time.
+    if matches!(&command, Command::Send(_) | Command::Recv(_)) {
+        let _ = sluice_core::engine::sweep_temporary_store(std::time::SystemTime::now());
+    }
     let outcome = match command {
         Command::Id(args) => id::run(&args, output.format())?,
         Command::Completions(args) => completions::run(&args)?,
+        Command::Send(args) => return send::run(&args, output),
+        Command::Recv(args) => return recv::run(&args, output),
         Command::Doctor(args) => doctor::run(&args)?,
     };
     output.print(&outcome)?;

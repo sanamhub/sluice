@@ -37,6 +37,8 @@ mod tests {
                 "sluice-completions.1",
                 "sluice-doctor.1",
                 "sluice-id.1",
+                "sluice-recv.1",
+                "sluice-send.1",
                 "sluice.1"
             ]
         );

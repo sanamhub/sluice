@@ -39,7 +39,7 @@ pub enum Mode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Congestion {
-    /// BBRv3, the Sluice default (ADR 0015).
+    /// BBRv3, selectable while Cubic is the default (ADR 0023).
     Bbr3,
     /// Cubic, the `noq` default.
     Cubic,
