@@ -242,6 +242,42 @@ fn the_end_of_a_command_leaves_a_kept_store_a_record_names() {
     forget_record(&store);
 }
 
+/// A path another removal keeps while a retry pass runs is still in the list once the pass puts its
+/// own survivors back: the pass appends to what is there instead of replacing it.
+#[test]
+fn a_path_kept_while_a_retry_runs_is_not_lost() {
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+
+    use super::super::{
+        registry::canonical,
+        removals::{kept_paths, left, seam},
+        wait_for_removals,
+    };
+
+    let _alone = crate::engine::storage::exclusive_removals();
+    let dir = tempfile::tempdir().unwrap();
+    // A path that is gone gives the pass something to take and nothing to put back.
+    left(&dir.path().join("gone"));
+    // The path kept while the pass runs is the one that must survive it.
+    let kept = dir.path().join("kept");
+    std::fs::create_dir(&kept).unwrap();
+    let wanted = canonical(&kept).unwrap();
+    let seen = Arc::new(Mutex::new(false));
+    let flag = Arc::clone(&seen);
+    seam::arm(
+        move || left(&kept),
+        move || *flag.lock().unwrap() = kept_paths().contains(&wanted),
+    );
+    wait_for_removals(Duration::from_secs(1));
+    assert!(
+        *seen.lock().unwrap(),
+        "a path kept during a retry pass was dropped by it"
+    );
+}
+
 /// Only an error a moment can clear is worth another try: a name that is gone or a path that cannot
 /// be removed at all is not, so the command is not delayed for it.
 #[cfg(windows)]
