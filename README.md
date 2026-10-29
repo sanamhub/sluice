@@ -19,9 +19,9 @@ It is built for large files and slow links. Every piece of the file is checked a
 dropped transfer picks up where it stopped. There is no account, no hosted service, no size plan,
 and no server in the middle that you did not choose.
 
-> **Status:** pre-1.0. `sluice send`, `sluice recv`, `sluice id`, `sluice doctor` and
-> `sluice completions` work today, including live mode, several tickets through the queue, a byte
-> range, pipes and a per-command byte cap. The desktop and browser clients do not exist yet.
+> **Status:** pre-1.0. `sluice send`, `sluice recv`, `sluice inspect`, `sluice id`, `sluice doctor`
+> and `sluice completions` work today, including live mode, several tickets through the queue, a
+> byte range, pipes and a per-command byte cap. The desktop and browser clients do not exist yet.
 
 ## Why it is different
 
@@ -47,6 +47,7 @@ cargo run -p sluice-cli -- recv <t1> <t2> <t3> --out ./out --priority high  # th
 cargo run -p sluice-cli -- recv <ticket> --limit-rate 50M --out ./out
 cat dump.sql | cargo run -p sluice-cli -- send - # a pipe is copied into the store first
 cargo run -p sluice-cli -- recv <ticket> --out - # a single file to standard output
+cargo run -p sluice-cli -- inspect <ticket>       # what it offers: names, counts and size
 
 cargo run -p sluice-cli -- id
 cargo run -p sluice-cli -- doctor

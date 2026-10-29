@@ -5,10 +5,11 @@ use std::time::{Duration, Instant};
 use sluice_core::{
     Error,
     engine::{Event, PathKind},
+    manifest::path::shown,
 };
 use tokio::{sync::mpsc::UnboundedReceiver, task::JoinHandle};
 
-use crate::output::{Format, Output};
+use crate::output::{Format, Output, bytes_text, summary};
 
 /// How often a progress line is printed. Verification and path events are not throttled.
 const PROGRESS_EVERY: Duration = Duration::from_millis(500);
@@ -52,6 +53,12 @@ pub fn ticket(output: Output, ticket: &str) -> Result<(), Error> {
 
 fn human(event: &Event, verb: &str) -> String {
     match event {
+        Event::Planned {
+            files,
+            folders,
+            links,
+            bytes,
+        } => summary(*files, *folders, *links, *bytes),
         Event::Started {
             name,
             files,
@@ -59,7 +66,7 @@ fn human(event: &Event, verb: &str) -> String {
             congestion,
         } => {
             let what = match name {
-                Some(name) => format!("{verb} {name}"),
+                Some(name) => format!("{verb} {}", shown(name)),
                 None => format!("{verb} {files} files"),
             };
             format!("{what} ({}) with {congestion}", bytes_text(*bytes),)
@@ -103,26 +110,11 @@ fn path_text(path: PathKind, relay: &Option<String>) -> String {
     }
 }
 
-fn bytes_text(bytes: u64) -> String {
-    const KIB: u64 = 1024;
-    const MIB: u64 = 1024 * KIB;
-    const GIB: u64 = 1024 * MIB;
-    if bytes >= GIB {
-        format!("{:.1} GiB", bytes as f64 / GIB as f64)
-    } else if bytes >= MIB {
-        format!("{:.1} MiB", bytes as f64 / MIB as f64)
-    } else if bytes >= KIB {
-        format!("{:.1} KiB", bytes as f64 / KIB as f64)
-    } else {
-        format!("{bytes} bytes")
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use sluice_core::engine::{Event, PathKind};
+    use sluice_core::engine::{Congestion, Event, PathKind};
 
-    use super::{bytes_text, human};
+    use super::human;
 
     #[test]
     fn a_relay_is_named_and_a_direct_path_is_not() {
@@ -148,11 +140,30 @@ mod tests {
         );
     }
 
+    /// What a transfer will write is one line, the same one `inspect` prints, and a name in it
+    /// cannot change what the terminal shows.
     #[test]
-    fn sizes_use_binary_units_and_do_not_divide_by_zero() {
-        assert_eq!(bytes_text(0), "0 bytes");
-        assert_eq!(bytes_text(1536), "1.5 KiB");
-        assert_eq!(bytes_text(100 << 20), "100.0 MiB");
+    fn a_planned_transfer_is_the_line_inspect_prints() {
+        let planned = Event::Planned {
+            files: 3,
+            folders: 2,
+            links: 1,
+            bytes: 1536,
+        };
+        assert_eq!(
+            human(&planned, "receiving"),
+            "3 files, 2 folders, 1 link, 1.5 KiB"
+        );
+        let started = Event::Started {
+            name: Some("report\u{202e}fdp.exe".into()),
+            files: 1,
+            bytes: 1536,
+            congestion: Congestion::Cubic,
+        };
+        assert_eq!(
+            human(&started, "receiving"),
+            "receiving report\\u{202e}fdp.exe (1.5 KiB) with cubic"
+        );
     }
 
     /// A transfer carried by a relay says so in one line, naming both kinds of relay: the client

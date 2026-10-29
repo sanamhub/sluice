@@ -174,3 +174,27 @@ pub fn wait_for(path: &Path) {
         std::thread::sleep(Duration::from_millis(20));
     }
 }
+
+/// That the home's private `tmp` holds no store: a command removes the one it made before it ends.
+/// The message says whether the lock of a folder that was left can still be taken, which tells a
+/// folder no command is removing from one a command still holds.
+pub fn assert_no_temporary_store(home: &Path) {
+    let mut left = Vec::new();
+    for entry in std::fs::read_dir(home.join("tmp"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let path = entry.path();
+        let state = match std::fs::File::open(path.join("lock")) {
+            Ok(file) if file.try_lock().is_ok() => "free",
+            Ok(_) => "held",
+            Err(_) => "no lock",
+        };
+        left.push(format!("{} ({state})", entry.file_name().to_string_lossy()));
+    }
+    assert!(
+        left.is_empty(),
+        "a temporary store was left under the home: {left:?}"
+    );
+}

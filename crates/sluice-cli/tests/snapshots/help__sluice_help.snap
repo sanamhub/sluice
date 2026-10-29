@@ -9,6 +9,7 @@ Commands:
   completions  Print the completion script for a shell
   send         Send files and folders, print a ticket, and serve until one complete download
   recv         Receive what a ticket names, writing it under the current folder by default
+  inspect      Read a ticket's manifest and print what it offers, without downloading any content
   doctor       Check the home, who can reach it, its lock and identity key, and say how to fix a problem
   help         Print this message or the help of the given subcommand(s)
 

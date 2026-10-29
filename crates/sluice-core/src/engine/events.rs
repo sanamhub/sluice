@@ -36,8 +36,8 @@ impl fmt::Display for PathKind {
 
 /// One thing that happened during a transfer.
 ///
-/// The variant name is the `event` field in JSON, so a consumer reads `started`, `connected`,
-/// `path_changed`, `progress`, `verified` or `done`. No event carries a ticket.
+/// The variant name is the `event` field in JSON, so a consumer reads `planned`, `started`,
+/// `connected`, `path_changed`, `progress`, `verified` or `done`. No event carries a ticket.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum Event {
@@ -52,6 +52,18 @@ pub enum Event {
         bytes: u64,
         /// The congestion controller the transfer runs with.
         congestion: Congestion,
+    },
+    /// What the transfer is about to write, counted from the manifest before the first byte: the
+    /// same line `inspect` prints, so a user sees the size before anything is written.
+    Planned {
+        /// How many files it will write.
+        files: u64,
+        /// How many folders it will make.
+        folders: u64,
+        /// How many symlinks it will make.
+        links: u64,
+        /// The sum of the files' sizes in bytes.
+        bytes: u64,
     },
     /// The connection is up, and this is the path it uses.
     Connected {

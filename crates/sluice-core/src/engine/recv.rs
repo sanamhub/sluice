@@ -8,6 +8,7 @@ mod write;
 
 use claim::{claim_store, hex, read_manifest};
 pub(super) use plan::check_one;
+pub(in crate::engine) use plan::totals;
 pub(super) use write::write_range;
 
 use std::{fs, path::PathBuf, time::Instant};
@@ -195,6 +196,15 @@ async fn exchange(
     conn: iroh::endpoint::Connection,
     events: &UnboundedSender<Event>,
 ) -> Result<(Received, f64), Error> {
+    emit(
+        events,
+        Event::Planned {
+            files: plan.files,
+            folders: plan.folders,
+            links: plan.links,
+            bytes: plan.bytes,
+        },
+    );
     emit(
         events,
         Event::Started {

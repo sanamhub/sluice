@@ -8,31 +8,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use common::{EXE, data, start, start_stdin, wait_for_sender};
-
-/// The store for a write to standard output lives under the home's private `tmp`, and it is gone
-/// when the command ends. The message says whether the lock of a folder that was left can still be
-/// taken: a folder nobody holds is one no command is removing from.
-fn assert_no_temporary_store(home: &std::path::Path) {
-    let mut left = Vec::new();
-    for entry in std::fs::read_dir(home.join("tmp"))
-        .into_iter()
-        .flatten()
-        .flatten()
-    {
-        let path = entry.path();
-        let state = match std::fs::File::open(path.join("lock")) {
-            Ok(file) if file.try_lock().is_ok() => "free",
-            Ok(_) => "held",
-            Err(_) => "no lock",
-        };
-        left.push(format!("{} ({state})", entry.file_name().to_string_lossy()));
-    }
-    assert!(
-        left.is_empty(),
-        "a temporary store was left under the home: {left:?}"
-    );
-}
+use common::{EXE, assert_no_temporary_store, data, start, start_stdin, wait_for_sender};
 
 #[test]
 fn a_ticket_on_standard_input_is_read() {

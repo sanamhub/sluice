@@ -8,6 +8,7 @@ use crate::colour::ColorWhen;
 use crate::completions;
 use crate::doctor;
 use crate::id;
+use crate::inspect;
 use crate::output::Format;
 use crate::{recv, send};
 
@@ -92,6 +93,12 @@ pub enum Command {
     /// A received file always keeps owner read and write, whatever the sender recorded: a file the
     /// sender marked read-only arrives writable, and one it marked unreadable arrives readable.
     Recv(recv::RecvArgs),
+    /// Read a ticket's manifest and print what it offers, without downloading any content
+    ///
+    /// It lists the names, how many files and folders there are and how large the transfer is, and
+    /// it writes nothing: the manifest is read into a temporary store that is removed again. A live
+    /// ticket has no manifest, so it says so.
+    Inspect(inspect::InspectArgs),
     /// Check the home, who can reach it, its lock and identity key, and say how to fix a problem
     ///
     /// It only reads: it never creates, locks, repairs or deletes anything. The exit code is 0

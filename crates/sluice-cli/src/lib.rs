@@ -9,6 +9,7 @@ mod doctor;
 mod events;
 mod exit;
 mod id;
+mod inspect;
 mod network;
 mod output;
 mod queue;
@@ -94,9 +95,12 @@ fn execute(command: Command, output: &Output) -> Result<u8, sluice_core::Error> 
     bug::panic_if_asked();
     // A command that was killed cannot remove the temporary folder it made. Its own `tmp` folder is
     // private to this user, so sweeping it by age is safe, and it is never done to the output
-    // folder. Only the two commands that make such folders sweep it: `doctor` promises to create
+    // folder. Only the commands that make such folders sweep it: `doctor` promises to create
     // nothing, and `id` and `completions` never make one. Best effort, and tried again next time.
-    if matches!(&command, Command::Send(_) | Command::Recv(_)) {
+    if matches!(
+        &command,
+        Command::Send(_) | Command::Recv(_) | Command::Inspect(_)
+    ) {
         let _ = sluice_core::engine::sweep_temporary_store(std::time::SystemTime::now());
     }
     let outcome = match command {
@@ -104,6 +108,7 @@ fn execute(command: Command, output: &Output) -> Result<u8, sluice_core::Error> 
         Command::Completions(args) => completions::run(&args)?,
         Command::Send(args) => return send::run(&args, output),
         Command::Recv(args) => return recv::run(&args, output),
+        Command::Inspect(args) => inspect::run(&args)?,
         Command::Doctor(args) => doctor::run(&args)?,
     };
     output.print(&outcome)?;

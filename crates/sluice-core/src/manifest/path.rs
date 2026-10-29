@@ -318,19 +318,19 @@ fn starts_with_ignore_ascii_case(name: &str, prefix: &str) -> bool {
 }
 
 /// Rule 6: the characters Windows refuses in a name, the two that mean something on some
-/// platform (`\` and `:`), the C0 and C1 controls, and the bidirectional controls. The last reorder
-/// what a UI draws, so a name with U+202E in it can show `exe.txt` for a file that ends in `.exe`.
+/// platform (`\` and `:`), and the ones that can change what a terminal shows. The last reorder what
+/// a UI draws, so a name with U+202E in it can show `exe.txt` for a file that ends in `.exe`, and a
+/// control character can write an escape sequence into the line the name is printed in.
 fn is_forbidden(c: char) -> bool {
+    matches!(c, '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*') || is_display_control(c)
+}
+
+/// The characters that can change what a terminal shows: the C0 and C1 controls, and the
+/// bidirectional formatting characters.
+fn is_display_control(c: char) -> bool {
     matches!(
         c,
-        '\\' | ':'
-            | '<'
-            | '>'
-            | '"'
-            | '|'
-            | '?'
-            | '*'
-            | '\u{0}'..='\u{1f}'
+        '\u{0}'..='\u{1f}'
             | '\u{7f}'..='\u{9f}'
             | '\u{61c}'
             | '\u{200e}'
@@ -338,6 +338,32 @@ fn is_forbidden(c: char) -> bool {
             | '\u{202a}'..='\u{202e}'
             | '\u{2066}'..='\u{2069}'
     )
+}
+
+/// `text` with every character that could change what a terminal shows written as an escape, so a
+/// name a stranger chose cannot reorder the line it is printed in or write an escape sequence into
+/// it. These are the characters `SPEC.md` section 8 refuses in a path: a name from a manifest passed
+/// that rule, and the name of a live stream comes from the sender's disk and has not.
+///
+/// # Examples
+///
+/// ```
+/// use sluice_core::manifest::path::shown;
+///
+/// assert_eq!(shown("a.txt"), "a.txt");
+/// assert_eq!(shown("report\u{202e}fdp.exe"), r"report\u{202e}fdp.exe");
+/// assert_eq!(shown("a\u{1b}[2Jb"), r"a\u{1b}[2Jb");
+/// ```
+pub fn shown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if is_display_control(c) {
+            out.push_str(&format!("\\u{{{:x}}}", u32::from(c)));
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Rule 8. Windows reads `con.tar.gz` and `CON .txt` as the console, so the name is what comes

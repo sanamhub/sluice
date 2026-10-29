@@ -8,6 +8,7 @@ use std::process::ExitCode;
 use anstream::{AutoStream, ColorChoice};
 use serde_json::json;
 use sluice_core::Error;
+use sluice_core::engine::Offering;
 
 use crate::colour::Colour;
 use crate::doctor::{self, Line};
@@ -20,6 +21,43 @@ pub enum Format {
     Json,
 }
 
+/// The bytes of a transfer in the units a person reads.
+pub fn bytes_text(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * KIB;
+    const GIB: u64 = 1024 * MIB;
+    if bytes >= GIB {
+        format!("{:.1} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} bytes")
+    }
+}
+
+/// The line that says how much a transfer moves: `3 files, 2 folders, 1.2 GiB`. A transfer with no
+/// folders or links says only the files and the size, and one file says `1 file`.
+pub fn summary(files: u64, folders: u64, links: u64, bytes: u64) -> String {
+    let mut line = format!("{files} {}", plural(files, "file", "files"));
+    if folders > 0 {
+        line.push_str(&format!(
+            ", {folders} {}",
+            plural(folders, "folder", "folders")
+        ));
+    }
+    if links > 0 {
+        line.push_str(&format!(", {links} {}", plural(links, "link", "links")));
+    }
+    line.push_str(&format!(", {}", bytes_text(bytes)));
+    line
+}
+
+fn plural(count: u64, one: &'static str, many: &'static str) -> &'static str {
+    if count == 1 { one } else { many }
+}
+
 /// What a command produced.
 pub enum Outcome {
     /// The endpoint id, as 64 lower-case hex characters.
@@ -29,6 +67,8 @@ pub enum Outcome {
     Text(String),
     /// The report of `sluice doctor`, and the exit code it ends with.
     Doctor { lines: Vec<Line>, code: u8 },
+    /// What `sluice inspect` read from a ticket, and whether every name is shown.
+    Offering { offering: Offering, all: bool },
 }
 
 impl Outcome {
@@ -71,6 +111,12 @@ impl Output {
                 (doctor::human(lines, self.colour.stdout), self.colour.stdout)
             }
             (Outcome::Doctor { lines, .. }, Format::Json) => (doctor::json(lines), false),
+            (Outcome::Offering { offering, all }, Format::Human) => {
+                (crate::inspect::text(offering, *all), false)
+            }
+            (Outcome::Offering { offering, .. }, Format::Json) => {
+                (crate::inspect::json(offering), false)
+            }
         };
         // Through `AutoStream` only when there are escape codes, which it turns on in a Windows
         // console that has them off. Everything else goes out as it is.
@@ -163,7 +209,23 @@ mod tests {
     use serde_json::Value;
     use sluice_core::Error;
 
-    use super::{Failure, Format, failure_line};
+    use super::{Failure, Format, bytes_text, failure_line, summary};
+
+    #[test]
+    fn sizes_use_binary_units_and_do_not_divide_by_zero() {
+        assert_eq!(bytes_text(0), "0 bytes");
+        assert_eq!(bytes_text(1536), "1.5 KiB");
+        assert_eq!(bytes_text(100 << 20), "100.0 MiB");
+    }
+
+    /// The one line `inspect` and a receive both print: the counts a plural needs, and the size.
+    #[test]
+    fn the_summary_line_counts_what_it_should() {
+        assert_eq!(summary(1, 0, 0, 0), "1 file, 0 bytes");
+        assert_eq!(summary(2, 0, 0, 1536), "2 files, 1.5 KiB");
+        assert_eq!(summary(3, 2, 0, 1536), "3 files, 2 folders, 1.5 KiB");
+        assert_eq!(summary(3, 1, 1, 1536), "3 files, 1 folder, 1 link, 1.5 KiB");
+    }
 
     #[test]
     fn a_json_failure_is_one_valid_line_whatever_the_message_holds() {

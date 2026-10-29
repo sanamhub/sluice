@@ -315,8 +315,8 @@ fn options(
 
 /// The ticket as given, or the one line on standard input when the argument is `-`. A ticket on
 /// the command line is visible in the process list and the shell history, so a caller that cares
-/// pipes it instead.
-fn ticket_text(argument: &str) -> Result<String, Error> {
+/// pipes it instead. `inspect` reads its ticket the same way.
+pub(crate) fn ticket_text(argument: &str) -> Result<String, Error> {
     if argument != "-" {
         return Ok(argument.to_string());
     }

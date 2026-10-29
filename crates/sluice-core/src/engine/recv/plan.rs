@@ -16,12 +16,25 @@ use crate::{
 pub(super) struct Plan {
     /// How many files.
     pub files: u64,
+    /// How many folders.
+    pub folders: u64,
+    /// How many symlinks.
+    pub links: u64,
     /// Their total size in bytes.
     pub bytes: u64,
     /// The top-level names this receive made, which a folder that is already there belongs to. A
     /// folder under one of them was made by the run this one continues, so it gets its mode and
     /// time like any other.
     pub ours: std::collections::BTreeSet<String>,
+}
+
+/// What the manifest will write, counted by kind.
+#[derive(Debug, Default)]
+pub(in crate::engine) struct Totals {
+    pub files: u64,
+    pub folders: u64,
+    pub links: u64,
+    pub bytes: u64,
 }
 
 /// Checks the whole manifest. Nothing here writes, so a refusal leaves the output untouched. The
@@ -34,9 +47,9 @@ pub(super) fn check(
     resume: bool,
     ours: &BTreeSet<String>,
 ) -> Result<(Plan, BTreeSet<String>), Error> {
-    let (files, bytes) = totals(manifest)?;
-    check_promised(ticket, bytes)?;
-    check_space(options, bytes)?;
+    let totals = totals(manifest)?;
+    check_promised(ticket, totals.bytes)?;
+    check_space(options, totals.bytes)?;
     let created = check_top(manifest, options, ours)?;
     let made = created.union(ours).cloned().collect();
     for entry in manifest.entries() {
@@ -46,29 +59,37 @@ pub(super) fn check(
     }
     Ok((
         Plan {
-            files,
-            bytes,
+            files: totals.files,
+            folders: totals.folders,
+            links: totals.links,
+            bytes: totals.bytes,
             ours: made,
         },
         created,
     ))
 }
 
-/// How many files there are and how many bytes they add up to. A manifest comes from a stranger,
-/// so the sum is checked: in a release build a plain `+` would wrap, and a wrapped total could be
-/// made to match a ticket's size and pass the free-space check for a tree far larger than it.
-fn totals(manifest: &Manifest) -> Result<(u64, u64), Error> {
-    let mut files = 0u64;
-    let mut bytes = 0u64;
+/// How many of each kind there are and how many bytes the files add up to. A manifest comes from a
+/// stranger, so the sum is checked: in a release build a plain `+` would wrap, and a wrapped total
+/// could be made to match a ticket's size and pass the free-space check for a tree far larger than
+/// it.
+pub(in crate::engine) fn totals(manifest: &Manifest) -> Result<Totals, Error> {
+    let mut totals = Totals::default();
     for entry in manifest.entries() {
-        if entry.kind != Kind::File {
-            continue;
+        match entry.kind {
+            Kind::File => {
+                // The decoder's entry limit is far below `u64::MAX`, so this cannot pass it.
+                totals.files += 1;
+                totals.bytes = totals
+                    .bytes
+                    .checked_add(entry.size)
+                    .ok_or_else(size_overflow)?;
+            }
+            Kind::Dir => totals.folders += 1,
+            Kind::Symlink => totals.links += 1,
         }
-        // The decoder's entry limit is far below `u64::MAX`, so this cannot pass it.
-        files += 1;
-        bytes = bytes.checked_add(entry.size).ok_or_else(size_overflow)?;
     }
-    Ok((files, bytes))
+    Ok(totals)
 }
 
 pub(super) fn size_overflow() -> Error {
