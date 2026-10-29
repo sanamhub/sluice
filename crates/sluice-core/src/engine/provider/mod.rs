@@ -88,9 +88,7 @@ impl Provider {
         self._dir = Some(dir);
     }
 
-    /// Sets how many places this send offers. The caller sets it before the ticket is printed;
-    /// `serve` sets the same value again, so a send that never reserved still counts, but the
-    /// moment in which a ticket is already known and the limit is not is closed.
+    /// Sets how many places this send offers, before the ticket is printed.
     pub(super) fn set_limit(&mut self, limit: Option<u32>) {
         lock_places(&self.places).set_limit(limit);
     }
@@ -302,14 +300,6 @@ impl Provider {
                 ..
             } => self.believed(*connection, roots),
             _ => false,
-        }
-    }
-
-    /// Milliseconds until the ticket deadline, or the far future when the ticket has none.
-    fn expiry_ms_left(&self) -> u64 {
-        match self.expiry {
-            Some(expiry) => expiry.saturating_sub(now_ms()),
-            None => 100 * 365 * 24 * 60 * 60 * 1000,
         }
     }
 }
