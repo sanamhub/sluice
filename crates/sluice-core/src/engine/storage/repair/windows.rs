@@ -12,17 +12,21 @@ use std::{
     fs, io,
     os::windows::fs::OpenOptionsExt,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
-use windows_sys::Win32::Storage::FileSystem::{
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
-    FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
+use windows_sys::Win32::{
+    Foundation::ERROR_SHARING_VIOLATION,
+    Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    },
 };
 
 use super::{alien, changed, sweep_paths};
 use crate::{
     Error,
-    engine::storage::{FolderId, storage},
+    engine::storage::{FolderId, HOLD_DELAYS, storage},
     home::private_windows,
 };
 
@@ -37,7 +41,7 @@ impl Dir {
         let handle = match open_held(partial) {
             Ok(handle) => handle,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(storage("open", partial, error)),
+            Err(error) => return Err(open_error(partial, error)),
         };
         let (reparse, folder) = private_windows::handle_kind(&handle)
             .map_err(|error| storage("read", partial, error))?;
@@ -62,7 +66,7 @@ impl Dir {
         let held = match open_held(&data) {
             Ok(handle) => handle,
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(storage("open", &data, error)),
+            Err(error) => return Err(open_error(&data, error)),
         };
         let (reparse, folder) =
             private_windows::handle_kind(&held).map_err(|error| storage("read", &data, error))?;
@@ -84,10 +88,52 @@ impl Dir {
 /// The access rights matter as much as the sharing: a handle opened for the directory's owner and
 /// security only is not one the file system counts when another open asks to delete or rename the
 /// folder, and the move goes through. Listing the folder is what makes the handle hold its name.
+///
+/// A handle another program holds *with* delete access is the one thing that stops this open: the
+/// share mode here does not allow that access, so the open fails with a sharing violation. A scanner
+/// or an indexer holds a folder that way for a moment while it looks at it, so the open is tried
+/// again with the waits a removal gets, and a program that keeps the folder for longer is named in
+/// the error rather than reported as an access denial.
 fn open_held(path: &Path) -> io::Result<fs::File> {
+    match open_once(path) {
+        Ok(handle) => Ok(handle),
+        Err(error) if !shared(&error) => Err(error),
+        Err(mut last) => {
+            for delay in HOLD_DELAYS {
+                std::thread::sleep(Duration::from_millis(delay));
+                match open_once(path) {
+                    Ok(handle) => return Ok(handle),
+                    Err(error) => last = error,
+                }
+            }
+            Err(last)
+        }
+    }
+}
+
+fn open_once(path: &Path) -> io::Result<fs::File> {
     fs::OpenOptions::new()
         .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
+}
+
+/// Whether the open failed because a handle that another program holds has delete access, which
+/// this open does not share.
+fn shared(error: &io::Error) -> bool {
+    error.raw_os_error() == Some(ERROR_SHARING_VIOLATION as i32)
+}
+
+/// The error for a folder the repair could not open. A folder another program holds is not a fault
+/// of the store: its bytes are as they were, and running the receive again can work once that
+/// program has let go.
+fn open_error(path: &Path, error: io::Error) -> Error {
+    if shared(&error) {
+        return Error::Storage(format!(
+            "{} is in use by another program; the receive can be run again",
+            path.display()
+        ));
+    }
+    storage("open", path, error)
 }

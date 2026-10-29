@@ -88,6 +88,78 @@ fn a_copy_of_the_blob_is_judged_to_be_the_blob() {
     assert_eq!(written, source);
 }
 
+/// A handle of the kind a scanner or an indexer holds a folder with: delete access, and delete
+/// sharing for everyone else but not for the repair's own open, which refuses to share it.
+#[cfg(windows)]
+fn hold_with_delete_access(path: &std::path::Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+
+    std::fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES | DELETE)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .unwrap()
+}
+
+/// A store folder another program holds for a moment is opened once it lets go: a scanner that has
+/// a file open with delete access makes the repair's own open fail with a sharing violation, and the
+/// receive must not fail over a hold that a moment clears.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_short_hold_on_the_store_folder_is_waited_out() {
+    use std::time::{Duration, Instant};
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join("store");
+    let data = store.join("data");
+    fs::create_dir_all(&data).unwrap();
+    let body = b"the store's bytes";
+    let hash = Hash::new(body);
+    let source = data.join(format!("{hash}.data"));
+    fs::write(&source, body).unwrap();
+    fs::hard_link(&source, dir.path().join("output")).unwrap();
+
+    let held = hold_with_delete_access(&store);
+    let released = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(60));
+        drop(held);
+    });
+    let began = Instant::now();
+    repair(&store, identify(&store).unwrap()).await.unwrap();
+    released.join().unwrap();
+    assert!(
+        began.elapsed() < Duration::from_secs(2),
+        "the open waited {:?} for a hold of 60 ms",
+        began.elapsed()
+    );
+    // The hold being waited out is what mattered: the repair then did its work.
+    let names = super::name_count(&source, &fs::metadata(&source).unwrap()).unwrap();
+    assert_eq!(names, 1, "the repair did not give the store its own bytes");
+}
+
+/// A program that keeps the folder is named as one, and the error says that running the receive
+/// again can work, instead of reporting an access denial the user cannot act on.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_folder_another_program_keeps_says_to_run_the_receive_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join("store");
+    fs::create_dir_all(store.join("data")).unwrap();
+
+    let _held = hold_with_delete_access(&store);
+    let error = repair(&store, identify(&store).unwrap()).await.unwrap_err();
+    let text = error.to_string();
+    assert!(matches!(error, crate::Error::Storage(_)), "{text}");
+    assert!(text.contains("in use by another program"), "{text}");
+    assert!(text.contains("run again"), "{text}");
+}
+
 /// A store file with a second name is copied and the copy takes its place, so the store stops
 /// sharing its bytes with the output and keeps them.
 #[cfg(unix)]
