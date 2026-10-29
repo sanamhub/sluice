@@ -146,8 +146,9 @@ fn still_there(path: &Path) -> bool {
         }
         super::remove_once(path).is_err()
     })
-    // Without a resolved form no hold can be taken, and no removal of it can be tried.
-    .unwrap_or(true)
+    // A path whose folder cannot be resolved has no folder to remove: the folder that held it is
+    // gone, and retrying it would hold the end of the command for nothing.
+    .unwrap_or(false)
 }
 
 /// Waits for the removals that are running, or until `deadline` passes.
