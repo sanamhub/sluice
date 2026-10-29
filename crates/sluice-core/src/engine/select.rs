@@ -4,7 +4,7 @@
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
-use crate::{Error, manifest::path::shown};
+use crate::Error;
 
 /// The entries of a manifest a receive takes, as a set of globs. No pattern takes every entry, which
 /// is what a receive without `--include` does.
@@ -37,7 +37,7 @@ impl Selection {
                 // pattern over a tree would match across components and take more than it says.
                 .literal_separator(true)
                 .build()
-                .map_err(|e| Error::Policy(format!("{} is not a pattern: {e}", shown(pattern))))?;
+                .map_err(|e| Error::Policy(format!("{pattern} is not a pattern: {e}")))?;
             builder.add(glob);
         }
         let set = builder

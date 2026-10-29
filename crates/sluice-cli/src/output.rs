@@ -306,6 +306,34 @@ mod tests {
         assert_eq!(line, "sluice: network error: literal \\\\u{202e}\n");
     }
 
+    /// A path on Windows keeps one backslash per separator: a backslash is doubled only where it
+    /// would otherwise start an escape, so a reader can read the path the sender wrote.
+    #[test]
+    fn a_path_in_a_failure_line_keeps_the_backslashes_it_was_written_with() {
+        let line = failure_line(
+            Format::Human,
+            &Failure::Error(Error::Storage(
+                r"C:\Users\me\out\tree already exists".into(),
+            )),
+        );
+        assert_eq!(
+            line,
+            "sluice: storage error: C:\\Users\\me\\out\\tree already exists\n"
+        );
+        // A message a peer wrote can hold the text of an escape, which is the one case that is
+        // doubled, so it cannot be read as the escape itself.
+        let line = failure_line(
+            Format::Human,
+            &Failure::Error(Error::Network(
+                r"the name is C:\Users\me\u{202e}.txt".into(),
+            )),
+        );
+        assert_eq!(
+            line,
+            "sluice: network error: the name is C:\\Users\\me\\\\u{202e}.txt\n"
+        );
+    }
+
     /// A peer chooses the reason it closes a connection with, and a QUIC close carries that reason
     /// to the other side, where an error's `Display` prints it. This is the whole path: a real
     /// connection on loopback, closed with an escape sequence and a bidirectional character, and

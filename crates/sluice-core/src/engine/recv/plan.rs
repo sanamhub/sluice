@@ -108,19 +108,14 @@ pub(in crate::engine) fn choose(
         .map(|(at, _)| at)
         .collect();
     if chosen.is_empty() {
+        let patterns = selection.patterns().join(", ");
         return Err(Error::Policy(format!(
-            "the pattern{} {} match{} nothing in this ticket",
+            "the pattern{} {patterns} match{} nothing in this ticket",
             if selection.patterns().len() == 1 {
                 ""
             } else {
                 "s"
             },
-            selection
-                .patterns()
-                .iter()
-                .map(|pattern| crate::manifest::path::shown(pattern))
-                .collect::<Vec<_>>()
-                .join(", "),
             if selection.patterns().len() == 1 {
                 "es"
             } else {

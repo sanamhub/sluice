@@ -18,7 +18,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use crate::{
     cli::{CongestionArg, PriorityArg},
     events,
-    output::Output,
+    output::{Output, line},
 };
 
 /// Receives the file a ticket names.
@@ -192,14 +192,16 @@ fn receive_one(
         printed?;
         let received = result?;
         if matches!(output.format(), crate::output::Format::Human) {
+            // The path ends in the name the sender's manifest holds, so it is written through the
+            // same boundary as a failure line.
             if received.files == 1 {
-                output.write_stderr(&format!("wrote {}\n", received.path.display()));
+                output.write_stderr(&line(&format!("wrote {}", received.path.display())));
             } else {
-                output.write_stderr(&format!(
-                    "wrote {} files under {}\n",
+                output.write_stderr(&line(&format!(
+                    "wrote {} files under {}",
                     received.files,
                     received.path.display()
-                ));
+                )));
             }
         }
         Ok(0)
@@ -276,7 +278,7 @@ fn run_live(
         printed?;
         let received = result?;
         if matches!(output.format(), crate::output::Format::Human) {
-            output.write_stderr(&format!("wrote {}\n", received.path.display()));
+            output.write_stderr(&line(&format!("wrote {}", received.path.display())));
         }
         Ok(0)
     })
