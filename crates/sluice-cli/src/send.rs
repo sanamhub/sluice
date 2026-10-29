@@ -123,7 +123,7 @@ fn serve(
         .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
     runtime.block_on(async {
         let home = Home::open(&Home::locate()?)?;
-        let outgoing = if args.live {
+        let mut outgoing = if args.live {
             sluice_core::engine::prepare_live_with_rate(
                 &home,
                 &paths[0],
@@ -148,6 +148,7 @@ fn serve(
         } else {
             outgoing(&home, paths, args, relay, expiry, rate).await?
         };
+        outgoing.reserve(keep);
         events::ticket(*output, &outgoing.ticket.encode())?;
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "sending");

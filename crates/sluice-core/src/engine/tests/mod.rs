@@ -35,6 +35,7 @@ mod lifecycle;
 mod live;
 mod names;
 mod pack;
+mod places;
 mod receivers;
 mod refusal;
 mod reports;

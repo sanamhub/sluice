@@ -34,9 +34,6 @@ impl Provider {
         // holder's close never counts a refused connection as one.
         let mut open: BTreeMap<u64, [u8; 32]> = BTreeMap::new();
         let mut grace: Option<Grace> = None;
-        if limited && self.places_full() && !self.holder_open(&open) {
-            return Ok(ServeEnd::Downloaded);
-        }
         loop {
             let left = self.expiry_ms_left();
             if left == 0 && self.expiry.is_some() {
