@@ -29,8 +29,8 @@ provenance attestation; only the images carry SBOM attestations, one per archite
 archive before running anything from it:
 
 ```
-gh attestation verify sluice-cli-x86_64-unknown-linux-gnu.tar.xz --repo <owner>/sluice \
-  --signer-workflow <owner>/sluice/.github/workflows/release.yml \
+gh attestation verify sluice-cli-x86_64-unknown-linux-gnu.tar.xz --repo sanamhub/sluice \
+  --signer-workflow sanamhub/sluice/.github/workflows/release.yml \
   --source-ref refs/tags/v<version>
 ```
 
