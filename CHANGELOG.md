@@ -45,5 +45,6 @@ checks every block before it is written, and resumes a transfer that dropped.
 - The home folder and its key are refused when another user owns them or can read them.
 - A sender serves nothing until its mode is set, so a ticket cannot be answered before it is
   printed.
-- A ticket is a read capability. [`docs/threat-model.md`](https://github.com/sanamhub/sluice/blob/main/docs/threat-model.md) says what is
+- A ticket is a read capability. The
+  [threat model](https://github.com/sanamhub/sluice/blob/main/docs/threat-model.md) says what is
   protected and what is not.
