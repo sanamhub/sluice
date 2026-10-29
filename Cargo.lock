@@ -3751,7 +3751,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "sluice-bench"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -3763,7 +3763,7 @@ dependencies = [
 
 [[package]]
 name = "sluice-cli"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "anstream",
  "assert_cmd",
@@ -3781,7 +3781,7 @@ dependencies = [
 
 [[package]]
 name = "sluice-core"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "blake3",
  "ed25519-dalek",
@@ -3813,7 +3813,7 @@ dependencies = [
 
 [[package]]
 name = "sluice-live"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "blake3",
  "ed25519-dalek",
@@ -3824,7 +3824,7 @@ dependencies = [
 
 [[package]]
 name = "sluice-probe"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -3846,7 +3846,7 @@ dependencies = [
 
 [[package]]
 name = "sluice-wasm-hash"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "blake3",
  "wasm-bindgen",
@@ -5103,7 +5103,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "anyhow",
  "blake3",
