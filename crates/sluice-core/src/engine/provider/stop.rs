@@ -11,11 +11,14 @@ pub enum Stop {
     OneDownload(Vec<[u8; 32]>),
     /// A live stream: serve until its close is signed, then until every segment is delivered.
     Live(Arc<LiveLog>),
-    /// On Ctrl+C or at the ticket expiry, and with a limit, once this many distinct receivers have
-    /// each taken the whole transfer. `roots` is what a completion has to have asked for to count.
+    /// On Ctrl+C or at the ticket expiry, and with a limit, once every place the send offers is
+    /// taken and the connections of the endpoints holding them have closed. A place is taken by the
+    /// first request the policy admits from an endpoint and is never returned; a holder that keeps
+    /// a connection open doing nothing is waited for no longer than the grace period after its last
+    /// request or byte, and activity pushes that wait back. `roots` is what a completion has to
+    /// have asked for to count.
     Keep {
-        /// How many receivers that took the whole transfer end the send, or none for a wait that
-        /// only Ctrl+C or the expiry ends.
+        /// How many places the send offers, or none for a wait that only Ctrl+C or the expiry ends.
         limit: Option<u32>,
         /// The content roots the transfer offers, which a completion code is checked against.
         roots: Vec<[u8; 32]>,
