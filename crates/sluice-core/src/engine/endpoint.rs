@@ -144,7 +144,11 @@ const LINGER: Duration = Duration::from_millis(250);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Receiver {
     /// A receiver's content connection is up.
-    Opened { endpoint: [u8; 32], relayed: bool },
+    Opened {
+        connection: u64,
+        endpoint: [u8; 32],
+        relayed: bool,
+    },
     /// A receiver's content connection closed. `claimed_whole` is only what the peer said; it is
     /// believed only by a provider that saw the connection ask for every root.
     Closed {
@@ -181,6 +185,7 @@ impl EndpointHooks for CompletionSignal {
             let own = self.0.ids.assign(stable);
             let endpoint = *conn.remote_id().as_bytes();
             let _ = self.0.sender.send(Receiver::Opened {
+                connection: own,
                 endpoint,
                 relayed: relayed(conn),
             });

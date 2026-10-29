@@ -15,6 +15,11 @@ pub use stop::{ServeEnd, Stop};
 
 use crate::Error;
 
+/// How long a send that has delivered every root waits for the last receiver's close report before
+/// it stops. The report is made by another task, and without the wait the sender could miss its own
+/// last line about a receiver.
+const SETTLE: Duration = Duration::from_millis(250);
+
 /// A listening provider. It holds the store open and answers only its allowed hashes.
 pub struct Provider {
     router: Option<Router>,
@@ -190,6 +195,7 @@ impl Provider {
             return Ok(ServeEnd::Expired);
         }
         let mut deadline = Box::pin(tokio::time::sleep(Duration::from_millis(left)));
+        let mut opened: BTreeSet<u64> = BTreeSet::new();
         loop {
             tokio::select! {
                 // A receiver that verified and installed every file says so with the completion
@@ -197,6 +203,7 @@ impl Provider {
                 // only what the first one was missing, so this process never sees the whole blob.
                 reported = self.receivers.recv() => {
                     if let Some(reported) = reported {
+                        Self::track(&reported, &mut opened);
                         let whole = self.report(reported, &wait.wanted, events);
                         if whole {
                             return Ok(ServeEnd::Downloaded);
@@ -217,7 +224,31 @@ impl Provider {
                 }
             }
             if wait.delivered() {
+                // The bytes are out. A receiver's close report can still be on its way, and the
+                // sender's last line about it is worth waiting a moment for, but not a second.
+                self.settle(&mut opened, &wait.wanted, events).await;
                 return Ok(ServeEnd::Downloaded);
+            }
+        }
+    }
+
+    /// Reports what is still on its way after the roots are delivered, for a moment at most.
+    async fn settle(
+        &mut self,
+        opened: &mut BTreeSet<u64>,
+        roots: &BTreeSet<Hash>,
+        events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
+    ) {
+        let deadline = tokio::time::sleep(SETTLE);
+        tokio::pin!(deadline);
+        while !opened.is_empty() {
+            tokio::select! {
+                _ = &mut deadline => break,
+                reported = self.receivers.recv() => {
+                    let Some(reported) = reported else { break };
+                    Self::track(&reported, opened);
+                    self.report(reported, roots, events);
+                }
             }
         }
     }
@@ -283,7 +314,9 @@ impl Provider {
         open: &mut BTreeSet<u64>,
     ) {
         match reported {
-            endpoint::Receiver::Opened { .. } => {}
+            endpoint::Receiver::Opened { connection, .. } => {
+                open.insert(*connection);
+            }
             endpoint::Receiver::Closed {
                 connection,
                 endpoint,
@@ -335,7 +368,9 @@ impl Provider {
         events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
     ) -> bool {
         let (event, whole) = match reported {
-            endpoint::Receiver::Opened { endpoint, relayed } => (
+            endpoint::Receiver::Opened {
+                endpoint, relayed, ..
+            } => (
                 crate::engine::Event::ReceiverStarted {
                     endpoint: Self::hex(&endpoint),
                     relayed,
@@ -361,6 +396,18 @@ impl Provider {
         };
         crate::engine::emit(events, event);
         whole
+    }
+
+    /// Whether a report says a connection opened or closed, for a set of the connections still open.
+    fn track(reported: &endpoint::Receiver, opened: &mut BTreeSet<u64>) {
+        match reported {
+            endpoint::Receiver::Opened { connection, .. } => {
+                opened.insert(*connection);
+            }
+            endpoint::Receiver::Closed { connection, .. } => {
+                opened.remove(connection);
+            }
+        }
     }
 
     /// An endpoint id as the 64 lower-case hex characters a ticket and `sluice id` spell it with.
