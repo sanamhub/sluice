@@ -17,6 +17,7 @@ mod send;
 
 use std::ffi::OsString;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::{CommandFactory, Parser};
 
@@ -24,6 +25,11 @@ use cli::{Cli, Command};
 use colour::Environment;
 use exit::Failure;
 use output::Output;
+
+/// How long a command waits for the removals it started before it ends. A removal waits for a file
+/// another program may hold, and the waits add up to a little over a second; two seconds covers one
+/// of those and a retry, and anything still left is removed by the sweep of temporary folders.
+const REMOVAL_WAIT: Duration = Duration::from_secs(2);
 
 /// The clap definition of the whole command line, for the completion scripts and the man pages.
 ///
@@ -50,6 +56,16 @@ pub fn command() -> clap::Command {
 /// assert_eq!(sluice_cli::run(args), std::process::ExitCode::SUCCESS);
 /// ```
 pub fn run(args: Vec<OsString>) -> ExitCode {
+    let code = run_to_exit(args);
+    // On every way out, including a bad command line and a panic: a removal that is still running
+    // has a thread of its own, which neither the end of the runtime nor the end of the process
+    // waits for, and the folder it is removing would stay until the sweep.
+    sluice_core::engine::wait_for_removals(REMOVAL_WAIT);
+    code
+}
+
+/// Parses the arguments, runs the command and prints what it produced.
+fn run_to_exit(args: Vec<OsString>) -> ExitCode {
     bug::install_hook();
     let environment = Environment::read();
     let cli = match Cli::try_parse_from(&args) {

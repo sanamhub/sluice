@@ -5,6 +5,7 @@ mod install;
 mod meta;
 mod open;
 mod registry;
+mod removals;
 mod repair;
 mod store;
 mod temp;
@@ -21,6 +22,7 @@ pub(crate) use registry::remember_as;
 pub use registry::{
     clash as registry_clash, discard_apart, find as find_record, forget as forget_record, with_hold,
 };
+pub use removals::wait_for_removals;
 pub use repair::repair;
 pub(crate) use repair::{changed, data_path, name_count};
 pub use store::{FolderId, Owner, begin, identify, partial_dir, recorded};
@@ -162,29 +164,42 @@ pub(crate) mod parked {
 /// Windows can hold a file for a moment after that, so a failure that may clear on its own is tried
 /// again for a short while. A folder that still cannot be removed is left to the sweep, which
 /// removes a temporary folder nobody holds; failing a send over it would hide the outcome that
-/// matters.
+/// matters. The removal is counted while it runs, and a path it could not remove is kept, so a
+/// command that is ending waits for it and tries it again ([`wait_for_removals`]).
 pub fn remove_quietly(path: &Path) {
+    let _doing = removals::Doing::begin();
     #[cfg(test)]
     parked::wait(path);
+    if quiet_attempts(path) {
+        removals::gone(path);
+    } else {
+        removals::left(path);
+    }
+}
+
+/// One attempt at the removal, then the waits for a failure that a moment can clear, and whether
+/// the path is gone.
+fn quiet_attempts(path: &Path) -> bool {
     let mut last = match remove_once(path) {
-        Ok(()) => return,
+        Ok(()) => return true,
         Err(error) => error,
     };
     for delay in HOLD_DELAYS {
         if !retryable(&last) {
-            return;
+            return false;
         }
         std::thread::sleep(Duration::from_millis(delay));
         match remove_once(path) {
-            Ok(()) => return,
+            Ok(()) => return true,
             Err(error) => last = error,
         }
     }
+    false
 }
 
 /// Removes `path` once and says whether it is gone. A temporary folder can be a folder or a file,
 /// so both names are tried, and a name that is already gone counts as removed.
-fn remove_once(path: &Path) -> io::Result<()> {
+pub(super) fn remove_once(path: &Path) -> io::Result<()> {
     match fs::remove_dir_all(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),

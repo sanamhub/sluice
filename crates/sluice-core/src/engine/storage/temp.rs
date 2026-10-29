@@ -115,16 +115,25 @@ impl Temp {
     }
 
     /// Removes the folder on a blocking thread without waiting. A process that ends before the
-    /// removal does leaves the folder to the sweep of temporary folders.
+    /// removal does waits for it at the end of the command, or leaves the folder to the sweep.
     pub(crate) fn remove_apart(mut self) {
         self.heartbeat.take();
         self.gone = true;
         let path = self.path.clone();
+        // Counted before the work is handed on, so the end of the command waits for a removal whose
+        // thread has not been scheduled yet.
+        let doing = super::removals::Doing::begin();
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
-                handle.spawn_blocking(move || remove_quietly(&path));
+                handle.spawn_blocking(move || {
+                    let _doing = doing;
+                    remove_quietly(&path);
+                });
             }
-            Err(_) => remove_quietly(&path),
+            Err(_) => {
+                let _doing = doing;
+                remove_quietly(&path);
+            }
         }
     }
 }
@@ -138,7 +147,7 @@ impl Drop for Temp {
         self.heartbeat.take();
         // A drop can run on an async thread, where the waits a held file needs would stop other
         // work. One attempt is immediate and almost always enough; the waits go to a thread of
-        // their own, and a process that ends first leaves the folder to the sweep.
+        // their own, and the end of the command waits for that thread to finish.
         if tokio::runtime::Handle::try_current().is_err() {
             remove_quietly(&self.path);
             return;
@@ -147,9 +156,13 @@ impl Drop for Temp {
             return;
         }
         let path = std::mem::take(&mut self.path);
+        let doing = super::removals::Doing::begin();
         let _ = std::thread::Builder::new()
             .name("sluice-temp-remove".to_string())
-            .spawn(move || remove_quietly(&path));
+            .spawn(move || {
+                let _doing = doing;
+                remove_quietly(&path);
+            });
     }
 }
 
