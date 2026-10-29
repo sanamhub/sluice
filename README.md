@@ -4,173 +4,220 @@
 
 <h1 align="center">Sluice</h1>
 
+<p align="center">Sluice sends a file straight from one computer to another. Nothing is stored in between.</p>
+
 <p align="center">
   <a href="https://github.com/sanamhub/sluice/actions/workflows/ci.yml">
     <img src="https://github.com/sanamhub/sluice/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/sanamhub/sluice/releases/latest">
+    <img src="https://img.shields.io/github/v/release/sanamhub/sluice?sort=semver" alt="Latest release"></a>
   <a href="https://github.com/sanamhub/sluice/blob/main/LICENSE-MIT">
     <img src="https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue"
       alt="License: Apache-2.0 or MIT"></a>
   <img src="https://img.shields.io/badge/status-pre--1.0-orange" alt="Status: pre-1.0">
 </p>
 
-Sluice sends a file straight from one computer to another. Nothing is stored in between.
+Sluice is a command-line tool for sending files and folders between two computers. It is built for
+large files, slow links and connections that drop. There is no account, no hosted storage and no
+telemetry. A transfer goes directly when the two machines can reach each other, and through a relay
+you run when they cannot.
 
-It is built for large files and slow links. Every piece of the file is checked as it arrives, and a
-dropped transfer picks up where it stopped. There is no account, no hosted service, no size plan,
-and no server in the middle that you did not choose.
+## Quick start
 
-> **Status:** pre-1.0. `sluice send`, `sluice recv`, `sluice inspect`, `sluice id`, `sluice doctor`
-> and `sluice completions` work today, including live mode, several tickets through the queue, a
-> byte range, pipes and a per-command byte cap. The desktop and browser clients do not exist yet.
-
-## Why it is different
-
-- **The file goes where it is needed.** There is no upload to a storage service and no copy left on
-  a server. A relay is a server you run that can forward data when a direct path fails, and it does
-  not keep them.
-- **Every piece is checked.** The file is split into small blocks. A damaged block is caught before
-  it is written, not after the file is opened.
-- **You own the path.** No account, no plan limit, no telemetry, and no relay you did not configure.
-  The relay image is in this repository.
-
-## Try it
-
-There is no release yet, so build from source. A transfer between two folders on one machine, or
-two machines that can reach each other, works today:
+Install on Linux or macOS:
 
 ```sh
-cargo run -p sluice-cli -- send ./bigfile.mkv    # prints a ticket
-cargo run -p sluice-cli -- recv <ticket> --out ./out
-cargo run -p sluice-cli -- send --live ./recording.mkv   # a file that is still being written
-cargo run -p sluice-cli -- recv <ticket> --out recording.mkv  # a live ticket names no file
-cargo run -p sluice-cli -- recv <t1> <t2> <t3> --out ./out --priority high  # three at once
-cargo run -p sluice-cli -- recv <ticket> --limit-rate 50M --out ./out
-cat dump.sql | cargo run -p sluice-cli -- send - # a pipe is copied into the store first
-cargo run -p sluice-cli -- recv <ticket> --out - # a single file to standard output
-cargo run -p sluice-cli -- inspect <ticket>       # what it offers: names, counts and size
-
-cargo run -p sluice-cli -- id
-cargo run -p sluice-cli -- doctor
-cargo run -p sluice-cli -- doctor --network           # UDP, relay, NAT and port mapping
-cargo run -p sluice-cli -- completions bash
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/sanamhub/sluice/releases/latest/download/sluice-cli-installer.sh | sh
 ```
 
-A folder arrives inside a folder of its own name, as copying it in a file manager does. A name
-already in the output folder refuses the whole transfer unless `--force`, a top-level name that
-starts with `.` needs `--allow-hidden`, and a link is replaced as an entry and never followed. A
-folder is never replaced by a file or a link, even with `--force`, and the error says so. A receive
-that was killed resumes from its partial store only when that store was made for the same ticket;
-a file whose content already matches is skipped, and anything else at its target is a clash.
-
-`doctor` changes nothing. It prints one line per check, `ok`, `warning`, `failed` or `skipped`, and
-the step that fixes a problem under it. Its exit code is 0 unless a check failed. With `--network`
-it also binds a UDP socket, asks the configured relay for a net report, and reports the public
-address, the NAT mapping and whether a router can open a port; without a relay it says that two
-hard NATs cannot connect. With `--json` the same report is one object. The
-[CLI README](crates/sluice-cli/README.md) lists every check, exit code and JSON field, which scripts
-may rely on.
-
-`sluice id --rotate` replaces the identity after asking. With no terminal, or with `--json`, it
-refuses unless `--yes` is given.
-
-## Install
-
-There is no release yet. When there is one, [`docs/install.md`](docs/install.md) lists the six
-archive names and the commands that check where an archive came from before it is run. The
-installers in a release check less than that, and the same page says what each one does.
-
-## More of 1.0
-
-Live mode, ranges and several tickets through the queue work today.
+Or with Homebrew:
 
 ```sh
-sluice recv <ticket> --range 4G:4.1G    # fetch and verify one byte range
-sluice recv <ticket> --include 'photos/**'   # take part of a folder
-sluice send --live ./recording.mkv      # follow a file that is still being written
+brew install sanamhub/tap/sluice
 ```
 
-`--include` takes a glob over the ticket's own paths, may be given more than once, and
-`sluice inspect --include` shows the same part before anything is fetched.
+On Windows:
 
-`--range` takes a half-open range, `start:end`, `start:+length`, `start:` or `:end`, in bytes or
-with a unit: `K`, `M`, `G`, `T` and `P` (and `KiB` and the like) count in 1024s, `KB`, `MB` and the
-like in 1000s, and a decimal such as `4.1G` is rounded down to a whole byte.
+```powershell
+irm https://github.com/sanamhub/sluice/releases/latest/download/sluice-cli-installer.ps1 | iex
+```
 
-A recording or a database dump is readable on the other side while it is still being written,
-verified segment by segment; the sender closes the stream after two seconds without growth, or the
-time `--close-after` names. A single byte range can be fetched and verified without the rest. A
-transfer that is killed, unplugged or runs out of disk resumes from the ranges its store committed:
-`iroh-blobs` commits them in batches, so a crash can cost a re-read of the part that was not
-committed, and no unverified byte is ever written.
+Or with Scoop or winget:
 
-The speed target is 8 Gbit/s on a 10 GbE LAN, within 10% of `iperf3`, for one 100 GB file. The
-lossy-path target and the resume budget are on the [performance page](docs/performance.md). None of
-these has been measured on a real network yet; the loopback numbers in the engine report are a
-local check, not a network measurement. Every number will be published with the hardware, the
-network conditions and a script to rerun it.
+```powershell
+# Scoop
+scoop bucket add sanamhub https://github.com/sanamhub/scoop-bucket
+scoop install sluice
 
-Files are hashed where they are. Sending a 100 GB file stores about 0.4% of its size in outboard
-data rather than copying it; `--copy` imports it instead. The engine is a library as well as a
-binary, under Apache-2.0 or MIT. Bindings for Python, Node, Swift, Kotlin, Go, C# and C, a local
-control API and an MCP server are planned in this repository.
+# winget
+winget install --id sanamhub.sluice -e
+```
 
-## Connectivity
+The container image is a fourth way, for Linux:
 
-Two computers behind NATs need help to find each other. Across the internet that help is a relay
-you run: the two ends coordinate a hole punch through it, and the file then goes direct.
+```sh
+docker pull ghcr.io/sanamhub/sluice:0.1.0
+```
 
-| Where | What you need |
-|---|---|
-| Same network | Nothing |
-| Internet, and the sender's router supports PCP, NAT-PMP or UPnP | Nothing |
-| Internet, otherwise | A relay you run as a meeting point. It fits on the smallest VPS, and when hole punching works it carries no file data |
-| Internet, when hole punching fails | A relay you run as a full relay, which carries the data |
+[`docs/install.md`](docs/install.md) has every channel, the archive names, the checks that verify a
+download, and the upgrade and uninstall command for each.
 
-Sluice never falls back to someone else's relay. When no relay is configured, the cases that need
-one fail and say why. The browser build is always relayed, because iroh in a tab has no UDP socket,
-so it needs a relay you run as well. [ADR 0011](docs/adr/0011-browser-is-relay-bound.md) and
-[ADR 0028](docs/adr/0028-one-relay-image-two-recipes.md).
+Send a file from one machine:
 
-## Run your own
+```sh
+sluice send ./report.pdf
+```
 
-One image, `relay`, run one of two ways. As a meeting point it limits each client to 64 KiB/s, so
-it coordinates hole punches and is too slow to carry files. As a full relay it carries the
-transfers that cannot go direct, at a limit you set. It ships with an allowlist, so nobody uses it
-until you add an endpoint id, and it starts through a guard that refuses a config that would open it
-by mistake.
+It prints a ticket on one line and then serves the file. Send the ticket to the other machine, any
+way you like, and run:
 
-- [`docker/relay/README.md`](docker/relay/README.md) has the certificate, the build, the
-  `docker run` for both ways, the allowlist and open mode.
-- [`docker/guard/README.md`](docker/guard/README.md) lists every rule the guard enforces.
+```sh
+sluice inspect <ticket>
+sluice recv <ticket> --out ./inbox
+```
 
-## Built on
+`inspect` prints what the ticket offers, with the number of files and folders, the size and the
+names, and fetches no content. `recv` prints progress, verifies each block as it arrives, and ends
+with a line that names the path it wrote. The sender stops after that one complete download.
 
-[iroh](https://github.com/n0-computer/iroh) for connectivity and QUIC, and
-[iroh-blobs](https://github.com/n0-computer/iroh-blobs) for content-addressed, verified streaming.
-Sluice adds live transfer, delta hints, directory manifests and packing, the parallel data path, and
-the CLI, bindings and UI. Live transfer works on the same principle as
-[Hypercore](https://github.com/holepunchto/hypercore)'s signed logs, applied to plain files. ADR
-0004 covers the differences.
+## What makes it different
 
-## Documentation
+- **The file does not go through storage.** The sender reads it where it is, and the receiver writes
+  it where it asks. No upload, no copy left on a server, and no third party in the path unless you
+  configured a relay. The relay is a server you run, and it keeps nothing.
+- **Every block is checked before it is written.** The file is split into content-addressed blocks,
+  and a block that does not match its BLAKE3 root is discarded instead of written. A damaged
+  transfer fails at the block, not after the file is opened.
+- **A dropped transfer resumes.** A killed or disconnected receive keeps the ranges its store
+  committed, so the next run fetches only the rest. No unverified byte is ever written.
+- **A file that is still growing can be sent.** Live mode follows one file, seals fixed-size
+  segments as they fill, and lets the receiver read each segment while the writer is still working.
+- **You choose the relay.** No account, no plan limit, no telemetry, and no relay you did not name.
+  With no relay configured, cases that need one fail and say why.
 
-| | |
-|---|---|
-| [`docs/design.md`](docs/design.md) | Architecture, data model, storage, connectivity |
-| [`SPEC.md`](SPEC.md) | Wire protocol, with test vectors, for anyone writing a compatible implementation |
-| [`docs/performance.md`](docs/performance.md) | Targets and how they are measured |
-| [`docs/threat-model.md`](docs/threat-model.md) | What is and is not protected |
-| [`docs/roadmap.md`](docs/roadmap.md) | 1.0, what comes after, and what will not be built |
-| [`docs/adr/`](docs/adr/README.md) | Decision records |
-| [`crates/sluice-cli/README.md`](crates/sluice-cli/README.md) | The commands, their exit codes and their JSON |
-| [`docs/install.md`](docs/install.md) | How to install and verify a release |
-| [`docs/runbooks/releasing.md`](docs/runbooks/releasing.md) | How a release is made |
+## Common tasks
 
-## Contributing and security
+Send a folder. It arrives inside a folder of its own name:
 
-Start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Report vulnerabilities privately as described in
-[`SECURITY.md`](SECURITY.md), never in a public issue.
+```sh
+sluice send ./photos
+sluice recv <ticket> --out ./inbox
+```
 
-## License
+Look at a ticket before fetching anything. `--all` lists past the first 50 names:
 
-Apache-2.0 or MIT, at your option. Sluice collects no telemetry.
+```sh
+sluice inspect <ticket>
+sluice inspect <ticket> --all
+```
+
+Take part of a folder. The pattern is matched against the ticket's own paths:
+
+```sh
+sluice inspect <ticket> --include 'photos/2025/**'
+sluice recv <ticket> --include 'photos/2025/**' --out ./inbox
+```
+
+Follow a file that is still being written. A live ticket names no file, so `--out` is the file to
+write:
+
+```sh
+sluice send --live ./recording.mkv
+sluice recv <ticket> --out ./recording.mkv
+```
+
+Send a pipe. Standard input is copied into the store first, because its root is known only at the
+end, so a pipe is never live:
+
+```sh
+tar c ./project | sluice send -
+sluice recv <ticket> --out - > project.tar
+```
+
+Receive several tickets through one queue. Three run at once by default, and `--priority` decides
+which starts first:
+
+```sh
+sluice recv <ticket-1> <ticket-2> <ticket-3> --out ./inbox --priority high
+```
+
+Cap the rate on either side. The units are `K`, `M`, `G`, `T` and `P` in powers of 1024, and `KB`,
+`MB` and the like in powers of 1000:
+
+```sh
+sluice recv <ticket> --limit-rate 50M --out ./inbox
+```
+
+Share one ticket with two receivers. `--keep N` offers N places and stops after both places are
+taken and their connections close:
+
+```sh
+sluice send --keep 2 ./dataset
+```
+
+Check a setup before a transfer. `doctor` reads only, prints one line per check with `ok`,
+`warning`, `failed` or `skipped`, and exits nonzero only if a check failed:
+
+```sh
+sluice doctor
+sluice doctor --network
+```
+
+The [CLI README](crates/sluice-cli/README.md) lists the exit codes, the JSON shapes and every
+`doctor` check that scripts may rely on.
+
+## How it works
+
+Sluice uses [iroh](https://github.com/n0-computer/iroh) for QUIC, address discovery and hole
+punching, and [iroh-blobs](https://github.com/n0-computer/iroh-blobs) for content-addressed
+storage. A sender hashes a file into blocks, publishes the roots, and serves them. A manifest
+carries names, sizes and modes, and a live transfer is a signed log of segments. The receiver
+fetches what it needs, verifies every block against its root, and writes only verified bytes.
+[`docs/design.md`](docs/design.md) has the architecture, the data model and the storage rules.
+
+## Security
+
+Every block of a fixed transfer is checked against its BLAKE3 root before it is written, and a live
+segment is checked against the signed log before its frame is accepted. Paths in the manifest are
+checked before anything is created: no absolute path, no `..`, and no link followed outside the
+output folder. The transport is QUIC with TLS 1.3, and the handshake prefers a post-quantum key
+exchange.
+
+A ticket is a read capability. It names the sender's endpoint id, the addresses the sender can be
+reached at, the relay if one is used, the content root or live key, and the expiry. It does not
+contain file names. Anyone who has the ticket can fetch the content while the sender is serving it
+and the ticket has not expired, so treat it like a password. An unexpired ticket that is forwarded
+grants the same access as the original.
+
+[`docs/threat-model.md`](docs/threat-model.md) lists what is protected, what is not, and the known
+weaknesses. Report a vulnerability privately through GitHub Security Advisories as
+[`SECURITY.md`](SECURITY.md) says, never in a public issue.
+
+## Run your own relay
+
+The relay image is `ghcr.io/sanamhub/sluice-relay`. It runs as a meeting point, which coordinates a
+hole punch at 64 KiB/s per client and carries no file data, or as a full relay, which carries the
+bytes for pairs that cannot connect directly. It ships closed, with an empty allowlist, so nobody
+uses it until you add an endpoint id.
+
+```sh
+docker pull ghcr.io/sanamhub/sluice-relay:0.1.0
+```
+
+[`docker/relay/README.md`](docker/relay/README.md) has the certificate, both recipes, the allowlist
+and the guard. [`docker/cli/README.md`](docker/cli/README.md) covers the tool image, its home volume
+and its network modes.
+
+## Project status
+
+0.1.0 is the first release. It ships the `sluice` binary for six targets, the shell and PowerShell
+installers, Homebrew, Scoop, winget, the AUR, and the tool and relay images. The desktop and browser
+clients described in the [roadmap](docs/roadmap.md) do not exist yet.
+
+Before 1.0 the command line and the wire format may change. [`SPEC.md`](SPEC.md) is the wire
+contract, with test vectors for anyone writing a compatible implementation.
+
+Contributions are welcome; start with [`CONTRIBUTING.md`](CONTRIBUTING.md). The project is
+Apache-2.0 or MIT, at your option; see [`LICENSE-APACHE`](LICENSE-APACHE) and
+[`LICENSE-MIT`](LICENSE-MIT).

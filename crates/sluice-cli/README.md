@@ -2,12 +2,11 @@
 
 The `sluice` command is the program you run. It sends and receives files, prints this machine's id,
 checks your setup with `doctor`, and prints shell completions. It owns the subcommands, human and
-`--json` output, man pages, progress display and `sluice mcp` (an MCP server over stdio, using
-`rmcp`).
+`--json` output, man pages and progress display.
 
-There is no release yet: build it with `cargo build -p sluice-cli`. A transfer between two folders
-on one machine, or two machines that can reach each other, works today. Speeds have not been
-measured on a real network, only on loopback.
+A release ships the binary, and it builds from a checkout with `cargo build -p sluice-cli`. A
+transfer between two folders on one machine, or two machines that can reach each other, works
+today. Speeds have not been measured on a real network, only on loopback.
 
 **Must never:**
 
