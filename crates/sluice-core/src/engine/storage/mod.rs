@@ -22,6 +22,8 @@ pub(crate) use registry::remember_as;
 pub use registry::{
     clash as registry_clash, discard_apart, find as find_record, forget as forget_record, with_hold,
 };
+#[cfg(test)]
+pub(crate) use removals::exclusive as exclusive_removals;
 pub use removals::wait_for_removals;
 pub use repair::repair;
 pub(crate) use repair::{changed, data_path, name_count};

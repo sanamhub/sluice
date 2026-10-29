@@ -28,7 +28,7 @@ pub struct Record {
 pub fn remember(path: &Path, root: &str) -> Result<String, Error> {
     let dir = Home::partial_records()?;
     let id = random_id()?;
-    let text = format!("path {}\nroot {root}\n", canonical(path).display());
+    let text = format!("path {}\nroot {root}\n", canonical(path)?.display());
     fs::write(dir.join(&id), text).map_err(|e| storage("write a record in", &dir, e))?;
     Ok(id)
 }
@@ -41,7 +41,7 @@ pub fn find(path: &Path, root: &str) -> Result<Option<Record>, Error> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(storage("read", &dir, e)),
     };
-    let wanted = canonical(path);
+    let wanted = canonical(path)?;
     for entry in entries.flatten() {
         let Some(id) = entry.file_name().to_str().map(str::to_string) else {
             continue;
@@ -67,7 +67,9 @@ pub fn forget(path: &Path) {
     let Ok(dir) = Home::partial_records() else {
         return;
     };
-    let wanted = canonical(path);
+    let Ok(wanted) = canonical(path) else {
+        return;
+    };
     let Ok(entries) = fs::read_dir(&dir) else {
         return;
     };
@@ -84,9 +86,39 @@ pub fn forget(path: &Path) {
     }
 }
 
+/// Whether any record of this home names `path`, whatever root it carries. The end of a command
+/// asks before it removes a kept partial store: a claim may have made that path a live store again,
+/// under another spelling of the same folder, after the removal gave up.
+pub(super) fn named(path: &Path) -> bool {
+    let Ok(wanted) = canonical(path) else {
+        // A path with no resolved form cannot be proved to be nobody's, and leaving a folder is
+        // better than removing a store that a record names.
+        return true;
+    };
+    let Ok(dir) = Home::partial_records() else {
+        return true;
+    };
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let Some(id) = entry.file_name().to_str().map(str::to_string) else {
+            return false;
+        };
+        let Ok(text) = fs::read_to_string(entry.path()) else {
+            return false;
+        };
+        parse(&id, &text).is_some_and(|record| record.path == wanted)
+    })
+}
+
 /// Removes a partial store and the home's record of it, which are both this receive's.
 pub fn discard(path: &Path) {
-    with_hold(path, || discard_here(path));
+    match with_hold(path, || discard_here(path)) {
+        Ok(()) => {}
+        // A path with no resolved form has no hold either, so no other caller is using one.
+        Err(_) => discard_here(path),
+    }
 }
 
 /// [`discard`] for a caller that already holds the path, such as a claim that made a folder and
@@ -104,17 +136,19 @@ pub(super) fn discard_here(path: &Path) {
 /// long-lived process does not keep one entry per transfer it has ever started.
 static HOLDS: Mutex<Vec<(PathBuf, Weak<Mutex<()>>)>> = Mutex::new(Vec::new());
 
-/// Runs `work` with the one hold on `path` taken, releasing it when `work` returns or unwinds.
-pub fn with_hold<T>(path: &Path, work: impl FnOnce() -> T) -> T {
-    let slot = hold(path);
+/// Runs `work` with the one hold on `path` taken, releasing it when `work` returns or unwinds. A
+/// path with no resolved form cannot be held, and the caller gets that error instead of working on
+/// a folder that two spellings of it could be removing at the same time.
+pub fn with_hold<T>(path: &Path, work: impl FnOnce() -> T) -> Result<T, Error> {
+    let slot = hold(path)?;
     // A removal that panicked while it held the path leaves the mutex poisoned. The hold itself is
     // gone, so the next claim takes it rather than waiting for a task that is not coming.
     let _held = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    work()
+    Ok(work())
 }
 
-fn hold(path: &Path) -> Arc<Mutex<()>> {
-    let key = canonical(path);
+fn hold(path: &Path) -> Result<Arc<Mutex<()>>, Error> {
+    let key = canonical(path)?;
     let mut holds = HOLDS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -124,11 +158,11 @@ fn hold(path: &Path) -> Arc<Mutex<()>> {
         .find(|(at, _)| *at == key)
         .and_then(|(_, slot)| slot.upgrade())
     {
-        return slot;
+        return Ok(slot);
     }
     let slot = Arc::new(Mutex::new(()));
     holds.push((key, Arc::downgrade(&slot)));
-    slot
+    Ok(slot)
 }
 
 /// [`discard`] for an async caller. The removal waits for a file another process may still hold,
@@ -152,7 +186,7 @@ pub fn clash(path: &Path) -> Error {
 #[cfg(test)]
 pub(crate) fn remember_as(path: &Path, root: &str, id: &str) -> Result<(), Error> {
     let dir = Home::partial_records()?;
-    let text = format!("path {}\nroot {root}\n", canonical(path).display());
+    let text = format!("path {}\nroot {root}\n", canonical(path)?.display());
     fs::write(dir.join(id), text).map_err(|e| storage("write a record in", &dir, e))
 }
 
@@ -173,24 +207,27 @@ fn parse(id: &str, text: &str) -> Option<Record> {
     })
 }
 
-/// The form of `path` a record holds and is compared against. The folder that holds the store is
+/// The one form of `path` a record holds and a hold is keyed by. The folder that holds the store is
 /// resolved once, so the same store is recognized however its path was spelled, whether with a case
 /// Windows folds, a `\\?\` prefix, a `..` or a link in the output folder. Only the parent is
 /// resolved: the store itself may not exist yet, and a name that was swapped under the same path is
 /// caught by the marker's id rather than by this text.
-pub(super) fn canonical(path: &Path) -> PathBuf {
-    let Some(name) = path.file_name() else {
-        return absolute(path);
-    };
+///
+/// A path whose parent cannot be resolved has no form here, and the caller is told rather than given
+/// the path as it was written: two spellings of one folder would then get two holds, and a claim
+/// and a removal of one store could run at the same time. On Windows this is also the difference
+/// between a `\\?\` path and one without it, which name one folder and compare as two.
+pub(super) fn canonical(path: &Path) -> Result<PathBuf, Error> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    match fs::canonicalize(parent) {
-        Ok(real) => real.join(name),
-        Err(_) => absolute(path),
+    let real = fs::canonicalize(parent).map_err(|e| storage("resolve", parent, e))?;
+    match path.file_name() {
+        Some(name) => Ok(real.join(name)),
+        // A root has no name to put under a resolved parent, and is never a store.
+        None => Err(Error::Storage(format!(
+            "cannot resolve {}: it names no folder of its own",
+            path.display()
+        ))),
     }
-}
-
-fn absolute(path: &Path) -> PathBuf {
-    std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn random_id() -> Result<String, Error> {

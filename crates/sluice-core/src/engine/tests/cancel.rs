@@ -23,7 +23,9 @@ fn store_of(out: &Path, ticket: &str) -> (String, std::path::PathBuf) {
 /// queued cannot stop between them and leave a folder that no record names, which the next run
 /// would refuse as another transfer's.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[allow(clippy::await_holding_lock)] // the one test lock, held for the whole test
 async fn a_claim_that_is_cancelled_leaves_a_store_the_next_run_resumes() {
+    let _alone = crate::engine::storage::exclusive_removals();
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("one.bin");
     fs::write(&source, vec![5u8; 64 * 1024]).unwrap();
@@ -52,6 +54,7 @@ async fn a_claim_that_is_cancelled_leaves_a_store_the_next_run_resumes() {
     let waited = partial.clone();
     tokio::task::spawn_blocking(move || crate::engine::storage::with_hold(&waited, || ()))
         .await
+        .unwrap()
         .unwrap();
     let record = crate::engine::storage::find_record(&partial, &owner)
         .unwrap()
@@ -75,7 +78,9 @@ async fn a_claim_that_is_cancelled_leaves_a_store_the_next_run_resumes() {
 /// waits on a held file, which is the state an interrupt leaves when a store's close is still being
 /// tried.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[allow(clippy::await_holding_lock)] // the one test lock, held for the whole test
 async fn a_discard_that_outlives_its_receive_leaves_the_next_store_alone() {
+    let _alone = crate::engine::storage::exclusive_removals();
     let dir = tempfile::tempdir().unwrap();
     let source = dir.path().join("one.bin");
     fs::write(&source, vec![7u8; 64 * 1024]).unwrap();
@@ -83,29 +88,11 @@ async fn a_discard_that_outlives_its_receive_leaves_the_next_store_alone() {
     let out = dir.path().join("out");
     let (owner, partial) = store_of(&out, &text);
 
-    // The arm is taken when the transfer reports what it will write, which is after it has claimed
-    // its store and before the removal that follows a finished transfer.
-    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
-    let armed = partial.clone();
-    let watcher = tokio::spawn(async move {
-        while let Some(event) = events.recv().await {
-            if matches!(event, Event::Started { .. }) {
-                return Some(crate::engine::storage::parked::arm(&armed));
-            }
-        }
-        None
-    });
+    let (tx, events) = tokio::sync::mpsc::unbounded_channel();
     let waiting = text.clone();
     let opts = options(&out);
     let receiving = tokio::spawn(async move { super::receive(&waiting, &opts, &tx).await });
-    let (reached, release) = tokio::time::timeout(Duration::from_secs(60), watcher)
-        .await
-        .expect("the first receive reported nothing")
-        .unwrap()
-        .expect("the first receive did not report what it would write");
-    tokio::task::spawn_blocking(move || reached.recv().unwrap())
-        .await
-        .unwrap();
+    let release = arm_removal(events, partial.clone()).await;
     receiving.abort();
     let _ = receiving.await;
     assert!(
@@ -151,4 +138,30 @@ async fn a_discard_that_outlives_its_receive_leaves_the_next_store_alone() {
         .expect("the marker of the second store was removed");
     assert_eq!(found.owner.id.as_deref(), Some(record.id.as_str()));
     outgoing.provider.shutdown().await.unwrap();
+}
+
+/// Arms the removal of `partial` once the receive reports that it started, which is after it has
+/// claimed its store and before the removal that follows a finished transfer. Returns the sender
+/// that lets that removal go on, once it has reached the arm.
+async fn arm_removal(
+    mut events: tokio::sync::mpsc::UnboundedReceiver<Event>,
+    partial: std::path::PathBuf,
+) -> std::sync::mpsc::Sender<()> {
+    let watcher = tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            if matches!(event, Event::Started { .. }) {
+                return Some(crate::engine::storage::parked::arm(&partial));
+            }
+        }
+        None
+    });
+    let (reached, release) = tokio::time::timeout(Duration::from_secs(60), watcher)
+        .await
+        .expect("the first receive reported nothing")
+        .unwrap()
+        .expect("the first receive did not report that it started");
+    tokio::task::spawn_blocking(move || reached.recv().unwrap())
+        .await
+        .unwrap();
+    release
 }

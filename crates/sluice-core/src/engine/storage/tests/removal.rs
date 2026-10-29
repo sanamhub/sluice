@@ -4,11 +4,13 @@
 /// tried. The removal is parked on an event; the open finishes while it is parked, so the wait is
 /// the store's close and not the folder's.
 #[tokio::test]
+#[allow(clippy::await_holding_lock)] // the one test lock, held for the whole test
 async fn an_open_is_not_held_by_a_removal_that_is_retrying() {
     use std::time::Duration;
 
     use crate::engine::storage::{Collector, Store, TempStore};
 
+    let _alone = crate::engine::storage::exclusive_removals();
     let dir = tempfile::tempdir().unwrap();
     let temp = TempStore::open(dir.path(), Collector::Off).await.unwrap();
     let folder = temp.path().to_path_buf();
@@ -51,6 +53,7 @@ fn the_end_of_a_command_waits_for_a_removal_that_is_still_running() {
 
     use super::super::{parked, remove_quietly, wait_for_removals};
 
+    let _alone = crate::engine::storage::exclusive_removals();
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("folder");
     std::fs::create_dir(&folder).unwrap();
@@ -74,7 +77,8 @@ fn the_end_of_a_command_waits_for_a_removal_that_is_still_running() {
 }
 
 /// A folder a hold kept is tried again when the command ends: a removal that gave up is not the
-/// last word, so a command that ends leaves nothing it made.
+/// last word, so a command that ends leaves nothing it made. The hold is released once the first
+/// removal has returned, so the retry has the file free whatever a slow machine did with the clock.
 #[cfg(windows)]
 #[test]
 fn the_end_of_a_command_tries_a_removal_that_gave_up() {
@@ -85,6 +89,7 @@ fn the_end_of_a_command_tries_a_removal_that_gave_up() {
 
     use super::super::{remove_quietly, wait_for_removals};
 
+    let _alone = crate::engine::storage::exclusive_removals();
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("folder");
     std::fs::create_dir(&folder).unwrap();
@@ -95,17 +100,17 @@ fn the_end_of_a_command_tries_a_removal_that_gave_up() {
         .share_mode(0)
         .open(&file)
         .unwrap();
-    // Longer than the removal's own waits, so that removal gives up and leaves the folder for the
-    // end of the command.
-    let released = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1400));
+    let (release, released) = std::sync::mpsc::channel();
+    let holder = std::thread::spawn(move || {
+        let _ = released.recv();
         drop(held);
     });
     remove_quietly(&folder);
     assert!(folder.exists(), "the removal was expected to give up");
+    release.send(()).unwrap();
+    holder.join().unwrap();
     let began = Instant::now();
     wait_for_removals(Duration::from_secs(2));
-    released.join().unwrap();
     assert!(!folder.exists(), "the folder was left for the sweep");
     assert!(
         began.elapsed() < Duration::from_secs(2),
@@ -124,6 +129,7 @@ fn a_folder_held_for_a_moment_is_still_removed() {
         time::{Duration, Instant},
     };
 
+    let _alone = crate::engine::storage::exclusive_removals();
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("folder");
     std::fs::create_dir(&folder).unwrap();
@@ -147,6 +153,93 @@ fn a_folder_held_for_a_moment_is_still_removed() {
         "the removal waited for {:?}",
         started.elapsed()
     );
+}
+
+/// A removal queued on a runtime that is shut down before the task starts is kept, not lost: a
+/// blocking task the runtime drops takes a plain count with it, so the path is recorded as left and
+/// the end of the command removes the folder itself.
+#[test]
+fn a_removal_that_never_ran_is_kept_for_the_end_of_the_command() {
+    use std::time::Duration;
+
+    use super::super::{removals::Queued, wait_for_removals};
+
+    let _alone = crate::engine::storage::exclusive_removals();
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("folder");
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::write(folder.join("file"), b"bytes").unwrap();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    // A runtime that has stopped accepts no blocking task: the task is dropped where it is spawned,
+    // which is what happens to a task still queued when a command's runtime ends.
+    let handle = runtime.handle().clone();
+    runtime.shutdown_background();
+    let queued = Queued::begin(folder.clone());
+    drop(handle.spawn_blocking(move || queued.run()));
+
+    assert!(folder.exists(), "the removal ran on a stopped runtime");
+    wait_for_removals(Duration::from_secs(2));
+    assert!(!folder.exists(), "the kept folder was left for the sweep");
+}
+
+/// The paths a removal keeps are keyed by the one form the hold uses, so a later removal that
+/// spells the folder another way clears the entry: nothing retries a folder that is gone or that a
+/// claim now owns.
+#[test]
+fn a_kept_path_is_the_one_the_hold_is_keyed_by() {
+    use std::time::Duration;
+
+    use super::super::{
+        removals::{gone, left},
+        wait_for_removals,
+    };
+
+    let _alone = crate::engine::storage::exclusive_removals();
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let store = out.join(".sluice-partial-x");
+    std::fs::create_dir(&store).unwrap();
+    std::fs::write(store.join("file"), b"bytes").unwrap();
+    let spelled_differently = out.join("..").join("out").join(".sluice-partial-x");
+
+    left(&spelled_differently);
+    gone(&store);
+    wait_for_removals(Duration::from_secs(1));
+    assert!(
+        store.exists(),
+        "a kept path was retried under another spelling"
+    );
+}
+
+/// The end of a command does not remove a kept path that a record names: a claim may have made it a
+/// live store since the removal gave up, under another spelling of the same folder, and the folder
+/// is that claim's.
+#[test]
+fn the_end_of_a_command_leaves_a_kept_store_a_record_names() {
+    use std::time::Duration;
+
+    use super::super::{forget_record, remember_record, removals::left, wait_for_removals};
+
+    let _alone = crate::engine::storage::exclusive_removals();
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    let store = out.join(".sluice-partial-x");
+    std::fs::create_dir(&store).unwrap();
+    std::fs::write(store.join("file"), b"bytes").unwrap();
+    remember_record(&store, "root-one").unwrap();
+    left(&out.join("..").join("out").join(".sluice-partial-x"));
+
+    wait_for_removals(Duration::from_secs(1));
+    assert!(
+        store.exists(),
+        "the end of the command removed a store a record names"
+    );
+    forget_record(&store);
 }
 
 /// Only an error a moment can clear is worth another try: a name that is gone or a path that cannot

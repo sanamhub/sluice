@@ -84,6 +84,7 @@ async fn decide(
     tokio::task::spawn_blocking(move || storage::with_hold(&dir, || resumable_store(&dir, &root)))
         .await
         .map_err(|error| Error::Storage(format!("cannot read {}: {error}", partial.display())))?
+        .map_err(|error| Error::Storage(format!("cannot resolve {}: {error}", partial.display())))?
 }
 
 /// The marker of the store this transfer may resume and the identity of the folder it was read
