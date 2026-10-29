@@ -31,6 +31,20 @@ fn a_record_path_is_resolved_through_the_folder_that_holds_it() {
     assert!(err.to_string().contains("missing"), "{err}");
 }
 
+/// A link that does not lead anywhere is not a folder, even though the link itself is there: a path
+/// under it has no resolved form, and the absolute spelling would be a key that a second spelling
+/// of the same place could not meet.
+#[cfg(unix)]
+#[test]
+fn a_path_under_a_dangling_link_has_no_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let dangling = dir.path().join("dangling");
+    std::os::unix::fs::symlink(dir.path().join("nowhere"), &dangling).unwrap();
+    let err = canonical(&dangling.join(".sluice-partial-x")).unwrap_err();
+    assert!(matches!(err, crate::Error::Storage(_)), "{err}");
+    assert!(err.to_string().contains("dangling"), "{err}");
+}
+
 /// A volume that cannot resolve a folder still gives it one key: the verbatim form and the plain
 /// form of an absolute path meet, whatever case the drive letter is written in, and so do the two
 /// forms of a share.
@@ -55,4 +69,22 @@ fn a_volume_that_cannot_be_resolved_still_gives_one_key() {
             "{spelling}"
         );
     }
+}
+
+/// Only `ERROR_INVALID_FUNCTION` is the failure the fallback exists for. A folder that is not there,
+/// a link that loops and a name that is too long all fail for reasons of their own, and none of them
+/// may be given the absolute spelling as a key.
+#[cfg(windows)]
+#[test]
+fn only_the_one_windows_error_falls_back() {
+    use super::super::registry::unusable_name;
+
+    let raw = |code: i32| std::io::Error::from_raw_os_error(code);
+    assert!(unusable_name(&raw(1)), "ERROR_INVALID_FUNCTION");
+    for code in [2, 3, 5, 32, 123, 1004] {
+        assert!(!unusable_name(&raw(code)), "{code}");
+    }
+    assert!(!unusable_name(&std::io::Error::from(
+        std::io::ErrorKind::NotFound
+    )));
 }

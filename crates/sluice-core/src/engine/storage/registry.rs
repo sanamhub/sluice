@@ -254,13 +254,19 @@ pub(super) fn canonical(path: &Path) -> Result<PathBuf, Error> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let real = match fs::canonicalize(parent) {
         Ok(real) => real,
-        // Some volumes, among them RAM disks and encrypted or virtual drives, answer no Win32 name
-        // for a folder that is there: `GetFinalPathNameByHandleW` fails with ERROR_INVALID_FUNCTION,
-        // and Rust's own fallback by device path fails with it. The folder's absolute form is then
-        // the one form it has: `absolute` settles `.` and `..` without a disk, and [`one_form`]
-        // folds the verbatim prefix and the drive letter, so the ways of spelling that folder meet
-        // on one key.
-        Err(error) => match fs::symlink_metadata(parent) {
+        // A volume that answers no final name for a folder that is there is the one case the
+        // fallback is for: some RAM disks, and some encrypted or virtual drives, fail
+        // `GetFinalPathNameByHandleW` with ERROR_INVALID_FUNCTION, and Rust's own fallback by
+        // device path fails with it too. Every other failure — a folder that is not there, a link
+        // that dangles or loops, a permission — is a refusal: the absolute form is a key a second
+        // spelling of the same place could not meet, and handing one out would let a claim and a
+        // removal of one store run at once.
+        //
+        // `std::path::absolute` makes the path absolute without touching the disk. On Windows it
+        // also folds `.` and `..` lexically, as `GetFullPathNameW` does; on other systems it only
+        // prepends the current directory and keeps a `..` as written. It is called only on Windows,
+        // because only Windows has the error above.
+        Err(error) if unusable_name(&error) => match fs::symlink_metadata(parent) {
             Ok(_) => std::path::absolute(parent)
                 .map(one_form)
                 .map_err(|_| storage("resolve", parent, error))?,
@@ -268,6 +274,7 @@ pub(super) fn canonical(path: &Path) -> Result<PathBuf, Error> {
             // not exist must not get a key that another spelling could meet.
             Err(_) => return Err(storage("resolve", parent, error)),
         },
+        Err(error) => return Err(storage("resolve", parent, error)),
     };
     match path.file_name() {
         Some(name) => Ok(real.join(name)),
@@ -277,6 +284,21 @@ pub(super) fn canonical(path: &Path) -> Result<PathBuf, Error> {
             path.display()
         ))),
     }
+}
+
+/// Whether a failed `canonicalize` is the one Windows failure the fallback is for: the volume
+/// answered no final name for a folder that is there. Every other system always answers, so no
+/// error falls back there.
+#[cfg(windows)]
+pub(super) fn unusable_name(error: &std::io::Error) -> bool {
+    // `ERROR_INVALID_FUNCTION` as the Win32 call returns it. An `io::ErrorKind` would not do: the
+    // error is a raw OS code, and several unrelated kinds share the same number range.
+    error.raw_os_error() == Some(1)
+}
+
+#[cfg(not(windows))]
+pub(super) fn unusable_name(_: &std::io::Error) -> bool {
+    false
 }
 
 /// The one form of an absolute path on a volume [`canonical`] could not resolve: the Windows
