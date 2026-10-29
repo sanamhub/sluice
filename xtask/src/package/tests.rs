@@ -79,3 +79,37 @@ fn a_missing_checksum_names_the_artifact() {
     let err = files("1.2.3", &sums).unwrap_err().to_string();
     assert!(err.contains(missing), "{err}");
 }
+
+/// The file of `name` for `version`.
+fn file(name: &str, version: &str) -> String {
+    files(version, &sums())
+        .unwrap()
+        .into_iter()
+        .find(|(path, _)| path == name)
+        .unwrap_or_else(|| panic!("no {name}"))
+        .1
+}
+
+/// The PKGBUILD installs from the folder `dist` puts the binary in. A folder named for the binary
+/// and the target, without `cli`, is not one the archive has, so `makepkg` would fail at install.
+#[test]
+fn the_arch_package_installs_from_the_archive_folder() {
+    let text = file("aur/PKGBUILD", "1.2.3");
+    assert!(!text.contains("$srcdir/sluice-$"), "{text}");
+    for folder in [
+        "sluice-cli-x86_64-unknown-linux-gnu",
+        "sluice-cli-aarch64-unknown-linux-gnu",
+    ] {
+        assert!(text.contains(folder), "{folder} is missing from {text}");
+    }
+    assert!(text.contains("$srcdir/$_folder/sluice"), "{text}");
+}
+
+/// `makepkg` refuses a hyphen in `pkgver`, and a pre-release version has one. The source URL keeps
+/// the version as the tag spells it, so the download still finds the release.
+#[test]
+fn a_pre_release_keeps_its_hyphen_in_the_url_and_an_underscore_in_pkgver() {
+    let text = file("aur/PKGBUILD", "1.3.0-rc.2");
+    assert!(text.contains("pkgver=1.3.0_rc.2"), "{text}");
+    assert!(text.contains("/download/v1.3.0-rc.2/"), "{text}");
+}

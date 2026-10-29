@@ -33,7 +33,20 @@ pub fn read(dir: &Path) -> Result<Checksums> {
             // A line may name a path, and a leading `*` marks a binary read.
             let name = name.trim_start_matches('*');
             let name = name.rsplit(['/', '\\']).next().unwrap_or(name);
-            sums.insert(name.to_string(), hash.to_ascii_lowercase());
+            let hash = hash.to_ascii_lowercase();
+            match sums.entry(name.to_string()) {
+                std::collections::btree_map::Entry::Occupied(seen) => {
+                    // The same artifact in two files is fine when they agree; two hashes for it
+                    // mean the release is not one release, and either choice could publish a pin
+                    // that does not match the bytes.
+                    if seen.get() != &hash {
+                        anyhow::bail!("{} has two checksums: {} and {}", name, seen.get(), hash);
+                    }
+                }
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(hash);
+                }
+            }
         }
     }
     if sums.is_empty() {
@@ -81,5 +94,37 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let err = read(dir.path()).unwrap_err().to_string();
         assert!(err.contains("no `.sha256` file"), "{err}");
+    }
+
+    /// Two files that give one artifact different hashes are a release that disagrees with itself.
+    /// Taking whichever line was read last would publish a pin that may not match the bytes.
+    #[test]
+    fn one_artifact_with_two_hashes_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let artifact = "sluice-cli-x86_64-unknown-linux-gnu.tar.xz";
+        let first = "a".repeat(64);
+        let second = "b".repeat(64);
+        std::fs::write(
+            dir.path().join("one.sha256"),
+            format!("{first}  {artifact}\n"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("two.sha256"),
+            format!("{second}  ./{artifact}\n"),
+        )
+        .unwrap();
+        let err = read(dir.path()).unwrap_err().to_string();
+        assert!(err.contains(artifact), "{err}");
+        assert!(err.contains("two checksums"), "{err}");
+
+        // The same hash twice is one release saying one thing twice.
+        std::fs::write(
+            dir.path().join("two.sha256"),
+            format!("{first}  ./{artifact}\n"),
+        )
+        .unwrap();
+        let sums = read(dir.path()).unwrap();
+        assert_eq!(sums[artifact], first);
     }
 }
