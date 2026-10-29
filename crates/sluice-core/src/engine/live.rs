@@ -199,17 +199,18 @@ async fn woke(events: &mut broadcast::Receiver<()>) -> bool {
     }
 }
 
-/// Writes one record as its length and its bytes.
+/// Writes one record as its length and its bytes. A failure here is the peer's, and the deepest
+/// cause says what it did: a connection close carries a reason, and the wrappers above it do not.
 async fn write_record(send: &mut SendStream, record: &[u8]) -> Result<(), Error> {
     send.write_all(&hello::varint_bytes(record.len() as u64))
         .await
-        .map_err(|e| Error::Network(format!("the live stream stopped: {e}")))?;
+        .map_err(|e| Error::Network(format!("the live stream stopped: {}", crate::plain(&e))))?;
     send.write_all(record)
         .await
-        .map_err(|e| Error::Network(format!("the live stream stopped: {e}")))?;
+        .map_err(|e| Error::Network(format!("the live stream stopped: {}", crate::plain(&e))))?;
     send.flush()
         .await
-        .map_err(|e| Error::Network(format!("the live stream stopped: {e}")))
+        .map_err(|e| Error::Network(format!("the live stream stopped: {}", crate::plain(&e))))
 }
 
 /// Reads one record. The length is a varint and no record is longer than a `LogClose`, so a
@@ -227,15 +228,17 @@ pub(super) async fn read_record(recv: &mut RecvStream) -> Result<Vec<u8>, Error>
     let mut bytes = vec![0u8; len];
     recv.read_exact(&mut bytes)
         .await
-        .map_err(|e| Error::Network(format!("the live stream stopped: {e}")))?;
+        .map_err(|e| stream(std::io::Error::other(e)))?;
     Ok(bytes)
 }
 
+/// The error for a record stream that stopped. The deepest cause is kept: a peer that closed the
+/// connection chose a reason, and that reason is what a person needs to read.
 fn stream(error: std::io::Error) -> Error {
     if error.kind() == std::io::ErrorKind::InvalidData {
         Error::Verify(format!("the live stream is not readable: {error}"))
     } else {
-        Error::Network(format!("the live stream stopped: {error}"))
+        Error::Network(format!("the live stream stopped: {}", crate::plain(&error)))
     }
 }
 

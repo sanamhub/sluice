@@ -205,14 +205,16 @@ pub(super) async fn fetch_blob(
 }
 
 /// A get error is a verification failure only when the provider sent bytes that did not match the
-/// root; everything else is a connection that can be retried.
+/// root; everything else is a connection that can be retried. The deepest cause is the one worth
+/// printing: a peer that closed the connection chose a reason, and that reason is the whole of what
+/// went wrong, while the wrappers above it only say that a read or a write failed.
 fn classify(e: GetError) -> Error {
     match &e {
         GetError::Decode {
             source: DecodeError::LeafHashMismatch { .. } | DecodeError::ParentHashMismatch { .. },
             ..
         } => Error::Verify("received bytes did not match the ticket root".to_string()),
-        _ => Error::Network(format!("the transfer stopped: {e}")),
+        _ => Error::Network(format!("the transfer stopped: {}", crate::plain(&e))),
     }
 }
 
