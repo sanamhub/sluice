@@ -92,17 +92,29 @@ keeps serving after it, so a sender that expects receivers taking a part uses `-
 with Ctrl+C.
 
 A ticket is a read capability, not a pairing: anyone holding it can take the content for as long as
-it lives and the send is serving. `--keep N` serves at most N receivers that each took the whole
-transfer, and stops when the last of them finishes; a receiver that reconnects is still one
-receiver, and one that is already transferring finishes. Plain `--keep` has no such limit, so a
-ticket shared with several people works until the send is stopped. Either way the sender prints a
-line when a receiver connects and one when it finishes or drops, naming it by the first ten
-characters of its endpoint id in the base32 a ticket is written in, with whether the connection is
-direct or relayed and whether it took the whole transfer or part of it:
+it lives and the send is serving. `--keep N` offers N places. A receiver takes one with the first
+request the sender lets in, whatever it asks for, and keeps it however its connection ends; a
+receiver that reconnects under the same endpoint id takes no second place. Once all N are taken,
+every other endpoint is refused before a byte is sent to it. The send stops when every place is
+taken and the holders' connections have closed; a holder that stays connected without asking for
+anything is waited for at most 30 seconds after its last request or byte. Plain `--keep` has no
+such limit, so a ticket shared with several people works until the send is stopped.
+
+A place belongs to the endpoint, not to the bytes, so `sluice inspect` against a send with
+`--keep N` takes one: it reads the manifest, which is a request like any other. Each `sluice recv`
+binds a fresh endpoint key, so a person who runs `recv` again after a failure takes a second place,
+and the fingerprint on a line names one run, not one person.
+
+With `--keep N` the sender prints a line when a receiver takes a place; plain `--keep` prints one
+when a connection opens. Each prints one when the connection closes or drops, naming the receiver
+by the first ten characters of its endpoint id in the base32 a ticket is written in, with whether
+the connection is direct or relayed and whether it took the whole transfer or part of it. A refused
+endpoint gets one line of its own, at most three in all:
 
 ```
 receiver 3f9k2m0q4x connected directly
 receiver 3f9k2m0q4x finished, the whole transfer (directly)
+receiver 7c1p9w2n5m refused, the 2 places are taken (directly)
 ```
 
 A receiver nobody expected is a reason to press Ctrl-C: the ticket is what lets it in.
@@ -130,10 +142,11 @@ is fetched. A file under 1 MiB travels inside a pack beside other files, and a p
 taking a packed file fetches its whole pack; the planned line says how many bytes that moves. A
 partial store made with one selection is not continued by a receive with another: it starts a store
 of its own. The top-level names an earlier selection's run made stay this ticket's in this output, so
-a second selection writes into them without `--force`; a file that run did not write still clashes
-as any other. Because this receive takes only a part of the ticket, it does not end a one-time
-`sluice send`: the sender is still serving afterwards, and only a receive of the whole ticket stops
-it. A sender that serves partial receivers should run with `--keep` and stop it with Ctrl+C.
+a second selection writes into them without `--force`; every existing file is still checked and
+clashes without `--force`, the files that run wrote included. Because this receive takes only a part
+of the ticket, it does not end a one-time `sluice send`: the sender is still serving afterwards, and
+only a receive of the whole ticket stops it. A sender that serves partial receivers should run with
+`--keep` and stop it with Ctrl+C; with `--keep N`, a partial receive has taken a place all the same.
 
 Several tickets run through the queue: three at once by default, high before normal before low, and
 a network failure waits the queue's backoff before the same ticket is tried again from its partial
