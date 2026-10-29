@@ -322,66 +322,14 @@ fn starts_with_ignore_ascii_case(name: &str, prefix: &str) -> bool {
 /// a UI draws, so a name with U+202E in it can show `exe.txt` for a file that ends in `.exe`, and a
 /// control character can write an escape sequence into the line the name is printed in.
 fn is_forbidden(c: char) -> bool {
-    matches!(c, '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*') || is_display_control(c)
+    matches!(c, '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*')
+        || super::show::is_display_control(c)
 }
 
-/// The characters that can change what a terminal shows: the C0 and C1 controls, and the
-/// bidirectional formatting characters.
-fn is_display_control(c: char) -> bool {
-    matches!(
-        c,
-        '\u{0}'..='\u{1f}'
-            | '\u{7f}'..='\u{9f}'
-            | '\u{61c}'
-            | '\u{200e}'
-            | '\u{200f}'
-            | '\u{202a}'..='\u{202e}'
-            | '\u{2066}'..='\u{2069}'
-    )
-}
-
-/// `text` with every character that could change what a terminal shows written as an escape, so a
-/// name or a message a stranger chose cannot reorder the line it is printed in or write an escape
-/// sequence into it.
-///
-/// These are the characters of [`is_display_control`], the two Unicode line separators, and the
-/// backslash. `SPEC.md` section 8 refuses all but the separators in a manifest path, so a path from
-/// a manifest cannot carry one; a live stream's name is a file name on the sender's disk, which on
-/// Unix may hold a backslash. The backslash is doubled so that a name holding the four characters
-/// `\u{202e}` cannot be read as the escape written for U+202E: the printed line uses `\` as the
-/// introducer of an escape, so a literal one has to be written twice.
-///
-/// # Examples
-///
-/// ```
-/// use sluice_core::manifest::path::shown;
-///
-/// assert_eq!(shown("a.txt"), "a.txt");
-/// assert_eq!(shown("report\u{202e}fdp.exe"), r"report\u{202e}fdp.exe");
-/// assert_eq!(shown("a\u{1b}[2Jb"), r"a\u{1b}[2Jb");
-/// assert_eq!(shown(r"a\u{202e}b"), r"a\\u{202e}b");
-/// assert_eq!(shown("a\u{2028}b\u{2029}c"), r"a\u{2028}b\u{2029}c");
-/// ```
-pub fn shown(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        if c == '\\' {
-            out.push_str(r"\\");
-        } else if is_display_control(c) || is_line_separator(c) {
-            out.push_str(&format!("\\u{{{:x}}}", u32::from(c)));
-        } else {
-            out.push(c);
-        }
-    }
-    out
-}
-
-/// The characters Unicode puts in the `Zl` and `Zp` categories. Each category holds exactly one
-/// code point, and a terminal may break the line at either of them, which a name or a message from
-/// a stranger could use to split the line it is printed in.
-fn is_line_separator(c: char) -> bool {
-    matches!(c, '\u{2028}' | '\u{2029}')
-}
+/// The printed form of a path or a message that came from elsewhere: every character that could
+/// change what a terminal shows written as an escape. [`super::show::shown`] says what it escapes
+/// and why, and this path is where the command line looks for it.
+pub use super::show::shown;
 
 /// Rule 8. Windows reads `con.tar.gz` and `CON .txt` as the console, so the name is what comes
 /// before the first `.`, without trailing spaces. U+0131 counts as `I`: it is not clear that a

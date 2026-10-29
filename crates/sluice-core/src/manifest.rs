@@ -12,6 +12,7 @@ pub mod pack;
 pub mod path;
 mod rules;
 mod sequence;
+mod show;
 #[cfg(test)]
 mod tests;
 mod wire;

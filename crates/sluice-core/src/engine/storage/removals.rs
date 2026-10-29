@@ -1,11 +1,13 @@
 //! The removals one command has started, so the command can wait for them before it ends.
 //!
 //! A removal waits for a file another process may still hold, and those waits add up to more than a
-//! second. They run on threads that may block, and neither a blocking task nor a thread of our own
-//! is joined when the command's runtime is dropped: a `spawn_blocking` task outlives the future
-//! that started it. A command that ended during one left its folder behind, for a sweep that only
-//! removes a folder a day old. So every removal is counted here, and a command waits for the count
-//! to reach zero, and tries again for the folders a hold kept, before it exits.
+//! second. What happens to one when the command's runtime is dropped is not one thing: a blocking
+//! task that is already running is waited for, without limit, because no shutdown timeout is set; a
+//! blocking task that has not started is dropped, and [`Queued`] keeps its path for the end of the
+//! command; and a thread of our own, the one a dropped [`super::Temp`] starts, is never joined at
+//! all. A command that ended during one left its folder behind, for a sweep that only removes a
+//! folder a day old. So every removal is counted here, and a command waits for the count to reach
+//! zero, and tries again for the folders a hold kept, before it exits.
 
 use std::{
     path::{Path, PathBuf},
