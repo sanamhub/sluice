@@ -319,7 +319,7 @@ impl Provider {
 }
 
 /// The endpoint's reports stopped without the endpoint being shut down. No path does that today:
-/// the sender lives in the endpoint's hook, so its end means the hook and the endpoint are gone.
+/// the endpoint's hook and the request gate hold the senders, so their end means both are gone.
 /// A wait that selected on a closed channel would poll it at once for ever, so it ends here.
 fn reports_stopped() -> Error {
     Error::Bug("the endpoint stopped reporting its receivers".to_string())

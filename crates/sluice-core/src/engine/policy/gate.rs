@@ -232,7 +232,7 @@ impl Gate {
         let now = now_ms();
         let mut places = lock(&self.places);
         let Some(peer) = peer else {
-            return places.limit().is_none();
+            return places.admits_unknown();
         };
         let admission = places.admit(peer.endpoint, now);
         let places_count = places.limit().unwrap_or_default() as u32;
