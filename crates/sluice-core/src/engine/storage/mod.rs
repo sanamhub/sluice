@@ -19,27 +19,31 @@ pub(super) use open::{GC_INTERVAL, open_store_after};
 #[cfg(test)]
 pub(crate) use registry::remember_as;
 pub use registry::{
-    clash as registry_clash, discard_apart, find as find_record, forget as forget_record,
-    remember as remember_record,
+    clash as registry_clash, discard_apart, find as find_record, forget as forget_record, with_hold,
 };
 pub use repair::repair;
 pub(crate) use repair::{changed, data_path, name_count};
-#[cfg(test)]
-pub use store::MARKER;
-pub use store::{FolderId, Owner, claim, identify, partial_dir, recorded, remember};
-#[cfg(test)]
-pub use temp::PREFIX as TEMP_PREFIX;
+pub use store::{FolderId, Owner, begin, identify, partial_dir, recorded};
 pub use temp::{Temp, sweep_temporary_store, temp_dir, temp_path};
 pub use temp_store::TempStore;
+
+// A receive makes its store, records it and names it through `begin`. A test also drives those
+// three steps on their own, so they are part of the test build and not of the library.
+#[cfg(test)]
+pub use registry::remember as remember_record;
+#[cfg(test)]
+pub use store::{MARKER, claim, remember};
+#[cfg(test)]
+pub use temp::PREFIX as TEMP_PREFIX;
 
 use std::{fs, io, path::Path, time::Duration};
 
 use crate::Error;
 
-/// The waits before another try at removing a folder that a command just closed. A store file can
-/// stay held for a moment after its database closes, by the store's own actor or by a scanner on
-/// Windows, and the waits add up to under two seconds together.
-const REMOVAL_DELAYS: [u64; 7] = [10, 20, 40, 80, 160, 320, 640];
+/// The waits before another try at a name another process holds: a folder that a removal cannot
+/// take, or a store folder that the repair cannot open while a scanner has it. They add up to under
+/// two seconds together.
+const HOLD_DELAYS: [u64; 7] = [10, 20, 40, 80, 160, 320, 640];
 
 /// How much room a receive of `content` bytes needs before it starts. The store keeps the partial
 /// blob and its outboard, about 0.4% of the content, and the manifest and metadata are small. A
@@ -111,8 +115,9 @@ pub fn policy_path(doing: &str, path: &Path, source: io::Error) -> Error {
 }
 
 /// A removal a test can hold at its start, keyed by folder, so the test can act while the removal
-/// is still to be tried. A test run shares the static with every other removal in the process, so
-/// only the armed folder stops, and only once.
+/// is still to be tried. A test run shares the one list with every other removal in the process, so
+/// an arm is taken by the first removal of its own folder, and only once; several tests can arm at
+/// the same time because no two of them use one folder.
 #[cfg(test)]
 pub(crate) mod parked {
     use std::{
@@ -120,27 +125,28 @@ pub(crate) mod parked {
         sync::{Mutex, mpsc},
     };
 
-    type Arms = (PathBuf, mpsc::Sender<()>, mpsc::Receiver<()>);
+    type Arm = (PathBuf, mpsc::Sender<()>, mpsc::Receiver<()>);
 
-    static ARMED: Mutex<Option<Arms>> = Mutex::new(None);
+    static ARMED: Mutex<Vec<Arm>> = Mutex::new(Vec::new());
 
     /// Holds the next removal of `path` until the returned sender is signalled, and reports on the
     /// returned receiver when the removal has reached this point.
     pub(crate) fn arm(path: &Path) -> (mpsc::Receiver<()>, mpsc::Sender<()>) {
         let (started, started_at) = mpsc::channel();
         let (release, released_at) = mpsc::channel();
-        *ARMED.lock().unwrap() = Some((path.to_owned(), started, released_at));
+        let mut armed = ARMED.lock().unwrap();
+        armed.push((path.to_owned(), started, released_at));
         (started_at, release)
     }
 
     /// Called at the start of every removal. Blocks only the removal of an armed folder.
     pub(crate) fn wait(path: &Path) {
         let armed = {
-            let mut slot = ARMED.lock().unwrap();
-            match &*slot {
-                Some((at, _, _)) if at == path => slot.take(),
-                _ => None,
-            }
+            let mut armed = ARMED.lock().unwrap();
+            armed
+                .iter()
+                .position(|(at, _, _)| at == path)
+                .map(|index| armed.swap_remove(index))
         };
         if let Some((_, started, release)) = armed {
             let _ = started.send(());
@@ -164,7 +170,7 @@ pub fn remove_quietly(path: &Path) {
         Ok(()) => return,
         Err(error) => error,
     };
-    for delay in REMOVAL_DELAYS {
+    for delay in HOLD_DELAYS {
         if !retryable(&last) {
             return;
         }

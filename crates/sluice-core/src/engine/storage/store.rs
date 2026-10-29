@@ -122,6 +122,27 @@ pub fn claim(dir: &Path) -> Result<(), Error> {
     crate::home::restrict_folder(dir)
 }
 
+/// Claims `dir`, writes this home's record of it and the marker that ties the two together, under
+/// the one hold on its path.
+///
+/// The three are one step because a claim that stopped between them would leave a folder with no
+/// record, which the next run refuses as another transfer's, or a record naming a folder that is
+/// gone. The caller runs this on a blocking thread and does not act on its answer: a command that
+/// is cancelled while this is queued leaves either a store the next run can resume, or nothing.
+pub fn begin(dir: &Path, root: &str, names: &BTreeSet<String>, force: bool) -> Result<(), Error> {
+    registry::with_hold(dir, || {
+        claim(dir)?;
+        let id = registry::remember(dir, root)?;
+        if let Err(e) = remember(dir, root, names, force, &id) {
+            // The hold is already this task's, and a folder without a marker is one no later run
+            // could tell from another transfer's.
+            registry::discard_here(dir);
+            return Err(e);
+        }
+        Ok(())
+    })
+}
+
 /// Writes the marker of a store this receive just made, naming the top-level entries it creates,
 /// whether it may replace what is there, and the id this home's record of the store carries. A
 /// later run reads it to tell this receive's folders from the user's, to refuse to continue a run
