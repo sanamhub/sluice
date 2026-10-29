@@ -84,9 +84,9 @@ The API returns these values: `gh api repos/sanamhub/sluice/environments/release
 3. **The `release` environment, for the release files.** `host` waits for an approval: Actions >
    the run > **Review deployments** > tick `release` > **Approve and deploy**.
 4. **The `release` environment, for each image.** `image-publish` starts only after `host` has made
-   the release. It has one job for `sluice-relay` and one for `sluice`, and both wait in the
-   environment, so a run has three deployments to approve, all within 35 days of the tag push
-   ([why][cut-a-release]).
+   the release. It has one job for `sluice-relay` and one for `sluice`. Both wait in the
+   environment at the same time, and one approval of `release` under **Review deployments** lets
+   both go, so a run asks for two approvals in all, within GitHub's limits, given below.
 
 ### Checks before approving `host`
 
@@ -147,25 +147,25 @@ never skips the checks even if the pull request merged without them.
    git push origin v0.2.0
    ```
 
-The tag's version must be the one in `Cargo.toml`: `dist` refuses a tag that names no package
-version.
+   The tag's version must be the one in `Cargo.toml`: `dist` refuses a tag that names no package
+   version.
 4. Watch the `release` run. The `ci` jobs come first, then `plan`, which refuses a tag with anything
    but letters, digits, `.` and `-` after the `v`. Then the six binary builds, the relay and tool
    builds on both architectures, and the installers. `host` waits for all of them, and the owner
    approves it when they are green, then each image job once the release is up.
 
-**A failed build publishes nothing.** If either image fails on either architecture, `host` does not
-start, so no file or image is public. Open the run and choose **Re-run failed jobs**: passed builds
-keep their artifacts (30 days for binaries, 35 for images), and `host` waits for an approval again.
-If the re-run fails the same way, the cause is in the tagged commit: delete the tag, fix it on
-`main`, and tag the next patch version.
+   **A failed build publishes nothing.** If either image fails on either architecture, `host` does not
+   start, so no file or image is public. Open the run and choose **Re-run failed jobs**: passed builds
+   keep their artifacts (30 days for binaries, 35 for images), and `host` waits for an approval again.
+   If the re-run fails the same way, the cause is in the tagged commit: delete the tag, fix it on
+   `main`, and tag the next patch version.
 
-If `host` fails after creating the draft, the draft remains and the next `host` refuses to start
-while a release or draft for the tag exists. It names the command: `gh release delete <tag> --yes`.
-Then **Re-run failed jobs**, and approve again.
+   If `host` fails after creating the draft, the draft remains and the next `host` refuses to start
+   while a release or draft for the tag exists. It names the command: `gh release delete <tag> --yes`.
+   Then **Re-run failed jobs**, and approve again.
 
-A failed push after `host` is different: the release is already public. This is the order, and what
-a failure leaves, for each image:
+   A failed push after `host` is different: the release is already public. This is the order, and what
+   a failure leaves, for each image:
 
    | Step that fails | Tags left public, for that image |
    |---|---|
@@ -174,13 +174,13 @@ a failure leaves, for each image:
    | `push-image.sh index` | both architecture tags, attested; the index only if it was written |
    | the index attestation | the index, unattested |
 
-Every step of a re-run writes the tag again, so a re-run overwrites what the failed one left. Re-run
-that job within 30 days of the tag push, and approve it again. A failure in one image's job does not
-stop the other: each row of the matrix retries on its own.
+   Every step of a re-run writes the tag again, so a re-run overwrites what the failed one left. Re-run
+   that job within 30 days of the tag push, and approve it again. A failure in one image's job does not
+   stop the other: each row of the matrix retries on its own.
 
-**How `host` publishes.** It creates the release as a draft with every file attached, then marks it
-published. An immutable release refuses a file added later ([Managing releases][managing-releases]).
-A job that fails after the draft exists leaves it for the operator to delete.
+   **How `host` publishes.** It creates the release as a draft with every file attached, then marks it
+   published. An immutable release refuses a file added later ([Managing releases][managing-releases]).
+   A job that fails after the draft exists leaves it for the operator to delete.
 5. Check the release page. It holds:
 
    | Files | How many |
@@ -193,8 +193,8 @@ A job that fails after the draft exists leaves it for the operator to delete.
    | `sluice-cli.cdx.xml`, the SBOM | 1 |
    | `dist-manifest.json`, what dist built and where | 1 |
 
-Then verify one archive and both images as in [`docs/install.md`](../install.md). The images are
-not files of the release; they are the two ghcr.io packages, each with the three tags below.
+   Then verify one archive and both images as in [`docs/install.md`](../install.md). The images are
+   not files of the release; they are the two ghcr.io packages, each with the three tags below.
 
 ## Rehearsing a release
 
@@ -214,8 +214,9 @@ requests, not a push.
 Make one commit on a branch with these contents:
 
 - `Cargo.toml`: `[workspace.package] version = "0.1.0"` becomes `"0.1.0-rc.1"`.
-- `Cargo.lock`: the three workspace entries, `sluice-cli`, `sluice-core` and `sluice-live`, change
-  from `version = "0.1.0"` to `0.1.0-rc.1`. No dependency version changes.
+- `Cargo.lock`: every workspace member that takes the workspace version (`sluice-cli`,
+  `sluice-core`, `sluice-live`, the bench crates and `xtask`) changes from `0.1.0` to `0.1.0-rc.1`.
+  `cargo check` rewrites them; no dependency version changes.
 - `CHANGELOG.md` is unchanged. There is no `0.1.0-rc.1` section, so the rehearsal's release notes are
   empty; that is what is being rehearsed, not the notes.
 
@@ -274,13 +275,14 @@ attestation store, naming digests no tag points at, which is harmless.
 Make the final version commit on a branch, the same way:
 
 - `Cargo.toml`: `version = "0.1.0-rc.1"` becomes `"0.1.0"`.
-- `Cargo.lock`: the three workspace entries go back to `0.1.0`.
+- `Cargo.lock`: the same workspace members go back to `0.1.0`, rewritten by `cargo check`.
 - `CHANGELOG.md`: no change from you. release-plz adds the `0.1.0` section when the push runs its
   workflow.
 
 ```
 git switch main && git pull
 git switch -c release-0.1.0
+cargo check
 git add Cargo.toml Cargo.lock
 git commit -m "chore: release v0.1.0"
 git push -u origin release-0.1.0
@@ -386,7 +388,6 @@ To move release-plz on, set `RELEASE_PLZ_VERSION` in `release-plz.yml`, and the 
 the asset's `digest` in `gh api repos/release-plz/release-plz/releases/tags/<tag>`, and check that a
 download hashes to the same value.
 
-[cut-a-release]: #cut-a-release
 [github-token]: https://docs.github.com/en/actions/concepts/security/github_token
 [reviewing-deployments]: https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments
 [re-running-runs]: https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs
