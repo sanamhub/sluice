@@ -15,22 +15,25 @@ use crate::{
 /// A cycle would otherwise resolve for ever, and a long chain is a way to hide where a link lands.
 const MAX_LINKS: usize = 40;
 
-/// Checks every link in the manifest against the tree the transfer is about to make, then writes
-/// them. The check is a decision about the manifest and the output folder as it is, so the order the
-/// links are written in cannot change an answer.
+/// Checks every taken link in the manifest against the tree the transfer is about to make, then
+/// writes them. The check is a decision about the manifest and the output folder as it is, so the
+/// order the links are written in cannot change an answer. Only taken links are checked and written:
+/// a link this run does not take is not in the tree, and a target that went through it would be
+/// resolved through something that is never made.
 pub(super) fn write_all(
     manifest: &Manifest,
     options: &ReceiveOptions,
     resume: bool,
+    chosen: &[usize],
 ) -> Result<(), Error> {
     // Keyed by the name a file system may treat as equal to the path, not by the path itself: a
     // target that names `sub/a` where the manifest makes `sub/A` has to be answered, and the map is
     // how the check finds the link that may be the same one there. The two spellings are never
     // treated as one name, though: the answer to such a name is a refusal, because only the volume
     // knows whether it folds them.
-    let links: BTreeMap<String, (&str, &str)> = manifest
-        .entries()
+    let links: BTreeMap<String, (&str, &str)> = chosen
         .iter()
+        .map(|&at| &manifest.entries()[at])
         .filter(|entry| entry.kind == Kind::Symlink)
         .filter_map(|entry| {
             let target = entry.link_target.as_ref()?;

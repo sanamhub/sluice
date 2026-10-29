@@ -35,6 +35,7 @@ mod lifecycle;
 mod live;
 mod resume;
 mod rules;
+mod select;
 mod server;
 mod transfer;
 
@@ -80,6 +81,7 @@ fn options(out: &Path) -> super::ReceiveOptions {
         rate: None,
         write_limit: None,
         max_network_failures: crate::queue::MAX_NETWORK_FAILURES,
+        include: None,
     }
 }
 

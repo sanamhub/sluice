@@ -9,7 +9,7 @@ fn a_marker_says_which_names_were_created_and_whether_the_run_was_forced() {
     use super::super::{recorded, remember};
     let dir = tempfile::tempdir().unwrap();
     let names = std::collections::BTreeSet::from(["made".to_string()]);
-    remember(dir.path(), "abc123", &names, true, "id-1").unwrap();
+    remember(dir.path(), "abc123", &names, true, "id-1", "all").unwrap();
     let found = recorded(dir.path()).unwrap().unwrap();
     let marker = found.owner;
     assert_eq!(marker.root, "abc123");
@@ -27,6 +27,7 @@ fn a_marker_says_which_names_were_created_and_whether_the_run_was_forced() {
         &std::collections::BTreeSet::new(),
         false,
         "id-2",
+        "all",
     )
     .unwrap();
     let found = recorded(dir.path()).unwrap().unwrap();
@@ -76,6 +77,7 @@ fn a_link_in_place_of_the_marker_is_refused() {
         &std::collections::BTreeSet::new(),
         false,
         "id-1",
+        "all",
     )
     .unwrap_err();
     assert!(matches!(err, crate::Error::Storage(_)), "{err}");
@@ -92,7 +94,7 @@ fn the_identity_read_with_the_marker_is_the_folders_own() {
     let store = root.path().join("store");
     std::fs::create_dir(&store).unwrap();
     let none = std::collections::BTreeSet::new();
-    remember(&store, "abc123", &none, false, "id-1").unwrap();
+    remember(&store, "abc123", &none, false, "id-1", "all").unwrap();
     let found = recorded(&store).unwrap().unwrap();
     let id = found
         .id
@@ -101,7 +103,7 @@ fn the_identity_read_with_the_marker_is_the_folders_own() {
 
     std::fs::rename(&store, root.path().join("gone")).unwrap();
     std::fs::create_dir(&store).unwrap();
-    remember(&store, "abc123", &none, false, "id-1").unwrap();
+    remember(&store, "abc123", &none, false, "id-1", "all").unwrap();
     assert_ne!(
         identify(&store).unwrap(),
         Some(id),

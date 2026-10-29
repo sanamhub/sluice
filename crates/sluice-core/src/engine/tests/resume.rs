@@ -171,7 +171,8 @@ async fn a_store_of_another_transfer_is_refused_without_removing_it() {
     let names = std::collections::BTreeSet::new();
     // The marker of the first transfer's store, under the name the second transfer would use, and a
     // record for the second transfer that carries the same id.
-    crate::engine::storage::remember(&partial, &owners[0], &names, false, "a-record").unwrap();
+    crate::engine::storage::remember(&partial, &owners[0], &names, false, "a-record", "all")
+        .unwrap();
     crate::engine::storage::remember_as(&partial, &owners[1], "a-record").unwrap();
     let marker = fs::read_to_string(partial.join(crate::engine::storage::MARKER)).unwrap();
 

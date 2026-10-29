@@ -5,12 +5,12 @@ use clap::Args;
 use serde_json::{Value, json};
 use sluice_core::{
     Error,
-    engine::{Offered, Offering, inspect},
+    engine::{Offered, Offering, Selection, inspect},
     manifest::{Kind, Limits, path::shown},
 };
 
 use crate::{
-    output::{Outcome, summary},
+    output::{Outcome, bytes_text, summary},
     recv::ticket_text,
 };
 
@@ -26,10 +26,17 @@ pub struct InspectArgs {
     /// List every name, not only the first 50
     #[arg(long)]
     pub all: bool,
+    /// Describe only the entries whose path matches this glob, such as `photos/**`; repeat for
+    /// more. `*` matches inside one name and `**` crosses a `/`
+    #[arg(long, value_name = "PATTERN")]
+    pub include: Vec<String>,
 }
 
 pub fn run(args: &InspectArgs) -> Result<Outcome, Error> {
     let text = ticket_text(&args.ticket)?;
+    let include = (!args.include.is_empty())
+        .then(|| Selection::new(&args.include))
+        .transpose()?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -40,6 +47,7 @@ pub fn run(args: &InspectArgs) -> Result<Outcome, Error> {
     let offering = runtime.block_on(crate::recv::until_interrupted(inspect(
         &text,
         Limits::default(),
+        include,
     )))?;
     Ok(Outcome::Offering {
         offering,
@@ -58,10 +66,15 @@ pub fn text(offering: &Offering, all: bool) -> String {
         }
         Offering::Static(offered) => offered,
     };
-    let mut text = format!(
-        "{}\n",
-        summary(offered.files, offered.folders, offered.links, offered.bytes)
-    );
+    let mut text = summary(offered.files, offered.folders, offered.links, offered.bytes);
+    if offered.filtered {
+        text.push_str(&format!(
+            " of {} files, {}",
+            offered.all_files,
+            bytes_text(offered.all_bytes)
+        ));
+    }
+    text.push('\n');
     let shown_lines = if all {
         offered.entries.len()
     } else {
@@ -107,13 +120,17 @@ fn object(offered: &Offered) -> Value {
         .iter()
         .map(|entry| json!({ "path": entry.path, "kind": kind(entry.kind), "size": entry.size }))
         .collect();
-    json!({
+    let mut object = json!({
         "files": offered.files,
         "folders": offered.folders,
         "links": offered.links,
         "bytes": offered.bytes,
         "entries": entries,
-    })
+    });
+    if offered.filtered {
+        object["of"] = json!({ "files": offered.all_files, "bytes": offered.all_bytes });
+    }
+    object
 }
 
 fn kind(kind: Kind) -> &'static str {
@@ -162,6 +179,9 @@ mod tests {
             folders,
             links,
             bytes,
+            all_files: files,
+            all_bytes: bytes,
+            filtered: false,
             entries,
         })
     }
@@ -238,6 +258,25 @@ mod tests {
         assert_eq!(
             text(&Offering::Live, false),
             "a live stream, whose names and size arrive with the stream itself\n"
+        );
+    }
+
+    /// A filtered view says what part of the transfer it takes, and the JSON carries the same
+    /// totals, so a user trying patterns sees the same numbers a receive will print.
+    #[test]
+    fn a_filtered_view_says_what_part_of_the_transfer_it_takes() {
+        let Offering::Static(mut offering) = offered(vec![
+            ("tree", Kind::Dir, 0),
+            ("tree/a.txt", Kind::File, 1024),
+        ]) else {
+            panic!("a fixed transfer");
+        };
+        offering.filtered = true;
+        offering.all_files = 9;
+        offering.all_bytes = 12 << 20;
+        assert_eq!(
+            text(&Offering::Static(offering), false),
+            "1 file, 1 folder, 1.0 KiB of 9 files, 12.0 MiB\ntree/\n  a.txt\n"
         );
     }
 }

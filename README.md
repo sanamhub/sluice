@@ -85,8 +85,12 @@ Live mode, ranges and several tickets through the queue work today.
 
 ```sh
 sluice recv <ticket> --range 4G:4.1G    # fetch and verify one byte range
+sluice recv <ticket> --include 'photos/**'   # take part of a folder
 sluice send --live ./recording.mkv      # follow a file that is still being written
 ```
+
+`--include` takes a glob over the ticket's own paths, may be given more than once, and
+`sluice inspect --include` shows the same part before anything is fetched.
 
 `--range` takes a half-open range, `start:end`, `start:+length`, `start:` or `:end`, in bytes or
 with a unit: `K`, `M`, `G`, `T` and `P` (and `KiB` and the like) count in 1024s, `KB`, `MB` and the

@@ -53,5 +53,14 @@ mod tests {
             main.contains("sluice\\-id(1)"),
             "the main page links its subcommands"
         );
+        // The flags come from the clap definition, so a page that does not name one is a page made
+        // from a definition that lost it.
+        for name in ["sluice-recv.1", "sluice-inspect.1"] {
+            let page = fs::read_to_string(target.join(name)).unwrap();
+            assert!(
+                page.contains("\\-\\-include"),
+                "{name} does not name --include"
+            );
+        }
     }
 }

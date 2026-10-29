@@ -59,7 +59,17 @@ fn human(event: &Event, verb: &str) -> String {
             folders,
             links,
             bytes,
-        } => summary(*files, *folders, *links, *bytes),
+            of_files,
+            of_bytes,
+        } => {
+            let mut line = summary(*files, *folders, *links, *bytes);
+            // A selection says what part of the ticket it takes, so a user sees that the patterns
+            // did something before the transfer starts.
+            if let (Some(of_files), Some(of_bytes)) = (of_files, of_bytes) {
+                line.push_str(&format!(" of {of_files} files, {}", bytes_text(*of_bytes)));
+            }
+            line
+        }
         Event::Started {
             name,
             files,
@@ -151,6 +161,8 @@ mod tests {
             folders: 2,
             links: 1,
             bytes: 1536,
+            of_files: None,
+            of_bytes: None,
         };
         assert_eq!(
             human(&planned, "receiving"),

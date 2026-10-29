@@ -15,6 +15,7 @@ mod rate;
 mod recv;
 mod recv_range;
 mod recv_stdout;
+mod select;
 mod send;
 mod storage;
 
@@ -37,6 +38,7 @@ pub use rate::Rate;
 pub use recv::{ReceiveOptions, Received, receive, top_level_rule};
 pub use recv_range::receive_range;
 pub use recv_stdout::receive_stdout;
+pub use select::Selection;
 pub(crate) use send::Scratch;
 #[cfg(test)]
 pub(super) use send::prepare_stdin_from as prepare_send_stdin_from;

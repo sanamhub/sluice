@@ -103,7 +103,13 @@ file or link that is already there, `--allow-hidden` accepts a top-level name st
 `--links` creates the symlinks the sender recorded (never followed outside the output), and
 `--no-times` skips restoring modification times. `--range 4G:4.1G` fetches one byte range of a
 one-file transfer. `--priority high|normal|low` orders several tickets, and `--limit-rate 50M` caps
-the whole command.
+the whole command. `--include PATTERN` takes only the entries of a folder ticket whose path matches
+the pattern; give it more than once to take the entries any of them match. `*` matches inside one
+name and `**` crosses a `/`, and the match is case-sensitive. A pattern that does not parse, or that
+matches nothing in the ticket, is refused before anything is fetched or written. A folder is made
+when an entry under it is taken, a link is taken when it matches, and only the taken files' content
+is fetched. A partial store made with one selection is not continued by a receive with another: it
+starts a store of its own.
 
 Several tickets run through the queue: three at once by default, high before normal before low, and
 a network failure waits the queue's backoff before the same ticket is tried again from its partial
@@ -118,7 +124,9 @@ anything else at its target is a clash.
 
 Before it writes anything, a receive prints one line with what the manifest will write, the same
 line `sluice inspect` prints: `3 files, 2 folders, 1.2 GiB`. In `--json` that is an event of its
-own, `{"event":"planned","files":3,"folders":2,"links":0,"bytes":1258291}`.
+own, `{"event":"planned","files":3,"folders":2,"links":0,"bytes":1258291}`. With `--include` the
+line counts only what it takes and says what part of the transfer that is, `1 file, 1.0 KiB of 9
+files, 12.0 MiB`, and the JSON event carries `"of_files":9,"of_bytes":12582912` beside the counts.
 
 **`sluice inspect`**
 
@@ -129,6 +137,11 @@ into a temporary store under the home's `tmp` that is removed before the command
 same limits a receive applies. The tree shows at most 50 names; `--all` lists every one, and a cut
 tree ends with a line that counts the rest. A name is printed with a control or a bidirectional
 character written as its escape (`\u{202e}`), so it cannot reorder the line it is in.
+
+`--include PATTERN` prints the view a receive with the same pattern would write: only the entries it
+takes, the folders above them, and the summary line ending `of 9 files, 12.0 MiB`. It takes the same
+patterns, refuses the same ones, and is the way to try a pattern before receiving with it. Neither
+`--include` nor a pattern on a live or a raw ticket has anything to choose from, so both are refused.
 
 A live ticket has no manifest, so there is nothing to read: the command says so and exits 0. A raw
 ticket (from `send -`) has a size and no name.

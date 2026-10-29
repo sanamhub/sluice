@@ -38,6 +38,20 @@ fn recv_help_says_which_mode_a_received_file_keeps() {
     assert!(text.contains("owner read and write"), "{text}");
 }
 
+/// The flags that take a glob say which separator `*` stops at, so a pattern tried with
+/// `inspect --include` means the same thing to a receive.
+#[test]
+fn the_include_flag_says_how_its_patterns_match() {
+    for args in [&["recv", "--help"][..], &["inspect", "--help"]] {
+        let text = help(args);
+        assert!(text.contains("--include"), "{args:?}: {text}");
+        assert!(
+            text.contains("`*` matches inside one name") && text.contains("crosses a `/`"),
+            "{args:?} does not say how a pattern matches: {text}"
+        );
+    }
+}
+
 /// Help is prose for a user: a doc comment that carried a line break or a comment marker into its
 /// text prints the source instead, and one flag with a broken doc comment is not something a reader
 /// would think to look for.

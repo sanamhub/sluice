@@ -15,6 +15,8 @@ categories = ["network-programming", "filesystem", "cryptography"]
 blake3.workspace = true
 ed25519-dalek.workspace = true
 getrandom.workspace = true
+# The patterns of --include, matched over a manifest's paths.
+globset.workspace = true
 iroh = { workspace = true, features = ["unstable-net-report"] }
 iroh-blobs.workspace = true
 iroh-mdns-address-lookup.workspace = true

@@ -54,7 +54,9 @@ pub enum Event {
         congestion: Congestion,
     },
     /// What the transfer is about to write, counted from the manifest before the first byte: the
-    /// same line `inspect` prints, so a user sees the size before anything is written.
+    /// same line `inspect` prints, so a user sees the size before anything is written. A receive
+    /// that takes only some of a folder's entries says here what part it takes: `of_files` and
+    /// `of_bytes` are the whole manifest's, and both are set or neither is.
     Planned {
         /// How many files it will write.
         files: u64,
@@ -64,6 +66,12 @@ pub enum Event {
         links: u64,
         /// The sum of the files' sizes in bytes.
         bytes: u64,
+        /// How many files the whole manifest holds, when only some are taken.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        of_files: Option<u64>,
+        /// The sum of every file's size in the manifest, when only some are taken.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        of_bytes: Option<u64>,
     },
     /// The connection is up, and this is the path it uses.
     Connected {
