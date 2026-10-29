@@ -45,7 +45,7 @@ use crate::Error;
 /// The waits before another try at a name another process holds: a folder that a removal cannot
 /// take, or a store folder that the repair cannot open while a scanner has it. They add up to under
 /// two seconds together.
-const HOLD_DELAYS: [u64; 7] = [10, 20, 40, 80, 160, 320, 640];
+pub(super) const HOLD_DELAYS: [u64; 7] = [10, 20, 40, 80, 160, 320, 640];
 
 /// How much room a receive of `content` bytes needs before it starts. The store keeps the partial
 /// blob and its outboard, about 0.4% of the content, and the manifest and metadata are small. A

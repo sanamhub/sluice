@@ -84,21 +84,25 @@ pub async fn repair(partial: &Path, expected: Option<FolderId>) -> Result<(), Er
     if identify(partial)? != expected {
         return Err(changed(partial));
     }
+    let folder = partial.to_path_buf();
+    // The open can wait for another program that holds the folder, and the sweep waits for files a
+    // scanner holds. Those waits belong on a blocking thread, and one thread does the whole pass.
+    tokio::task::spawn_blocking(move || repair_here(&folder, expected))
+        .await
+        .map_err(|error| Error::Storage(format!("cannot repair {}: {error}", partial.display())))?
+}
+
+/// One pass over the store: open its folder, check that it is the folder the caller checked, sweep
+/// it, and on the platform whose handles cannot list a folder, check it again by name.
+fn repair_here(partial: &Path, expected: Option<FolderId>) -> Result<(), Error> {
     let Some(dir) = Dir::open(partial)? else {
         return Ok(());
     };
     if dir.identity()? != expected {
         return Err(changed(partial));
     }
-    let folder = partial.to_path_buf();
-    match tokio::task::spawn_blocking(move || dir.sweep(&folder)).await {
-        Ok(Ok(())) => recheck(partial, expected),
-        Ok(Err(error)) => Err(error),
-        Err(error) => Err(Error::Storage(format!(
-            "cannot repair {}: {error}",
-            partial.display()
-        ))),
-    }
+    dir.sweep(partial)?;
+    recheck(partial, expected)
 }
 
 /// Copied and hashed in one pass, so the hash is of the bytes that went into the target and not of
