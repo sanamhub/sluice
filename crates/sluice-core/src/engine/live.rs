@@ -109,7 +109,9 @@ impl LiveLog {
     /// Ends the stream. Every reader that is still writing records wakes up and writes the close.
     pub(super) fn finish(&self, close: LogClose) {
         *lock(&self.close) = Some(close);
-        let _ = self.closed.send(true);
+        // `send` stores nothing while no one is subscribed, and a follower can end before the
+        // provider starts to wait; `send_replace` stores the value either way.
+        self.closed.send_replace(true);
         let _ = self.signals.send(());
     }
 
@@ -118,7 +120,7 @@ impl LiveLog {
     /// rather than waiting for a close that will never come.
     pub(super) fn fail(&self, message: &str) {
         *lock(&self.error) = Some(message.to_string());
-        let _ = self.closed.send(true);
+        self.closed.send_replace(true);
         let _ = self.signals.send(());
     }
 

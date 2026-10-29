@@ -229,7 +229,8 @@ async fn the_free_space_floor_stops_the_stream() {
 
 /// A file that shrinks while it is followed ends the stream with a storage error instead of closing
 /// over bytes that are no longer the source, and the sender reports it rather than a finished send.
-/// A follower that failed otherwise leaves every reader waiting for a close that never comes.
+/// A follower that failed otherwise leaves every reader waiting for a close that never comes, and a
+/// failure that comes before the send starts serving must end it all the same.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_file_that_shrank_while_followed_ends_the_stream_with_an_error() {
     let dir = tempfile::tempdir().unwrap();
@@ -259,6 +260,15 @@ async fn a_file_that_shrank_while_followed_ends_the_stream_with_an_error() {
     .await
     .expect("the follower sealed no segment");
     fs::write(&source, b"short").unwrap();
+    // The follower fails before anyone serves the stream, so the send must learn of a failure it
+    // was not yet waiting for.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while log.error().is_none() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the follower did not notice the file shrank");
 
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let served = tokio::time::timeout(Duration::from_secs(10), outgoing.serve(Keep::One, &tx))
