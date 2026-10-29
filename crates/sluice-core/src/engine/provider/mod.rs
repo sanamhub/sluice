@@ -88,6 +88,13 @@ impl Provider {
         self._dir = Some(dir);
     }
 
+    /// Sets how many places this send offers. The caller sets it before the ticket is printed;
+    /// `serve` sets the same value again, so a send that never reserved still counts, but the
+    /// moment in which a ticket is already known and the limit is not is closed.
+    pub(super) fn set_limit(&mut self, limit: Option<u32>) {
+        lock_places(&self.places).set_limit(limit);
+    }
+
     /// The send's own folder, for a test that watches it while the send runs.
     #[cfg(test)]
     pub fn scratch(&self) -> Option<&std::path::Path> {

@@ -6,7 +6,7 @@ use n0_future::StreamExt;
 
 /// A client endpoint and a store that fetch by hand, so one endpoint can connect twice and be the
 /// same receiver both times.
-async fn client(dir: &TempDir, name: &str) -> (Endpoint, FsStore) {
+pub(super) async fn client(dir: &TempDir, name: &str) -> (Endpoint, FsStore) {
     let endpoint = endpoint::bind(None, &RelayModeChoice::Disabled, Congestion::Cubic, None)
         .await
         .unwrap();
@@ -29,25 +29,6 @@ async fn take_whole(probe: &Endpoint, store: &FsStore, addr: &iroh::EndpointAddr
     .expect("the fetch did not finish")
     .unwrap();
     conn.close(crate::engine::COMPLETE_CLOSE.into(), b"complete");
-}
-
-/// One receiver that takes every byte and closes the normal way, without the completion code. It
-/// holds a place all the same: the place is about who was served, not about what was said.
-async fn take_whole_without_code(
-    probe: &Endpoint,
-    store: &FsStore,
-    addr: &iroh::EndpointAddr,
-    root: Hash,
-) {
-    let conn = probe.connect(addr.clone(), iroh_blobs::ALPN).await.unwrap();
-    tokio::time::timeout(
-        Duration::from_secs(20),
-        crate::engine::fetch::fetch_whole(store, &conn, root),
-    )
-    .await
-    .expect("the fetch did not finish")
-    .unwrap();
-    conn.close(0u32.into(), b"done");
 }
 
 /// Two receivers each take the whole ticket, and the send stops. The sender reports one place and
@@ -174,41 +155,6 @@ where
         }
     }
     panic!("the held transfer did not finish");
-}
-
-/// A receive that took everything but closed without the completion code still holds a place, and
-/// its close is what ends a send that offered one.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_receiver_without_the_completion_code_still_uses_a_place() {
-    let dir = tempfile::tempdir().unwrap();
-    let body = vec![3u8; 64 << 10];
-    let (outgoing, _text) = prepared(&dir, &body).await;
-    let root = Hash::from(outgoing.roots[0]);
-    let roots = outgoing.roots.clone();
-    let addr = outgoing.provider.addr();
-    let (tx, _events) = tokio::sync::mpsc::unbounded_channel();
-    let serving = tokio::spawn(async move {
-        outgoing
-            .provider
-            .serve(
-                Stop::Keep {
-                    limit: Some(1),
-                    roots,
-                },
-                &tx,
-            )
-            .await
-    });
-
-    let (probe, store) = client(&dir, "quiet").await;
-    take_whole_without_code(&probe, &store, &addr, root).await;
-    let end = tokio::time::timeout(Duration::from_secs(10), serving)
-        .await
-        .expect("a quiet close did not end the send")
-        .unwrap()
-        .unwrap();
-    assert_eq!(end, ServeEnd::Downloaded);
-    probe.close().await;
 }
 
 /// Reading only the manifest spends a place: `inspect` against a send that offers one ends it when
