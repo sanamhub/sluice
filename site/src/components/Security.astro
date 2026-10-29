@@ -1,0 +1,54 @@
+---
+import { INSTALL, SECURITY, THREAT_MODEL } from "../data/links";
+
+const facts = [
+    {
+        title: "Checked, not trusted",
+        body: "Every block of a transfer is verified against its BLAKE3 root before it is written. A live segment is checked against a signed log. Paths are checked before anything is created: no absolute path, no .., no link followed out of the output folder.",
+    },
+    {
+        title: "Encrypted on the wire",
+        body: "The transport is QUIC with TLS 1.3, and the handshake prefers a post-quantum key exchange. A relay forwards encrypted packets it cannot read, and keeps nothing.",
+    },
+    {
+        title: "Nothing phones home",
+        body: "No analytics, no telemetry, no account, and no relay you did not name. With no relay set, a case that needs one fails and says why.",
+    },
+];
+---
+
+<section class="section security" id="security" aria-labelledby="security-title">
+    <div class="wrap security-grid">
+        <div class="section-head">
+            <h2 id="security-title">What protects a transfer</h2>
+            <p>
+                The <a href={THREAT_MODEL}>threat model</a> lists what is protected, what is not, and
+                the known weaknesses. Report a vulnerability privately, as <a href={SECURITY}>SECURITY.md</a>
+                says.
+            </p>
+        </div>
+        <ul class="facts">
+            {
+                facts.map((fact) => (
+                    <li class="fact">
+                        <h3>{fact.title}</h3>
+                        <p>{fact.body}</p>
+                    </li>
+                ))
+            }
+        </ul>
+        <aside class="ticket-card" aria-labelledby="ticket-title">
+            <h3 id="ticket-title">A ticket is a key</h3>
+            <p>
+                It names the sender's endpoint id, its addresses, the relay if one is used, the
+                content's root and the expiry. It holds no file names. Anyone who has it can fetch
+                the content while the sender serves it, so share it like a password.
+            </p>
+            <p class="muted">
+                Releases are built in CI with attestations: <code translate="no">gh attestation verify</code>
+                proves an archive came from this repository. The <a href={INSTALL}>install guide</a>
+                shows how.
+            </p>
+        </aside>
+    </div>
+</section>

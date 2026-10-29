@@ -1,0 +1,11 @@
+---
+// A sentence where `backticks` mark a command, a flag or a file name. Each marked part becomes
+// <code>, so the data lists stay plain strings.
+interface Props {
+    text: string;
+}
+
+const parts = Astro.props.text.split("`").map((part, index) => ({ part, code: index % 2 === 1 }));
+---
+
+{parts.map(({ part, code }) => (code ? <code translate="no">{part}</code> : part))}

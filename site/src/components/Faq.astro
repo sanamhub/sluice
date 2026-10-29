@@ -1,60 +1,59 @@
 ---
-import { CONTRIBUTING, ROADMAP, SPEC } from "../data/links";
+import { CONTRIBUTING, ROADMAP } from "../data/links";
+import Prose from "./Prose.astro";
 
 const questions = [
     {
         q: "Is it free?",
-        a: "Yes. The code is Apache-2.0 or MIT. You pay only for hardware and for any relay you run.",
+        a: "Yes. The code is Apache-2.0 or MIT. You pay only for your machines and for a relay if you run one.",
     },
     {
         q: "Does it work over the internet, or only at home?",
-        a: "Both, in 1.0. On one network it connects directly. Across the internet it tries a direct path first. If that fails, it can use a relay you run: a server that forwards the data.",
+        a: "Both. On one network the machines connect directly. Across the internet they try a direct path first, through the routers. Machines behind strict routers need a relay to meet at: your own, or n0's public relays with `--n0-relays`.",
     },
     {
-        q: "Is it safe? Who can see my files?",
-        a: "Only the two computers keep the file. The connection is encrypted, and a relay you run passes data without storing it. A ticket is a secret: anyone who has it can fetch the file.",
-    },
-    {
-        q: "What works today?",
-        a: "sluice id, sluice doctor and sluice completions. Sending and receiving arrive in 1.0.",
-    },
-    {
-        q: "Do I need a server?",
-        a: "Not on one network. Across the internet, yes: a relay you run, which the two computers use to meet and punch a path to each other. Set as a meeting point, it fits on the smallest server and the file goes direct. Set as a full relay, it also carries the transfers that cannot go direct. Either way it never keeps the file.",
+        q: "Who can see my files?",
+        a: "Only the two machines keep them. The connection is encrypted, and a relay passes packets it cannot read. The ticket is the key: anyone who has it can fetch the content while the sender is serving and the ticket has not expired.",
     },
     {
         q: "What happens if the connection drops?",
-        a: "In 1.0, the transfer resumes at the last checked piece. The target is the first new byte within 2 s. Checked data is not sent again.",
+        a: "Run the same `recv` again. The receive kept the blocks it had checked, so it fetches only the rest. No unverified byte is ever written.",
     },
     {
-        q: "How is it different from the cloud?",
-        a: "The file goes straight to the other computer. There is no upload to a company's storage, no account and no plan limit. You keep the only copies.",
+        q: "How big can a file be?",
+        a: "Sluice sets no limit. The sender reads files where they are and the receiver writes as blocks arrive, so the disks are the limit.",
+    },
+    {
+        q: "Is there an app with a window?",
+        a: "Not yet. 0.1.0 is the command-line tool and the two container images. Desktop and browser clients are on the roadmap.",
     },
     {
         q: "How can I help?",
-        a: "Try doctor and say what it prints. Read the spec or the roadmap, or open an issue. Contributions and hard questions are both welcome.",
+        a: "Try it and say what happens, especially what `sluice doctor --network` prints on unusual networks. Issues, questions and pull requests are all welcome.",
     },
 ];
 ---
 
-<section class="section section-flow faq" id="questions" aria-labelledby="questions-title">
-    <div class="wrap">
+<section class="section faq" aria-labelledby="faq-title">
+    <div class="wrap faq-grid">
         <div class="section-head">
-            <h2 id="questions-title">Questions</h2>
-            <p class="section-lede">
-                The short answers. The <a href={SPEC}>specification</a> and the{" "}
-                <a href={ROADMAP}>roadmap</a> go further, and{" "}
+            <h2 id="faq-title">Questions</h2>
+            <p>
+                The <a href={ROADMAP}>roadmap</a> says what comes next, and
                 <a href={CONTRIBUTING}>contributing</a> says how to help.
             </p>
         </div>
-
         <div class="faq-list">
-            {questions.map((item) => (
-                <details class="faq-item">
-                    <summary>{item.q}</summary>
-                    <p>{item.a}</p>
-                </details>
-            ))}
+            {
+                questions.map((item) => (
+                    <details class="faq-item">
+                        <summary>{item.q}</summary>
+                        <p>
+                            <Prose text={item.a} />
+                        </p>
+                    </details>
+                ))
+            }
         </div>
     </div>
 </section>

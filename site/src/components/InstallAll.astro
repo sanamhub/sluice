@@ -1,0 +1,59 @@
+---
+// Every channel 0.1.0 ships, in the same tabs as the hero. Names match docs/install.md and the
+// package files the release generates.
+import { INSTALL } from "../data/links";
+import InstallTabs from "./InstallTabs.astro";
+
+const channels = [
+    {
+        id: "shell",
+        label: "Shell",
+        lines: [
+            "curl --proto '=https' --tlsv1.2 -LsSf \\",
+            "  https://github.com/sanamhub/sluice/releases/latest/download/sluice-cli-installer.sh | sh",
+        ],
+        note: "Linux and macOS, x86-64 and ARM64.",
+    },
+    {
+        id: "powershell",
+        label: "PowerShell",
+        lines: ["irm https://github.com/sanamhub/sluice/releases/latest/download/sluice-cli-installer.ps1 | iex"],
+        note: "Windows, x86-64 and ARM64.",
+    },
+    { id: "brew", label: "Homebrew", lines: ["brew install sanamhub/tap/sluice"], note: "macOS and Linux." },
+    {
+        id: "scoop",
+        label: "Scoop",
+        lines: ["scoop bucket add sanamhub https://github.com/sanamhub/scoop-bucket", "scoop install sluice"],
+        note: "Windows.",
+    },
+    { id: "winget", label: "winget", lines: ["winget install --id sanamhub.sluice -e"], note: "Windows." },
+    { id: "aur", label: "AUR", lines: ["yay -S sluice-bin"], note: "Arch Linux, x86-64 and ARM64." },
+    {
+        id: "docker",
+        label: "Docker",
+        lines: ["docker pull ghcr.io/sanamhub/sluice:0.1.0"],
+        note: "Linux, amd64 and arm64. The home lives on a volume.",
+    },
+    {
+        id: "source",
+        label: "Source",
+        lines: ["cargo install --git https://github.com/sanamhub/sluice sluice-cli --locked"],
+        note: "Any of the six targets, with Rust 1.91 or newer.",
+    },
+];
+---
+
+<section class="section install-all" id="install" aria-labelledby="install-title">
+    <div class="wrap install-grid">
+        <div class="section-head">
+            <h2 id="install-title">Install</h2>
+            <p>
+                One binary for Linux, macOS and Windows, on x86-64 and ARM64. The
+                <a href={INSTALL}>install guide</a> shows how to verify each download, upgrade and
+                uninstall.
+            </p>
+        </div>
+        <InstallTabs name="all" options={channels} />
+    </div>
+</section>

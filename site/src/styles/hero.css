@@ -1,0 +1,288 @@
+/* The hero: the headline and the install box on one side, the channel scene on the other. On a
+   narrow screen the headline comes first and the scene follows, so the H1 is above the fold. */
+
+.hero {
+  position: relative;
+  overflow: clip;
+  padding-block: clamp(2.5rem, 6vw, 5rem) clamp(3rem, 7vw, 6rem);
+}
+
+/* A wash of water light behind the scene, and a faint ruled channel bed across the whole band:
+   the page's background is the canal, not a pattern. */
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: -20% -10% auto 30%;
+  height: 120%;
+  background: radial-gradient(closest-side, var(--water-soft), transparent 70%);
+  filter: blur(40px);
+  pointer-events: none;
+}
+
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    180deg,
+    transparent 0 46px,
+    color-mix(in srgb, var(--line) 45%, transparent) 46px 47px
+  );
+  mask-image: radial-gradient(
+    ellipse 70% 60% at 70% 45%,
+    #000 10%,
+    transparent 75%
+  );
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.hero-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  align-items: center;
+  gap: clamp(1.5rem, 4vw, 4rem);
+}
+
+.hero-copy {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 36rem;
+}
+
+.lede {
+  max-width: 34rem;
+  color: var(--mist);
+  font-size: var(--step-1);
+  line-height: 1.5;
+}
+
+.hero-more {
+  color: var(--mist);
+  font-size: var(--step--1);
+}
+
+.hero-art {
+  position: relative;
+  aspect-ratio: 1000 / 620;
+  margin-right: calc(-1 * clamp(0rem, 4vw, 3rem));
+}
+
+/* The scene has no frame: its edges fade into the page. */
+.hero-art {
+  mask-image:
+    linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%),
+    linear-gradient(180deg, #000 80%, transparent 100%);
+  mask-composite: intersect;
+}
+
+.hero-still,
+.hero-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.hero-canvas {
+  opacity: 0;
+  transition: opacity 900ms ease;
+}
+
+.hero-art[data-live] .hero-canvas {
+  opacity: 1;
+}
+
+.hero-still {
+  transition: opacity 900ms ease;
+}
+
+.hero-art[data-live] .hero-still {
+  opacity: 0;
+}
+
+/* The still frame's parts, coloured from the tokens. */
+.s-stone {
+  fill: var(--stone);
+}
+
+.s-stone2 {
+  fill: var(--stone-2);
+}
+
+.s-line {
+  fill: var(--line);
+}
+
+.s-edge {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.s-water-line {
+  fill: none;
+  stroke: var(--water);
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0.7;
+}
+
+.s-cell-off {
+  fill: var(--line);
+}
+
+.s-cell-water,
+.s-block-water {
+  fill: var(--water);
+}
+
+.s-cell-brass,
+.s-block-brass,
+.s-brass {
+  fill: var(--brass);
+}
+
+.s-brass-ring {
+  fill: none;
+  stroke: var(--brass);
+  stroke-width: 4;
+}
+
+.s-flash {
+  stroke-width: 3;
+  opacity: 0.85;
+}
+
+@media (max-width: 56rem) {
+  .hero-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-art {
+    margin-right: 0;
+    margin-inline: calc(-1 * var(--gutter));
+  }
+}
+
+/* Install box, in the hero and in the install section. */
+
+.install {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--stone) 82%, transparent);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.install-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.install-tabs[hidden] {
+  display: none;
+}
+
+.install-tabs button {
+  flex: none;
+  padding: 0.45rem 0.8rem;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--mist);
+  font: inherit;
+  font-size: var(--step--1);
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.install-tabs button:hover {
+  color: var(--ink);
+}
+
+.install-tabs button[aria-selected="true"] {
+  background: var(--stone-2);
+  color: var(--ink);
+  box-shadow: inset 0 -2px 0 var(--water);
+}
+
+.install-panel {
+  padding: 0.9rem 1rem 1rem;
+}
+
+.install-panel + .install-panel {
+  border-top: 1px solid var(--line);
+}
+
+[data-enhanced] .install-panel + .install-panel {
+  border-top: 0;
+}
+
+[data-enhanced] .install-label {
+  display: none;
+}
+
+.install-label {
+  margin-bottom: 0.4rem;
+  color: var(--mist);
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+
+.install-code {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.install-code pre {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-x: auto;
+  color: var(--ink);
+  font-size: 0.86rem;
+  line-height: 1.6;
+  white-space: pre;
+  scrollbar-width: thin;
+}
+
+.install-code pre::before {
+  content: "$ ";
+  color: var(--water);
+}
+
+.install-note {
+  margin-top: 0.5rem;
+  color: var(--mist);
+  font-size: var(--step--1);
+}
+
+.copy {
+  flex: none;
+  padding: 0.35rem 0.75rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--brass);
+  color: var(--brass-ink);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.copy:hover {
+  background: color-mix(in srgb, var(--brass) 86%, white);
+}
+
+.copy[hidden] {
+  display: none;
+}

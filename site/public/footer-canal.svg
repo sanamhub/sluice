@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1600 240" preserveAspectRatio="xMidYMax slice">
+  <!-- A flight of canal locks at night, drawn as one shape: low hills, a sluice gate with its
+       winding wheel, two lock chambers stepping down, a footbridge, a narrowboat carrying three
+       blocks, reeds and a heron. The page uses it as a CSS mask, so it takes the theme's colour.
+       In the mask white is drawn and black is cut: the water, and a thin halo that keeps each
+       structure apart from the hills behind it. -->
+  <defs>
+    <g id="works">
+      <!-- The sluice gate: two posts, a head beam, a plate that slides, and the winding wheel -->
+      <rect x="242" y="78" width="9" height="112"/>
+      <rect x="275" y="78" width="9" height="112"/>
+      <rect x="234" y="72" width="58" height="9" rx="2"/>
+      <rect x="251" y="104" width="24" height="76"/>
+      <rect x="261" y="56" width="4" height="18"/>
+      <circle cx="263" cy="50" r="15"/>
+      <!-- Lock gates with their balance beams -->
+      <rect x="612" y="128" width="10" height="62"/>
+      <rect x="626" y="128" width="10" height="62"/>
+      <path d="M617 130 540 112 542 105 621 123Z"/>
+      <path d="M631 130 708 112 710 119 633 137Z"/>
+      <rect x="536" y="102" width="9" height="12" rx="2"/>
+      <rect x="972" y="146" width="10" height="52"/>
+      <rect x="984" y="146" width="10" height="52"/>
+      <path d="M977 148 900 130 902 123 981 141Z"/>
+      <path d="M989 148 1066 130 1068 137 991 155Z"/>
+      <rect x="896" y="120" width="9" height="12" rx="2"/>
+      <!-- Footbridge -->
+      <path d="M1080 176C1100 136 1180 126 1236 126S1372 136 1392 176H1374C1356 150 1300 140 1236 140S1116 150 1098 176Z"/>
+      <rect x="1100" y="104" width="5" height="34"/>
+      <rect x="1367" y="104" width="5" height="34"/>
+      <rect x="1100" y="102" width="272" height="5" rx="2"/>
+      <!-- Narrowboat with three blocks on deck -->
+      <path d="M1150 178H1330L1318 194H1166Z"/>
+      <rect x="1172" y="158" width="96" height="20" rx="3"/>
+      <rect x="1272" y="162" width="15" height="15" rx="2"/>
+      <rect x="1291" y="162" width="15" height="15" rx="2"/>
+      <rect x="1281" y="144" width="15" height="15" rx="2"/>
+      <!-- Heron -->
+      <path d="M1416 164C1414 152 1424 142 1440 142C1456 142 1462 152 1458 160C1450 166 1428 168 1416 164Z"/>
+      <path d="M1418 150C1408 146 1400 148 1396 154C1404 154 1412 156 1418 160Z"/>
+      <path d="M1446 144C1444 126 1448 112 1456 104L1460 107C1453 116 1450 130 1452 144Z"/>
+      <circle cx="1460" cy="104" r="5.5"/>
+      <path d="M1462 102 1488 106 1462 107Z"/>
+      <rect x="1436" y="162" width="2.5" height="36"/>
+      <rect x="1444" y="162" width="2.5" height="36"/>
+      <!-- Reeds -->
+      <path d="M1500 198C1498 172 1496 152 1490 136L1494 135C1500 152 1502 172 1504 198Z"/>
+      <path d="M1510 198C1510 166 1512 148 1518 128L1522 129C1516 150 1514 168 1514 198Z"/>
+      <rect x="1514" y="112" width="6" height="18" rx="3"/>
+      <path d="M1520 198C1526 174 1532 160 1544 146L1547 148C1537 162 1530 176 1525 198Z"/>
+      <path d="M1566 198C1564 176 1562 160 1556 146L1560 145C1566 160 1568 176 1570 198Z"/>
+      <path d="M1576 198C1578 172 1582 156 1590 140L1594 142C1586 158 1582 174 1580 198Z"/>
+      <rect x="1586" y="124" width="6" height="18" rx="3"/>
+    </g>
+    <mask id="canal" maskUnits="userSpaceOnUse" x="0" y="0" width="1600" height="240">
+      <!-- Low hills, far off -->
+      <path fill="#fff" d="M0 150C70 140 120 126 190 124S300 136 360 132 470 112 550 110 680 128 750 130 860 118 930 112 1050 104 1130 110 1250 126 1330 128 1430 118 1500 120 1570 130 1600 132V240H0Z"/>
+      <!-- Trees on the left bank, part of the hills -->
+      <g fill="#fff">
+        <circle cx="96" cy="128" r="20"/><circle cx="122" cy="120" r="16"/>
+        <circle cx="356" cy="122" r="13"/><circle cx="374" cy="128" r="10"/>
+        <circle cx="770" cy="118" r="15"/><circle cx="792" cy="124" r="11"/>
+      </g>
+
+      <!-- Water: the reservoir, two chambers and the channel, each a step lower -->
+      <rect fill="#000" x="0" y="140" width="244" height="32"/>
+      <rect fill="#000" x="282" y="150" width="330" height="32"/>
+      <rect fill="#000" x="636" y="164" width="336" height="26"/>
+      <rect fill="#000" x="994" y="178" width="606" height="20"/>
+      <g fill="#fff">
+        <rect x="24" y="150" width="46" height="2" rx="1"/><rect x="96" y="158" width="64" height="2" rx="1"/>
+        <rect x="170" y="150" width="40" height="2" rx="1"/><rect x="30" y="164" width="30" height="2" rx="1"/>
+        <rect x="316" y="160" width="58" height="2" rx="1"/><rect x="420" y="168" width="70" height="2" rx="1"/>
+        <rect x="530" y="160" width="40" height="2" rx="1"/><rect x="350" y="174" width="36" height="2" rx="1"/>
+        <rect x="668" y="174" width="52" height="2" rx="1"/><rect x="770" y="180" width="66" height="2" rx="1"/>
+        <rect x="880" y="172" width="40" height="2" rx="1"/>
+        <rect x="1020" y="188" width="48" height="2" rx="1"/><rect x="1340" y="186" width="56" height="2" rx="1"/>
+      </g>
+
+      <!-- Bed and walls under the water, down to the ground the footer stands on -->
+      <path fill="#fff" d="M0 172H244V186H282V182H612V190H636V190H972V198H994V198H1600V240H0Z"/>
+
+      <!-- The works, first as a cut halo, then drawn -->
+      <use href="#works" xlink:href="#works" fill="#000" stroke="#000" stroke-width="7" stroke-linejoin="round"/>
+      <use href="#works" xlink:href="#works" fill="#fff"/>
+
+      <!-- Cuts inside the works: the gate plate's ribs, the wheel's rim and spokes, the cabin's
+           windows, the bridge's arch -->
+      <g fill="#000">
+        <rect x="255" y="116" width="16" height="3"/><rect x="255" y="132" width="16" height="3"/>
+        <rect x="255" y="148" width="16" height="3"/><rect x="255" y="164" width="16" height="3"/>
+        <circle cx="263" cy="50" r="10"/>
+        <rect x="1182" y="164" width="11" height="7" rx="1"/><rect x="1201" y="164" width="11" height="7" rx="1"/>
+        <rect x="1220" y="164" width="11" height="7" rx="1"/><rect x="1239" y="164" width="11" height="7" rx="1"/>
+        <rect x="1118" y="112" width="2" height="16"/><rect x="1146" y="112" width="2" height="14"/>
+        <rect x="1324" y="112" width="2" height="14"/><rect x="1352" y="112" width="2" height="16"/>
+      </g>
+      <path fill="none" stroke="#fff" stroke-width="3" d="M263 40V60M253 50H273M256 43 270 57M270 43 256 57"/>
+    </mask>
+  </defs>
+  <rect width="1600" height="240" fill="#000" mask="url(#canal)"/>
+</svg>

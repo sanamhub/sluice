@@ -1,0 +1,61 @@
+---
+// Install commands behind tabs. With no script every panel shows, each under its own heading, so
+// nothing is hidden from a reader who never runs the page's code; the script turns them into tabs
+// and adds a copy button.
+interface Option {
+    id: string;
+    label: string;
+    lines: string[];
+    note?: string;
+}
+
+interface Props {
+    name: string;
+    options: Option[];
+}
+
+const { name, options } = Astro.props;
+---
+
+<div class="install" data-tabs>
+    <div class="install-tabs" role="tablist" aria-label="Install" hidden>
+        {
+            options.map((option, index) => (
+                <button
+                    type="button"
+                    role="tab"
+                    id={`${name}-tab-${option.id}`}
+                    aria-controls={`${name}-panel-${option.id}`}
+                    aria-selected={index === 0 ? "true" : "false"}
+                    tabindex={index === 0 ? 0 : -1}
+                >
+                    {option.label}
+                </button>
+            ))
+        }
+    </div>
+    {
+        options.map((option) => (
+            <div
+                class="install-panel"
+                role="tabpanel"
+                id={`${name}-panel-${option.id}`}
+                aria-labelledby={`${name}-tab-${option.id}`}
+                tabindex="0"
+            >
+                <p class="install-label">{option.label}</p>
+                <div class="install-code">
+                    <pre translate="no"><code>{option.lines.join("\n")}</code></pre>
+                    <button class="copy" type="button" data-copy hidden>
+                        <span class="copy-text" aria-live="polite">Copy</span>
+                    </button>
+                </div>
+                {option.note && <p class="install-note">{option.note}</p>}
+            </div>
+        ))
+    }
+</div>
+
+<script>
+    import "../scripts/tabs";
+</script>

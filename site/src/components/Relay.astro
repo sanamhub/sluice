@@ -1,0 +1,36 @@
+---
+import { RELAY_README } from "../data/links";
+---
+
+<section class="section relay" aria-labelledby="relay-title">
+    <div class="wrap relay-grid">
+        <div class="section-head">
+            <h2 id="relay-title">Your relay, or none</h2>
+            <p>
+                On one network nothing else is needed. Across the internet, two machines behind
+                strict routers need a server to meet at. Run the relay image yourself, or pass
+                <code translate="no">--n0-relays</code> to use n0's public relays.
+            </p>
+        </div>
+        <div class="relay-body">
+            <dl class="relay-modes">
+                <div>
+                    <dt>Meeting point</dt>
+                    <dd>Coordinates the hole punch at 64 KiB/s per client and carries no file data.</dd>
+                </div>
+                <div>
+                    <dt>Full relay</dt>
+                    <dd>Also carries the bytes for pairs that cannot connect directly.</dd>
+                </div>
+            </dl>
+            <div class="relay-code">
+                <pre translate="no"><code>docker pull ghcr.io/sanamhub/sluice-relay:0.1.0</code></pre>
+            </div>
+            <p class="muted">
+                It ships closed, with an empty allowlist, so nobody uses it until you add an endpoint
+                id. The <a href={RELAY_README}>relay README</a> has the certificate, both recipes and
+                the guard that checks its config.
+            </p>
+        </div>
+    </div>
+</section>
