@@ -41,3 +41,4 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0030](0030-sends-keep-their-own-store.md) | Each send keeps its copies in a store of its own, and the home keeps none of them | Accepted, corrects 0029 |
 | [0031](0031-a-shared-ticket-counts-its-receivers.md) | A shared ticket counts the receivers it serves, and the sender says who connected | Accepted |
 | [0032](0032-the-rendezvous-image-is-gone.md) | The rendezvous image is no longer built or released | Accepted, supersedes 0020's rendezvous mode |
+| [0033](0033-the-tool-ships-as-an-image.md) | The tool ships as a container image beside the relay | Accepted |

@@ -1,0 +1,27 @@
+# The tool image builds from the repository root, because it compiles the workspace and not a
+# folder of its own. Only the manifests and sources that build needs go in: everything else stays
+# out, so a target/ folder, a local home, a rendering of a large file or a node_modules tree never
+# reaches the builder. The legacy builder (DOCKER_BUILDKIT=0) reads this file too.
+*
+!Cargo.toml
+!Cargo.lock
+!crates
+crates/**
+!crates/sluice-cli
+!crates/sluice-cli/**
+!crates/sluice-core
+!crates/sluice-core/**
+!crates/sluice-live
+!crates/sluice-live/**
+!bench
+bench/**
+!bench/probe
+!bench/probe/**
+!bench/harness
+!bench/harness/**
+!bench/wasm-hash
+!bench/wasm-hash/Cargo.toml
+!bench/wasm-hash/src
+!bench/wasm-hash/src/**
+!xtask
+!xtask/**

@@ -15,10 +15,11 @@
 #   (docs/runbooks/releasing.md);
 # * only sluice-cli's SBOM is released, for all targets, and it is uploaded: dist's template read
 #   `steps.cargo-cyclonedx.output.paths`, which is always empty, so the SBOM was left behind;
-# * the `relay` image is built here, the GitHub release waits for it, and it is pushed only after
-#   the release is made: a failed build publishes nothing, and an image push that fails after the
-#   GitHub release leaves the release without its image (docs/runbooks/releasing.md);
-# * the image build records the image's ID as a job output before syft is installed, and the
+# * the `relay` and `sluice` images are built here, the GitHub release waits for both, and they are
+#   pushed only after the release is made: a failed build publishes nothing, and an image push that
+#   fails after the GitHub release leaves the release without its image
+#   (docs/runbooks/releasing.md);
+# * each image build records its image's ID as a job output before syft is installed, and the
 #   publishing job refuses a loaded image whose ID is not the one recorded: the check cannot be
 #   changed by a later step, and the index is built from the digests that were attested;
 # * the GitHub release is made as a draft with every file, then published, and `host` refuses to
@@ -279,30 +280,31 @@ jobs:
             ${{ env.BUILD_MANIFEST_NAME }}
           retention-days: 30
 
-  # The relay image of ADR 0013 on native amd64 and arm64 runners, beside the binary builds. It
-  # builds and saves, and pushes nothing: these jobs ask for no registry permission. The
-  # `image-publish` job is the only one in this file that holds `packages: write`, and the `release`
-  # environment pauses it. What a tag's own `release.yml` asks for is that commit's to say
-  # (docs/runbooks/releasing.md).
+  # The relay image of ADR 0013 and the tool image of ADR 0033, on native amd64 and arm64 runners,
+  # beside the binary builds. They build and save, and push nothing: these jobs ask for no registry
+  # permission. The `image-publish` job is the only one in this file that holds `packages: write`,
+  # and the `release` environment pauses it. What a tag's own `release.yml` asks for is that
+  # commit's to say (docs/runbooks/releasing.md).
   #
   # One job per architecture, and not one matrix over both: GitHub's documentation says a matrix
   # job that writes to `$GITHUB_OUTPUT` has its content "overwritten for each matrix combination",
-  # so a row that did not set a name would clear the row that did. Each job here sets its output
-  # itself. Compiling iroh-relay in the build stage is most of it, and 60 minutes leaves room on
-  # the arm64 runner, the slower half.
+  # so a row that did not set a name would clear the row that did. Each job here sets its two
+  # outputs itself. Compiling iroh-relay is most of the relay, the tool compiles the workspace, and
+  # 90 minutes leaves room on the amd64 runner. The arm64 half gets 105.
   image-build-amd64:
     needs: plan
     if: needs.plan.outputs.publishing == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       ARCH: amd64
       TAG: ${{ needs.plan.outputs.tag }}
     outputs:
-      # The image's ID, which is its config digest and covers every layer, recorded in the Save
+      # Each image's ID, which is its config digest and covers every layer, recorded in the Save
       # step before syft is installed. A later step cannot change a job output, so the publishing
       # job's check of the loaded image does not trust anything syft wrote or touched.
       relay: ${{ steps.save.outputs.id-relay }}
+      cli: ${{ steps.save.outputs.id-cli }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -311,50 +313,72 @@ jobs:
       # GITHUB_TOKEN push to it again next time. Without --provenance=false and --sbom=false, a
       # builder that stores images in containerd adds an attestation manifest, the push is then an
       # index and not one image, and push-image.sh refuses it. The SBOM comes from syft below.
-      - name: Build
+      - name: Build the relay
         run: |
           docker build --provenance=false --sbom=false --tag "sluice-relay:$ARCH" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.version=${TAG#v}" \
             --file docker/relay/Dockerfile docker
       # The distroless image has no shell, so the binary is run directly.
-      - name: Smoke test
+      - name: Relay smoke test
         run: docker run --rm --entrypoint /usr/local/bin/iroh-relay "sluice-relay:$ARCH" --version
       # The image starts with a read-only root, and its guard refuses each config that would open
       # more than it says (ADR 0019, ADR 0020).
       - name: Guard smoke test
         run: bash docker/smoke-test.sh relay "sluice-relay:$ARCH"
-      # The image is saved uncompressed, because syft reads a Docker tar and not a gzipped one, and
-      # its ID is recorded here, before syft is installed. The ID is the config digest, which covers
-      # every layer, so the publishing job can refuse a tarball that holds another image. Nothing
-      # in this job can change the output after this step.
+      # The tool's own context is the repository root, because it compiles the workspace. The
+      # labels are the relay's.
+      - name: Build the tool
+        run: |
+          docker build --provenance=false --sbom=false --tag "sluice:$ARCH" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.version=${TAG#v}" \
+            --file docker/cli/Dockerfile .
+      # The entry point is the tool, and this runs the commands a user runs plus a transfer between
+      # two containers with no route out.
+      - name: Tool smoke test
+        run: bash docker/cli/smoke-test.sh "sluice:$ARCH"
+      # The images are saved uncompressed, because syft reads a Docker tar and not a gzipped one,
+      # and their IDs are recorded here, before syft is installed. An ID is the config digest, which
+      # covers every layer, so the publishing job can refuse a tarball that holds another image.
+      # Nothing in this job can change an output after this step.
       - id: save
         name: Save
         run: |
-          dir="$RUNNER_TEMP/image/relay"
-          mkdir -p "$dir"
-          docker save "sluice-relay:$ARCH" > "$dir/$ARCH.tar"
-          id="$(docker image inspect "sluice-relay:$ARCH" --format '{{.Id}}')"
-          case "$id" in
+          dir="$RUNNER_TEMP/image"
+          mkdir -p "$dir/relay" "$dir/cli"
+          docker save "sluice-relay:$ARCH" > "$dir/relay/$ARCH.tar"
+          docker save "sluice:$ARCH" > "$dir/cli/$ARCH.tar"
+          relay="$(docker image inspect "sluice-relay:$ARCH" --format '{{.Id}}')"
+          case "$relay" in
             sha256:*) ;;
-            *) echo "::error::relay has no config digest: '$id'"; exit 1 ;;
+            *) echo "::error::relay has no config digest: '$relay'"; exit 1 ;;
           esac
-          echo "id-relay=$id" >> "$GITHUB_OUTPUT"
+          cli="$(docker image inspect "sluice:$ARCH" --format '{{.Id}}')"
+          case "$cli" in
+            sha256:*) ;;
+            *) echo "::error::the tool has no config digest: '$cli'"; exit 1 ;;
+          esac
+          echo "id-relay=$relay" >> "$GITHUB_OUTPUT"
+          echo "id-cli=$cli" >> "$GITHUB_OUTPUT"
       # At an exact version, from its release, with its hash checked first. The action this
       # replaces downloaded syft's install script at run time and ran syft with the Docker socket
       # before the image was saved, so a bad syft could have changed what was signed.
       - name: Install syft
         run: bash .github/release/install-syft.sh
-      # From this architecture's own image, on its own runner, so the SBOM lists what that image
+      # From this architecture's own images, on its own runner, so each SBOM lists what that image
       # holds. The publishing job attests it on the digest the registry gives the image.
       - name: SBOM
         run: |
-          dir="$RUNNER_TEMP/image/relay"
-          syft "docker-archive:$dir/$ARCH.tar" --output "spdx-json=$dir/$ARCH.spdx.json"
+          dir="$RUNNER_TEMP/image"
+          syft "docker-archive:$dir/relay/$ARCH.tar" --output "spdx-json=$dir/relay/$ARCH.spdx.json"
+          syft "docker-archive:$dir/cli/$ARCH.tar" --output "spdx-json=$dir/cli/$ARCH.spdx.json"
       # Compressed after syft is done, for the upload. `docker load` reads a gzipped tarball, and
-      # the ID recorded above is what the publishing job checks, not a hash of these bytes.
+      # the IDs recorded above are what the publishing job checks, not a hash of these bytes.
       - name: Compress
-        run: gzip -n "$RUNNER_TEMP/image/relay/$ARCH.tar"
+        run: |
+          gzip -n "$RUNNER_TEMP/image/relay/$ARCH.tar"
+          gzip -n "$RUNNER_TEMP/image/cli/$ARCH.tar"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-relay-${{ env.ARCH }}
@@ -364,57 +388,88 @@ jobs:
           # re-run is allowed only within 30 days of that start. So these outlive every run that
           # could read them, and no longer.
           retention-days: 35
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-cli-${{ env.ARCH }}
+          path: ${{ runner.temp }}/image/cli/
+          if-no-files-found: error
+          retention-days: 35
 
-  # The arm64 half of the job above, with the same steps. 75 minutes, because the arm64 runners
+  # The arm64 half of the job above, with the same steps. 105 minutes, because the arm64 runners
   # are the slower half.
   image-build-arm64:
     needs: plan
     if: needs.plan.outputs.publishing == 'true'
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 75
+    timeout-minutes: 105
     env:
       ARCH: arm64
       TAG: ${{ needs.plan.outputs.tag }}
     outputs:
       relay: ${{ steps.save.outputs.id-relay }}
+      cli: ${{ steps.save.outputs.id-cli }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Build
+      - name: Build the relay
         run: |
           docker build --provenance=false --sbom=false --tag "sluice-relay:$ARCH" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.version=${TAG#v}" \
             --file docker/relay/Dockerfile docker
-      - name: Smoke test
+      - name: Relay smoke test
         run: docker run --rm --entrypoint /usr/local/bin/iroh-relay "sluice-relay:$ARCH" --version
       - name: Guard smoke test
         run: bash docker/smoke-test.sh relay "sluice-relay:$ARCH"
+      - name: Build the tool
+        run: |
+          docker build --provenance=false --sbom=false --tag "sluice:$ARCH" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.version=${TAG#v}" \
+            --file docker/cli/Dockerfile .
+      - name: Tool smoke test
+        run: bash docker/cli/smoke-test.sh "sluice:$ARCH"
       - id: save
         name: Save
         run: |
-          dir="$RUNNER_TEMP/image/relay"
-          mkdir -p "$dir"
-          docker save "sluice-relay:$ARCH" > "$dir/$ARCH.tar"
-          id="$(docker image inspect "sluice-relay:$ARCH" --format '{{.Id}}')"
-          case "$id" in
+          dir="$RUNNER_TEMP/image"
+          mkdir -p "$dir/relay" "$dir/cli"
+          docker save "sluice-relay:$ARCH" > "$dir/relay/$ARCH.tar"
+          docker save "sluice:$ARCH" > "$dir/cli/$ARCH.tar"
+          relay="$(docker image inspect "sluice-relay:$ARCH" --format '{{.Id}}')"
+          case "$relay" in
             sha256:*) ;;
-            *) echo "::error::relay has no config digest: '$id'"; exit 1 ;;
+            *) echo "::error::relay has no config digest: '$relay'"; exit 1 ;;
           esac
-          echo "id-relay=$id" >> "$GITHUB_OUTPUT"
+          cli="$(docker image inspect "sluice:$ARCH" --format '{{.Id}}')"
+          case "$cli" in
+            sha256:*) ;;
+            *) echo "::error::the tool has no config digest: '$cli'"; exit 1 ;;
+          esac
+          echo "id-relay=$relay" >> "$GITHUB_OUTPUT"
+          echo "id-cli=$cli" >> "$GITHUB_OUTPUT"
       - name: Install syft
         run: bash .github/release/install-syft.sh
       - name: SBOM
         run: |
-          dir="$RUNNER_TEMP/image/relay"
-          syft "docker-archive:$dir/$ARCH.tar" --output "spdx-json=$dir/$ARCH.spdx.json"
+          dir="$RUNNER_TEMP/image"
+          syft "docker-archive:$dir/relay/$ARCH.tar" --output "spdx-json=$dir/relay/$ARCH.spdx.json"
+          syft "docker-archive:$dir/cli/$ARCH.tar" --output "spdx-json=$dir/cli/$ARCH.spdx.json"
       - name: Compress
-        run: gzip -n "$RUNNER_TEMP/image/relay/$ARCH.tar"
+        run: |
+          gzip -n "$RUNNER_TEMP/image/relay/$ARCH.tar"
+          gzip -n "$RUNNER_TEMP/image/cli/$ARCH.tar"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-relay-${{ env.ARCH }}
           path: ${{ runner.temp }}/image/relay/
+          if-no-files-found: error
+          retention-days: 35
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image-cli-${{ env.ARCH }}
+          path: ${{ runner.temp }}/image/cli/
           if-no-files-found: error
           retention-days: 35
 
@@ -429,7 +484,7 @@ jobs:
       - image-build-amd64
       - image-build-arm64
     # Only when publishing, and only if plan, local and global did not fail (skipped is fine) and
-    # the image built. A failed image build stops the release before anything is public.
+    # the images built. A failed image build stops the release before anything is public.
     # `!cancelled()` and not `always()`, so a cancelled run publishes nothing.
     if: >-
       !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' &&
@@ -542,12 +597,13 @@ jobs:
           TAG: ${{ needs.plan.outputs.tag }}
         run: gh release edit "$TAG" --draft=false
 
-  # Pushes, merges and attests the image, only after the GitHub release exists. It runs in the
+  # Pushes, merges and attests an image, only after the GitHub release exists. It runs in the
   # `release` environment, which pauses it for an approval (docs/runbooks/releasing.md).
   # `push-image.sh arch` checks the loaded image against the ID its build job recorded, writes both
   # architecture tags, and each is attested with its SBOM; only then does `push-image.sh index`
-  # create the version tag from the attested digests, which is attested last. Moves at most 62 MB
-  # per architecture and signs five attestations: 30 minutes is plenty.
+  # create the version tag from the attested digests, which is attested last. One row per image, so
+  # each package is pushed and attested on its own. Moves one image's two architectures and signs
+  # five attestations: 30 minutes is plenty.
   image-publish:
     needs:
       - plan
@@ -555,7 +611,7 @@ jobs:
       - image-build-amd64
       - image-build-arm64
     # Named in full, and not left to the implicit `success()`, so the condition says what it needs:
-    # the GitHub release exists and both architectures of the image built. `!cancelled()` so a
+    # the GitHub release exists and both architectures of both images built. `!cancelled()` so a
     # cancelled run pushes nothing.
     if: >-
       !cancelled() && needs.host.result == 'success' &&
@@ -564,7 +620,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [relay]
+        include:
+          - image: relay
+            package: sluice-relay
+          - image: cli
+            package: sluice
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: release
@@ -577,12 +637,13 @@ jobs:
       id-token: write
       attestations: write
     env:
-      IMAGE: ${{ matrix.image }}
+      PACKAGE: ${{ matrix.package }}
       OWNER: ${{ github.repository_owner }}
       TAG: ${{ needs.plan.outputs.tag }}
-      # The ID each build job recorded, which `arch` checks after `docker load`.
-      AMD64_ID: ${{ needs.image-build-amd64.outputs.relay }}
-      ARM64_ID: ${{ needs.image-build-arm64.outputs.relay }}
+      # The ID each build job recorded for this row's image, which `arch` checks after `docker
+      # load`. The matrix chooses between the two outputs of each build job.
+      AMD64_ID: ${{ matrix.image == 'relay' && needs.image-build-amd64.outputs.relay || needs.image-build-amd64.outputs.cli }}
+      ARM64_ID: ${{ matrix.image == 'relay' && needs.image-build-arm64.outputs.relay || needs.image-build-arm64.outputs.cli }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

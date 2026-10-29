@@ -1,20 +1,34 @@
 name: images
 
-# Only the Dockerfiles, their configs, the guard's sources (all under docker/) and the release
-# scripts and workflow that build and push the images can break an image build, so only a change to
-# them runs it. A workflow of its own because `paths` filters a whole workflow and not a job, and
-# ci.yml has to run on every change.
+# Only the Dockerfiles, their configs, the sources they compile and the release scripts and
+# workflow that build and push the images can break an image build, so only a change to them runs
+# it. A workflow of its own because `paths` filters a whole workflow and not a job, and ci.yml has
+# to run on every change.
 on:
   push:
     branches: [main]
     paths:
       - docker/**
+      - crates/**
+      - bench/**
+      - xtask/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .dockerignore
       - .github/release/**
       - .github/workflows/images.yml
       - .github/workflows/release.yml
   pull_request:
     paths:
       - docker/**
+      - crates/**
+      - bench/**
+      - xtask/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .dockerignore
       - .github/release/**
       - .github/workflows/images.yml
       - .github/workflows/release.yml
@@ -27,35 +41,51 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # One row per image. The relay is the only one, and the build below is what a release runs.
+  # One row per image. The relay and the tool are everything the release publishes, and the build
+  # below is what a release runs. The tool builds from the repository root and the relay from
+  # docker/, which holds the guard's sources.
   build:
     strategy:
       fail-fast: false
       matrix:
-        image: [relay]
+        include:
+          - image: relay
+            package: sluice-relay
+            dockerfile: docker/relay/Dockerfile
+            context: docker
+          - image: cli
+            package: sluice
+            dockerfile: docker/cli/Dockerfile
+            context: .
     runs-on: ubuntu-latest
-    # Compiling iroh-relay is most of it. As in release.yml's image builds, 60 minutes leaves room
-    # without letting a hung build run for GitHub's default of 6 hours.
+    # Compiling iroh-relay is most of the relay, and the tool compiles the workspace. As in
+    # release.yml's image builds, 60 minutes leaves room without letting a hung build run for
+    # GitHub's default of 6 hours.
     timeout-minutes: 60
     env:
-      IMAGE: ${{ matrix.image }}
+      PACKAGE: ${{ matrix.package }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Nothing is pushed or loaded anywhere else. The build compiles iroh-relay from crates.io,
-      # which is the step a yanked release or a moved base image breaks. The flags are those
-      # of release.yml.
-      # The context is docker/, for the guard, and Dockerfile.dockerignore beside each Dockerfile
-      # keeps it to the files that image needs.
+      # Nothing is pushed or loaded anywhere else. The build compiles from crates.io, which is the
+      # step a yanked release or a moved base image breaks. The flags are those of release.yml.
       - run: |
-          docker build --provenance=false --sbom=false --tag "sluice-$IMAGE:ci" \
-            --file "docker/$IMAGE/Dockerfile" docker
+          docker build --provenance=false --sbom=false --tag "$PACKAGE:ci" \
+            --file "${{ matrix.dockerfile }}" "${{ matrix.context }}"
       # The distroless image has no shell, so the binary is run directly.
-      - run: docker run --rm --entrypoint /usr/local/bin/iroh-relay "sluice-$IMAGE:ci" --version
-      # Each image starts with a read-only root, and its guard refuses each config that would open
+      - if: matrix.image == 'relay'
+        run: docker run --rm --entrypoint /usr/local/bin/iroh-relay "$PACKAGE:ci" --version
+      - if: matrix.image == 'cli'
+        run: docker run --rm "$PACKAGE:ci" --version
+      # The relay starts with a read-only root, and its guard refuses each config that would open
       # more than it says, so a guard that lets a mistake through fails here (ADR 0019, ADR 0020).
-      - run: bash docker/smoke-test.sh "$IMAGE" "sluice-$IMAGE:ci"
+      - if: matrix.image == 'relay'
+        run: bash docker/smoke-test.sh relay "$PACKAGE:ci"
+      # The tool image is checked with the commands a user runs, and a transfer between two
+      # containers on a network with no route out.
+      - if: matrix.image == 'cli'
+        run: bash docker/cli/smoke-test.sh "$PACKAGE:ci"
       # The shape of a release's image artifacts: one per architecture, each holding that
       # architecture's tarball. The push test below downloads them the way image-publish does,
       # then replaces them with stand-ins.
@@ -63,10 +93,10 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/image"
           for arch in amd64 arm64; do
-            docker tag "sluice-$IMAGE:ci" "sluice-$IMAGE:$arch"
+            docker tag "$PACKAGE:ci" "$PACKAGE:$arch"
             # Written to a file and compressed in two steps: a pipe hides a failed `docker save`
             # behind gzip's exit status, and the empty archive it leaves fails later as a load.
-            docker save --output "$RUNNER_TEMP/image/$arch.tar" "sluice-$IMAGE:$arch"
+            docker save --output "$RUNNER_TEMP/image/$arch.tar" "$PACKAGE:$arch"
             gzip --force "$RUNNER_TEMP/image/$arch.tar"
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -88,15 +118,19 @@ jobs:
   # it. It cannot test ghcr.io: the login, the permissions and the attestations need a tag run.
   #
   # It downloads the two artifacts per image the way image-publish does, then pushes stand-ins in
-  # their place: the architecture check needs a real linux/arm64 image, and building iroh-relay
-  # under emulation on a pull request is too slow. A stand-in is `FROM scratch`, so buildx builds
-  # one per platform with nothing to run and no emulation.
+  # their place: the architecture check needs a real linux/arm64 image, and building under emulation
+  # on a pull request is too slow. A stand-in is `FROM scratch`, so buildx builds one per platform
+  # with nothing to run and no emulation.
   push:
     needs: build
     strategy:
       fail-fast: false
       matrix:
-        image: [relay]
+        include:
+          - image: relay
+            package: sluice-relay
+          - image: cli
+            package: sluice
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -108,7 +142,7 @@ jobs:
         ports:
           - 5000:5000
     env:
-      IMAGE: ${{ matrix.image }}
+      PACKAGE: ${{ matrix.package }}
       OWNER: sanamhub
       TAG: v0.0.0-test
       # The local registry asks for no login. The script requires a token and a user, so these are
@@ -136,11 +170,11 @@ jobs:
         name: Build the stand-ins
         run: |
           for arch in amd64 arm64; do
-            docker buildx build --platform "linux/$arch" --tag "sluice-$IMAGE:$arch" --load \
+            docker buildx build --platform "linux/$arch" --tag "$PACKAGE:$arch" --load \
               --file docker/push-test/Dockerfile docker/push-test
-            docker save --output "$RUNNER_TEMP/image/$arch.tar" "sluice-$IMAGE:$arch"
+            docker save --output "$RUNNER_TEMP/image/$arch.tar" "$PACKAGE:$arch"
             gzip --force "$RUNNER_TEMP/image/$arch.tar"
-            id="$(docker image inspect "sluice-$IMAGE:$arch" --format '{{.Id}}')"
+            id="$(docker image inspect "$PACKAGE:$arch" --format '{{.Id}}')"
             echo "$arch=$id" >> "$GITHUB_OUTPUT"
           done
       # The image's ID is an output of the build job, recorded before syft ran, so `arch` compares
@@ -163,7 +197,7 @@ jobs:
           test "$code" = 1
           grep -q 'is not the image its SBOM describes' <<< "$message"
           if docker buildx imagetools inspect \
-            "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test-amd64" > /dev/null 2>&1; then
+            "localhost:5000/sanamhub/$PACKAGE:0.0.0-test-amd64" > /dev/null 2>&1; then
             echo "::error::push-image.sh pushed a tag before it checked the image's ID"
             exit 1
           fi
@@ -180,14 +214,14 @@ jobs:
       - id: moved
         name: Move the amd64 tag to a third digest
         run: |
-          docker buildx build --platform linux/amd64 --tag "sluice-$IMAGE:moved" --load \
+          docker buildx build --platform linux/amd64 --tag "$PACKAGE:moved" --load \
             --file docker/push-test/Dockerfile \
             --label "org.opencontainers.image.version=moved" docker/push-test
-          docker tag "sluice-$IMAGE:moved" \
-            "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test-amd64"
-          docker push "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test-amd64"
+          docker tag "$PACKAGE:moved" \
+            "localhost:5000/sanamhub/$PACKAGE:0.0.0-test-amd64"
+          docker push "localhost:5000/sanamhub/$PACKAGE:0.0.0-test-amd64"
           moved="$(docker buildx imagetools inspect \
-            "localhost:5000/sanamhub/sluice-$IMAGE:0.0.0-test-amd64" \
+            "localhost:5000/sanamhub/$PACKAGE:0.0.0-test-amd64" \
             --format '{{json .Manifest}}' | jq --raw-output .digest)"
           echo "moved=$moved" >> "$GITHUB_OUTPUT"
       - id: push-index
