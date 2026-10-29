@@ -240,18 +240,19 @@ jobs:
           test "$code" = 2
           grep -q "is not a registry" <<< "$message"
       # A tag is a release, and a release goes to ghcr.io only. The run must stop at the registry
-      # check, before a token is sent anywhere, so the log may not hold a login.
+      # check, before a token is sent anywhere, so the log may not hold a login. A step's `env`
+      # cannot replace a GITHUB_ variable the runner sets, so the tag and the output file are set on
+      # the command itself.
       - name: A tag refuses another registry
         env:
-          GITHUB_REF: refs/tags/v0.0.0-test
-          GITHUB_OUTPUT: ${{ runner.temp }}/refusal-output
           AMD64_ID: ${{ steps.standins.outputs.amd64 }}
           ARM64_ID: ${{ steps.standins.outputs.arm64 }}
         run: |
-          : > "$GITHUB_OUTPUT"
+          output="$RUNNER_TEMP/refusal-output"
+          : > "$output"
           set +e
-          message="$(bash .github/release/push-image.sh localhost:5000 arch \
-            "$AMD64_ID" "$ARM64_ID" 2>&1)"
+          message="$(GITHUB_REF=refs/tags/v0.0.0-test GITHUB_OUTPUT="$output" \
+            bash .github/release/push-image.sh localhost:5000 arch "$AMD64_ID" "$ARM64_ID" 2>&1)"
           code=$?
           set -e
           printf '%s\n' "$message"

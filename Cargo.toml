@@ -13,7 +13,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.90"
+rust-version = "1.91"
 license = "Apache-2.0 OR MIT"
 # The installers dist writes download from this repository's GitHub releases. The homepage points at
 # the same place until the project has a domain.
