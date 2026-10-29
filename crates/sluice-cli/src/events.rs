@@ -106,6 +106,15 @@ fn human(event: &Event, verb: &str) -> String {
         Event::Done { bytes, seconds } => {
             format!("done, {} in {seconds:.1} s", bytes_text(*bytes))
         }
+        Event::ReceiverStarted { .. }
+        | Event::ReceiverRefused { .. }
+        | Event::ReceiverFinished { .. } => receiver(event),
+    }
+}
+
+/// The line about one receiver: who it is, how it reached us, and what became of it.
+fn receiver(event: &Event) -> String {
+    match event {
         Event::ReceiverStarted { endpoint, relayed } => format!(
             "receiver {} connected {}",
             fingerprint(endpoint),
@@ -136,6 +145,7 @@ fn human(event: &Event, verb: &str) -> String {
                 path_words(*relayed)
             )
         }
+        other => unreachable!("the caller matched a receiver event: {other:?}"),
     }
 }
 
@@ -185,9 +195,28 @@ fn path_text(path: PathKind, relay: &Option<String>) -> String {
 #[cfg(test)]
 mod tests {
     use sluice_core::engine::{Congestion, Event, PathKind};
+    use sluice_core::ticket::fingerprint;
 
     use super::human;
     use crate::output::line;
+
+    /// A receiver the places could not take is named once, with the limit that refused it.
+    #[test]
+    fn a_refused_receiver_is_named_with_the_limit() {
+        let endpoint = "ab".repeat(32);
+        let event = Event::ReceiverRefused {
+            endpoint: endpoint.clone(),
+            relayed: false,
+            places: 2,
+        };
+        assert_eq!(
+            line(&human(&event, "sending")),
+            format!(
+                "receiver {} refused, the 2 places are taken (directly)\n",
+                fingerprint(&endpoint)
+            )
+        );
+    }
 
     #[test]
     fn a_relay_is_named_and_a_direct_path_is_not() {

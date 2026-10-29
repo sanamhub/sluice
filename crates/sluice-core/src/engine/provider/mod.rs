@@ -2,7 +2,7 @@
 //! stops a send uses.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -11,6 +11,8 @@ use iroh::{Endpoint, EndpointAddr, protocol::Router};
 use iroh_blobs::{Hash, store::fs::FsStore};
 
 use super::{endpoint, live::LiveLog, now_ms, policy, storage};
+mod keep;
+mod report;
 mod start;
 mod stop;
 
@@ -283,96 +285,6 @@ impl Provider {
         wanted.is_subset(&self.policy.asked_by(connection))
     }
 
-    /// Serves until Ctrl+C or the expiry, and with a limit until every place is taken and the
-    /// connections of the endpoints holding them have closed. A holder that keeps a connection open
-    /// doing nothing is waited for no longer than [`GRACE`] after its last request or byte; activity
-    /// pushes that wait back, so a transfer that is still moving is never cut off.
-    async fn keep(
-        &mut self,
-        limit: Option<u32>,
-        roots: Vec<Hash>,
-        events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
-    ) -> Result<ServeEnd, Error> {
-        let roots: BTreeSet<Hash> = roots.into_iter().collect();
-        let limited = limit.is_some();
-        // Every content connection still open, with the endpoint it belongs to, so the wait for a
-        // holder's close never counts a refused connection as one.
-        let mut open: BTreeMap<u64, [u8; 32]> = BTreeMap::new();
-        let mut grace: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
-        if limited && self.places_full() && !self.holder_open(&open) {
-            return Ok(ServeEnd::Downloaded);
-        }
-        loop {
-            let left = self.expiry_ms_left();
-            if left == 0 && self.expiry.is_some() {
-                return Ok(ServeEnd::Expired);
-            }
-            let deadline = tokio::time::sleep(Duration::from_millis(left));
-            tokio::pin!(deadline);
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => return Ok(ServeEnd::Interrupted),
-                _ = wait_grace(&mut grace) => {
-                    let left = self.idle_left();
-                    if left.is_zero() {
-                        return Ok(ServeEnd::Downloaded);
-                    }
-                    grace = Some(Box::pin(tokio::time::sleep(left)));
-                }
-                reported = self.receivers.recv() => {
-                    let Some(reported) = reported else {
-                        return Err(reports_stopped());
-                    };
-                    match &reported {
-                        endpoint::Receiver::Opened { connection, endpoint, .. } => {
-                            open.insert(*connection, *endpoint);
-                        }
-                        endpoint::Receiver::Closed { connection, .. } => {
-                            open.remove(connection);
-                        }
-                        _ => {}
-                    }
-                    self.report(reported, limited, &roots, events);
-                    if limited && self.places_full() {
-                        // The send promised N places and they are all spent. It is done when every
-                        // connection of a holder has gone, and at the latest [`GRACE`] after a
-                        // holder last did something.
-                        if !self.holder_open(&open) {
-                            return Ok(ServeEnd::Downloaded);
-                        }
-                        if grace.is_none() {
-                            grace = Some(Box::pin(tokio::time::sleep(GRACE)));
-                        }
-                    }
-                }
-                _ = &mut deadline => {
-                    // The timer is not the clock: a sleep can end early across a clock change.
-                    if self.expiry.is_none_or(|expiry| now_ms() >= expiry) {
-                        return Ok(ServeEnd::Expired);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Whether every place a limited send offers is taken.
-    fn places_full(&self) -> bool {
-        lock_places(&self.places).full()
-    }
-
-    /// Whether a connection a place holder opened is still open.
-    fn holder_open(&self, open: &BTreeMap<u64, [u8; 32]>) -> bool {
-        let places = lock_places(&self.places);
-        open.values().any(|endpoint| places.holds(endpoint))
-    }
-
-    /// How long a holder that is still connected may go without asking for or receiving anything
-    /// before the send stops waiting for it to close.
-    fn idle_left(&self) -> Duration {
-        let last = lock_places(&self.places).last_active_ms();
-        let grace_ms = GRACE.as_millis() as u64;
-        Duration::from_millis(last.saturating_add(grace_ms).saturating_sub(now_ms()))
-    }
-
     /// Whether a report is a completion code this provider believes: only a connection that asked
     /// for every root can end a wait with it, because the code itself is unauthenticated.
     fn completion(&self, reported: &endpoint::Receiver, roots: &BTreeSet<Hash>) -> bool {
@@ -384,73 +296,6 @@ impl Provider {
             } => self.believed(*connection, roots),
             _ => false,
         }
-    }
-
-    /// Reports a receiver's report as its line. A limited send names a receiver when it takes a
-    /// place, not when it opens a connection, and names a refused endpoint once; an unlimited send
-    /// keeps naming every connection as it opens and closes.
-    fn report(
-        &self,
-        reported: endpoint::Receiver,
-        limited: bool,
-        roots: &BTreeSet<Hash>,
-        events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
-    ) {
-        let event = match reported {
-            endpoint::Receiver::Opened { .. } if limited => return,
-            endpoint::Receiver::Opened {
-                endpoint, relayed, ..
-            }
-            | endpoint::Receiver::Placed { endpoint, relayed } => {
-                crate::engine::Event::ReceiverStarted {
-                    endpoint: Self::hex(&endpoint),
-                    relayed,
-                }
-            }
-            endpoint::Receiver::Refused {
-                endpoint,
-                relayed,
-                places,
-            } => crate::engine::Event::ReceiverRefused {
-                endpoint: Self::hex(&endpoint),
-                relayed,
-                places,
-            },
-            endpoint::Receiver::Closed {
-                connection,
-                endpoint,
-                relayed,
-                claimed_whole,
-            } => {
-                if limited && !lock_places(&self.places).holds(&endpoint) {
-                    return;
-                }
-                crate::engine::Event::ReceiverFinished {
-                    endpoint: Self::hex(&endpoint),
-                    relayed,
-                    whole: claimed_whole && self.believed(connection, roots),
-                }
-            }
-        };
-        crate::engine::emit(events, event);
-    }
-
-    /// Whether a report says a connection opened or closed, for a set of the connections still open.
-    fn track(reported: &endpoint::Receiver, opened: &mut BTreeSet<u64>) {
-        match reported {
-            endpoint::Receiver::Opened { connection, .. } => {
-                opened.insert(*connection);
-            }
-            endpoint::Receiver::Closed { connection, .. } => {
-                opened.remove(connection);
-            }
-            _ => {}
-        }
-    }
-
-    /// An endpoint id as the 64 lower-case hex characters a ticket and `sluice id` spell it with.
-    fn hex(bytes: &[u8; 32]) -> String {
-        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
 
     /// Milliseconds until the ticket deadline, or the far future when the ticket has none.
