@@ -18,9 +18,9 @@
 # literal `ghcr.io`, and images.yml's push test writes `localhost:5000`. A value an earlier step
 # wrote to GITHUB_ENV cannot change it, and on a tag any registry but ghcr.io is refused.
 #
-# IMAGE is `relay`, OWNER the repository owner and TAG the checked `v<version>` tag. The image
-# build jobs left `<arch>.tar.gz` and `<arch>.spdx.json` for each architecture in
-# RUNNER_TEMP/image.
+# PACKAGE is the ghcr.io package, `sluice` or `sluice-relay`, OWNER the repository owner and TAG
+# the checked `v<version>` tag. The image build jobs left `<arch>.tar.gz` and `<arch>.spdx.json` for
+# each architecture in RUNNER_TEMP/image.
 set -euo pipefail
 # A failed command inside `$(...)` stops the script too, and not only the line that reads it.
 shopt -s inherit_errexit
@@ -43,7 +43,7 @@ if [[ ! "$registry" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]+)?$ ]]; then
   exit 2
 fi
 
-: "${IMAGE:?}" "${OWNER:?}" "${TAG:?}" "${GITHUB_TOKEN:?}" "${GITHUB_ACTOR:?}"
+: "${PACKAGE:?}" "${OWNER:?}" "${TAG:?}" "${GITHUB_TOKEN:?}" "${GITHUB_ACTOR:?}"
 : "${RUNNER_TEMP:?}" "${GITHUB_OUTPUT:?}"
 
 # An image ID and a manifest digest are both `sha256:` and 64 lower-case hex digits. The IDs come
@@ -72,7 +72,7 @@ if [[ "${GITHUB_REF:-}" == refs/tags/* && "$registry" != ghcr.io ]]; then
 fi
 version="${TAG#v}"
 # A ghcr.io name is lower case, and an owner's login may not be.
-repo="$registry/$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')/sluice-$IMAGE"
+repo="$registry/$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')/$PACKAGE"
 
 # The digest the registry gives a reference, which is what a pull of it fetches, after checking
 # that the manifest there is the kind expected: `image` for one platform's image, `index` for the
@@ -117,7 +117,7 @@ push_architectures() {
       amd64) expected="$amd64" ;;
       arm64) expected="$arm64" ;;
     esac
-    image="sluice-$IMAGE:$arch"
+    image="$PACKAGE:$arch"
     loaded="$(docker load --input "$RUNNER_TEMP/image/$arch.tar.gz")"
     # The tag inside the tarball, and not whatever the runner had under this name before, is what
     # the checks below are read from.
