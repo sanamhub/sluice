@@ -130,7 +130,19 @@ pub fn wait_for_removals(budget: Duration) {
                 still.push(path);
             }
         }
-        *left_list() = still;
+        #[cfg(test)]
+        seam::before_merge();
+        // Appending, not assigning: a `Temp::drop` thread or a late `Queued` drop can add a path
+        // while this pass runs, and replacing the list would lose it.
+        let mut kept = left_list();
+        for path in still {
+            if !kept.contains(&path) {
+                kept.push(path);
+            }
+        }
+        drop(kept);
+        #[cfg(test)]
+        seam::after_merge();
         std::thread::sleep(RETRY_EVERY);
     }
 }
@@ -176,6 +188,12 @@ fn left_list() -> MutexGuard<'static, Vec<PathBuf>> {
     LEFT.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// The paths the end of a command would still try, for a test that watches them.
+#[cfg(test)]
+pub(super) fn kept_paths() -> Vec<PathBuf> {
+    left_list().clone()
+}
+
 /// The one lock a test takes while it watches the removals of the whole process, because the count
 /// and the kept paths are shared by every test in one binary: under `cargo test` a parked removal of
 /// another test would use up the budget of one that waits for them, and its folder could be retried
@@ -185,4 +203,45 @@ fn left_list() -> MutexGuard<'static, Vec<PathBuf>> {
 pub(crate) fn exclusive() -> MutexGuard<'static, ()> {
     static ONE: Mutex<()> = Mutex::new(());
     ONE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The two moments of one retry pass a test can act at, so it can watch a path arrive while a pass
+/// runs without a sleep. One test uses them at a time, under [`exclusive`].
+#[cfg(test)]
+pub(super) mod seam {
+    use std::sync::Mutex;
+
+    type Run = Box<dyn FnOnce() + Send>;
+
+    static BEFORE: Mutex<Option<Run>> = Mutex::new(None);
+    static AFTER: Mutex<Option<Run>> = Mutex::new(None);
+
+    /// Arms the next pass: `before` runs after every path is retried and before the survivors go
+    /// back, and `after` runs once they are.
+    pub(crate) fn arm(
+        before: impl FnOnce() + Send + 'static,
+        after: impl FnOnce() + Send + 'static,
+    ) {
+        *BEFORE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(before));
+        *AFTER
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(after));
+    }
+
+    pub(super) fn before_merge() {
+        take(&BEFORE)();
+    }
+
+    pub(super) fn after_merge() {
+        take(&AFTER)();
+    }
+
+    fn take(slot: &Mutex<Option<Run>>) -> Run {
+        slot.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .unwrap_or_else(|| Box::new(|| {}))
+    }
 }
