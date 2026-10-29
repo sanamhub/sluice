@@ -140,7 +140,7 @@ pub fn begin(dir: &Path, root: &str, names: &BTreeSet<String>, force: bool) -> R
             return Err(e);
         }
         Ok(())
-    })
+    })?
 }
 
 /// Writes the marker of a store this receive just made, naming the top-level entries it creates,

@@ -146,7 +146,9 @@ fn the_store_name_carries_the_whole_root() {
 }
 
 /// The path a record holds is the folder the store really lands in, so the same store is found
-/// however the output was spelled: through `..` here, and through a link on Unix.
+/// however the output was spelled: through `..` here, and through a link on Unix. A path whose
+/// folder is not there has no resolved form, and the caller is told instead of given a second
+/// spelling that would get a hold of its own.
 #[test]
 fn a_record_path_is_resolved_through_the_folder_that_holds_it() {
     use super::registry::canonical;
@@ -155,17 +157,22 @@ fn a_record_path_is_resolved_through_the_folder_that_holds_it() {
     std::fs::create_dir_all(&out).unwrap();
     let plain = out.join(".sluice-partial-x");
     let odd = out.join("..").join("out").join(".sluice-partial-x");
-    assert_eq!(canonical(&plain), canonical(&odd));
+    assert_eq!(canonical(&plain).unwrap(), canonical(&odd).unwrap());
 
     #[cfg(unix)]
     {
         let link = dir.path().join("link-to-out");
         std::os::unix::fs::symlink(&out, &link).unwrap();
         assert_eq!(
-            canonical(&link.join(".sluice-partial-x")),
-            canonical(&plain)
+            canonical(&link.join(".sluice-partial-x")).unwrap(),
+            canonical(&plain).unwrap()
         );
     }
+
+    let missing = dir.path().join("missing").join(".sluice-partial-x");
+    let err = canonical(&missing).unwrap_err();
+    assert!(matches!(err, crate::Error::Storage(_)), "{err}");
+    assert!(err.to_string().contains("missing"), "{err}");
 }
 
 /// A store that is a link would put this receive's bytes wherever the link leads, and its marker

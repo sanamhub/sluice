@@ -115,25 +115,21 @@ impl Temp {
     }
 
     /// Removes the folder on a blocking thread without waiting. A process that ends before the
-    /// removal does waits for it at the end of the command, or leaves the folder to the sweep.
+    /// removal does waits for it at the end of the command, or leaves the folder to the sweep. A
+    /// task the runtime drops before it starts keeps the path, which the end of the command tries
+    /// again.
     pub(crate) fn remove_apart(mut self) {
         self.heartbeat.take();
         self.gone = true;
         let path = self.path.clone();
         // Counted before the work is handed on, so the end of the command waits for a removal whose
         // thread has not been scheduled yet.
-        let doing = super::removals::Doing::begin();
+        let queued = super::removals::Queued::begin(path);
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
-                handle.spawn_blocking(move || {
-                    let _doing = doing;
-                    remove_quietly(&path);
-                });
+                handle.spawn_blocking(move || queued.run());
             }
-            Err(_) => {
-                let _doing = doing;
-                remove_quietly(&path);
-            }
+            Err(_) => queued.run(),
         }
     }
 }
