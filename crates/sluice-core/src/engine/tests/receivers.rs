@@ -19,7 +19,12 @@ pub(super) async fn client(dir: &TempDir, name: &str) -> (Endpoint, FsStore) {
 /// One receiver's whole download over `probe`, which says the transfer is complete when it is. The
 /// connection is waited for after the close, so a second dial is a second connection rather than
 /// the one that is still closing.
-async fn take_whole(probe: &Endpoint, store: &FsStore, addr: &iroh::EndpointAddr, root: Hash) {
+pub(super) async fn take_whole(
+    probe: &Endpoint,
+    store: &FsStore,
+    addr: &iroh::EndpointAddr,
+    root: Hash,
+) {
     let conn = probe.connect(addr.clone(), iroh_blobs::ALPN).await.unwrap();
     tokio::time::timeout(
         Duration::from_secs(20),

@@ -88,9 +88,16 @@ impl Provider {
         self._dir = Some(dir);
     }
 
-    /// Sets how many places this send offers, before the ticket is printed.
+    /// Sets how many places this send offers, and lets its requests in, before the ticket is
+    /// printed.
     pub(super) fn set_limit(&mut self, limit: Option<u32>) {
         lock_places(&self.places).set_limit(limit);
+    }
+
+    /// Lets the requests of a send that offers no places in. A caller that never reserved has to
+    /// be armed before it serves, or its first receiver would be refused.
+    fn arm(&mut self) {
+        lock_places(&self.places).arm();
     }
 
     /// The send's own folder, for a test that watches it while the send runs.
@@ -117,6 +124,13 @@ impl Provider {
         stop: Stop,
         events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
     ) -> Result<ServeEnd, Error> {
+        // The endpoint has been accepting since the send was prepared. The mode is set before the
+        // first request can be answered: `reserve` does it earlier still, for a ticket that can be
+        // dialled before this call, and a caller that skipped that is covered here.
+        match &stop {
+            Stop::Keep { limit, .. } => self.set_limit(*limit),
+            _ => self.arm(),
+        }
         let end = match stop {
             Stop::OneDownload(roots) => {
                 self.one_download(roots.into_iter().map(Hash::from).collect(), events)
@@ -124,10 +138,6 @@ impl Provider {
             }
             Stop::Live(log) => self.live(log, events).await,
             Stop::Keep { limit, roots } => {
-                // The limit lives in the policy, which decides every request. The caller has set
-                // it before the ticket print when it could; setting it again here keeps a send
-                // that never reserved bounded too.
-                self.set_limit(limit);
                 self.keep(limit, roots.into_iter().map(Hash::from).collect(), events)
                     .await
             }

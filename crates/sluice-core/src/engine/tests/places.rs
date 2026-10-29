@@ -1,7 +1,7 @@
-//! What spends a place: a close without the completion code, and a request that races the moment
-//! the ticket becomes known.
+//! What spends a place: a close without the completion code, a request that races the moment the
+//! ticket becomes known, and a request that reaches the endpoint before the send has a mode.
 
-use super::receivers::client;
+use super::receivers::{client, take_whole};
 use super::*;
 
 /// One receiver that takes every byte and closes the normal way, without the completion code. It
@@ -106,4 +106,48 @@ async fn a_limit_reserved_before_the_ticket_is_printed_refuses_a_racer() {
     .unwrap();
     assert_eq!(end, StopEnd::Downloaded);
     racer.close().await;
+}
+
+/// The endpoint accepts from the moment the send is prepared. Until the send's mode is set a
+/// request is refused and takes no place; after `reserve` the same endpoint is served, and its
+/// close ends the send that offers one place.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_prepared_endpoint_serves_nothing_before_the_send_sets_its_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = vec![9u8; 64 << 10];
+    let (mut outgoing, _text) = prepared_without_mode(&dir, &body).await;
+    let root = Hash::from(outgoing.roots[0]);
+    let addr = outgoing.provider.addr();
+    let (probe, store) = client(&dir, "probe").await;
+
+    let connection = probe.connect(addr.clone(), iroh_blobs::ALPN).await.unwrap();
+    let refused = store
+        .remote()
+        .execute_get(connection.clone(), GetRequest::blob(root))
+        .complete()
+        .await;
+    assert!(
+        refused.is_err(),
+        "a request was served before the send's mode was set"
+    );
+    connection.close(0u32.into(), b"refused");
+    assert_eq!(outgoing.provider.served_bytes(root), 0);
+
+    outgoing.reserve(Keep::Receivers(1));
+    take_whole(&probe, &store, &addr, root).await;
+    assert!(
+        outgoing.provider.served_bytes(root) > 0,
+        "the reserved send served nothing"
+    );
+
+    let (tx, _events) = tokio::sync::mpsc::unbounded_channel();
+    let end = tokio::time::timeout(
+        Duration::from_secs(10),
+        outgoing.serve(Keep::Receivers(1), &tx),
+    )
+    .await
+    .expect("the reserved send did not end")
+    .unwrap();
+    assert_eq!(end, StopEnd::Downloaded);
+    probe.close().await;
 }
