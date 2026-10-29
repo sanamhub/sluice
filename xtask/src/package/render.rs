@@ -3,35 +3,33 @@
 
 use anyhow::Result;
 
-use super::{Checksums, DESCRIPTION, HOMEPAGE, LICENSE, PUBLISHER, SHORT, TARGETS, url};
+use super::{Checksums, DESCRIPTION, HOMEPAGE, LICENSE, PUBLISHER, SHORT, TARGETS, Target, url};
+
+/// The target `triple` names. Every format names it from the same table, so the spelling of a
+/// folder, an artifact and a binary stays one decision.
+fn target(triple: &str) -> &'static Target {
+    TARGETS
+        .iter()
+        .find(|target| target.triple == triple)
+        .expect("every triple named here is a target")
+}
 
 /// The hash of `triple`'s artifact in `sums`.
 fn sum<'a>(sums: &'a Checksums, triple: &str) -> Result<&'a str> {
-    let target = TARGETS
-        .iter()
-        .find(|target| target.triple == triple)
-        .expect("every triple named here is a target");
-    sums.get(&target.artifact())
+    let artifact = target(triple).artifact();
+    sums.get(&artifact)
         .map(String::as_str)
-        .ok_or_else(|| anyhow::anyhow!("no checksum for {}", target.artifact()))
+        .ok_or_else(|| anyhow::anyhow!("no checksum for {artifact}"))
 }
 
 /// The release URL of `triple`'s artifact.
 fn shipped(version: &str, triple: &str) -> String {
-    let target = TARGETS
-        .iter()
-        .find(|target| target.triple == triple)
-        .expect("every triple named here is a target");
-    url(version, &target.artifact())
+    url(version, &target(triple).artifact())
 }
 
 /// The path of `name` inside `triple`'s archive, which unpacks to the folder `dist` names for it.
 fn inside(triple: &str, name: &str) -> String {
-    let target = TARGETS
-        .iter()
-        .find(|target| target.triple == triple)
-        .expect("every triple named here is a target");
-    format!("{}/{}", target.folder(), name)
+    format!("{}/{}", target(triple).folder(), name)
 }
 
 /// A Homebrew formula for the four Unix targets.
@@ -251,9 +249,5 @@ pub(super) fn pkgver(version: &str) -> String {
 
 /// The folder `triple`'s archive unpacks to.
 fn folder(triple: &str) -> String {
-    TARGETS
-        .iter()
-        .find(|target| target.triple == triple)
-        .expect("every triple named here is a target")
-        .folder()
+    target(triple).folder()
 }

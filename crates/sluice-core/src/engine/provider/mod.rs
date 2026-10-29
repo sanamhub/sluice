@@ -33,8 +33,9 @@ pub struct Provider {
     store: FsStore,
     policy: policy::Policy,
     done: tokio::sync::mpsc::UnboundedReceiver<policy::ServeEvent>,
-    /// Every content connection a receiver opened or closed, in the order it happened. The sender
-    /// end lives in the endpoint's hook, so the channel ends with the endpoint.
+    /// Every content connection a receiver opened or closed, and every place taken or refused, in
+    /// the order it happened. The sender is cloned into the endpoint's hook and into the gate, so
+    /// the channel closes only when the endpoint's reporter and the policy are both gone.
     receivers: tokio::sync::mpsc::UnboundedReceiver<endpoint::Receiver>,
     /// The places a limited send offers. The policy decides them; this side reads them to know when
     /// the send has served everyone it promised to.
