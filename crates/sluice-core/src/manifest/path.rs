@@ -258,15 +258,11 @@ fn component_violation(component: &str) -> Option<Violation<'_>> {
 /// the folder a later receive resumes from.
 pub const RESERVED_PREFIXES: [&str; 2] = [".sluice-partial-", ".sluice-tmp-"];
 
-/// Rule 9 folds case and compatibility the way a file system may, because a folder a receive keeps
-/// its store in is one name whatever spelling of it the file system resolves: Windows and macOS
-/// resolve case, macOS also resolves the composed and decomposed forms, and APFS folds some letters
-/// beyond ASCII, such as `ſ` to `s`.
-///
-/// Two things are read away before folding, because a file system may read them away too: the code
-/// points a name may not show (the default-ignorable ones, which HFS+ drops when it compares) and
-/// U+0131, which NTFS upcases to `I` although NFKC and case folding leave it alone. A name that only
-/// reaches the prefix once those are gone would open the store folder on such a volume.
+/// Rule 9 compares the key of a name with the prefix, because a folder a receive keeps its store in
+/// is one name whatever spelling of it the file system resolves: Windows and macOS resolve case,
+/// macOS also resolves the composed and decomposed forms, and APFS folds some letters beyond ASCII,
+/// such as `ſ` to `s`. The key drops the code points a name may not show and reads the dotless i,
+/// which NTFS upcases to `I`; [`fold_key`] says what else it does and in what order.
 fn starts_with_reserved(name: &str, prefix: &str) -> bool {
     if starts_with_ignore_ascii_case(name, prefix) {
         return true;
