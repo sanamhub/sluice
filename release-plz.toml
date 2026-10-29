@@ -3,6 +3,9 @@
 # `v<version>` tags the maintainer pushes, and nothing needs a registry token.
 [workspace]
 git_only = true
+# Three numeric parts, so a rehearsal tag such as v0.1.0-rc.1 is not a release tag here. After it
+# exists, the release pull request still starts at the last stable tag and keeps the whole v0.1.0
+# changelog (release_regex.rs in release-plz 0.3.174; docs/runbooks/releasing.md).
 git_tag_name = "v{{ version }}"
 # The maintainer tags by hand after merging the pull request, and the tag starts release.yml, which
 # makes the GitHub release. release-plz must do neither.

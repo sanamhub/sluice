@@ -42,21 +42,9 @@ The owner of `sanamhub/sluice` is `@sanamhub`. GitHub's permissions page says a 
   only entry in both settings above.
 
 The API returns these values, so a reader can check them without the settings pages:
-
-```
-gh api repos/sanamhub/sluice/environments/release \
-  --jq '{reviewers: [.protection_rules[] | select(.type == "required_reviewers")
-                         | .reviewers[].reviewer.login],
-         prevent_self_review: [.protection_rules[] | select(.type == "required_reviewers")
-                               | .prevent_self_review],
-         admins_bypass: .can_admins_bypass,
-         branches: .deployment_branch_policy}'
-gh api repos/sanamhub/sluice/environments/release/deployment-branch-policies \
-  --jq '.branch_policies[] | {name, type}'
-gh api repos/sanamhub/sluice/rulesets --jq '.[] | select(.name == "release tags") | .id'
-gh api repos/sanamhub/sluice/rulesets/<id> \
-  --jq '{refs: .conditions.ref_name.include, rules: [.rules[].type], bypass: .bypass_actors}'
-```
+`gh api repos/sanamhub/sluice/environments/release` shows the reviewer, self-review, branch policy
+and admin bypass, and `gh api repos/sanamhub/sluice/rulesets/<id>` shows the tag rules and bypass.
+Find `<id>` with `gh api repos/sanamhub/sluice/rulesets`.
 
 ### What the pause protects against
 
@@ -218,6 +206,97 @@ exists leaves it for the operator to delete.
    | `dist-manifest.json`, what dist built and where | 1 |
 
 Then verify one archive and the image as in [`docs/install.md`](../install.md).
+
+## Rehearsing a release
+
+Run the whole pipeline once on a pre-release tag before the first release. `v0.1.0-rc.1` is a real
+tag and a real GitHub release: it builds and publishes the binaries and the image under that
+version, and then you delete them. Do this before `v0.1.0`, not after it.
+
+**The tagged commit must carry the pre-release version.** `dist` 0.33.1 selects a package for a tag
+only when the package's version equals the tag's version. A tag that matches no package stops with
+`NothingToRelease` (`check_dist_package` and `require_releases` in [announce.rs][dist-announce]).
+A `v0.1.0-rc.1` tag on a commit whose `Cargo.toml` still says `0.1.0` therefore builds nothing.
+The rehearsal needs a version commit on `main`, and a second commit after it.
+
+### The first commit: the rehearsal version
+
+On `main`, make one commit with these contents:
+
+- `Cargo.toml`: `[workspace.package] version = "0.1.0"` becomes `"0.1.0-rc.1"`.
+- `Cargo.lock`: the three workspace entries, `sluice-cli`, `sluice-core` and `sluice-live`, change
+  from `version = "0.1.0"` to `0.1.0-rc.1`. No dependency version changes.
+- `CHANGELOG.md` is unchanged. There is no `0.1.0-rc.1` section, so the rehearsal's release notes are
+  empty; that is what is being rehearsed, not the notes.
+
+```
+cargo check
+git add Cargo.toml Cargo.lock
+git commit -m "chore: rehearse v0.1.0-rc.1"
+git push origin main
+git tag -a v0.1.0-rc.1 -m "Sluice 0.1.0-rc.1"
+git push origin v0.1.0-rc.1
+```
+
+### Run and approve it
+
+The tag starts `release.yml` exactly as a final tag does. Approve `host` and then `image-publish`
+under **Review deployments**, and run the same checks as for any release. Then check:
+
+- The release page is marked **Pre-release**. `dist` reads that from the tag
+  (`announcement_is_prerelease` in [announce.rs][dist-announce]), and `release.yml` passes
+  `--prerelease` to `gh release create`.
+- The release has the seven kinds of file in the table under **Cut a release**.
+- The image is public under the version `0.1.0-rc.1`, with the three tags the pipeline writes:
+  `0.1.0-rc.1`, `0.1.0-rc.1-amd64` and `0.1.0-rc.1-arm64`.
+
+### Remove what the rehearsal published
+
+Do this before the final release. A pre-release left in place would keep the version, its files and
+its image tags public, and nothing in the final run deletes them.
+
+```
+gh release delete v0.1.0-rc.1 --repo sanamhub/sluice --cleanup-tag --yes
+```
+
+`--cleanup-tag` deletes `v0.1.0-rc.1` too; if it does not, `git push origin :refs/tags/v0.1.0-rc.1`
+does, and the `release tags` ruleset lets the owner do that. Then open **Packages** >
+`sluice-relay` > the three `0.1.0-rc.1` tags and delete each one. Their attestations stay in the
+attestation store, naming digests no tag points at, which is harmless.
+
+### The second commit: back to 0.1.0
+
+Make the final version commit on `main`:
+
+- `Cargo.toml`: `version = "0.1.0-rc.1"` becomes `"0.1.0"`.
+- `Cargo.lock`: the three workspace entries go back to `0.1.0`.
+- `CHANGELOG.md`: no change from you. release-plz adds the `0.1.0` section when the push runs the
+  release workflow.
+
+```
+git add Cargo.toml Cargo.lock
+git commit -m "chore: release v0.1.0"
+git push origin main
+```
+
+Then wait for the release pull request, which now has the full changelog, merge it, and cut
+`v0.1.0` as **Cut a release** says.
+
+### What release-plz does with the pre-release tag
+
+It ignores it. The tag pattern comes from `git_tag_name = "v{{ version }}"`, and release-plz 0.3.174
+turns `{{ version }}` into `(\d+\.\d+\.\d+)` and anchors the whole tag, so `v0.1.0-rc.1` does not
+match ([release_regex.rs][release-tag-regex]). After the second commit the current version is
+`0.1.0`, and release-plz looks for `v0.1.0`, which does not exist yet; with no release to diff
+against, it carries the changelog for the whole history, not only the commits after the rehearsal.
+It does not propose a `0.1.0-rc.2`.
+
+While the rehearsal version is on `main`, release-plz may open a pull request for `0.1.0-rc.1`,
+because it sees no stable tag and the version was bumped. The second commit replaces it with the
+`0.1.0` pull request; close the rc one if it is still open.
+
+[dist-announce]: https://github.com/axodotdev/cargo-dist/blob/v0.33.1/cargo-dist/src/announce.rs
+[release-tag-regex]: https://github.com/release-plz/release-plz/blob/release-plz-v0.3.174/crates/release_plz_core/src/release_regex.rs
 
 ## Roll back
 
