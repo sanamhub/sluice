@@ -1,7 +1,8 @@
-//! A send that serves several receivers: how many take the whole transfer, who connected, and which
-//! of them counts.
+//! A send that serves several receivers: who may take the content, how many places it offers, and
+//! which connections hold one.
 
 use super::*;
+use n0_future::StreamExt;
 
 /// A client endpoint and a store that fetch by hand, so one endpoint can connect twice and be the
 /// same receiver both times.
@@ -30,8 +31,27 @@ async fn take_whole(probe: &Endpoint, store: &FsStore, addr: &iroh::EndpointAddr
     conn.close(crate::engine::COMPLETE_CLOSE.into(), b"complete");
 }
 
-/// Two receivers each take the whole ticket, and the send stops: a third is not served. The sender
-/// reports one start and one finish for each, with the same id on a receiver's two lines.
+/// One receiver that takes every byte and closes the normal way, without the completion code. It
+/// holds a place all the same: the place is about who was served, not about what was said.
+async fn take_whole_without_code(
+    probe: &Endpoint,
+    store: &FsStore,
+    addr: &iroh::EndpointAddr,
+    root: Hash,
+) {
+    let conn = probe.connect(addr.clone(), iroh_blobs::ALPN).await.unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(20),
+        crate::engine::fetch::fetch_whole(store, &conn, root),
+    )
+    .await
+    .expect("the fetch did not finish")
+    .unwrap();
+    conn.close(0u32.into(), b"done");
+}
+
+/// Two receivers each take the whole ticket, and the send stops. The sender reports one place and
+/// one finish for each, with the same id on a receiver's two lines.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_receivers_end_a_send_that_serves_that_many() {
     let dir = tempfile::tempdir().unwrap();
@@ -52,26 +72,242 @@ async fn two_receivers_end_a_send_that_serves_that_many() {
         .unwrap()
         .unwrap();
     assert_eq!(end, StopEnd::Downloaded);
-
-    // The send has stopped, so the third ticket holder is never served: its dial does not reach a
-    // sender, whether that fails now or is still waiting when the moment allowed for it passes.
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut rejected = options(&dir.path().join("three"));
-    rejected.max_network_failures = 1;
-    let third = tokio::time::timeout(
-        Duration::from_secs(2),
-        super::receive(&text, &rejected, &tx),
-    )
-    .await;
-    assert!(
-        third.is_err() || third.is_ok_and(|result| result.is_err()),
-        "a third receiver was served"
-    );
-
     assert_report_lines(&mut events, 2);
 }
 
-/// Drains the sender's receiver lines and checks them: one start and one finish per receiver, the
+/// The bound is on endpoints, not on connections: the second place is gone while its holder is
+/// still transferring, and a third endpoint that asks for the content is refused. The send ends
+/// when the last holder closes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_third_receiver_is_refused_while_a_place_holder_transfers() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = vec![7u8; 4 << 20];
+    let (outgoing, text) = prepared(&dir, &body).await;
+    let root = Hash::from(outgoing.roots[0]);
+    let roots = outgoing.roots.clone();
+    let addr = outgoing.provider.addr();
+    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let serving = tokio::spawn(async move {
+        outgoing
+            .provider
+            .serve(
+                Stop::Keep {
+                    limit: Some(2),
+                    roots,
+                },
+                &tx,
+            )
+            .await
+    });
+
+    // The first place, taken by an ordinary receive.
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    super::receive(&text, &options(&dir.path().join("one")), &tx)
+        .await
+        .unwrap();
+    wait_for_started(&mut events).await;
+
+    // The second place, held by a request that is still moving: the stream is opened but only its
+    // first update is read, so the connection stays up with bytes still to come.
+    let (second, store) = client(&dir, "second").await;
+    let held = second
+        .connect(addr.clone(), iroh_blobs::ALPN)
+        .await
+        .unwrap();
+    let request = store
+        .remote()
+        .execute_get(held.clone(), GetRequest::blob(root));
+    let mut stream = std::pin::pin!(request.stream());
+    assert!(stream.next().await.is_some(), "the request was not started");
+    wait_for_started(&mut events).await;
+
+    // The third endpoint asks for the same blob and is refused before any byte is written.
+    let (third, store) = client(&dir, "third").await;
+    let refused_conn = third.connect(addr.clone(), iroh_blobs::ALPN).await.unwrap();
+    let refused = store
+        .remote()
+        .execute_get(refused_conn.clone(), GetRequest::blob(root))
+        .complete()
+        .await;
+    assert!(refused.is_err(), "a third receiver was served");
+    wait_for_refused(&mut events, 2).await;
+    refused_conn.close(0u32.into(), b"refused");
+    third.close().await;
+
+    // The holder finishes and closes, which ends the send: both places were taken and neither
+    // holder has a connection left.
+    let mut done = false;
+    while let Some(item) = stream.next().await {
+        match item {
+            iroh_blobs::api::remote::GetProgressItem::Done(_) => {
+                done = true;
+                break;
+            }
+            iroh_blobs::api::remote::GetProgressItem::Progress(_) => {}
+            iroh_blobs::api::remote::GetProgressItem::Error(e) => {
+                panic!("the held transfer failed: {e}")
+            }
+        }
+    }
+    assert!(done, "the held transfer did not finish");
+    held.close(crate::engine::COMPLETE_CLOSE.into(), b"complete");
+
+    let end = tokio::time::timeout(Duration::from_secs(10), serving)
+        .await
+        .expect("the send did not stop after the last holder closed")
+        .unwrap()
+        .unwrap();
+    assert_eq!(end, ServeEnd::Downloaded);
+    second.close().await;
+}
+
+/// A receive that took everything but closed without the completion code still holds a place, and
+/// its close is what ends a send that offered one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_receiver_without_the_completion_code_still_uses_a_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = vec![3u8; 64 << 10];
+    let (outgoing, _text) = prepared(&dir, &body).await;
+    let root = Hash::from(outgoing.roots[0]);
+    let roots = outgoing.roots.clone();
+    let addr = outgoing.provider.addr();
+    let (tx, _events) = tokio::sync::mpsc::unbounded_channel();
+    let serving = tokio::spawn(async move {
+        outgoing
+            .provider
+            .serve(
+                Stop::Keep {
+                    limit: Some(1),
+                    roots,
+                },
+                &tx,
+            )
+            .await
+    });
+
+    let (probe, store) = client(&dir, "quiet").await;
+    take_whole_without_code(&probe, &store, &addr, root).await;
+    let end = tokio::time::timeout(Duration::from_secs(10), serving)
+        .await
+        .expect("a quiet close did not end the send")
+        .unwrap()
+        .unwrap();
+    assert_eq!(end, ServeEnd::Downloaded);
+    probe.close().await;
+}
+
+/// Reading only the manifest spends a place: `inspect` against a send that offers one ends it when
+/// its connection closes, because a place is about the endpoint, not about the bytes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_inspect_spends_a_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = vec![4u8; 64 << 10];
+    let (outgoing, text) = prepared(&dir, &body).await;
+    let roots = outgoing.roots.clone();
+    let (tx, _events) = tokio::sync::mpsc::unbounded_channel();
+    let serving = tokio::spawn(async move {
+        outgoing
+            .provider
+            .serve(
+                Stop::Keep {
+                    limit: Some(1),
+                    roots,
+                },
+                &tx,
+            )
+            .await
+    });
+
+    crate::engine::inspect(&text, Limits::default(), None)
+        .await
+        .unwrap();
+    let end = tokio::time::timeout(Duration::from_secs(10), serving)
+        .await
+        .expect("an inspect did not spend a place")
+        .unwrap()
+        .unwrap();
+    assert_eq!(end, ServeEnd::Downloaded);
+}
+
+/// A receiver that reconnects is one receiver: two connections from one endpoint take one place,
+/// and a second endpoint's one connection takes the other.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_receiver_that_reconnects_is_counted_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = vec![6u8; 64 << 10];
+    let (outgoing, _text) = prepared(&dir, &body).await;
+    let root = Hash::from(outgoing.roots[0]);
+    let roots = outgoing.roots.clone();
+    let addr = outgoing.provider.addr();
+    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+    let serving = tokio::spawn(async move {
+        outgoing
+            .provider
+            .serve(
+                Stop::Keep {
+                    limit: Some(2),
+                    roots,
+                },
+                &tx,
+            )
+            .await
+    });
+
+    let (probe, store) = client(&dir, "probe").await;
+    take_whole(&probe, &store, &addr, root).await;
+    assert_lines(&lines_until_finish(&mut events).await, 1);
+    // The same endpoint again: a finish line, and no second place line, because it already holds
+    // the place it takes.
+    take_whole(&probe, &store, &addr, root).await;
+    assert_lines(&lines_until_finish(&mut events).await, 0);
+
+    // If the reconnect had taken the second place, the send would have ended when that connection
+    // closed and this dial would find nothing to serve.
+    let (second, store) = client(&dir, "second").await;
+    take_whole(&second, &store, &addr, root).await;
+    assert_lines(&lines_until_finish(&mut events).await, 1);
+    let end = tokio::time::timeout(Duration::from_secs(10), serving)
+        .await
+        .expect("the send did not stop after the second receiver")
+        .unwrap()
+        .unwrap();
+    assert_eq!(end, ServeEnd::Downloaded);
+    probe.close().await;
+    second.close().await;
+}
+
+/// Waits for one receiver's finish line and returns the lines before it, its place line included.
+async fn lines_until_finish(
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>,
+) -> Vec<Event> {
+    let mut lines = Vec::new();
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .expect("no receiver event arrived")
+            .expect("the events channel closed");
+        let finished = matches!(event, Event::ReceiverFinished { .. });
+        lines.push(event);
+        if finished {
+            return lines;
+        }
+    }
+}
+
+/// Checks the lines one connection made: exactly `places` place lines and one finish, in that order.
+fn assert_lines(lines: &[Event], places: usize) {
+    let started = lines
+        .iter()
+        .filter(|event| matches!(event, Event::ReceiverStarted { .. }))
+        .count();
+    assert_eq!(started, places, "the place lines of one connection");
+    assert!(
+        matches!(lines.last(), Some(Event::ReceiverFinished { .. })),
+        "the last line is the finish"
+    );
+}
+
+/// Drains the sender's receiver lines and checks them: one place and one finish per receiver, the
 /// same id on a receiver's two lines, and count receivers in all.
 fn assert_report_lines(events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>, count: usize) {
     let mut started = 0;
@@ -110,99 +346,40 @@ fn assert_report_lines(events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>,
     assert_eq!(ids.len(), count, "two receivers shared one id");
 }
 
-/// A receiver that reconnects is one receiver: two connections from one endpoint do not use up a
-/// limit of two, and a second receiver's one connection does.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_receiver_that_reconnects_is_counted_once() {
-    let dir = tempfile::tempdir().unwrap();
-    let body = vec![6u8; 64 << 10];
-    let (outgoing, _text) = prepared(&dir, &body).await;
-    let root = Hash::from(outgoing.roots[0]);
-    let roots = outgoing.roots.clone();
-    let addr = outgoing.provider.addr();
-    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
-    let mut serving = tokio::spawn(async move {
-        outgoing
-            .provider
-            .serve(
-                Stop::Keep {
-                    limit: Some(2),
-                    roots,
-                },
-                &tx,
-            )
-            .await
-    });
-
-    let (probe, store) = client(&dir, "probe").await;
-    for _ in 0..2 {
-        take_whole(&probe, &store, &addr, root).await;
-        wait_for_finish(&mut events).await;
-    }
-    assert!(
-        tokio::time::timeout(Duration::from_millis(400), &mut serving)
-            .await
-            .is_err(),
-        "one receiver that reconnected used up a limit of two"
-    );
-
-    let (second, store) = client(&dir, "second").await;
-    take_whole(&second, &store, &addr, root).await;
-    let end = tokio::time::timeout(Duration::from_secs(10), serving)
-        .await
-        .expect("the send did not stop after the second receiver")
-        .unwrap()
-        .unwrap();
-    assert_eq!(end, ServeEnd::Downloaded);
-    probe.close().await;
-    second.close().await;
+/// Waits for one receiver's place line, so a test never sleeps between two connections.
+async fn wait_for_started(events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>) {
+    wait_for(events, |event| {
+        matches!(event, Event::ReceiverStarted { .. })
+    })
+    .await;
 }
 
-/// A receive that took only part of a ticket closes without the completion code, so it is part of
-/// the transfer and not one of the receivers the limit counts. The whole receive that follows ends
-/// the send.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_partial_receive_does_not_use_up_the_limit() {
-    let dir = tempfile::tempdir().unwrap();
-    let tree = tree(&dir);
-    let (outgoing, text) = prepared_paths(&dir, std::slice::from_ref(&tree)).await;
-    let (tx, _events) = tokio::sync::mpsc::unbounded_channel();
-    let serving = tokio::spawn(async move { outgoing.serve(Keep::Receivers(1), &tx).await });
-
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    super::receive(
-        &text,
-        &selecting(&dir.path().join("part"), &["tree/a.txt"]),
-        &tx,
-    )
-    .await
-    .unwrap();
-    assert!(
-        !serving.is_finished(),
-        "a partial receive used up the limit"
-    );
-
-    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    super::receive(&text, &options(&dir.path().join("all")), &tx)
-        .await
-        .unwrap();
-    let end = tokio::time::timeout(Duration::from_secs(10), serving)
-        .await
-        .expect("the whole receive did not end the send")
-        .unwrap()
-        .unwrap();
-    assert_eq!(end, StopEnd::Downloaded);
+/// Waits for the one refusal line a send makes for an endpoint.
+async fn wait_for_refused(events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>, places: u32) {
+    let event = wait_for(events, |event| {
+        matches!(event, Event::ReceiverRefused { .. })
+    })
+    .await;
+    let Event::ReceiverRefused {
+        places: reported, ..
+    } = event
+    else {
+        unreachable!("the predicate matched a refusal");
+    };
+    assert_eq!(reported, places, "the refusal named another limit");
 }
 
-/// Waits for one receiver's finish line, so a test never sleeps between two connections.
-async fn wait_for_finish(events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>) {
+async fn wait_for(
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>,
+    wanted: impl Fn(&Event) -> bool,
+) -> Event {
     loop {
-        let event = tokio::time::timeout(Duration::from_secs(2), events.recv())
+        let event = tokio::time::timeout(Duration::from_secs(5), events.recv())
             .await
             .expect("no receiver event arrived")
             .expect("the events channel closed");
-        if matches!(event, Event::ReceiverFinished { .. }) {
-            return;
+        if wanted(&event) {
+            return event;
         }
     }
 }
