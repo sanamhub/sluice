@@ -29,44 +29,45 @@ impl iroh::protocol::ProtocolHandler for Silent {
 }
 
 /// An endpoint on loopback whose one handler is [`Silent`], with the ticket that dials it. The
-/// router sets the endpoint's ALPNs when it is spawned, so it is spawned before the ticket is used.
+/// router sets the endpoint's ALPNs when it is spawned and starts the accept loop on the runtime,
+/// so it is spawned on that runtime and before the ticket is used.
 fn silent_sender(
     runtime: &tokio::runtime::Runtime,
 ) -> (iroh::Endpoint, iroh::protocol::Router, String) {
     use sluice_core::ticket::{Body, Format, Ticket};
 
-    let endpoint = runtime.block_on(async {
-        iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+    runtime.block_on(async {
+        let endpoint = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
             .relay_mode(iroh::RelayMode::Disabled)
             .bind_addr((std::net::Ipv4Addr::LOCALHOST, 0))
             .expect("a loopback address")
             .bind()
             .await
-            .expect("bind the sender")
-    });
-    let router = iroh::protocol::Router::builder(endpoint.clone())
-        .accept(iroh_blobs::ALPN, Silent)
-        .spawn();
-    let id = *endpoint.id().as_bytes();
-    let direct = endpoint
-        .bound_sockets()
-        .into_iter()
-        .find(|addr| addr.is_ipv4())
-        .expect("no IPv4 socket");
-    let ticket = Ticket::new(
-        id,
-        vec![direct],
-        None,
-        None,
-        // A hash sequence that is never served: the handler never writes a byte.
-        Body::Static {
-            root: [3; 32],
-            size: 0,
-            format: Format::HashSequence,
-        },
-    )
-    .expect("a ticket");
-    (endpoint, router, ticket.encode())
+            .expect("bind the sender");
+        let router = iroh::protocol::Router::builder(endpoint.clone())
+            .accept(iroh_blobs::ALPN, Silent)
+            .spawn();
+        let id = *endpoint.id().as_bytes();
+        let direct = endpoint
+            .bound_sockets()
+            .into_iter()
+            .find(|addr| addr.is_ipv4())
+            .expect("no IPv4 socket");
+        let ticket = Ticket::new(
+            id,
+            vec![direct],
+            None,
+            None,
+            // A hash sequence that is never served: the handler never writes a byte.
+            Body::Static {
+                root: [3; 32],
+                size: 0,
+                format: Format::HashSequence,
+            },
+        )
+        .expect("a ticket");
+        (endpoint, router, ticket.encode())
+    })
 }
 
 /// The entries of `dir` whose names start with `prefix`.
