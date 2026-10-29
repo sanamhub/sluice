@@ -39,7 +39,7 @@ async fn a_dropped_connection_is_retried() {
     // A sender that comes back imports the file again: the content of a send is its own and went
     // with it. The home saves the port its last send bound, so the second send reaches the address
     // the ticket already carries.
-    let again = super::prepare_send(
+    let mut again = super::prepare_send(
         &home,
         &source,
         RelayModeChoice::Disabled,
@@ -49,6 +49,9 @@ async fn a_dropped_connection_is_retried() {
     )
     .await
     .unwrap();
+    // A prepared send refuses every request until its mode is set, as the command line sets it
+    // before printing a ticket.
+    again.reserve(Keep::One);
     let provider = again.provider;
     let reached = provider
         .addr()
