@@ -60,6 +60,13 @@ impl Places {
         self.armed = true;
     }
 
+    /// Whether a request from a connection without a handshake record is served. Such a request
+    /// holds no place and can take none, so only a send that is armed and counts no places lets it
+    /// in.
+    pub(crate) fn admits_unknown(&self) -> bool {
+        self.armed && self.limit.is_none()
+    }
+
     /// How many places the send offers, or `None` when it does not count.
     pub(crate) fn limit(&self) -> Option<usize> {
         self.limit
@@ -212,5 +219,16 @@ mod tests {
         assert_eq!(places.last_active_ms(), 10);
         places.touch(&[1; 32], 30);
         assert_eq!(places.last_active_ms(), 30);
+    }
+
+    /// A request whose connection has no handshake record is refused until the send's mode is set,
+    /// and after that only by a send that counts places.
+    #[test]
+    fn an_unknown_connection_waits_for_the_mode_and_never_takes_a_place() {
+        let mut unarmed = Places::default();
+        assert!(!unarmed.admits_unknown());
+        unarmed.arm();
+        assert!(unarmed.admits_unknown());
+        assert!(!places(2).admits_unknown());
     }
 }
