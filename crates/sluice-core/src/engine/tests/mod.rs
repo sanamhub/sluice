@@ -37,6 +37,7 @@ mod names;
 mod pack;
 mod receivers;
 mod refusal;
+mod reports;
 mod resume;
 mod rules;
 mod select;
