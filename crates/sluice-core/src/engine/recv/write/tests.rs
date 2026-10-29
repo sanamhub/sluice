@@ -49,6 +49,8 @@ async fn run(
     let plan = Plan {
         files: manifest.entries().len() as u64,
         bytes: manifest.entries().iter().map(|entry| entry.size).sum(),
+        folders: 0,
+        links: 0,
         ours: std::collections::BTreeSet::new(),
     };
     write(manifest, &plan, store, &options(out), partial, false, &tx)
@@ -84,6 +86,8 @@ async fn a_kept_store_is_given_its_own_bytes_back() {
     let plan = Plan {
         files: 2,
         bytes: (one.len() + two.len()) as u64,
+        folders: 0,
+        links: 0,
         ours: std::collections::BTreeSet::new(),
     };
     let mut options = options(&out);
@@ -342,6 +346,8 @@ async fn a_store_copy_linked_to_an_edited_file_is_not_exported() {
     let plan = Plan {
         files: 1,
         bytes: body.len() as u64,
+        folders: 0,
+        links: 0,
         ours: std::collections::BTreeSet::new(),
     };
     let mut options = options(&out);

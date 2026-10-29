@@ -30,6 +30,7 @@ use crate::{
 mod cancel;
 mod checks;
 mod done;
+mod inspect;
 mod lifecycle;
 mod live;
 mod resume;

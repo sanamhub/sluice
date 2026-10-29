@@ -116,6 +116,38 @@ target is replaced as an entry and never followed. A receive that was killed res
 partial store's marker names the same ticket; a file whose content already matches is skipped, and
 anything else at its target is a clash.
 
+Before it writes anything, a receive prints one line with what the manifest will write, the same
+line `sluice inspect` prints: `3 files, 2 folders, 1.2 GiB`. In `--json` that is an event of its
+own, `{"event":"planned","files":3,"folders":2,"links":0,"bytes":1258291}`.
+
+**`sluice inspect`**
+
+`inspect TICKET` reads the ticket's hash sequence and manifest, and prints what the transfer offers:
+how many files, folders and links, how many bytes, and the names as a tree with a folder's name
+ending in `/` and a link's in `@`. It fetches no content and writes nothing: the manifest is read
+into a temporary store under the home's `tmp` that is removed before the command ends, under the
+same limits a receive applies. The tree shows at most 50 names; `--all` lists every one, and a cut
+tree ends with a line that counts the rest. A name is printed with a control or a bidirectional
+character written as its escape (`\u{202e}`), so it cannot reorder the line it is in.
+
+A live ticket has no manifest, so there is nothing to read: the command says so and exits 0. A raw
+ticket (from `send -`) has a size and no name.
+
+```
+1 file, 1.5 KiB
+one.bin
+```
+
+With `--json` the same is one object, and it carries every entry whatever `--all` says, because a
+line limit is about a terminal and not about a value:
+
+```
+{"files":2,"folders":2,"links":0,"bytes":6,"entries":[{"path":"tree","kind":"directory","size":0},{"path":"tree/a.txt","kind":"file","size":4},{"path":"tree/sub","kind":"directory","size":0},{"path":"tree/sub/b.txt","kind":"file","size":2}]}
+```
+
+`kind` is `file`, `directory` or `link`, and `size` is the file's bytes. A live ticket prints
+`{"live":true}`.
+
 **`sluice doctor`**
 
 `sluice doctor` checks the home, who owns it and who else can reach it, its layout version, its

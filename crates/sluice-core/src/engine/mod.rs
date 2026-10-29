@@ -7,6 +7,7 @@ mod events;
 mod expiry;
 mod fetch;
 mod hello;
+mod inspect;
 mod live;
 mod net;
 mod policy;
@@ -27,6 +28,7 @@ pub use hello::{
     Hello, MAX_FRAME_BYTES, PROTO_VERSION, SluiceProtocol, decode as decode_hello,
     encode as encode_hello, greet,
 };
+pub use inspect::{Offered, OfferedEntry, Offering, inspect};
 pub use live::{
     CLOSE_AFTER, LiveLog, LiveSend, prepare_live, prepare_live_with_rate, receive_live,
 };
