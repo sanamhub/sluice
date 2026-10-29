@@ -14,8 +14,6 @@
 
 use std::ffi::OsString;
 
-use crate::Mode;
-
 /// The path iroh-relay is told to read: its own descriptor 0, which holds the sealed copy of the
 /// bytes the guard checked. A `/proc/self/fd` link opens what the descriptor holds, from its
 /// start. It is a path of the kernel's and not `/dev/stdin`, which is a link the container runtime
@@ -36,26 +34,14 @@ pub const MEMFD_NAME: &str = "sluice-relay-config";
 /// The arguments iroh-relay is started with after the sealed copy is on descriptor 0:
 /// `--config-path=/proc/self/fd/0`, and nothing from the command line the guard was given.
 ///
-/// In rendezvous mode `--dev` comes first. iroh-relay 1.4.1 gives the QUIC server of address
-/// discovery a certificate only on the path `--dev` takes when the relay half is off
-/// (main.rs:593-600 and 703-721), and without it refuses the config with `TLS not configured`.
-/// Its other effects, plain HTTP for the relay and a default HTTP port, have nothing to act on
-/// with no relay half, which the guard has checked is off. The guard refuses `--dev` from the
-/// command line, in every mode.
-///
 /// ```
-/// use sluice_relay_guard::{Mode, relay_args};
-///
-/// assert_eq!(relay_args(Mode::Closed), ["--config-path=/proc/self/fd/0"]);
-/// assert_eq!(relay_args(Mode::Open), ["--config-path=/proc/self/fd/0"]);
-/// assert_eq!(relay_args(Mode::Rendezvous), ["--dev", "--config-path=/proc/self/fd/0"]);
+/// assert_eq!(
+///     sluice_relay_guard::relay_args(),
+///     ["--config-path=/proc/self/fd/0"]
+/// );
 /// ```
-pub fn relay_args(mode: Mode) -> Vec<OsString> {
-    let config = OsString::from(format!("--config-path={CONFIG_FD_PATH}"));
-    match mode {
-        Mode::Rendezvous => vec![OsString::from("--dev"), config],
-        Mode::Closed | Mode::Open => vec![config],
-    }
+pub fn relay_args() -> Vec<OsString> {
+    vec![OsString::from(format!("--config-path={CONFIG_FD_PATH}"))]
 }
 
 #[cfg(target_os = "linux")]

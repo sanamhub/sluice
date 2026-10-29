@@ -11,11 +11,11 @@ even when the file goes direct. It runs one of two ways (ADR 0028):
 - **as a full relay**, with [relay.toml](relay.toml) and a per-client limit you set: every relayed
   byte of a transfer passes through the host, in and out again, and the host pays for both.
 
-`iroh-relay` is the upstream binary, built the way `rendezvous` builds it: from crates.io with
-`--locked`, at the version `Cargo.lock` resolves for `iroh`, on the same two base images pinned by
-the same digests. It runs as uid 65532 on `gcr.io/distroless/cc-debian13:nonroot`, which has no
-shell, and the metrics server is off. It starts through [the guard](#the-guard), the one program of
-ours in the image, which refuses a config that would open the relay by mistake.
+`iroh-relay` is the upstream binary, built from crates.io with `--locked`, at the version
+`Cargo.lock` resolves for `iroh`, on two base images pinned by digest. It runs as uid 65532 on
+`gcr.io/distroless/cc-debian13:nonroot`, which has no shell, and the metrics server is off. It
+starts through [the guard](#the-guard), the one program of ours in the image, which refuses a
+config that would open the relay by mistake.
 
 The relay runs closed (`docs/design.md`, **Relays run closed**). Only the endpoint ids on its
 allowlist may relay through it, and the image ships with that list empty, so it lets nobody in until
@@ -49,13 +49,13 @@ prints them:
 | a mounted `relay.toml` that says `[acess]` | ``sluice-relay-guard: line 1: unknown key `acess`: iroh-relay 1.4.1 has no such setting, and would ignore it; check the spelling against docker/relay/README.md`` |
 | `--config-path /etc/relay/open.toml` | ``sluice-relay-guard: `access` is "everyone", which lets anyone relay: list the ids that may relay in `[access] allowlist`, or start with --open to run it open on purpose`` |
 
-It also refuses `--dev`, every argument but `--open`, `--rendezvous`, `--behind-proxy` and
-`--config-path`, `--open` with a closed config, and an allowlist entry that is not 64 hex digits.
-Since ADR 0020 it refuses `dangerous_http_only = true`, a config with no `enable_metrics` line, an
+It also refuses `--dev`, every argument but `--open`, `--behind-proxy` and `--config-path`,
+`--open` with a closed config, and an allowlist entry that is not 64 hex digits. Since ADR 0020 it
+refuses `dangerous_http_only = true`, a config with no `enable_metrics` line, an
 `access.http.url` with a user name, password, query or fragment in it, and `enable_relay = false`,
-which is the rendezvous image's config. Since ADR 0021 it refuses a config with no `[tls]` unless
-`--behind-proxy` is given. The [guard's README](../guard/README.md) lists every rule. No message
-prints a value from the config, since a token may be one.
+because the relay half would then carry nothing. Since ADR 0021 it refuses a config with no `[tls]`
+unless `--behind-proxy` is given. The [guard's README](../guard/README.md) lists every rule. No
+message prints a value from the config, since a token may be one.
 
 One exception is the maintainer's: a key name made only of 1 to 32 lower-case letters and `_` is
 printed, because no rule can tell it from a setting's name. A `--config-path` value is printed only
@@ -104,8 +104,8 @@ docker build -f docker/relay/Dockerfile -t sluice-relay docker
 ```
 
 The default command runs [relay.toml](relay.toml), which reads `default.crt` and `default.key` from
-`/etc/relay/certs`. For a test, make a self-signed certificate as for `rendezvous`. It has to say
-`CA:FALSE`, or the client refuses it as a server certificate:
+`/etc/relay/certs`. For a test, make a self-signed certificate. It has to say `CA:FALSE`, or the
+client refuses it as a server certificate:
 
 ```
 mkdir certs && cd certs
@@ -161,10 +161,10 @@ It was run again through the guard, with new keys, and came out the same, with `
 container's PID 1. On 2026-10-23 it was run a third time with the config handed over and the
 container's root read-only, and came out the same again, with `iroh-relay` started as
 `--config-path=/dev/stdin` as the guard did then; ADR 0021 moved that to a sealed copy read through
-`/proc/self/fd/0`. [smoke-test.sh](../smoke-test.sh) checks the guard's refusals, that both images
-start as the config they were given with a read-only root, what PID 1 is, and that `docker stop`
+`/proc/self/fd/0`. [smoke-test.sh](../smoke-test.sh) checks the guard's refusals, that the image
+starts as the config it was given with a read-only root, what PID 1 is, and that `docker stop`
 returns in under a second with exit 0, because the Dockerfile sends SIGINT. CI runs it on every
-build of either image.
+build of the image.
 
 ## Meeting point
 
@@ -207,25 +207,23 @@ traffic cap.
 
 ## Certificates
 
-The image takes `Manual` certificates, as `rendezvous` does. With the relay half on, `iroh-relay`
+The image takes `Manual` certificates. With the relay half on, `iroh-relay`
 1.4.1 can also fetch a LetsEncrypt certificate itself: set `cert_mode = "LetsEncrypt"`, `hostname`
 and `contact` in `[tls]`, and keep `cert_dir` on a mounted volume, where it caches the certificate.
 Its challenge is TLS-ALPN-01, answered on the HTTPS listener (`src/server/http_server.rs:1095`), so
 TCP 443 must be reachable from the internet. TCP 80 is not used for the challenge. This mode was
 read from the source and not run, because there was no public host name.
 
-With a certificate from outside, the `certbot` recipe of the
-[`rendezvous` README](../rendezvous/README.md#certificates) works with one change: `--standalone`
-needs TCP 80, which the relay holds, so add `--pre-hook 'docker stop relay'` and end the deploy hook
-with `docker start relay`. This recipe was not run either.
+With a certificate from outside, `certbot --standalone` would work with one change: it needs TCP 80,
+which the relay holds, so add `--pre-hook 'docker stop relay'` and end the deploy hook with `docker
+start relay`. This recipe was not run either.
 
 ## A config with no `[tls]`
 
 A config with no `[tls]` table makes iroh-relay serve plain HTTP, so it is refused unless the
 operator says a proxy in front ends TLS. Add `--behind-proxy` to the `docker run` command for that.
 The flag and the file have to agree: `--behind-proxy` with a `[tls]` table is refused, because then
-iroh-relay ends TLS itself, and `--behind-proxy` in `--rendezvous` mode is refused, because a
-rendezvous server relays nothing.
+iroh-relay ends TLS itself.
 
 **The proxy in front must end TLS.** A client reaches the proxy over HTTPS, and the proxy reaches
 the relay over HTTP. Whatever the clients present crosses that second hop in clear text, shared

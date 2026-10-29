@@ -108,8 +108,8 @@ collapsed.
 bandwidth-delay product of 10 Gbit/s at 60 ms. The values in force are in every result.
 
 `--rendezvous` points both ends at a rendezvous server, which is `iroh-relay` with its relay half
-off (ADR 0013, [the image](../../docker/rendezvous/README.md)). It goes into iroh's relay map with
-QUIC address discovery on its UDP port, the URL's port or 7842. The endpoint asks the server for its
+off (ADR 0013; ADR 0032 retires the image, and the binary is what remains). It goes into iroh's
+relay map with QUIC address discovery on its UDP port, the URL's port or 7842. The endpoint asks the server for its
 public address and uses it for nothing else, so a connection is direct or it does not exist. It
 cannot be combined with `--relay`.
 

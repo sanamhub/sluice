@@ -14,7 +14,7 @@ use sluice_relay_guard::{Args, Mode, check_config, open_config};
 // 32 lower-case letters or `-`.
 fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data);
-    for mode in [Mode::Closed, Mode::Open, Mode::Rendezvous] {
+    for mode in [Mode::Closed, Mode::Open] {
         for token in [None, Some("t")] {
             for behind_proxy in [false, true] {
                 if let Err(refusal) = check_config(&text, mode, token, behind_proxy) {
@@ -71,7 +71,7 @@ fn argument_named_plainly(message: &str) {
 const FIXED_SPANS: &[&str] = &[
     // Whole settings of the guard's advice, with a space and an `=` in them.
     "enable_metrics = false",
-    "enable_relay = false",
+    "enable_relay = true",
     // The name of a table as the README writes it.
     "[access] allowlist",
     // The command that prints an id.

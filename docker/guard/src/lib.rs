@@ -1,13 +1,13 @@
-//! `sluice-relay-guard`: the entry point of the `relay` and `rendezvous` images (ADR 0019, ADR
-//! 0020). It checks the config that `iroh-relay` is about to start with, and refuses one that would
-//! open more than the operator wrote.
+//! `sluice-relay-guard`: the entry point of the `relay` image (ADR 0019, ADR 0020). It checks the
+//! config that `iroh-relay` is about to start with, and refuses one that would open more than the
+//! operator wrote.
 //!
 //! iroh-relay 1.4.1 reads a missing `access` setting as everyone, ignores keys it does not know,
 //! and runs its open default when the config file is missing. Each gives a relay that anyone can
 //! use with no byte limit, and the server logs nothing that says so. The guard refuses all three,
-//! and every config that is open without `--open` and a per-client byte limit. In `--rendezvous`
-//! mode it requires the relay half off, since a deleted `enable_relay = false` line would turn a
-//! rendezvous server into an open relay.
+//! and every config that is open without `--open` and a per-client byte limit. It also refuses a
+//! config whose relay half is off: such a config serves address discovery only, and this image
+//! exists to carry traffic.
 //!
 //! It owns the check and the handover, and nothing else. It never prints a value from the config,
 //! since a token may be one, and it never changes the config it was given. What iroh-relay reads is
@@ -65,8 +65,6 @@ pub enum Mode {
     /// `--open`: a relay whose `access` is everyone, a denylist, or not set, with a per-client
     /// byte limit.
     Open,
-    /// `--rendezvous`: address discovery only, with the relay half off.
-    Rendezvous,
 }
 
 /// Why the guard will not start the relay: one line that names the key or the rule, and says what
@@ -105,12 +103,11 @@ impl std::error::Error for Refusal {}
 
 /// Checks a config's text for the mode asked for, and for whether the relay stands behind a proxy
 /// that ends TLS. In every mode: every key is one iroh-relay 1.4.1 knows, every allowlist id is one
-/// iroh-relay accepts, `enable_metrics` is written out, and HTTPS is not turned off. In closed and
-/// open mode a config with no `[tls]` table is refused unless `behind_proxy` says a proxy in front
-/// ends TLS, and `behind_proxy` with a `[tls]` table is refused, because then iroh-relay ends TLS
-/// itself. An HTTP access URL holds no secret, and shared tokens are not empty. Closed needs a
-/// closed `access`, open needs an open one and a per-client byte limit, and rendezvous needs
-/// `enable_relay = false`, no `access` or `[limits]`, and no `behind_proxy`. Each flag is refused
+/// iroh-relay accepts, `enable_metrics` is written out, the relay half is on, and HTTPS is not
+/// turned off. A config with no `[tls]` table is refused unless `behind_proxy` says a proxy in
+/// front ends TLS, and `behind_proxy` with a `[tls]` table is refused, because then iroh-relay ends
+/// TLS itself. An HTTP access URL holds no secret, and shared tokens are not empty. Closed needs a
+/// closed `access`, and open needs an open one and a per-client byte limit. Each flag is refused
 /// with a config of another mode, so it always means what it says.
 ///
 /// `access_token` is the value of [`ACCESS_TOKEN_VAR`], or `None` if it is unset or not UTF-8, as
@@ -139,10 +136,9 @@ impl std::error::Error for Refusal {}
 /// assert_eq!(check_config(open, Mode::Open, None, false), Ok(()));
 /// assert!(check_config(open, Mode::Closed, None, false).is_err());
 ///
-/// let rendezvous = "enable_relay = false\nenable_metrics = false\n";
-/// assert_eq!(check_config(rendezvous, Mode::Rendezvous, None, false), Ok(()));
-/// assert!(check_config("enable_metrics = false\n", Mode::Rendezvous, None, false).is_err());
-/// assert!(check_config(rendezvous, Mode::Rendezvous, None, true).is_err());
+/// // The relay half off is refused, because this image carries traffic.
+/// let off = "enable_relay = false\nenable_metrics = false\n";
+/// assert!(check_config(off, Mode::Closed, None, false).is_err());
 ///
 /// // The variable replaces an empty list, and is refused when it is empty itself.
 /// let tokens =

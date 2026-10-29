@@ -1,9 +1,9 @@
 # Releasing Sluice
 
 A release is the `sluice` binary for six targets, a shell and a PowerShell installer, checksums, a
-CycloneDX SBOM and GitHub artifact attestations, on a GitHub release. The `rendezvous` and `relay`
-images go to ghcr.io from the same run, after the release exists, each with provenance and an SBOM
-per architecture attested. Nothing goes to crates.io.
+CycloneDX SBOM and GitHub artifact attestations, on a GitHub release. The `relay` image goes to
+ghcr.io from the same run, after the release exists, with provenance and an SBOM per architecture
+attested. Nothing goes to crates.io.
 
 Installing and verifying a release is in [`docs/install.md`](../install.md). This runbook is for
 making one.
@@ -13,7 +13,7 @@ making one.
 | Workflow | Runs on | Does |
 |---|---|---|
 | `release-plz.yml` | every push to `main` | opens or updates the release pull request with the version bump and the new changelog section |
-| `release.yml` | a tag `v<version>` | runs all of `ci.yml`, checks the tag, builds six binaries and both images for amd64 and arm64, waits for every build and an approval, publishes the release as a draft and then publishes it, then pushes and attests the images: each architecture first, then the version index |
+| `release.yml` | a tag `v<version>` | runs all of `ci.yml`, checks the tag, builds six binaries and the relay image for amd64 and arm64, waits for every build and an approval, publishes the release as a draft and then publishes it, then pushes and attests the image: each architecture first, then the version index |
 
 ## Who can release
 
@@ -41,9 +41,8 @@ to the owner releasing alone.
 3. **The `release` environment, for the binaries.** `host` waits for a required reviewer: Actions >
    the run > **Review deployments** > tick `release` > **Approve and deploy**. It has to be someone
    other than whoever pushed the tag.
-4. **The `release` environment, for the images.** The two `image-publish` jobs start only after
-   `host` has made the release, so they wait for a second review in the same run. One review
-   approves both.
+4. **The `release` environment, for the image.** The `image-publish` job starts only after `host`
+   has made the release, so it waits for a second review in the same run.
 
 One release asks for four approvals: the merge, the tag, and two reviews by the second person, both
 within 35 days of the tag push ([why][cut-a-release]). GitHub's documentation says each job that
@@ -120,11 +119,11 @@ never skips the checks even if the pull request merged without them.
 The version in the tag must be the one in `Cargo.toml`: `dist` refuses a tag that names no package
 version.
 4. Watch the `release` run. The `ci` jobs come first, then `plan`, which refuses a tag with anything
-   but letters, digits, `.` and `-` after the `v`. Then the six binary builds, the four image builds
+   but letters, digits, `.` and `-` after the `v`. Then the six binary builds, the two image builds
    and the installers. `host` waits for all of them, and the approver approves it when they are
-   green, then the two `image-publish` jobs once the release is up.
+   green, then `image-publish` once the release is up.
 
-**A failed build publishes nothing.** If either image fails on either architecture, `host` does not
+**A failed build publishes nothing.** If the image fails on either architecture, `host` does not
 start, so no file or image is public. Open the run and choose **Re-run failed jobs**: the builds
 that passed keep their artifacts (30 days for binaries, 35 for images), and `host` waits for the
 reviewer again. If the re-run fails the same way, the cause is in the tagged commit: delete the tag,
@@ -223,9 +222,8 @@ A release cannot be edited into a good one. Take it down and go back to the one 
 - **Actions may open pull requests.** Settings > Actions > General > Workflow permissions > tick
   **Allow GitHub Actions to create and approve pull requests**. Without it release-plz cannot open
   its pull request.
-- **The image packages are public.** After the first run, open `sluice-rendezvous` and
-  `sluice-relay` under **Packages**, then Package settings > **Change visibility** > Public. A new
-  ghcr.io package starts private.
+- **The image package is public.** After the first run, open `sluice-relay` under **Packages**,
+  then Package settings > **Change visibility** > Public. A new ghcr.io package starts private.
 - Attestations need a public repository, or a private one on GitHub Enterprise Cloud.
 
 No secret is needed. Every workflow uses `GITHUB_TOKEN` with the narrowest permissions each job

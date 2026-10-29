@@ -223,9 +223,9 @@ fn with_selector(configs: Vec<Seed>) -> Vec<Seed> {
         .collect()
 }
 
-/// The three configs the images ship, iroh-relay 1.4.1's own examples that the guard's tests
-/// parse, and [`NEAR_MISSES`]. No vector holds a relay config: it is iroh-relay's format, and not
-/// the wire's.
+/// The two configs the image ships, iroh-relay 1.4.1's own examples that the guard's tests parse,
+/// and [`NEAR_MISSES`]. No vector holds a relay config: it is iroh-relay's format, and not the
+/// wire's.
 fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
     let docker = root.join("docker");
     let examples = docker
@@ -235,7 +235,6 @@ fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
     let mut paths = vec![
         docker.join("relay").join("relay.toml"),
         docker.join("relay").join("open.toml"),
-        docker.join("rendezvous").join("manual.toml"),
     ];
     let mut found = Vec::new();
     for entry in
@@ -278,7 +277,7 @@ fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
 /// secret in a URL. Without a seed on each side of a rule, a run of seconds cannot tell a guard
 /// that has the rule from one that lost it.
 const NEAR_MISSES: [&str; 6] = [
-    // `dangerous_http_only`, for a relay and for a rendezvous server.
+    // `dangerous_http_only`, for a relay and for one with the relay half off.
     "enable_metrics = false\n[access]\nallowlist = []\n[tls]\ncert_mode = \"Manual\"\n\
      dangerous_http_only = true\n",
     "enable_relay = false\nenable_metrics = false\n[tls]\ncert_mode = \"Manual\"\n\

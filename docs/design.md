@@ -263,8 +263,8 @@ configured. The home's identity key is why the id itself survives.
 **One container, two recipes.** The `relay` image runs both halves of `iroh-relay`. As a meeting
 point its per-client limit is 64 KiB/s, enough to coordinate and too little to carry files. As a
 full relay the operator sets the limit from the host's bandwidth and carries the bill. A transfer
-with no direct path 10 seconds in prints one line naming the relay and goes on. ADR 0028, which
-retires the `rendezvous` image of ADR 0013.
+with no direct path 10 seconds in prints one line naming the relay and goes on. ADR 0028, and
+ADR 0032, which removes the second image.
 
 **Relays run closed.** A leaked relay URL is free bandwidth for anyone, so our relay image ships
 with authorization on. `open` mode needs a flag and a per-client byte rate limit; `iroh-relay` has

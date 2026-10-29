@@ -28,7 +28,7 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0017](0017-bindings-in-one-repository.md) | Bindings for every language, generated, in this repository | Accepted |
 | [0018](0018-post-quantum-is-checked-at-the-handshake.md) | Post-quantum key exchange is checked at the handshake | Accepted |
 | [0019](0019-relay-starts-through-a-guard.md) | The relay image starts through a guard that refuses an open config | Accepted, extended by 0020 |
-| [0020](0020-guard-closes-more-defaults-and-guards-rendezvous.md) | The guard closes three more open defaults, pins the file it checked, and guards rendezvous | Accepted, extended by 0021 |
+| [0020](0020-guard-closes-more-defaults-and-guards-rendezvous.md) | The guard closes three more open defaults, pins the file it checked, and guards rendezvous | Accepted, extended by 0021, rendezvous mode superseded by 0032 |
 | [0021](0021-guard-hands-over-a-sealed-copy.md) | The guard hands iroh-relay a sealed copy, and a relay without TLS needs a flag | Accepted |
 | [0022](0022-landing-page-on-cloudflare.md) | The landing page lives in `site/`, on Cloudflare Workers | Accepted |
 | [0023](0023-cubic-until-the-max-bw-fix.md) | Cubic is the default congestion controller until the BBRv3 max bandwidth fix ships | Accepted, amends 0015, amended by 0024 |
@@ -39,3 +39,5 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0028](0028-one-relay-image-two-recipes.md) | One relay image, run either as a meeting point or as a full relay | Accepted |
 | [0029](0029-only-the-live-stores-collect.md) | Only the live stores collect, and every store is closed on the way out | Accepted, corrects 0027 |
 | [0030](0030-sends-keep-their-own-store.md) | Each send keeps its copies in a store of its own, and the home keeps none of them | Accepted, corrects 0029 |
+| [0031](0031-a-shared-ticket-counts-its-receivers.md) | A shared ticket counts the receivers it serves, and the sender says who connected | Accepted |
+| [0032](0032-the-rendezvous-image-is-gone.md) | The rendezvous image is no longer built or released | Accepted, supersedes 0020's rendezvous mode |

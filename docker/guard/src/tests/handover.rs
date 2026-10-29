@@ -1,14 +1,8 @@
-use crate::{Mode, relay_args};
+use crate::relay_args;
 
 #[test]
 fn iroh_relay_is_started_on_its_descriptor_zero_and_nothing_else() {
-    assert_eq!(relay_args(Mode::Closed), ["--config-path=/proc/self/fd/0"]);
-    assert_eq!(relay_args(Mode::Open), ["--config-path=/proc/self/fd/0"]);
-    // --dev is how iroh-relay 1.4.1 hands the QUIC server its certificate with the relay half off.
-    assert_eq!(
-        relay_args(Mode::Rendezvous),
-        ["--dev", "--config-path=/proc/self/fd/0"]
-    );
+    assert_eq!(relay_args(), ["--config-path=/proc/self/fd/0"]);
 }
 
 #[cfg(target_os = "linux")]

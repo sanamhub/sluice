@@ -164,7 +164,9 @@ kept.
 
 The measurement also has to say how often two peers connect directly when the only infrastructure is
 a rendezvous server and there is no relay (ADR 0013). `bench connect` measures that on two hosts
-behind real NATs, with the [`rendezvous` image](../docker/rendezvous/README.md) on a small VPS:
+behind real NATs, with an `iroh-relay` server whose relay half is off on a small VPS. The image that
+used to run it is gone (ADR 0032); the server is the upstream binary with `enable_relay = false`, as
+the probe's own test server is.
 
 ```
 target/release/bench check --hosts ~/sluice-hosts.toml --rendezvous https://rendezvous.example.net

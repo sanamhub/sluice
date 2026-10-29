@@ -51,24 +51,21 @@ fn each_example_is_closed_open_or_refused_for_its_ids() {
             false => format!("{text}\n[limits.client.rx]\nbytes_per_second = 1\n"),
         };
         let open = check_config(&rated, Mode::Open, None, behind_proxy).is_ok();
-        let rendezvous = check_config(&text, Mode::Rendezvous, None, false).is_ok();
         let want = match name.as_str() {
             // The README's placeholder is not an id, in either list.
-            "readme-allowlist" | "readme-denylist" => (false, false, false),
+            "readme-allowlist" | "readme-denylist" => (false, false),
             // Their URL has a query, `?boo=baz`, which iroh-relay would log (ADR 0020).
-            "access-http-bearer" | "access-http-url" => (false, false, false),
+            "access-http-bearer" | "access-http-url" => (false, false),
             // iroh-relay refuses these two at start, as its own test_access_token_empty_is_rejected
             // shows (main.rs:920-939), and the guard now refuses them first.
-            "access-shared-token-empty" | "access-shared-token-empty-string" => {
-                (false, false, false)
-            }
-            // The relay half off, and nothing else set: a rendezvous config.
-            "enable-relay-false" => (false, false, true),
+            "access-shared-token-empty" | "access-shared-token-empty-string" => (false, false),
+            // The relay half off, so no traffic can pass: this image refuses it.
+            "enable-relay-false" => (false, false),
             n if n.contains("http") || n.contains("token") || n == "access-allowlist" => {
-                (true, false, false)
+                (true, false)
             }
-            _ => (false, true, false),
+            _ => (false, true),
         };
-        assert_eq!((closed, open, rendezvous), want, "{name}");
+        assert_eq!((closed, open), want, "{name}");
     }
 }

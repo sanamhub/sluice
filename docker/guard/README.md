@@ -1,25 +1,22 @@
 # sluice-relay-guard
 
-The entry point of both images, [`relay`](../relay/README.md) and
-[`rendezvous`](../rendezvous/README.md) (ADR 0019, ADR 0020, ADR 0021). It checks the config that
-`iroh-relay` 1.4.1 is about to start with, refuses one that would open more than the operator
-wrote, and then replaces itself with `/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0`,
-with a sealed copy of the bytes it checked on descriptor 0, so the server runs as PID 1 and gets
-the container's signals.
+The entry point of the [`relay`](../relay/README.md) image (ADR 0019, ADR 0020, ADR 0021). It
+checks the config that `iroh-relay` 1.4.1 is about to start with, refuses one that would open
+more than the operator wrote, and then replaces itself with
+`/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0`, with a sealed copy of the bytes it
+checked on descriptor 0, so the server runs as PID 1 and gets the container's signals.
 
 ```
-sluice-relay-guard [--open | --rendezvous | --behind-proxy] --config-path <file>
+sluice-relay-guard [--open | --behind-proxy] --config-path <file>
 ```
 
 | Mode | Flag | Starts a config that |
 |---|---|---|
 | closed | none | relays only for an allowlist, an HTTP check or shared tokens |
 | open | `--open` | lets anyone relay, with `limits.client.rx.bytes_per_second` set |
-| rendezvous | `--rendezvous` | says `enable_relay = false`, and sets no `access` and no `[limits]` |
 
 `--behind-proxy` is not a mode: it is added to closed or open mode when the config has no `[tls]`
-table and a proxy in front ends TLS (ADR 0021). It is refused with `[tls]`, and with
-`--rendezvous`.
+table and a proxy in front ends TLS (ADR 0021). It is refused with `[tls]`.
 
 ## Why it exists
 
@@ -31,9 +28,9 @@ ways (`src/main.rs` of that crate):
 - a config path that does not exist, or no `--config-path`, runs its open default
   (main.rs:542-554).
 
-`enable_relay` defaults to true (main.rs:107), so a rendezvous server whose `enable_relay = false`
-line is deleted becomes an open relay. `enable_metrics` defaults to true (main.rs:145), with no
-login on the metrics port.
+`enable_relay` defaults to true (main.rs:107), and the guard refuses a config that turns it off:
+the image carries traffic, so a relay half that is off serves nothing it is meant to serve.
+`enable_metrics` defaults to true (main.rs:145), with no login on the metrics port.
 
 ## What it refuses
 
@@ -54,8 +51,7 @@ path or an argument, is escaped, so a refusal is one line.
 |---|---|
 | no `--config-path`, a path that does not exist, a folder | iroh-relay runs open without a file |
 | a FIFO at the config path, even one swapped in after the path was read | it is not a regular file, and the open must not wait for a writer |
-| `--dev`, and any argument but `--open`, `--rendezvous` and `--config-path` | `--dev` turns TLS off and runs on any config |
-| `--open` and `--rendezvous` together | a rendezvous server has nothing to open |
+| `--dev`, and any argument but `--open`, `--behind-proxy` and `--config-path` | `--dev` turns TLS off and runs on any config |
 | a key iroh-relay 1.4.1 does not have, at any level | iroh-relay would ignore it |
 | text that is not TOML, or a value of the wrong type | named by line and key, never by value |
 | `access` missing, `"everyone"` or a denylist, without `--open` | it lets in ids nobody listed |
@@ -63,16 +59,13 @@ path or an argument, is escaped, so a refusal is one line.
 | `--open` with an allowlist, an HTTP check or shared tokens | the flag must mean what it says |
 | a relay config with no `[tls]` table, without `--behind-proxy` | iroh-relay serves plain HTTP, and a shared token or bearer token would cross the network in clear text (ADR 0021) |
 | `--behind-proxy` with a `[tls]` table | iroh-relay ends TLS itself, so the flag and the config disagree |
-| `--behind-proxy` with `--rendezvous` | a rendezvous server relays nothing and answers no token |
 | an allowlist or denylist entry that is not 64 lower-case hex digits of an ed25519 public key | iroh-relay refuses to start on an id it cannot read, and the README says to paste what `sluice id` prints |
 | an empty `access.shared_token` list, or an empty token in it, unless `IROH_RELAY_ACCESS_TOKEN` is set | iroh-relay refuses both at start, and the variable replaces the list |
 | `IROH_RELAY_ACCESS_TOKEN` set but empty, in every mode | iroh-relay would take the empty value as the only token |
 | `[tls] dangerous_http_only = true` (ADR 0020) | it turns HTTPS off, as `--dev` does; a config with no `[tls]` needs `--behind-proxy` instead |
 | no `enable_metrics` line (ADR 0020) | iroh-relay then serves metrics on port 9090 with no login; `true` and `false` both start |
 | an `access.http.url` that is not an absolute http or https URL, or holds a user name, password, query or fragment (ADR 0020) | iroh-relay logs the URL when a check fails; a secret goes in `bearer_token`, a header |
-| `--rendezvous` without `enable_relay = false` written out (ADR 0020) | iroh-relay turns the relay half on by default |
-| `--rendezvous` with `access` or `[limits]` | they govern only a relay half, so the config was written for a relay |
-| `enable_relay = false` without `--rendezvous` | it is a rendezvous config, and the flag must say so |
+| `enable_relay = false` (ADR 0020) | the relay half is off, so no traffic passes; the image exists to carry it |
 
 An empty allowlist starts: it is what the relay image ships, and it lets nobody in. If iroh-relay
 itself cannot be started, the guard exits with 69, `EX_UNAVAILABLE`.
@@ -104,23 +97,12 @@ Elsewhere it stops after the check with exit 69.
 
 iroh-relay 1.4.1 reads nothing from standard input: no line of its `src/` reads `stdin`.
 
-## `--dev` in rendezvous mode
-
-The guard refuses `--dev` on its command line, and passes it to iroh-relay itself in rendezvous
-mode, after checking that the relay half is off. iroh-relay 1.4.1 hands the address-discovery QUIC
-server a certificate only on the path `--dev` takes (main.rs:593-600 and 703-721), and without it
-refuses a config with the relay half off: `Failed to bind QAD listener` and `TLS not configured`
-(see [the rendezvous README](../rendezvous/README.md)). Its other effects, plain HTTP for the
-relay and a default HTTP port, have nothing to act on when no relay runs: with `enable_relay =
-false`, `Server::spawn` builds no HTTP or HTTPS listener (`server.rs:713-835`), so `--dev` here only
-hands the certificate to QUIC. That is why the guard accepts it in this mode and no other.
-
 ## What it must never do
 
 - Change the config, or start iroh-relay with anything but the sealed copy of the bytes it checked.
 - Print a value from the config.
 - Accept a key because a newer iroh-relay might have it. The schema is 1.4.1's and no other.
-- Pass `--dev` to a server whose relay half is on.
+- Pass `--dev`, which turns TLS off and is refused on the command line.
 
 ## Moving iroh-relay on
 
@@ -129,20 +111,19 @@ names the lines of each. A new release may add a key, rename one, or change what
 so before moving `IROH_RELAY_VERSION`:
 
 1. Read the new release's `src/main.rs`, from `struct Cli` down to `build_relay_config`, and diff
-   it against 1.4.1's. Check that `--dev` still does nothing with the relay half off but hand the
-   QUIC server its certificate.
+   it against 1.4.1's.
 2. Bring `schema.rs` in line, field by field, with the new line numbers, and copy the release's own
    example configs into `testdata/iroh-relay-<version>/`.
-3. Move `IROH_RELAY_VERSION` in `src/lib.rs`, the `ARG` in both Dockerfiles, and `iroh-relay` in
-   the root `Cargo.lock` together. Two tests fail until all three agree, and a third until every
-   crate in this project's `Cargo.lock` is one the root lock has at the same version.
+3. Move `IROH_RELAY_VERSION` in `src/lib.rs`, the `ARG` in the Dockerfile, and `iroh-relay` in the
+   root `Cargo.lock` together. Two tests fail until all three agree, and a third until every crate
+   in this project's `Cargo.lock` is one the root lock has at the same version.
 
 ## Building and testing
 
-It is its own project with its own `Cargo.lock`, outside the root workspace, so each image builds
-from `docker/` with only the files it needs: each Dockerfile has a `Dockerfile.dockerignore` beside
-it that lists them, which BuildKit reads. The legacy builder (`DOCKER_BUILDKIT=0`) reads only
-`docker/.dockerignore`, so that holds the union of the two lists, and each Dockerfile copies only
+It is its own project with its own `Cargo.lock`, outside the root workspace, so the image builds
+from `docker/` with only the files it needs: `Dockerfile.dockerignore` beside the Dockerfile lists
+them, which BuildKit reads. The legacy builder (`DOCKER_BUILDKIT=0`) reads only
+`docker/.dockerignore`, so that holds the same list, and the Dockerfile copies only
 `guard/Cargo.toml`, `guard/Cargo.lock` and `guard/src`. Tests check both.
 
 ci.yml runs its gates; to run them by hand from the repository root:
@@ -160,13 +141,13 @@ a control character or prints a key or an argument outside the rules above, and 
 backticked span of a config refusal is fixed text of the guard's or a dotted setting name of 1 to 32
 lower-case letters or `_`. `relay_differential` reads the same bytes through the guard and through a
 loose mirror of how iroh-relay 1.4.1 reads them, and asserts that whatever the guard lets start is
-what iroh-relay would run: closed means a closed `access`, rendezvous means the relay half is off,
-`enable_metrics` was written, `dangerous_http_only` is not true, an open config has a per-client
-byte limit, a relay config's `[tls]` agrees with `--behind-proxy`, and an HTTP check's URL holds no
-user name, password, query or fragment. Its first byte says whether `IROH_RELAY_ACCESS_TOKEN` is
-unset, set, or set but empty, which the guard must refuse, and the rest is the config.
+what iroh-relay would run: closed means a closed `access`, the relay half is on, `enable_metrics`
+was written, `dangerous_http_only` is not true, an open config has a per-client byte limit, a relay
+config's `[tls]` agrees with `--behind-proxy`, and an HTTP check's URL holds no user name,
+password, query or fragment. Its first byte says whether `IROH_RELAY_ACCESS_TOKEN` is unset, set,
+or set but empty, which the guard must refuse, and the rest is the config.
 
-`cargo xtask fuzz-seeds relay_config <dir>` writes the seeds of the first: the three shipped
+`cargo xtask fuzz-seeds relay_config <dir>` writes the seeds of the first: the two shipped
 configs, the iroh-relay examples, and six configs one line from a rule, such as an open config
 without a limit. For `relay_differential` it writes each of them twice, with `0x00` and `0x01` in
 front: every shipped config starts with `#`, and as the first byte it would leave a comment cut in
