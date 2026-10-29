@@ -9,7 +9,7 @@ async fn a_dropped_connection_is_retried() {
     let source = dir.path().join("large.bin");
     let body: Vec<u8> = (0..(4 << 20)).map(|i| (i as u8).wrapping_mul(13)).collect();
     fs::write(&source, &body).unwrap();
-    let outgoing = super::prepare_send(
+    let mut outgoing = super::prepare_send(
         &home,
         &source,
         RelayModeChoice::Disabled,
@@ -19,6 +19,7 @@ async fn a_dropped_connection_is_retried() {
     )
     .await
     .unwrap();
+    outgoing.reserve(Keep::One);
     let text = outgoing.ticket.encode();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let out = dir.path().join("out");
@@ -70,7 +71,8 @@ async fn a_dropped_connection_is_retried() {
     provider.shutdown().await.unwrap();
 }
 
-/// Waits until the transfer reports an event `wanted` accepts.
+/// Waits until the transfer reports an event `wanted` accepts. A transfer that ends first fails the
+/// test here, so a wait can never pass on a receive that already stopped.
 async fn wait_for(
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<super::Event>,
     wanted: impl Fn(&super::Event) -> bool,
@@ -80,6 +82,7 @@ async fn wait_for(
             return;
         }
     }
+    panic!("the receive ended before the event the test waits for");
 }
 
 #[tokio::test]
