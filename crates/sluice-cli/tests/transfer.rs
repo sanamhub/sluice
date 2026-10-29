@@ -304,3 +304,31 @@ fn a_taken_port_is_refused_with_its_number() {
         "{text}"
     );
 }
+
+/// The line that says what was written ends in the sender's name, and a name may hold a line
+/// separator, which would break the line into two. It is written as its escape, and the file keeps
+/// the name it was sent with.
+#[test]
+fn a_name_that_could_break_the_line_is_written_as_an_escape() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let out = dir.path().join("out");
+    let name = "report\u{2028}final\u{2029}.bin";
+    let body = data(1024, 4);
+    std::fs::write(dir.path().join(name), &body).unwrap();
+
+    let (mut sender, ticket) = start(&home, &dir.path().join(name), "1h");
+    let result = recv(&home, &ticket, &out, false);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(std::fs::read(out.join(name)).unwrap(), body);
+    let stderr = String::from_utf8(result.stderr).unwrap();
+    assert!(stderr.contains("wrote "), "{stderr:?}");
+    assert!(!stderr.contains('\u{2028}'), "{stderr:?}");
+    assert!(!stderr.contains('\u{2029}'), "{stderr:?}");
+    assert!(stderr.contains(r"\u{2028}final\u{2029}.bin"), "{stderr:?}");
+    wait_for_sender(&mut sender);
+}
