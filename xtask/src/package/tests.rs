@@ -105,11 +105,25 @@ fn the_arch_package_installs_from_the_archive_folder() {
     assert!(text.contains("$srcdir/$_folder/sluice"), "{text}");
 }
 
-/// `makepkg` refuses a hyphen in `pkgver`, and a pre-release version has one. The source URL keeps
-/// the version as the tag spells it, so the download still finds the release.
+/// `makepkg` refuses a hyphen in `pkgver`, and a pre-release version has one. The hyphen is
+/// dropped so the pre-release sorts below its release; the source URL keeps the version as the tag
+/// spells it, so the download still finds the release.
 #[test]
-fn a_pre_release_keeps_its_hyphen_in_the_url_and_an_underscore_in_pkgver() {
+fn a_pre_release_keeps_its_hyphen_in_the_url_and_drops_it_from_pkgver() {
     let text = file("aur/PKGBUILD", "1.3.0-rc.2");
-    assert!(text.contains("pkgver=1.3.0_rc.2"), "{text}");
+    assert!(text.contains("pkgver=1.3.0rc.2"), "{text}");
     assert!(text.contains("/download/v1.3.0-rc.2/"), "{text}");
+}
+
+/// A `pkgver` with a hyphen would be refused by `makepkg`, and a separator would sort above the
+/// release: the hyphen goes and nothing takes its place.
+#[test]
+fn the_pkgver_of_a_pre_release_sorts_below_its_release() {
+    for (version, want) in [
+        ("1.3.0", "1.3.0"),
+        ("1.3.0-rc.2", "1.3.0rc.2"),
+        ("1.3.0-alpha.1", "1.3.0alpha.1"),
+    ] {
+        assert_eq!(super::render::pkgver(version), want, "{version}");
+    }
 }
