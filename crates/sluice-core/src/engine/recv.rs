@@ -155,10 +155,10 @@ async fn run(
     let endpoint = receiver.shutdown().await;
     match outcome {
         Ok((received, seconds)) => {
-            // The completion code went out before this point, so the files are in place and the
-            // sender has been told so. A store or endpoint that would not close is worth saying,
-            // and is not a reason to report a transfer that arrived as failed, or to keep a store
-            // a later run would try to resume into a tree that is already there.
+            // A completion code, when this run took every entry, went out before this point, so the
+            // files are in place and the sender has been told so. A store or endpoint that would not
+            // close is worth saying, and is not a reason to report a transfer that arrived as failed,
+            // or to keep a store a later run would try to resume into a tree that is already there.
             if let Some(message) = did_not_close(closed, endpoint) {
                 emit(events, Event::Warning { message });
             }
@@ -243,10 +243,16 @@ async fn exchange(
     };
     let conn = content::ensure_content(&session, conn).await?;
     write::write(manifest, &plan, store, options, partial, resume, events).await?;
-    // Every file is verified and in place, so the whole tree arrived on this machine. Closing the
-    // content connection with the completion code is how the sender learns that, and it is the
-    // only moment it may: a receive that failed, or that took a range, never sends it.
-    conn.close(super::COMPLETE_CLOSE.into(), b"complete");
+    // Every file this run took is verified and in place. The completion code says the whole
+    // transfer arrived, so it goes out only when the run took every entry of the manifest: the
+    // sender believes it only from a connection that asked for every root, and a run that took part
+    // of a tree must not claim a download it did not finish. Such a run closes the ordinary way, so
+    // a one-time send keeps serving whoever wants all of it.
+    if plan.chosen.len() == manifest.entries().len() {
+        conn.close(super::COMPLETE_CLOSE.into(), b"complete");
+    } else {
+        conn.close(0u32.into(), b"");
+    }
     Ok((
         Received {
             path: single_path(manifest, options),

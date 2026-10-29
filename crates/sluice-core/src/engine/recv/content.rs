@@ -31,7 +31,7 @@ pub(super) struct Session<'a> {
 /// with the queue's backoff. A reconnect is a network attempt like any other, so a failure to
 /// reconnect is retried too instead of ending a transfer that could still finish. Nothing in the
 /// output is touched until the whole tree is in the store, so a retry cannot meet a file it wrote.
-/// The connection is handed back so the caller can close it with the completion code.
+/// The connection is handed back so the caller can close it with the code the run earned.
 pub(super) async fn ensure_content(
     session: &Session<'_>,
     mut conn: iroh::endpoint::Connection,

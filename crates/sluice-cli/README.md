@@ -87,7 +87,9 @@ names. `send -` reads standard input to the end and sends it as one raw blob, be
 known only then. `--expires 1h|7d|never` sets the ticket's life (24 hours by default), `--keep`
 serves until Ctrl+C instead of after one complete download, `--port` names the UDP port, and
 `--relay` or `--n0-relays` choose a relay. `--limit-rate 50M` caps what the whole command offers per
-second.
+second. A receive that took only part of a folder does not count as the one download: the send
+keeps serving after it, so a sender that expects receivers taking a part uses `--keep`, and ends it
+with Ctrl+C.
 
 `send --live FILE` follows one regular file that is still being written: each segment is sealed and
 signed as it fills, and a receiver can fetch it while the writer keeps going. The stream closes
@@ -109,7 +111,10 @@ name and `**` crosses a `/`, and the match is case-sensitive. A pattern that doe
 matches nothing in the ticket, is refused before anything is fetched or written. A folder is made
 when an entry under it is taken, a link is taken when it matches, and only the taken files' content
 is fetched. A partial store made with one selection is not continued by a receive with another: it
-starts a store of its own.
+starts a store of its own. Because this receive takes only a part of the ticket, it does not end a
+one-time `sluice send`: the sender is still serving afterwards, and only a receive of the whole
+ticket stops it. A sender that serves partial receivers should run with `--keep` and stop it with
+Ctrl+C.
 
 Several tickets run through the queue: three at once by default, high before normal before low, and
 a network failure waits the queue's backoff before the same ticket is tried again from its partial

@@ -203,6 +203,46 @@ async fn the_content_of_an_unselected_file_is_not_fetched() {
     outgoing.shutdown().await.unwrap();
 }
 
+/// A one-time send is not ended by a receive that takes part of the ticket: it is still serving
+/// after that receive, and a receive of the whole ticket is what stops it. The completion code a
+/// sender believes comes only from a connection that asked for every root, and this selection asks
+/// for one root of two: a big file, which is a blob of its own, beside a small one, which is packed
+/// and so not part of what the selection fetches.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_partial_receive_does_not_end_a_one_time_send() {
+    const MIB: usize = 1 << 20;
+    let dir = tempfile::tempdir().unwrap();
+    let tree = dir.path().join("tree");
+    fs::create_dir(&tree).unwrap();
+    fs::write(tree.join("big.bin"), vec![7u8; MIB]).unwrap();
+    fs::write(tree.join("small.txt"), b"small").unwrap();
+    let (outgoing, text) = prepared_paths(&dir, &[tree]).await;
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let serving = tokio::spawn(async move { outgoing.serve(false, &tx).await });
+
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let part = dir.path().join("part");
+    super::receive(&text, &selecting(&part, &["tree/big.bin"]), &tx)
+        .await
+        .unwrap();
+    if serving.is_finished() {
+        let end = serving.await.unwrap();
+        panic!("the send stopped after a partial receive: {end:?}");
+    }
+
+    // The send is still there, so the rest of the ticket arrives from it; that receive is what ends
+    // the wait.
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let out = dir.path().join("all");
+    super::receive(&text, &options(&out), &tx).await.unwrap();
+    let end = tokio::time::timeout(Duration::from_secs(30), serving)
+        .await
+        .expect("the send did not stop after the whole ticket arrived")
+        .unwrap()
+        .unwrap();
+    assert!(matches!(end, StopEnd::Downloaded), "{end:?}");
+}
+
 /// A provider of a two-file manifest that serves `tree/a.txt` and has no bytes for `tree/b.txt`,
 /// whose root no policy allows. A receive that asks for the second file fails.
 async fn provider_without_one_blob(dir: &TempDir) -> (Provider, String) {
