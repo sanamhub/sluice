@@ -1,0 +1,54 @@
+---
+// A real run, copied from the terminal: a folder of two videos and a note sent between two homes
+// on one machine with the 0.1.0 binary. The ticket is shortened and the output path is written as
+// a relative one; every other character is what the commands printed.
+const sender = [
+    { kind: "cmd", text: "sluice send holiday-video" },
+    { kind: "out", text: "sluice10406jfphae599kc7nksv9zf46r051bq578p1jtv6…" },
+    { kind: "err", text: "sending 3 files (75.3 MiB) with cubic" },
+    { kind: "err", text: "receiver pkj66k91xk connected directly" },
+    { kind: "ok", text: "receiver pkj66k91xk finished, the whole transfer (directly)" },
+];
+const receiver = [
+    { kind: "cmd", text: "sluice recv sluice10406jfph… --out ./out" },
+    { kind: "err", text: "connected direct" },
+    { kind: "err", text: "3 files, 1 folder, 75.3 MiB" },
+    { kind: "err", text: "receiving 3 files (75.3 MiB) with cubic" },
+    { kind: "err", text: "60% 45.8 MiB of 75.3 MiB" },
+    { kind: "ok", text: "verified 75.3 MiB" },
+    { kind: "ok", text: "done, 75.3 MiB in 0.9 s" },
+    { kind: "err", text: "wrote 3 files under ./out" },
+];
+const panes = [
+    { title: "On the sending machine", lines: sender },
+    { title: "On the receiving machine", lines: receiver },
+];
+---
+
+<section class="section transcript" aria-labelledby="transcript-title">
+    <div class="wrap">
+        <div class="section-head">
+            <h2 id="transcript-title">Two commands, start to finish</h2>
+            <p>
+                What the terminal shows, as it printed it. The ticket goes from one machine to the
+                other however you like: a chat, an email, a note.
+            </p>
+        </div>
+        <div class="panes">
+            {
+                panes.map((pane) => (
+                    <figure class="pane">
+                        <figcaption>{pane.title}</figcaption>
+                        <pre translate="no" tabindex="0"><code>{pane.lines.map((line) => (
+                            <span class={`t-${line.kind}`}>{line.text}{"\n"}</span>
+                        ))}</code></pre>
+                    </figure>
+                ))
+            }
+        </div>
+        <p class="note">
+            A real run between two homes on one machine, 0.1.0 on Windows. The ticket is shortened and
+            the output path made relative.
+        </p>
+    </div>
+</section>

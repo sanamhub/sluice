@@ -1,0 +1,90 @@
+---
+// The hero scene's still frame, drawn by hand: the sender with most of its blocks gone, three
+// blocks on the water, one passing the gate, and the receiver filling. It is what a reader sees
+// before the moving scene loads, and all they see without WebGL or with reduced motion.
+const cols = 6;
+const rows = 4;
+const cells = Array.from({ length: cols * rows }, (_, i) => ({ col: i % cols, row: Math.floor(i / cols), i }));
+const sent = 17;
+const arrived = 13;
+---
+
+<svg class="hero-still" viewBox="0 0 1000 560" aria-hidden="true" focusable="false">
+    <defs>
+        <linearGradient id="still-water" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stop-color="var(--water-deep)"></stop>
+            <stop offset="0.5" stop-color="var(--water)" stop-opacity="0.75"></stop>
+            <stop offset="1" stop-color="var(--water-deep)"></stop>
+        </linearGradient>
+        <radialGradient id="still-glow" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0" stop-color="var(--water)" stop-opacity="0.35"></stop>
+            <stop offset="1" stop-color="var(--water)" stop-opacity="0"></stop>
+        </radialGradient>
+    </defs>
+
+    <ellipse cx="500" cy="352" rx="330" ry="90" fill="url(#still-glow)"></ellipse>
+
+    <!-- Plinth -->
+    <path class="s-stone2" d="M70 352H930L978 430H22Z"></path>
+    <path class="s-line" d="M22 430H978V446H22Z"></path>
+
+    <!-- Channel walls and water -->
+    <path class="s-stone" d="M316 318H684L690 372H310Z"></path>
+    <path fill="url(#still-water)" d="M322 326H678L683 360H317Z"></path>
+    <g class="s-water-line">
+        <path d="M352 336h40M430 344h56M520 334h34M588 348h50M370 352h26"></path>
+    </g>
+
+    <!-- Sender -->
+    <path class="s-stone2" d="M128 196H318L304 232H112Z"></path>
+    <path class="s-stone" d="M112 232H304V398H112Z"></path>
+    <path class="s-stone2" d="M304 232L318 196V362L304 398Z"></path>
+    <path class="s-edge" d="M112 232H304V398H112ZM304 232L318 196M112 232L128 196H318V362L304 398"></path>
+    {
+        cells.map(({ col, row, i }) => (
+            <rect
+                class={i < sent ? "s-cell-off" : "s-cell-water"}
+                x={130 + col * 26}
+                y={252 + row * 26}
+                width="20"
+                height="20"
+                rx="3"
+            />
+        ))
+    }
+
+    <!-- Receiver -->
+    <path class="s-stone2" d="M682 196H872L888 232H696Z"></path>
+    <path class="s-stone" d="M696 232H888V398H696Z"></path>
+    <path class="s-stone2" d="M696 232L682 196V362L696 398Z"></path>
+    <path class="s-edge" d="M696 232H888V398H696ZM696 232L682 196M888 232L872 196H682V362L696 398"></path>
+    {
+        cells.map(({ col, row, i }) => (
+            <rect
+                class={i < arrived - 1 ? "s-cell-water" : i === arrived - 1 ? "s-cell-brass" : "s-cell-off"}
+                x={714 + col * 26}
+                y={252 + row * 26}
+                width="20"
+                height="20"
+                rx="3"
+            />
+        ))
+    }
+
+    <!-- Blocks on the water -->
+    <rect class="s-block-water" x="372" y="316" width="24" height="24" rx="5" transform="rotate(-8 384 328)"></rect>
+    <rect class="s-block-water" x="440" y="320" width="24" height="24" rx="5" transform="rotate(10 452 332)"></rect>
+    <rect class="s-block-brass" x="528" y="314" width="24" height="24" rx="5" transform="rotate(-6 540 326)"></rect>
+    <rect class="s-block-water" x="612" y="320" width="24" height="24" rx="5" transform="rotate(12 624 332)"></rect>
+
+    <!-- The gate, its check ring and its wheel -->
+    <g class="s-brass">
+        <rect x="481" y="200" width="9" height="168"></rect>
+        <rect x="512" y="200" width="9" height="168"></rect>
+        <rect x="474" y="194" width="54" height="10" rx="2"></rect>
+        <rect x="488" y="226" width="26" height="62" rx="2"></rect>
+        <rect x="499" y="164" width="4" height="32"></rect>
+    </g>
+    <circle class="s-brass-ring" cx="501" cy="152" r="16"></circle>
+    <ellipse class="s-brass-ring s-flash" cx="501" cy="330" rx="12" ry="30"></ellipse>
+</svg>

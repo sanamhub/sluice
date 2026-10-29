@@ -1,79 +1,43 @@
 ---
-import { PERFORMANCE } from "../data/links";
-
-// The comparison names no product. The cloud column is the generic upload-then-download flow, so
-// it says "usually" and "often" where the flow varies; the Sluice column states the design and
-// marks the one deadline that is a target.
+// Sluice next to the usual upload-then-download flow. The comparison names no product, so the cloud
+// column says "usually" where services differ.
 const rows = [
-    {
-        label: "Where the file waits",
-        sluice: "Nowhere. It lands on the other computer.",
-        cloud: "On the provider's servers.",
-    },
-    {
-        label: "Account",
-        sluice: "None.",
-        cloud: "Usually one.",
-    },
-    {
-        label: "Size limit",
-        sluice: "None from Sluice. Your disk is the limit.",
-        cloud: "Usually set by a plan.",
-    },
-    {
-        label: "Checked on arrival",
-        sluice: "Every piece, against the file's fingerprint. 1.0",
-        cloud: "Usually the provider checks its copy. Your two ends do not check each other.",
-    },
-    {
-        label: "After a dropped link",
-        sluice: "Starts at the last checked piece. Target: first new byte within 2 s. 1.0",
-        cloud: "Often from the beginning, unless the service offers resume.",
-    },
+    ["Where the file waits", "Nowhere. It goes to the other computer.", "On the provider's servers."],
+    ["Account", "None.", "Usually one, sometimes for both people."],
+    ["Size limit", "None from Sluice. The disks decide.", "Usually set by a plan."],
+    ["Checked on arrival", "Every block, against the root the ticket names.", "The provider checks its own copy."],
+    ["After a dropped link", "The receive keeps what it checked and fetches the rest.", "Often from the start, unless the service resumes."],
+    ["Who can read it", "The two machines. The link is encrypted end to end.", "The provider, and anyone with the share link."],
 ];
 ---
 
-<section class="section section-flow compare" id="compare" aria-labelledby="compare-title">
+<section class="section compare" aria-labelledby="compare-title">
     <div class="wrap">
         <div class="section-head">
-            <h2 id="compare-title">Compared with uploading to the cloud</h2>
-            <p class="section-lede">
-                Sluice is not a storage service. The file goes from one computer to the other, and
-                the middle keeps nothing.
-            </p>
+            <h2 id="compare-title">Not another upload</h2>
+            <p>Sluice is not a storage service. The middle of the path keeps nothing.</p>
         </div>
-
-        <table class="compare-table">
-            <caption class="visually-hidden">
-                Sluice compared with uploading to a cloud service and downloading again
-            </caption>
-            <thead>
-                <tr>
-                    <th scope="col"><span class="visually-hidden">Question</span></th>
-                    <th scope="col">Sluice</th>
-                    <th scope="col">Upload, then download</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows.map((row) => (
+        <div class="compare-scroll" tabindex="0" role="region" aria-labelledby="compare-title">
+            <table class="compare-table">
+                <thead>
                     <tr>
-                        <th scope="row">{row.label}</th>
-                        <td>
-                            <span class="cell-label">Sluice</span>
-                            {row.sluice}
-                        </td>
-                        <td>
-                            <span class="cell-label">Upload, then download</span>
-                            {row.cloud}
-                        </td>
+                        <th scope="col"><span class="visually-hidden">Question</span></th>
+                        <th scope="col">Sluice</th>
+                        <th scope="col">Upload, then download</th>
                     </tr>
-                ))}
-            </tbody>
-        </table>
-
-        <p class="section-note">
-            Sending is 1.0 and is not built yet. A target is marked; the rest describes the design.
-            The <a href={PERFORMANCE}>performance page</a> has the method and the scenarios.
-        </p>
+                </thead>
+                <tbody>
+                    {
+                        rows.map(([label, sluice, cloud]) => (
+                            <tr>
+                                <th scope="row">{label}</th>
+                                <td>{sluice}</td>
+                                <td>{cloud}</td>
+                            </tr>
+                        ))
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
 </section>

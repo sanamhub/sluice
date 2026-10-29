@@ -1,0 +1,81 @@
+/* The palette is a canal at night: deep blue-green water, wet stone, and the brass of a lock gate.
+   Two accents, each with one meaning:
+   - water is data in motion: a moving block, the channel, a progress line. Never a button.
+   - brass is the gate: a block that passed its check, and the one action that asks to be pressed.
+   Links are pale water ink, underlined, so neither accent turns into decoration.
+   Every colour is light-dark(day, night). Dark is the base; the light theme is limestone and
+   daylight water, chosen with the toggle, or by the system when nothing was chosen. */
+
+:root {
+  color-scheme: dark;
+
+  --basin: light-dark(#eef3f1, #081820);
+  --basin-deep: light-dark(#e1eae7, #050f15);
+  --stone: light-dark(#ffffff, #10262e);
+  --stone-2: light-dark(#f5f8f7, #15313a);
+  --line: light-dark(#d2dfdc, #1f3e48);
+  --line-strong: light-dark(#a9c0bc, #2f5866);
+  --ink: light-dark(#0d2229, #e4eff0);
+  --mist: light-dark(#4b6269, #8faab1);
+  --water: light-dark(#0b7c8c, #7adce8);
+  --water-deep: light-dark(#075c69, #2b8fa0);
+  --water-soft: light-dark(rgb(11 124 140 / 0.1), rgb(122 220 232 / 0.12));
+  --brass: light-dark(#94621a, #e0b26a);
+  --brass-ink: light-dark(#ffffff, #241806);
+  --brass-soft: light-dark(rgb(148 98 26 / 0.12), rgb(224 178 106 / 0.14));
+  --link: light-dark(#0a5d6a, #b9dfe5);
+  --glass: light-dark(rgb(238 243 241 / 0.72), rgb(8 24 32 / 0.62));
+  --shadow-color: light-dark(rgb(13 34 41 / 0.3), rgb(0 0 0 / 0.7));
+  --shadow: 0 18px 40px -24px var(--shadow-color);
+
+  --font-body: var(
+    --font-sans,
+    "Archivo",
+    ui-sans-serif,
+    system-ui,
+    sans-serif
+  );
+  --font-code: var(
+    --font-mono,
+    "IBM Plex Mono",
+    ui-monospace,
+    "Cascadia Mono",
+    monospace
+  );
+  /* Headlines are set wide; body text keeps the normal width. */
+  --wide: 116%;
+  --wider: 125%;
+
+  --step--1: 0.875rem;
+  --step-0: 1.0625rem;
+  --step-1: 1.25rem;
+  --step-2: clamp(1.6rem, 1.25rem + 1.4vw, 2.3rem);
+  --step-3: clamp(2.35rem, 1.45rem + 3.9vw, 4.6rem);
+
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 1.5rem;
+  --space-4: 2.5rem;
+  --space-5: 4rem;
+  --section: clamp(4.5rem, 9vw, 8rem);
+
+  --radius-s: 6px;
+  --radius-m: 12px;
+  --radius-l: 20px;
+  --radius-pill: 999px;
+
+  --gutter: clamp(1rem, 5vw, 3rem);
+  --measure: 64ch;
+  --wrap: 74rem;
+  --header: 3.75rem;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+  }
+}

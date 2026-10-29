@@ -1,0 +1,79 @@
+---
+// The jobs Sluice does beyond one file, each with the command that does it. Every flag here is in
+// `sluice <command> --help` at 0.1.0.
+import { CLI_README } from "../data/links";
+import Prose from "./Prose.astro";
+
+const tasks = [
+    {
+        title: "Whole folders",
+        body: "A folder arrives inside a folder of its own name, as a file manager copies it. Links are recreated as entries and never followed.",
+        code: "sluice send ./photos",
+    },
+    {
+        title: "Part of a folder",
+        body: "Match the ticket's own paths and fetch only those. `inspect` shows what would come first.",
+        code: "sluice recv <ticket> --include 'photos/2025/**'",
+    },
+    {
+        title: "A file still being written",
+        body: "Live mode seals the file in segments as it grows, and the receiver reads each one while the writer keeps going.",
+        code: "sluice send --live ./recording.mkv",
+    },
+    {
+        title: "Pipes",
+        body: "Send standard input, or write a single file to standard output on the other side.",
+        code: "tar c ./project | sluice send -",
+    },
+    {
+        title: "Several tickets at once",
+        body: "One queue receives them, three at a time by default, and `--priority` decides which starts first.",
+        code: "sluice recv <t1> <t2> <t3> --out ./inbox",
+    },
+    {
+        title: "A gentle rate",
+        body: "Cap the bytes per second on either side, so a big transfer leaves room for everything else.",
+        code: "sluice recv <ticket> --limit-rate 50M",
+    },
+    {
+        title: "One ticket, a few people",
+        body: "`--keep N` offers N places. Each receiver takes one, and anyone else is refused before a byte is sent.",
+        code: "sluice send --keep 3 ./dataset",
+    },
+    {
+        title: "Look before you fetch",
+        body: "`inspect` reads the ticket's manifest: names, counts and size, and no content.",
+        code: "sluice inspect <ticket>",
+    },
+    {
+        title: "Check the setup",
+        body: "`doctor` checks the home, its lock and key, and with `--network` the UDP path, NAT and port mapping.",
+        code: "sluice doctor --network",
+    },
+];
+---
+
+<section class="section tasks" aria-labelledby="tasks-title">
+    <div class="wrap">
+        <div class="section-head">
+            <h2 id="tasks-title">More than one file</h2>
+            <p>
+                The same two commands cover folders, live files, pipes and shared tickets. The
+                <a href={CLI_README}>CLI reference</a> has every flag, exit code and JSON field.
+            </p>
+        </div>
+        <ul class="task-list">
+            {
+                tasks.map((task) => (
+                    <li class="task">
+                        <h3>{task.title}</h3>
+                        <p>
+                            <Prose text={task.body} />
+                        </p>
+                        <code translate="no">{task.code}</code>
+                    </li>
+                ))
+            }
+        </ul>
+    </div>
+</section>

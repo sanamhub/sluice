@@ -1,54 +1,53 @@
 ---
-import StepArt from "./StepArt.astro";
+// The three things that happen in a transfer, in order. The line beside them fills with water as
+// the reader scrolls, and each step's mark turns brass when the water reaches it.
+import { DESIGN, IROH, IROH_BLOBS } from "../data/links";
+import Prose from "./Prose.astro";
 
-// The three steps are a real sequence, so they are numbered and ordered. Every capability they
-// name is 1.0: send and recv, the ticket, checked pieces and resume.
 const steps = [
     {
-        kind: "send" as const,
-        title: "Send a file",
-        body: "Pick a file or a folder. Sluice reads it where it is, so a large file needs no second copy before it moves.",
-        note: "1.0: send and folders",
+        title: "The sender prints a ticket",
+        body: "`sluice send` reads the files where they are, cuts them into blocks and hashes them. The ticket names this machine, the addresses it can be reached at and the content's root. It carries no file names, and it expires in a day unless you say otherwise.",
+        code: "sluice send ./holiday-video",
     },
     {
-        kind: "share" as const,
-        title: "Share one code",
-        body: "The sender gets a ticket: one line of text with the address and the file's fingerprint. Send it however you like. Keep it private, because anyone who has it can fetch the file.",
-        note: "1.0: the ticket",
+        title: "The two machines find a path",
+        body: "The receiver dials the sender over QUIC with TLS 1.3. On one network they connect directly. Across the internet they punch a hole through the routers, and a relay you name with `--relay` only carries the bytes if no direct path works.",
+        code: "sluice recv <ticket> --out ./inbox",
     },
     {
-        kind: "receive" as const,
-        title: "Receive it",
-        body: "Paste the ticket on the other computer. Every piece is checked before it is written, and a dropped link resumes at the last checked piece.",
-        note: "1.0: checked pieces, resume",
+        title: "Every block is checked before it is written",
+        body: "Each block is verified against the BLAKE3 root the ticket named. A block that does not match is thrown away, so a damaged transfer fails at that block, not after the file is opened. A dropped receive keeps what it checked and fetches only the rest.",
+        code: "verified 75.3 MiB",
     },
 ];
 ---
 
-<section class="section section-flow steps" id="how" aria-labelledby="how-title">
-    <div class="wrap">
-        <div class="section-head">
-            <h2 id="how-title">How it works</h2>
-            <p class="section-lede">
-                Three steps, one file, and no stop in the middle. All three arrive in 1.0; today you
-                can check an install with <code>sluice doctor</code>.
+<section class="section how" id="how" aria-labelledby="how-title">
+    <div class="wrap how-grid">
+        <div class="section-head how-head">
+            <h2 id="how-title">How a file crosses</h2>
+            <p>
+                Three steps and no stop in the middle. Sluice builds on <a href={IROH}>iroh</a> for the
+                connection and <a href={IROH_BLOBS}>iroh-blobs</a> for verified storage; the
+                <a href={DESIGN}>design notes</a> have the rest.
             </p>
         </div>
-
-        <ol class="step-list">
-            {steps.map((step, index) => (
-                <li class="step">
-                    <div class="step-top">
-                        <span class="step-number" aria-hidden="true">
-                            {String(index + 1).padStart(2, "0")}
+        <ol class="how-steps">
+            {
+                steps.map((step, index) => (
+                    <li class="how-step">
+                        <span class="how-mark" aria-hidden="true">
+                            {index + 1}
                         </span>
-                        <StepArt kind={step.kind} />
-                    </div>
-                    <h3>{step.title}</h3>
-                    <p>{step.body}</p>
-                    <p class="step-note mono">{step.note}</p>
-                </li>
-            ))}
+                        <h3>{step.title}</h3>
+                        <p>
+                            <Prose text={step.body} />
+                        </p>
+                        <code translate="no">{step.code}</code>
+                    </li>
+                ))
+            }
         </ol>
     </div>
 </section>

@@ -1,35 +1,48 @@
 ---
-import { REPO } from "../data/links";
-import HeroArt from "./HeroArt.astro";
+import { INSTALL, REPO } from "../data/links";
+import HeroStill from "./HeroStill.astro";
+import InstallTabs from "./InstallTabs.astro";
+
+const quick = [
+    {
+        id: "unix",
+        label: "macOS and Linux",
+        lines: [
+            "curl --proto '=https' --tlsv1.2 -LsSf \\",
+            "  https://github.com/sanamhub/sluice/releases/latest/download/sluice-cli-installer.sh | sh",
+        ],
+    },
+    {
+        id: "windows",
+        label: "Windows",
+        lines: [
+            "irm https://github.com/sanamhub/sluice/releases/latest/download/sluice-cli-installer.ps1 | iex",
+        ],
+    },
+    { id: "brew", label: "Homebrew", lines: ["brew install sanamhub/tap/sluice"] },
+];
 ---
 
 <section class="hero" aria-labelledby="hero-title">
     <div class="wrap hero-grid">
         <div class="hero-copy">
-            <h1 id="hero-title">Send huge files straight to another computer.</h1>
+            <h1 id="hero-title">Send big files straight to another computer.</h1>
             <p class="lede">
-                Nothing is stored in between. Sluice moves the file directly and checks each piece
-                as it lands.
+                Sluice opens a direct channel between two machines and checks every block as it
+                lands. Nothing waits on a server in between, and there is no account to make.
             </p>
-            <p class="status">
-                <span class="status-mark" aria-hidden="true"></span>
-                In development, pre-1.0
+            <InstallTabs name="hero" options={quick} />
+            <p class="hero-more">
+                Also <a href="#install">Scoop, winget, the AUR, a container image</a>{" "}
+                and <a href={INSTALL}>source</a>. Free and open source, on <a href={REPO}>GitHub</a>.
             </p>
-            <p class="hero-today">
-                Today it names this computer, checks your setup and prints shell completions. Sending
-                and receiving arrive in 1.0.
-            </p>
-            <div class="actions">
-                <a class="button primary" href={REPO}>
-                    View on GitHub
-                </a>
-                <a class="button" href="#how">
-                    See how it works
-                </a>
-            </div>
         </div>
-        <div class="hero-art">
-            <HeroArt />
+        <div class="hero-art" data-hero-scene>
+            <HeroStill />
         </div>
     </div>
 </section>
+
+<script>
+    import "../scripts/hero";
+</script>

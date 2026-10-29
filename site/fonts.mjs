@@ -15,12 +15,13 @@ const require = createRequire(import.meta.url);
  * @param {string} subset e.g. "latin"
  * @param {string} weight e.g. "400" or "400 700"
  * @param {string} style "normal" or "italic"
+ * @param {string} [stretch] the width range a variable face covers, e.g. "62% 125%"
  */
-function variant(pkg, css, subset, weight, style) {
+function variant(pkg, css, subset, weight, style, stretch) {
     const text = readFileSync(require.resolve(`${pkg}/${css}`), "utf8");
     // Match the subset as a whole name segment: "-latin-" is a substring of "-latin-ext-", and the
     // extended block comes first in the package stylesheet.
-    const wanted = new RegExp(`-${subset}-(wght|\\d{3})-normal\\.woff2$`);
+    const wanted = new RegExp(`-${subset}-(wght|wdth|\\d{3})-normal\\.woff2$`);
     for (const block of text.split("@font-face").slice(1)) {
         const file = /url\(\.\/(files\/[^)]+\.woff2)\)/.exec(block)?.[1];
         if (!file || !wanted.test(file)) continue;
@@ -30,6 +31,7 @@ function variant(pkg, css, subset, weight, style) {
             src: [`${pkg}/${file}`],
             weight,
             style,
+            ...(stretch ? { stretch } : {}),
             display: "swap",
             unicodeRange: range.split(",").map((part) => part.trim()),
         };
@@ -54,16 +56,19 @@ const family = (name, cssVariable, variants, fallbacks) => ({
 });
 
 export const fonts = [
+    // Archivo's width axis is the page's one typographic device: headlines are set wide, like the
+    // lettering on engineering works, and body text at the normal width. One file holds both axes.
     family(
-        "Instrument Sans",
+        "Archivo",
         "--font-sans",
         [
             variant(
-                "@fontsource-variable/instrument-sans",
-                "wght.css",
+                "@fontsource-variable/archivo",
+                "wdth.css",
                 "latin",
-                "400 700",
+                "100 900",
                 "normal",
+                "62% 125%",
             ),
         ],
         ["sans-serif"],
