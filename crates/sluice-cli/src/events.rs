@@ -62,20 +62,9 @@ fn human(event: &Event, verb: &str) -> String {
             of_files,
             of_bytes,
             fetched,
-        } => {
-            let mut line = summary(*files, *folders, *links, *bytes);
-            // A selection says what part of the ticket it takes, so a user sees that the patterns
-            // did something before the transfer starts.
-            if let (Some(of_files), Some(of_bytes)) = (of_files, of_bytes) {
-                line.push_str(&format!(" of {of_files} files, {}", bytes_text(*of_bytes)));
-            }
-            // A packed file brings its whole pack, so the bytes moved can be more than the bytes
-            // written; the line says how many, because that is what the transfer waits for.
-            if let Some(fetched) = fetched {
-                line.push_str(&format!(", {} to fetch", bytes_text(*fetched)));
-            }
-            line
-        }
+        } => planned(
+            *files, *folders, *links, *bytes, *of_files, *of_bytes, *fetched,
+        ),
         Event::Started {
             name,
             files,
@@ -117,6 +106,32 @@ fn human(event: &Event, verb: &str) -> String {
             format!("done, {} in {seconds:.1} s", bytes_text(*bytes))
         }
     }
+}
+
+/// The line for what a transfer will write: the summary, what part of the ticket a selection takes,
+/// and the bytes the transfer moves when a pack makes those differ.
+#[allow(clippy::too_many_arguments)]
+fn planned(
+    files: u64,
+    folders: u64,
+    links: u64,
+    bytes: u64,
+    of_files: Option<u64>,
+    of_bytes: Option<u64>,
+    fetched: Option<u64>,
+) -> String {
+    let mut line = summary(files, folders, links, bytes);
+    // A selection says what part of the ticket it takes, so a user sees that the patterns did
+    // something before the transfer starts.
+    if let (Some(of_files), Some(of_bytes)) = (of_files, of_bytes) {
+        line.push_str(&format!(" of {of_files} files, {}", bytes_text(of_bytes)));
+    }
+    // A packed file brings its whole pack, so the bytes moved can be more than the bytes written;
+    // the line says how many, because that is what the transfer waits for.
+    if let Some(fetched) = fetched {
+        line.push_str(&format!(", {} to fetch", bytes_text(fetched)));
+    }
+    line
 }
 
 fn path_text(path: PathKind, relay: &Option<String>) -> String {

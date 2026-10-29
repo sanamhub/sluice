@@ -252,37 +252,5 @@ async fn provider_without_one_blob(dir: &TempDir) -> (Provider, String) {
         vec![],
     )
     .unwrap();
-    store.blobs().add_bytes(manifest.encode()).await.unwrap();
-    store
-        .blobs()
-        .add_bytes(manifest.sequence_bytes())
-        .await
-        .unwrap();
-    let mut allowed: BTreeSet<[u8; 32]> = manifest.hash_sequence().into_iter().collect();
-    allowed.insert(manifest.sequence_root());
-    let provider = Provider::start(
-        &home,
-        store,
-        allowed,
-        RelayModeChoice::Disabled,
-        super::Congestion::Cubic,
-        None,
-        None,
-    )
-    .await
-    .unwrap();
-    let addr = provider.addr();
-    let ticket = Ticket::new(
-        *addr.id.as_bytes(),
-        addr.ip_addrs().copied().collect(),
-        None,
-        None,
-        Body::Static {
-            root: manifest.sequence_root(),
-            size: 5 + 2048,
-            format: Format::HashSequence,
-        },
-    )
-    .unwrap();
-    (provider, ticket.encode())
+    provider_of(&home, store, manifest, 5 + 2048).await
 }

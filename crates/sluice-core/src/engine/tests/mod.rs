@@ -35,6 +35,7 @@ mod lifecycle;
 mod live;
 mod names;
 mod pack;
+mod refusal;
 mod resume;
 mod rules;
 mod select;
@@ -96,6 +97,58 @@ fn selecting(out: &Path, patterns: &[&str]) -> super::ReceiveOptions {
         .collect();
     options.include = Some(Selection::new(&patterns).unwrap());
     options
+}
+
+/// The hex name of the store a static ticket's transfer belongs to, which is its sequence root.
+fn owner_of(ticket: &str) -> String {
+    let decoded = Ticket::decode(ticket).unwrap();
+    let Body::Static { root, .. } = decoded.body() else {
+        panic!("a live ticket has no store");
+    };
+    root.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// A provider that serves `manifest` and the content already in `store`, and the ticket that names
+/// it. `size` is what the ticket promises, which is the manifest's files added up.
+async fn provider_of(
+    home: &Home,
+    store: FsStore,
+    manifest: Manifest,
+    size: u64,
+) -> (Provider, String) {
+    store.blobs().add_bytes(manifest.encode()).await.unwrap();
+    store
+        .blobs()
+        .add_bytes(manifest.sequence_bytes())
+        .await
+        .unwrap();
+    let mut allowed: BTreeSet<[u8; 32]> = manifest.hash_sequence().into_iter().collect();
+    allowed.insert(manifest.sequence_root());
+    let provider = Provider::start(
+        home,
+        store,
+        allowed,
+        RelayModeChoice::Disabled,
+        super::Congestion::Cubic,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let addr = provider.addr();
+    let ticket = Ticket::new(
+        *addr.id.as_bytes(),
+        addr.ip_addrs().copied().collect(),
+        None,
+        None,
+        Body::Static {
+            root: manifest.sequence_root(),
+            size,
+            format: Format::HashSequence,
+        },
+    )
+    .unwrap();
+    (provider, ticket.encode())
 }
 
 /// A folder of one file at the top, one below it and one deeper still, with a second top-level file

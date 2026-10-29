@@ -41,26 +41,11 @@ pub(super) async fn claim_store(
     // holds a different set of finished files, and resuming into it would write a tree no run asked
     // for. The store and its record go, and this run claims its own.
     let key = selection.key();
-    let (resumed, checked, carried, consume) = match decide(partial, owner).await? {
-        Found::Store(found, _) if found.select.as_deref().unwrap_or("all") != key => {
-            let carried = found.names;
-            storage::discard_apart(partial).await;
-            (None, None, carried, false)
-        }
-        Found::Store(found, checked) => (Some(found), checked, BTreeSet::new(), false),
-        Found::Names(names) => (None, None, names, true),
-        Found::Nothing => (None, None, BTreeSet::new(), false),
-    };
+    let (resumed, checked, carried, consume) =
+        resumable(decide(partial, owner).await?, partial, &key).await;
 
     let resume = resumed.is_some();
-    // A run that was allowed to replace what was in the output was a deliberate choice, so the run
-    // that continues it has to make the same one.
-    if resume && !options.force && resumed.as_ref().is_some_and(|found| found.force) {
-        return Err(Error::Policy(format!(
-            "the store this transfer would resume was made with --force; pass --force to continue it into {}",
-            options.out.display()
-        )));
-    }
+    check_forced(resumed.as_ref(), options)?;
     // The top-level names a store recorded are this ticket's in this output, whether that store is
     // here to continue or only its record is left: a second selection writes into the folder the
     // first one made instead of needing --force, which would also allow replacing its files.
@@ -91,6 +76,15 @@ pub(super) async fn claim_store(
     // repair, before it touches a file, because a folder swapped in since the check above is not
     // this transfer's store.
     storage::repair(partial, before).await?;
+    let store = open_claimed(partial, before).await?;
+    Ok((store, resume, plan))
+}
+
+/// Opens the claimed store and proves it is still the folder that was checked.
+async fn open_claimed(
+    partial: &std::path::Path,
+    before: Option<storage::FolderId>,
+) -> Result<storage::Store, Error> {
     let store = match storage::Store::open(partial, storage::Collector::Off).await {
         Ok(store) => store,
         Err(e) => {
@@ -106,7 +100,45 @@ pub(super) async fn claim_store(
         let _ = store.close().await;
         return Err(storage::changed(partial));
     }
-    Ok((store, resume, plan))
+    Ok(store)
+}
+
+/// What of this home's store there is, what this run may use of it: a store that took the same
+/// entries is continued; a store that took others, or only its record is left, gives this run the
+/// top-level names it made, and the store itself goes. The last value says whether a record of names
+/// must be forgotten once this run claims.
+async fn resumable(
+    found: Found,
+    partial: &std::path::Path,
+    key: &str,
+) -> (
+    Option<storage::Owner>,
+    Option<storage::FolderId>,
+    BTreeSet<String>,
+    bool,
+) {
+    match found {
+        Found::Store(found, _) if found.select.as_deref().unwrap_or("all") != key => {
+            let carried = found.names;
+            storage::discard_apart(partial).await;
+            (None, None, carried, false)
+        }
+        Found::Store(found, checked) => (Some(found), checked, BTreeSet::new(), false),
+        Found::Names(names) => (None, None, names, true),
+        Found::Nothing => (None, None, BTreeSet::new(), false),
+    }
+}
+
+/// A run that was allowed to replace what was in the output was a deliberate choice, so the run that
+/// continues it has to make the same one.
+fn check_forced(resumed: Option<&storage::Owner>, options: &ReceiveOptions) -> Result<(), Error> {
+    if resumed.is_some_and(|found| found.force) && !options.force {
+        return Err(Error::Policy(format!(
+            "the store this transfer would resume was made with --force; pass --force to continue it into {}",
+            options.out.display()
+        )));
+    }
+    Ok(())
 }
 
 /// [`resumable_store`] on a blocking thread, with the store's path held.
