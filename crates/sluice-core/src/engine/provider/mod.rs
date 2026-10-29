@@ -92,6 +92,15 @@ impl Provider {
         self._dir.as_ref().map(storage::Temp::path)
     }
 
+    /// Ends the receiver reports, as an endpoint that has gone would, so a test can prove that a
+    /// wait ends with an error instead of polling a closed channel for ever.
+    #[cfg(test)]
+    pub fn stop_reports(&mut self) {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        drop(sender);
+        self.receivers = receiver;
+    }
+
     /// Serves until the requested stop, reporting every receiver as a line of its own. The router is
     /// shut down before this returns, so a closed provider is not still accepting connections, and
     /// the store is closed after it, so the database is free for the next command that opens the
@@ -139,9 +148,10 @@ impl Provider {
             tokio::select! {
                 _ = log.wait_closed() => break,
                 reported = self.receivers.recv() => {
-                    if let Some(reported) = reported {
-                        self.report(reported, false, &BTreeSet::new(), events);
-                    }
+                    let Some(reported) = reported else {
+                        return Err(reports_stopped());
+                    };
+                    self.report(reported, false, &BTreeSet::new(), events);
                 }
                 _ = &mut deadline => {
                     if self.expiry.is_none_or(|expiry| now_ms() >= expiry) {
@@ -212,13 +222,14 @@ impl Provider {
                 // code. It ends the wait even when a byte count would not: a resumed receive takes
                 // only what the first one was missing, so this process never sees the whole blob.
                 reported = self.receivers.recv() => {
-                    if let Some(reported) = reported {
-                        Self::track(&reported, &mut opened);
-                        let whole = self.completion(&reported, &wait.wanted);
-                        self.report(reported, false, &wait.wanted, events);
-                        if whole {
-                            return Ok(ServeEnd::Downloaded);
-                        }
+                    let Some(reported) = reported else {
+                        return Err(reports_stopped());
+                    };
+                    Self::track(&reported, &mut opened);
+                    let whole = self.completion(&reported, &wait.wanted);
+                    self.report(reported, false, &wait.wanted, events);
+                    if whole {
+                        return Ok(ServeEnd::Downloaded);
                     }
                 }
                 event = self.done.recv() => match event {
@@ -308,7 +319,9 @@ impl Provider {
                     grace = Some(Box::pin(tokio::time::sleep(left)));
                 }
                 reported = self.receivers.recv() => {
-                    let Some(reported) = reported else { continue };
+                    let Some(reported) = reported else {
+                        return Err(reports_stopped());
+                    };
                     match &reported {
                         endpoint::Receiver::Opened { connection, endpoint, .. } => {
                             open.insert(*connection, *endpoint);
@@ -447,6 +460,13 @@ impl Provider {
             None => 100 * 365 * 24 * 60 * 60 * 1000,
         }
     }
+}
+
+/// The endpoint's reports stopped without the endpoint being shut down. No path does that today:
+/// the sender lives in the endpoint's hook, so its end means the hook and the endpoint are gone.
+/// A wait that selected on a closed channel would poll it at once for ever, so it ends here.
+fn reports_stopped() -> Error {
+    Error::Bug("the endpoint stopped reporting its receivers".to_string())
 }
 
 /// The places lock, poisoned only by a panic that changed nothing it guards: a holder edits a set
