@@ -119,10 +119,11 @@ pub(super) async fn claim_store(
 async fn decide(partial: &std::path::Path, owner: &str) -> Result<Found, Error> {
     let dir = partial.to_owned();
     let root = owner.to_owned();
+    // The task's own failure is wrapped once, with the folder it was about; the storage error the
+    // work returns already names that folder and its cause, so it is passed through as it is.
     tokio::task::spawn_blocking(move || storage::with_hold(&dir, || resumable_store(&dir, &root)))
         .await
-        .map_err(|error| Error::Storage(format!("cannot read {}: {error}", partial.display())))?
-        .map_err(|error| Error::Storage(format!("cannot resolve {}: {error}", partial.display())))?
+        .map_err(|error| Error::Storage(format!("cannot read {}: {error}", partial.display())))??
 }
 
 /// The marker of the store this transfer may resume and the identity of the folder it was read
@@ -190,4 +191,23 @@ pub(super) async fn read_manifest(
 
 pub(super) fn hex(bytes: &[u8; 32]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decide;
+
+    /// A folder that cannot be resolved is named once, with its cause, not wrapped in the same
+    /// message twice.
+    #[tokio::test]
+    async fn a_store_decision_that_cannot_resolve_its_folder_says_so_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let partial = dir.path().join("missing").join(".sluice-partial-x");
+        let error = match decide(&partial, "root").await {
+            Ok(_) => panic!("a store decision under a folder that is not there succeeded"),
+            Err(error) => error.to_string(),
+        };
+        assert_eq!(error.matches("cannot resolve").count(), 1, "{error}");
+        assert_eq!(error.matches("storage error").count(), 1, "{error}");
+    }
 }
