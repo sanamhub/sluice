@@ -8,7 +8,7 @@ mod write;
 
 use claim::{claim_store, hex, read_manifest};
 pub(super) use plan::check_one;
-pub(in crate::engine) use plan::totals;
+pub(in crate::engine) use plan::{check_promised, totals};
 pub(super) use write::write_range;
 
 use std::{fs, path::PathBuf, time::Instant};

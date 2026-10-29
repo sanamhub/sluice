@@ -96,7 +96,10 @@ pub(super) fn size_overflow() -> Error {
     Error::Policy("the manifest's file sizes add up past u64::MAX".to_string())
 }
 
-fn check_promised(ticket: &Ticket, bytes: u64) -> Result<(), Error> {
+/// Refuses a manifest whose files do not add up to the size the ticket promises. `inspect` runs it
+/// too, so the size it shows is the size a receive would accept: a ticket that names one size and a
+/// manifest that adds up to another is refused the same way by both.
+pub(in crate::engine) fn check_promised(ticket: &Ticket, bytes: u64) -> Result<(), Error> {
     let promised = match ticket.body() {
         Body::Static { size, .. } => *size,
         Body::Live { .. } => 0,
