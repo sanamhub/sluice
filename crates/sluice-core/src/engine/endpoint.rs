@@ -137,10 +137,14 @@ pub(super) async fn bind_with_completion(
 /// queued before a close is processed within milliseconds; a quarter of a second is a wide margin,
 /// and the address cannot be reused meanwhile because the close task holds the connection.
 const LINGER: Duration = Duration::from_millis(250);
-/// What a content connection reported: that a receiver opened it, or that it closed and whether the
-/// reason was the completion code. The endpoint id is the peer's, so a receiver that reconnects is
-/// the same receiver; the connection id is the one the policy knows, so the provider can check what
-/// that connection asked for before it believes a completion.
+/// What a content connection reported: that a receiver opened it, took a place, was refused one, or
+/// that it closed and whether the reason was the completion code. The endpoint id is the peer's, so
+/// a receiver that reconnects is the same receiver; the connection id is the one the policy knows,
+/// so the provider can check what that connection asked for before it believes a completion.
+///
+/// These all travel on one channel, which is what keeps their order: a connection opens before it
+/// can ask for anything, and the policy takes a place before it answers the request, so a place is
+/// always reported after the open of the connection that took it and before its close.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Receiver {
     /// A receiver's content connection is up.
@@ -148,6 +152,14 @@ pub(super) enum Receiver {
         connection: u64,
         endpoint: [u8; 32],
         relayed: bool,
+    },
+    /// A limited send let this endpoint's first request in, which spent one of its places.
+    Placed { endpoint: [u8; 32], relayed: bool },
+    /// A limited send refused this endpoint because every place was taken.
+    Refused {
+        endpoint: [u8; 32],
+        relayed: bool,
+        places: u32,
     },
     /// A receiver's content connection closed. `claimed_whole` is only what the peer said; it is
     /// believed only by a provider that saw the connection ask for every root.
@@ -182,12 +194,15 @@ impl EndpointHooks for CompletionSignal {
             let stable = conn.stable_id() as u64;
             // Before this connection can send a request, so the policy never has to guess its id
             // from iroh's reusable address.
-            let own = self.0.ids.assign(stable);
-            let endpoint = *conn.remote_id().as_bytes();
+            let peer = super::conn::Peer {
+                endpoint: *conn.remote_id().as_bytes(),
+                relayed: relayed(conn),
+            };
+            let own = self.0.ids.assign(stable, peer);
             let _ = self.0.sender.send(Receiver::Opened {
                 connection: own,
-                endpoint,
-                relayed: relayed(conn),
+                endpoint: peer.endpoint,
+                relayed: peer.relayed,
             });
             // `stable_id` is the address of an allocation that is handed to a later connection once
             // this one is freed, and the policy resolves a request event by that address. Holding a
@@ -205,7 +220,7 @@ impl EndpointHooks for CompletionSignal {
                 );
                 let _ = reports.sender.send(Receiver::Closed {
                     connection: own,
-                    endpoint,
+                    endpoint: peer.endpoint,
                     relayed: relayed(&held),
                     claimed_whole,
                 });

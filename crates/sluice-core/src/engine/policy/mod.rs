@@ -18,10 +18,13 @@ use iroh_blobs::{
 use n0_future::task::AbortOnDropHandle;
 
 mod delivery;
+mod places;
 use delivery::{add, covers, credited, requested};
+pub(crate) use places::{Admission, Places};
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::conn::ConnIds;
+use super::conn::{ConnIds, Peer};
+use super::endpoint::Receiver;
 
 /// The byte ranges of one root this process has served, merged and in ascending order. A range
 /// asked for twice counts once, so two requests for the first half are not the whole file.
@@ -127,10 +130,15 @@ struct Gate {
     asked: Arc<Mutex<Asked>>,
     ids: Arc<ConnIds>,
     rate: Option<Arc<super::Rate>>,
+    places: Arc<Mutex<Places>>,
+    /// Where a place or a refusal is reported, on the same channel as a connection's open and close
+    /// so the three keep their order.
+    receivers: UnboundedSender<Receiver>,
 }
 
 /// [`start`] with an allowlist the caller keeps. A live send adds the root of each segment it
 /// seals, and the same set is what the policy answers from.
+#[allow(clippy::too_many_arguments)]
 pub fn start_shared(
     allowed: Arc<Mutex<BTreeSet<Hash>>>,
     expiry: Option<u64>,
@@ -138,6 +146,8 @@ pub fn start_shared(
     store: FsStore,
     rate: Option<Arc<super::Rate>>,
     ids: Arc<ConnIds>,
+    places: Arc<Mutex<Places>>,
+    receivers: UnboundedSender<Receiver>,
 ) -> Policy {
     let (events, mut rx) = EventSender::channel(32, mask(rate.is_some()));
     let totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>> = Arc::default();
@@ -152,6 +162,8 @@ pub fn start_shared(
         asked: Arc::clone(&asked),
         ids: Arc::clone(&ids),
         rate,
+        places: Arc::clone(&places),
+        receivers,
     };
     let task = AbortOnDropHandle::new(n0_future::task::spawn(async move {
         while let Some(message) = rx.recv().await {
@@ -199,12 +211,13 @@ impl Gate {
         match message {
             ProviderMessage::GetRequestReceived(mut msg) => {
                 let hash = msg.request.hash;
-                let ok = self.may(hash);
                 // The id this process gave the connection. A connection the handshake never saw
                 // has none, so its request is still checked against the allowlist but counted for
                 // no completion: an id inherited from a closed connection would let a peer end a
                 // send it never received.
                 let connection = self.ids.own(msg.connection_id).unwrap_or_default();
+                let peer = self.ids.peer(connection);
+                let ok = self.may(peer, hash);
                 let whole = msg.request.ranges.is_all();
                 let asked = requested(&msg.request.ranges);
                 if msg.tx.send(answer(ok)).await.is_err() || !ok {
@@ -217,6 +230,8 @@ impl Gate {
                 let store = self.store.clone();
                 let totals = Arc::clone(&self.totals);
                 let served = Arc::clone(&self.served);
+                let places = Arc::clone(&self.places);
+                let endpoint = peer.map(|peer| peer.endpoint);
                 n0_future::task::spawn(async move {
                     let sent = Sent {
                         store: &store,
@@ -225,6 +240,11 @@ impl Gate {
                         connection,
                     };
                     while let Ok(Some(update)) = msg.rx.recv().await {
+                        // A holder that is moving bytes has not gone quiet, so it is not a
+                        // connection that does nothing.
+                        if let Some(endpoint) = endpoint {
+                            lock(&places).touch(&endpoint, super::now_ms());
+                        }
                         let Some(covered) = sent.checked(hash, &asked, update, whole).await else {
                             continue;
                         };
@@ -238,11 +258,17 @@ impl Gate {
                 });
             }
             ProviderMessage::GetManyRequestReceived(msg) => {
-                let ok = self.may_all(&msg.request.hashes);
+                let peer = self
+                    .ids
+                    .peer(self.ids.own(msg.connection_id).unwrap_or_default());
+                let ok = self.may_all(peer, &msg.request.hashes);
                 msg.tx.send(answer(ok)).await.ok();
             }
             ProviderMessage::ObserveRequestReceived(msg) => {
-                let ok = self.may(msg.request.hash);
+                let peer = self
+                    .ids
+                    .peer(self.ids.own(msg.connection_id).unwrap_or_default());
+                let ok = self.may(peer, msg.request.hash);
                 msg.tx.send(answer(ok)).await.ok();
             }
             ProviderMessage::ConnectionClosed(msg) => {
@@ -266,19 +292,61 @@ impl Gate {
         }
     }
 
-    /// The one access rule: an allowed hash, before the ticket's deadline.
-    fn may(&self, hash: Hash) -> bool {
-        !expired(self.expiry) && lock(&self.allowed).contains(&hash)
+    /// The one access rule: an allowed hash, before the ticket's deadline, and a place when the send
+    /// offers them. The place is decided here, where the answer is, so a receiver the limit cannot
+    /// take never reaches the protocol at all.
+    fn may(&self, peer: Option<Peer>, hash: Hash) -> bool {
+        if expired(self.expiry) || !lock(&self.allowed).contains(&hash) {
+            return false;
+        }
+        self.admit(peer)
     }
 
     /// The same rule for a request that names several hashes at once: every one has to be allowed,
     /// so one refused hash refuses the whole request.
-    fn may_all(&self, hashes: &[Hash]) -> bool {
+    fn may_all(&self, peer: Option<Peer>, hashes: &[Hash]) -> bool {
         if expired(self.expiry) {
             return false;
         }
         let allowed = lock(&self.allowed);
-        hashes.iter().all(|hash| allowed.contains(hash))
+        if !hashes.iter().all(|hash| allowed.contains(hash)) {
+            return false;
+        }
+        drop(allowed);
+        self.admit(peer)
+    }
+
+    /// Admits or refuses one request by the places the send offers. A connection without a handshake
+    /// record holds no place and can take none, so a limited send refuses it: an id this process
+    /// never gave cannot be the same receiver twice.
+    fn admit(&self, peer: Option<Peer>) -> bool {
+        let now = super::now_ms();
+        let mut places = lock(&self.places);
+        let Some(peer) = peer else {
+            return places.limit().is_none();
+        };
+        let admission = places.admit(peer.endpoint, now);
+        let places_count = places.limit().unwrap_or_default() as u32;
+        drop(places);
+        match admission {
+            Admission::Served => true,
+            Admission::Took => {
+                let _ = self.receivers.send(Receiver::Placed {
+                    endpoint: peer.endpoint,
+                    relayed: peer.relayed,
+                });
+                true
+            }
+            Admission::Refused => {
+                let _ = self.receivers.send(Receiver::Refused {
+                    endpoint: peer.endpoint,
+                    relayed: peer.relayed,
+                    places: places_count,
+                });
+                false
+            }
+            Admission::Unreported => false,
+        }
     }
 }
 
@@ -351,8 +419,15 @@ fn expired_at(expiry: Option<u64>, now: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{Asked, MAX_ASKED, expired_at};
-    use crate::engine::conn::ConnIds;
+    use crate::engine::conn::{ConnIds, Peer};
     use iroh_blobs::Hash;
+
+    fn peer(byte: u8) -> Peer {
+        Peer {
+            endpoint: [byte; 32],
+            relayed: false,
+        }
+    }
 
     #[test]
     fn the_boundary_is_the_ticket_boundary() {
@@ -371,11 +446,11 @@ mod tests {
         let ids = ConnIds::default();
         let mut asked = Asked::default();
         let root = Hash::from([1u8; 32]);
-        let first = ids.assign(9);
+        let first = ids.assign(9, peer(1));
         asked.remember(first, root);
         assert!(asked.of(first).contains(&root));
         ids.closed(9, first);
-        let second = ids.assign(9);
+        let second = ids.assign(9, peer(2));
         assert_ne!(first, second);
         assert!(asked.of(second).is_empty());
     }

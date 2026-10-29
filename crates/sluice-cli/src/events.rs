@@ -111,6 +111,15 @@ fn human(event: &Event, verb: &str) -> String {
             fingerprint(endpoint),
             path_words(*relayed)
         ),
+        Event::ReceiverRefused {
+            endpoint,
+            relayed,
+            places,
+        } => format!(
+            "receiver {} refused, the {places} places are taken ({})",
+            fingerprint(endpoint),
+            path_words(*relayed)
+        ),
         Event::ReceiverFinished {
             endpoint,
             relayed,

@@ -155,6 +155,7 @@ impl Provider {
     ) -> Result<Self, Error> {
         let (receivers, receivers_rx) = unbounded_channel();
         let ids = Arc::new(ConnIds::default());
+        let places = Arc::new(Mutex::new(policy::Places::default()));
         let completion = endpoint::Completion {
             sender: receivers.clone(),
             ids: Arc::clone(&ids),
@@ -172,7 +173,16 @@ impl Provider {
         }
         endpoint::wait_for_direct_addr(&endpoint).await?;
         let (done, done_rx) = unbounded_channel();
-        let policy = policy::start_shared(allowed, expiry, done, store.clone(), rate, ids);
+        let policy = policy::start_shared(
+            allowed,
+            expiry,
+            done,
+            store.clone(),
+            rate,
+            ids,
+            Arc::clone(&places),
+            receivers,
+        );
         let blobs = BlobsProtocol::new(store.deref(), Some(policy.events.clone()));
         let sluice = match live {
             Some(log) => SluiceProtocol::live(log),
@@ -189,6 +199,7 @@ impl Provider {
             policy,
             done: done_rx,
             receivers: receivers_rx,
+            places,
             expiry,
             _dir: None,
         })
