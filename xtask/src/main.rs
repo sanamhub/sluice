@@ -5,6 +5,7 @@ mod cold_start;
 mod conformance;
 mod fuzz_seeds;
 mod man;
+mod package;
 mod tree;
 mod unicode_ignorable;
 mod wasm_features;
@@ -42,6 +43,17 @@ enum Command {
         /// The folder to write `sluice.1` and one page per subcommand into
         dir: PathBuf,
     },
+    /// Write the Homebrew, Scoop, winget and AUR files of a release from its checksums
+    Package {
+        /// The release version, without its leading `v`
+        version: String,
+        /// The folder that holds the release's `.sha256` files
+        #[arg(long, value_name = "DIR")]
+        from: PathBuf,
+        /// The folder to write the files into
+        #[arg(long, value_name = "DIR", default_value = "packaging")]
+        out: PathBuf,
+    },
     /// Fail if the tree holds a file a build writes or a top-level entry that does not belong
     Tree,
     /// Write one Unicode property's ranges from the character database as Rust source
@@ -60,6 +72,7 @@ fn main() -> anyhow::Result<()> {
         Command::ColdStart => cold_start::run(),
         Command::FuzzSeeds { target, dir } => fuzz_seeds::run(target, &dir),
         Command::Man { dir } => man::run(&dir),
+        Command::Package { version, from, out } => package::run(&version, &from, &out),
         Command::Tree => tree::run(),
         Command::UnicodeIgnorable { source, out } => unicode_ignorable::run(&source, &out),
     }

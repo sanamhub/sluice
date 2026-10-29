@@ -231,6 +231,13 @@ A release cannot be edited into a good one. Take it down and go back to the one 
 No secret is needed. Every workflow uses `GITHUB_TOKEN` with the narrowest permissions each job
 needs.
 
+## Package managers
+
+Homebrew, Scoop, winget and the AUR are not published by the release workflow. `cargo xtask package`
+writes their files from a release's own checksums, and [`packaging.md`](packaging.md) says what each
+registry needs, how to check a file before publishing it, and which of those checks this machine can
+and cannot run.
+
 ## Not done yet
 
 - **The binaries are not signed.** Windows SmartScreen can warn on the first run, and macOS
