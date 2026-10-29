@@ -18,7 +18,7 @@ fn refusal(text: &str, mode: Mode) -> String {
 
 #[test]
 fn a_plain_unknown_key_is_named_in_every_mode() {
-    for mode in [Mode::Closed, Mode::Open, Mode::Rendezvous] {
+    for mode in [Mode::Closed, Mode::Open] {
         let message = refusal(&m("enable_relays = true\n"), mode);
         assert!(
             message.contains("line 2: unknown key `enable_relays`"),
@@ -46,7 +46,7 @@ fn a_token_used_as_a_key_is_not_printed() {
         (format!("\"{dotted}\""), 2),
         (format!("[tls]\ncert_mode = \"Manual\"\n\"{base64}\""), 4),
     ] {
-        for mode in [Mode::Closed, Mode::Open, Mode::Rendezvous] {
+        for mode in [Mode::Closed, Mode::Open] {
             let message = refusal(&m(&format!("{key} = 1\n")), mode);
             assert!(
                 message.contains(&format!("line {line}: a key: ")),

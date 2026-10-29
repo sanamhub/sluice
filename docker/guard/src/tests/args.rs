@@ -16,22 +16,23 @@ fn refused(args: &[&str], says: &str) {
 
 #[test]
 fn the_arguments_in_either_order_and_either_spelling() {
-    for (flag, mode) in [("--open", Mode::Open), ("--rendezvous", Mode::Rendezvous)] {
-        let want = Args {
-            mode,
-            behind_proxy: false,
-            config_path: "/etc/relay/a.toml".into(),
-        };
-        assert_eq!(
-            parse(&[flag, "--config-path", "/etc/relay/a.toml"]),
-            Ok(want.clone())
-        );
-        assert_eq!(
-            parse(&["--config-path", "/etc/relay/a.toml", flag]),
-            Ok(want.clone())
-        );
-        assert_eq!(parse(&["--config-path=/etc/relay/a.toml", flag]), Ok(want));
-    }
+    let want = Args {
+        mode: Mode::Open,
+        behind_proxy: false,
+        config_path: "/etc/relay/a.toml".into(),
+    };
+    assert_eq!(
+        parse(&["--open", "--config-path", "/etc/relay/a.toml"]),
+        Ok(want.clone())
+    );
+    assert_eq!(
+        parse(&["--config-path", "/etc/relay/a.toml", "--open"]),
+        Ok(want.clone())
+    );
+    assert_eq!(
+        parse(&["--config-path=/etc/relay/a.toml", "--open"]),
+        Ok(want)
+    );
     let closed = parse(&["--config-path", "/etc/relay/relay.toml"]).unwrap();
     assert_eq!(closed.mode, Mode::Closed);
     assert_eq!(closed.config_path, Path::new("/etc/relay/relay.toml"));
@@ -41,7 +42,6 @@ fn the_arguments_in_either_order_and_either_spelling() {
 fn a_missing_config_path_is_refused_with_why() {
     refused(&[], "--config-path <file> is required");
     refused(&["--open"], "without a config file iroh-relay runs open");
-    refused(&["--rendezvous"], "--config-path <file> is required");
     refused(&["--config-path"], "needs the path of the config file");
     refused(
         &["--open", "--config-path"],
@@ -54,7 +54,7 @@ fn a_missing_config_path_is_refused_with_why() {
 #[test]
 fn dev_is_refused_alone_and_with_a_config_in_every_mode() {
     refused(&["--dev"], "--dev is refused: it turns TLS off");
-    for flags in [&[][..], &["--open"], &["--rendezvous"]] {
+    for flags in [&[][..], &["--open"]] {
         let mut args = flags.to_vec();
         args.extend(["--dev", "--config-path", "/etc/relay/relay.toml"]);
         refused(&args, "--dev is refused");
@@ -86,7 +86,6 @@ fn an_argument_that_is_not_a_flag_is_not_printed() {
         hex,
         "relay.toml",
         "--open=yes",
-        "--rendezvous=yes",
         "-c",
         "-h",
         "-",
@@ -105,7 +104,7 @@ fn an_argument_that_is_not_a_flag_is_not_printed() {
         assert_eq!(
             message,
             "an argument at position 2 is unknown: the guard takes only \
-             [--open | --rendezvous | --behind-proxy] --config-path <file>"
+             [--open | --behind-proxy] --config-path <file>"
         );
     }
     // The position counts the path after --config-path, so it is the place on the command line.
@@ -129,23 +128,9 @@ fn a_repeated_argument_is_refused() {
         "--open is given twice",
     );
     refused(
-        &["--rendezvous", "--config-path", "a.toml", "--rendezvous"],
-        "--rendezvous is given twice",
-    );
-    refused(
         &["--config-path", "a.toml", "--config-path=b.toml"],
         "--config-path is given twice",
     );
-}
-
-#[test]
-fn open_and_rendezvous_together_are_refused_in_either_order() {
-    for args in [
-        ["--open", "--rendezvous", "--config-path", "a.toml"],
-        ["--rendezvous", "--config-path", "a.toml", "--open"],
-    ] {
-        refused(&args, "--open and --rendezvous are given together");
-    }
 }
 
 #[test]
@@ -171,14 +156,5 @@ fn behind_proxy_is_parsed_once_and_only_for_a_relay() {
             "a.toml",
         ],
         "--behind-proxy is given twice",
-    );
-    // It is for a relay whose config has no [tls]; a rendezvous server relays nothing.
-    refused(
-        &["--rendezvous", "--behind-proxy", "--config-path", "a.toml"],
-        "--behind-proxy is for a relay behind a proxy",
-    );
-    refused(
-        &["--behind-proxy", "--rendezvous", "--config-path", "a.toml"],
-        "--behind-proxy is for a relay behind a proxy",
     );
 }

@@ -1,21 +1,21 @@
 # The relay server: iroh-relay with both halves on, address discovery and the relay that carries
 # traffic when two peers cannot reach each other (ADR 0013). iroh-relay is the upstream binary,
-# built the way docker/rendezvous builds it, from the same base images and version. It starts
-# through sluice-relay-guard, which refuses a config that would open the relay by mistake
-# (ADR 0019, ADR 0020, ../guard/README.md).
+# built from crates.io with --locked, the version the root Cargo.lock resolves. It starts through
+# sluice-relay-guard, which refuses a config that would open the relay by mistake (ADR 0019,
+# ADR 0020, ../guard/README.md).
 #
-# Build from docker/, which both images share for the guard's sources:
+# Build from docker/, which holds the guard's sources too:
 #   docker build -f docker/relay/Dockerfile -t sluice-relay docker
 # BuildKit reads Dockerfile.dockerignore, beside this file, and lets in only the two configs and
 # the guard's manifest, lock file and sources. The legacy builder reads only .dockerignore in
-# docker/, which lets in the same for both images. Either way the COPY lines below name only what
-# the build needs, so a stray folder in docker/ never reaches the build stage.
+# docker/, which lets in the same files. Either way the COPY lines below name only what the build
+# needs, so a stray folder in docker/ never reaches the build stage.
 
 FROM rust:1.99.1-slim-trixie@sha256:4df2ae8cfdfebdfc13a65da7f253b73d68983dc0339f2719bc17a279c913b13d AS build
 
 # The release Cargo.lock resolves for iroh-relay, so the server and the probe's iroh come from the
 # same release, and the guard's schema is that release's: a test of the guard fails if this line
-# names another. Move it with docker/rendezvous, and review the guard's schema first.
+# names another. Move it with the guard's schema, and review that first.
 ARG IROH_RELAY_VERSION=1.4.1
 
 # --locked uses the lockfile the crate was published with. The binary needs the server feature.

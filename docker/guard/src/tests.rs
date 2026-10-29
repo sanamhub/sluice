@@ -4,7 +4,6 @@ mod examples;
 mod files;
 mod handover;
 mod keys;
-mod rendezvous;
 mod rules;
 mod secrets;
 mod settings;
@@ -13,7 +12,7 @@ mod versions;
 
 use std::path::{Path, PathBuf};
 
-/// The `docker` folder, which holds the guard and both images' folders.
+/// The `docker` folder, which holds the guard and the relay image's folder.
 fn docker_dir() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -23,11 +22,6 @@ fn docker_dir() -> &'static Path {
 /// The `docker/relay` folder, which holds the relay's shipped configs and its Dockerfile.
 fn relay_dir() -> PathBuf {
     docker_dir().join("relay")
-}
-
-/// The `docker/rendezvous` folder, which holds the rendezvous config and its Dockerfile.
-fn rendezvous_dir() -> PathBuf {
-    docker_dir().join("rendezvous")
 }
 
 /// The repository root, which holds the Cargo.lock of the probe and the workspace.

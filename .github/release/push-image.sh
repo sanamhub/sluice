@@ -18,8 +18,8 @@
 # literal `ghcr.io`, and images.yml's push test writes `localhost:5000`. A value an earlier step
 # wrote to GITHUB_ENV cannot change it, and on a tag any registry but ghcr.io is refused.
 #
-# IMAGE is `rendezvous` or `relay`, OWNER the repository owner and TAG the checked `v<version>`
-# tag. The image-build jobs left `<arch>.tar.gz` and `<arch>.spdx.json` for each architecture in
+# IMAGE is `relay`, OWNER the repository owner and TAG the checked `v<version>` tag. The image
+# build jobs left `<arch>.tar.gz` and `<arch>.spdx.json` for each architecture in
 # RUNNER_TEMP/image.
 set -euo pipefail
 # A failed command inside `$(...)` stops the script too, and not only the line that reads it.

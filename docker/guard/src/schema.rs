@@ -27,7 +27,7 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// `true` by default there (main.rs:107, 376-378). Here a missing one stays `None`, so that
-    /// rendezvous mode can require it written out (ADR 0020).
+    /// the guard can refuse a config that writes `false` (ADR 0020).
     pub enable_relay: Option<bool>,
     pub http_bind_addr: Option<SocketAddr>,
     pub tls: Option<TlsConfig>,

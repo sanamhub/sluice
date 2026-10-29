@@ -1,7 +1,7 @@
 //! The checks of ADR 0019 and ADR 0020 on a config's text: it parses with every key known, every
 //! setting that would open something by default is written out, and the config is what its mode
-//! says. A closed relay has a closed `access`, an open one has `--open` and a per-client byte
-//! limit, and a rendezvous server has its relay half off.
+//! says. A closed relay has a closed `access`, and an open one has `--open` and a per-client byte
+//! limit. The relay half is always on, because this image carries traffic.
 //!
 //! No message prints a value from the config. A `shared_token` entry or `access.http.bearer_token`
 //! is a secret, and so may be the query of `access.http.url`, and a misplaced one would turn up in
@@ -21,7 +21,7 @@ pub(crate) fn check(
     access_token: Option<&str>,
     behind_proxy: bool,
 ) -> Result<(), Refusal> {
-    let readme = readme(mode);
+    let readme = readme();
     // iroh-relay 1.4.1 stops at start on an empty token: an empty value replaces the list with one
     // empty entry, and `bail_any!` refuses it (main.rs:236-243). The guard refuses it first so the
     // operator gets exit 64 and one line that names the variable.
@@ -40,61 +40,28 @@ pub(crate) fn check(
     }
     let config: Config =
         toml::from_str(text).map_err(|err| messages::schema_error(text, &err, readme))?;
-    match mode {
-        Mode::Rendezvous => check_rendezvous(&config)?,
-        Mode::Closed | Mode::Open => check_relay_half_on(&config)?,
-    }
+    check_relay_half_on(&config)?;
     if let Some(access) = &config.access {
         access::check(access, access_token)?;
     }
-    check_tls(&config, mode, behind_proxy)?;
+    check_tls(&config, behind_proxy)?;
     check_metrics(&config)?;
-    match mode {
-        Mode::Rendezvous => Ok(()),
-        Mode::Closed | Mode::Open => check_access(&config, mode),
-    }
+    check_access(&config, mode)
 }
 
-/// What the operator is told to compare a config with: the README of the image that mode runs.
-fn readme(mode: Mode) -> &'static str {
-    match mode {
-        Mode::Rendezvous => "docker/rendezvous/README.md",
-        Mode::Closed | Mode::Open => "docker/relay/README.md",
-    }
+/// What the operator is told to compare a config with: the README of the image.
+fn readme() -> &'static str {
+    "docker/relay/README.md"
 }
 
-/// A rendezvous server answers address discovery and relays nothing (ADR 0013). `enable_relay`
-/// defaults to true (main.rs:107 and 376-378), so it must say false, and a deleted line cannot turn
-/// the server into a relay. `access` and `[limits]` govern only the relay half, so a config that
-/// sets them was written for a relay.
-fn check_rendezvous(config: &Config) -> Result<(), Refusal> {
-    if config.enable_relay != Some(false) {
-        return Err(Refusal::new(
-            "--rendezvous needs `enable_relay = false` written out: iroh-relay 1.4.1 turns the \
-             relay half on without it, and a rendezvous server relays nothing",
-        ));
-    }
-    if config.access.is_some() {
-        return Err(Refusal::new(
-            "`access` is set, and a rendezvous server relays nothing for it to govern: remove \
-             it, or start a relay without --rendezvous",
-        ));
-    }
-    if config.limits.is_some() {
-        return Err(Refusal::new(
-            "[limits] is set, and a rendezvous server relays nothing for it to limit: remove \
-             it, or start a relay without --rendezvous",
-        ));
-    }
-    Ok(())
-}
-
-/// A config with the relay half off is a rendezvous config, and starts only as one.
+/// `enable_relay` defaults to true (main.rs:107 and 376-378), so a config that turns it off would
+/// serve address discovery only. The image exists to carry traffic, so that config is refused
+/// rather than started as something else.
 fn check_relay_half_on(config: &Config) -> Result<(), Refusal> {
     if config.enable_relay == Some(false) {
         return Err(Refusal::new(
-            "`enable_relay` is false, so this is a rendezvous config: start it with --rendezvous, \
-             as the rendezvous image does",
+            "`enable_relay` is false, so the relay half is off and no traffic can pass: write \
+             `enable_relay = true`, or leave the setting out, which iroh-relay reads as true",
         ));
     }
     Ok(())
@@ -104,9 +71,8 @@ fn check_relay_half_on(config: &Config) -> Result<(), Refusal> {
 /// turns HTTPS off on a relay that has TLS (main.rs:593-600 and 703-721), which is what `--dev`
 /// does, so a shared token would then cross the network in clear text. A config with no `[tls]`
 /// serves plain HTTP only, which is right behind a proxy that ends TLS and wrong anywhere else: the
-/// guard cannot tell those apart, so the operator says which one it is with the flag. A rendezvous
-/// server relays nothing and answers no token, so the flag has nothing to stand behind there.
-fn check_tls(config: &Config, mode: Mode, behind_proxy: bool) -> Result<(), Refusal> {
+/// guard cannot tell those apart, so the operator says which one it is with the flag.
+fn check_tls(config: &Config, behind_proxy: bool) -> Result<(), Refusal> {
     if config
         .tls
         .as_ref()
@@ -117,26 +83,17 @@ fn check_tls(config: &Config, mode: Mode, behind_proxy: bool) -> Result<(), Refu
              leave out [tls] and start with --behind-proxy behind a proxy that ends TLS",
         ));
     }
-    match mode {
-        Mode::Rendezvous => match behind_proxy {
-            true => Err(Refusal::new(
-                "--behind-proxy is for a relay behind a proxy that ends TLS, and a rendezvous \
-                 server relays nothing: remove it, or start a relay without --rendezvous",
-            )),
-            false => Ok(()),
-        },
-        Mode::Closed | Mode::Open => match (config.tls.is_none(), behind_proxy) {
-            (true, false) => Err(Refusal::new(
-                "there is no [tls] table, so iroh-relay serves plain HTTP only, and a shared token \
-                 or an HTTP bearer token would cross the network in clear text: add [tls], or \
-                 start with --behind-proxy when a proxy in front ends TLS",
-            )),
-            (false, true) => Err(Refusal::new(
-                "--behind-proxy was given, but the config has a [tls] table, so iroh-relay ends \
-                 TLS itself: remove the flag, or leave out [tls] when a proxy in front ends TLS",
-            )),
-            _ => Ok(()),
-        },
+    match (config.tls.is_none(), behind_proxy) {
+        (true, false) => Err(Refusal::new(
+            "there is no [tls] table, so iroh-relay serves plain HTTP only, and a shared token or \
+             an HTTP bearer token would cross the network in clear text: add [tls], or start with \
+             --behind-proxy when a proxy in front ends TLS",
+        )),
+        (false, true) => Err(Refusal::new(
+            "--behind-proxy was given, but the config has a [tls] table, so iroh-relay ends TLS \
+             itself: remove the flag, or leave out [tls] when a proxy in front ends TLS",
+        )),
+        _ => Ok(()),
     }
 }
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# The smoke test of both images: the shipped image starts, with a read-only root, as the config it
+# The smoke test of the image: the shipped image starts, with a read-only root, as the config it
 # was given and not as iroh-relay's open default, and the guard refuses each config that would open
 # more than the operator wrote, with exit code 64 and one line that names the key. images.yml and
-# release.yml run it on every build of either image, so a guard that lets a mistake through fails
-# CI (ADR 0019, ADR 0020).
+# release.yml run it on every build of the image, so a guard that lets a mistake through fails CI
+# (ADR 0019, ADR 0020).
 #
-# Usage: docker/smoke-test.sh relay|rendezvous <image>
+# Usage: docker/smoke-test.sh relay <image>
 #
 # It needs a Linux host with Docker, openssl, curl and bash. It makes one network, a throwaway
 # certificate and the containers it needs, all named after a random suffix, and removes them when
@@ -14,17 +14,17 @@
 # container that stops on SIGINT has to say so within ten seconds.
 set -euo pipefail
 
-usage="usage: smoke-test.sh relay|rendezvous <image>"
+usage="usage: smoke-test.sh relay <image>"
 kind="${1:?$usage}"
 image="${2:?$usage}"
 case "$kind" in
-  relay | rendezvous) ;;
+  relay) ;;
   *) echo "$usage" >&2; exit 2 ;;
 esac
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Random, and not the process id, which two runs in two containers or namespaces may share.
 name="sluice-smoke-$(od -An -N6 -tx1 /dev/urandom | tr -d ' \n')"
-etc="/etc/$kind"
+etc="/etc/relay"
 work="$(mktemp -d)"
 failed=0
 runs=0
@@ -95,7 +95,7 @@ presents_our_certificate() {
 }
 
 # Up with this config, and not with iroh-relay's open default, which also answers /generate_204 on
-# port 80. Both images log the QUIC listener, which only a config that asks for it starts, and the
+# port 80. The image logs the QUIC listener, which only a config that asks for it starts, and the
 # relay's HTTPS port must present the certificate this run made.
 up() {
   local container="$1" logs port
@@ -103,7 +103,6 @@ up() {
   # docker gets SIGPIPE, and pipefail turns the match into a failure.
   logs="$(docker logs "$container" 2>&1)"
   grep -q 'QUIC server listening' <<< "$logs" || return 1
-  [ "$kind" = relay ] || return 0
   port="$(docker port "$container" 80/tcp | head -n 1 | cut -d: -f2)"
   [ "$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' \
     "http://127.0.0.1:$port/generate_204")" = 204 ] || return 1
@@ -112,10 +111,9 @@ up() {
 }
 
 # The metrics server is on at port 9090 with no login unless the config turns it off. The control
-# is a port the config does start: the relay's HTTPS 443, or the rendezvous server's QUIC 7842,
-# which is bound over UDP. Both are read from the container's own /proc, so a host that cannot reach
-# the container's address still gets a truthful answer, and a container with no listener fails the
-# control instead of passing the 9090 check.
+# is a port the config does start: the relay's HTTPS 443. Both are read from the container's own
+# /proc, so a host that cannot reach the container's address still gets a truthful answer, and a
+# container with no listener fails the control instead of passing the 9090 check.
 metrics_are_off() {
   local container="$1" pid ports control
   pid="$(docker inspect --format '{{.State.Pid}}' "$container")"
@@ -124,7 +122,6 @@ metrics_are_off() {
     return
   fi
   control=443
-  [ "$kind" = rendezvous ] && control=7842
   if ! grep -qx "$control" <<< "$ports"; then
     fail "metrics: port $control, which this config starts, is not open, so 9090 proves nothing"
   elif grep -qx 9090 <<< "$ports"; then
@@ -137,13 +134,12 @@ metrics_are_off() {
 # Starts the image with a read-only root and the given arguments, and passes if it comes up as
 # that config, with its HTTPS, its QUIC listener and no metrics port.
 starts() {
-  local check="$1" container publish=()
+  local check="$1" container
   container="$(next_name)"
   shift 1
-  [ "$kind" = relay ] && publish=(-p 127.0.0.1::80 -p 127.0.0.1::443)
-  # An empty array under `set -u` on an older bash is an unbound variable; this expands to nothing.
   docker run -d --read-only --name "$container" --network "$name" \
-    ${publish[@]+"${publish[@]}"} -v "$work/certs:$etc/certs:ro" "$image" "$@" > /dev/null
+    -p 127.0.0.1::80 -p 127.0.0.1::443 \
+    -v "$work/certs:$etc/certs:ro" "$image" "$@" > /dev/null
   local ok=no
   for _ in $(seq 1 50); do
     if up "$container"; then ok=yes; break; fi
@@ -200,7 +196,6 @@ handover() {
     return
   fi
   want="/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0 "
-  [ "$kind" = rendezvous ] && want="/usr/local/bin/iroh-relay --dev --config-path=/proc/self/fd/0 "
   if ! cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2> "$work/stderr")"; then
     fail "handover: /proc/$pid/cmdline cannot be read: $(head -n 1 "$work/stderr")"
     docker rm -f "$container" > /dev/null
@@ -212,8 +207,7 @@ handover() {
       docker rm -f "$container" > /dev/null
       return
     }
-  local shipped="$here/$kind/manual.toml"
-  [ "$kind" = relay ] && shipped="$here/relay/relay.toml"
+  local shipped="$here/relay/relay.toml"
   if [ "$cmdline" != "$want" ] || [[ "$copy" != *"memfd:"* ]]; then
     fail "handover: PID 1 is '$cmdline', descriptor 0: $copy"
     docker rm -f "$container" > /dev/null
@@ -229,8 +223,8 @@ handover() {
 }
 
 # iroh-relay stops on SIGINT and not on SIGTERM (main.rs:610-614), so an image with no STOPSIGNAL
-# makes `docker stop` wait out its 30-second grace period and kill the process. Both Dockerfiles
-# say STOPSIGNAL SIGINT, so the stop returns in about a second with iroh-relay's own exit code.
+# makes `docker stop` wait out its 30-second grace period and kill the process. The Dockerfile
+# says STOPSIGNAL SIGINT, so the stop returns in about a second with iroh-relay's own exit code.
 stops() {
   local container start end elapsed code started=no
   container="$(next_name)"
@@ -259,7 +253,7 @@ stops() {
   docker rm -f "$container" > /dev/null
 }
 
-# Only the QUIC line, which both images log when their config is the one that started.
+# Only the QUIC line, which the image logs when its config is the one that started.
 up_quic() {
   local logs
   logs="$(docker logs "$1" 2>&1)"
@@ -301,15 +295,7 @@ config() {
 metrics='enable_metrics = false\n'
 allow='[access]\nallowlist = []\n'
 tls='[tls]\nquic_bind_addr = "0.0.0.0:7842"\ncert_mode = "Manual"\n'
-quic='enable_quic_addr_discovery = true\n'
 upper="$(printf 'AB%.0s' $(seq 1 32))"
-
-# The checks both images share: a variable that is set and empty replaces the config's tokens with
-# one that is empty, which iroh-relay would take as the only token.
-both() {
-  refuses "IROH_RELAY_ACCESS_TOKEN set but empty" "IROH_RELAY_ACCESS_TOKEN is set but empty" \
-    -e IROH_RELAY_ACCESS_TOKEN= "$image"
-}
 
 relay() {
   starts "the shipped image"
@@ -323,13 +309,12 @@ relay() {
   refuses "--open without a rate" "--open needs \`limits.client.rx.bytes_per_second\`" \
     -v "$(config norate "${metrics}access = \"everyone\"\n${tls}" relay.toml)" \
     "$image" --open --config-path /etc/relay/relay.toml
-  refuses "--rendezvous with relay.toml" "needs \`enable_relay = false\`" \
-    "$image" --rendezvous --config-path /etc/relay/relay.toml
   refuses "--dev" "--dev is refused" "$image" --dev --config-path /etc/relay/relay.toml
   refuses "a --config-path that does not exist" "does not exist" \
     "$image" --config-path /etc/relay/missing.toml
+  refuses "IROH_RELAY_ACCESS_TOKEN set but empty" \
+    "IROH_RELAY_ACCESS_TOKEN is set but empty" -e IROH_RELAY_ACCESS_TOKEN= "$image"
   relay_configs
-  both
 }
 
 # Configs that parse, and that iroh-relay would run in a way the operator did not write.
@@ -360,30 +345,7 @@ relay_configs() {
     -v "$(config tokens "${metrics}[access]\nshared_token = []\n" relay.toml)" "$image"
 }
 
-rendezvous() {
-  starts "the shipped image"
-  stops
-  handover
-  refuses "no enable_relay = false" "needs \`enable_relay = false\`" \
-    -v "$(config on "${metrics}${quic}${tls}" manual.toml)" "$image"
-  refuses "--open with --rendezvous" "--open and --rendezvous are given together" \
-    "$image" --rendezvous --open --config-path "$etc/manual.toml"
-  refuses "manual.toml without --rendezvous" "\`enable_relay\` is false" \
-    "$image" --config-path "$etc/manual.toml"
-  refuses "--dev" "--dev is refused" "$image" --dev --rendezvous --config-path "$etc/manual.toml"
-  refuses "no enable_metrics" "\`enable_metrics\` is not set" \
-    -v "$(config metrics "enable_relay = false\n${quic}${tls}" manual.toml)" "$image"
-  refuses "an access setting" "\`access\` is set" \
-    -v "$(config access "enable_relay = false\n${metrics}access = \"everyone\"\n" manual.toml)" \
-    "$image"
-  refuses "dangerous_http_only" "\`dangerous_http_only\` is true" \
-    -v "$(config http "enable_relay = false\n${metrics}${quic}${tls}dangerous_http_only = true\n" \
-      manual.toml)" "$image"
-  both
-}
-
 case "$kind" in
   relay) relay ;;
-  rendezvous) rendezvous ;;
 esac
 exit "$failed"

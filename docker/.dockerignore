@@ -1,13 +1,12 @@
-# The build context of both images is this folder, and the legacy builder (DOCKER_BUILDKIT=0)
-# reads only this file. It does not read the Dockerfile.dockerignore beside each Dockerfile, which
+# The build context of the relay image is this folder, and the legacy builder (DOCKER_BUILDKIT=0)
+# reads only this file. It does not read the Dockerfile.dockerignore beside the Dockerfile, which
 # BuildKit prefers, so without this file it would send all of docker/: a target/ folder, a local
-# certificate or key, and every other image's folder. An allowlist of what either image needs,
-# the union of the two Dockerfile.dockerignore files. The guard's tests are left out: the image
-# builds the guard without them.
+# certificate or key, and another image's folder. An allowlist of what the image needs, the same
+# rules as Dockerfile.dockerignore. The guard's tests are left out: the image builds the guard
+# without them.
 *
 !relay/relay.toml
 !relay/open.toml
-!rendezvous/manual.toml
 !guard/Cargo.toml
 !guard/Cargo.lock
 !guard/src

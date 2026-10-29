@@ -226,17 +226,13 @@ fn the_range_seeds_are_written_here_and_every_one_parses() {
 fn the_relay_config_seeds_are_the_shipped_configs_and_every_iroh_example() {
     let seeds = seeds(Target::RelayConfig, &vectors_dir()).unwrap();
     let files: Vec<String> = seeds.iter().filter_map(|seed| seed.file.clone()).collect();
-    assert_eq!(files.len(), 23, "{files:?}");
+    assert_eq!(files.len(), 22, "{files:?}");
     assert_eq!(
-        files[..3],
-        [
-            "docker/relay/relay.toml",
-            "docker/relay/open.toml",
-            "docker/rendezvous/manual.toml"
-        ]
+        files[..2],
+        ["docker/relay/relay.toml", "docker/relay/open.toml"]
     );
     assert!(
-        files[3..]
+        files[2..]
             .iter()
             .all(|f| f.starts_with("docker/guard/testdata/iroh-relay-1.4.1/")),
         "{files:?}"

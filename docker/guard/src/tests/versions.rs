@@ -1,8 +1,8 @@
-//! The schema is iroh-relay 1.4.1's. Both images must build that release, and the probe must
+//! The schema is iroh-relay 1.4.1's. The image must build that release, and the probe must
 //! resolve it, or a new release could add a key the guard does not know and the guard would
 //! refuse a good config, or worse, let a key through that it reads differently.
 
-use super::{docker_dir, read, relay_dir, rendezvous_dir, repo_root};
+use super::{docker_dir, read, relay_dir, repo_root};
 use crate::IROH_RELAY_VERSION;
 
 /// The `version` of each `[[package]]` named `name` in a Cargo.lock.
@@ -28,20 +28,18 @@ const INSTALL: &str = "RUN cargo install iroh-relay --version \"=${IROH_RELAY_VE
                        --features server --root /out";
 
 #[test]
-fn both_dockerfiles_build_the_release_the_schema_was_written_for() {
-    for (image, dir) in [("relay", relay_dir()), ("rendezvous", rendezvous_dir())] {
-        let dockerfile = read(&dir.join("Dockerfile"));
-        let args: Vec<&str> = dockerfile
-            .lines()
-            .filter_map(|line| line.strip_prefix("ARG IROH_RELAY_VERSION="))
-            .collect();
-        assert_eq!(args, [IROH_RELAY_VERSION], "docker/{image}/Dockerfile");
-        let installs: Vec<&str> = dockerfile
-            .lines()
-            .filter(|line| line.contains("cargo install") && line.contains("iroh-relay"))
-            .collect();
-        assert_eq!(installs, [INSTALL], "docker/{image}/Dockerfile");
-    }
+fn the_dockerfile_builds_the_release_the_schema_was_written_for() {
+    let dockerfile = read(&relay_dir().join("Dockerfile"));
+    let args: Vec<&str> = dockerfile
+        .lines()
+        .filter_map(|line| line.strip_prefix("ARG IROH_RELAY_VERSION="))
+        .collect();
+    assert_eq!(args, [IROH_RELAY_VERSION], "docker/relay/Dockerfile");
+    let installs: Vec<&str> = dockerfile
+        .lines()
+        .filter(|line| line.contains("cargo install") && line.contains("iroh-relay"))
+        .collect();
+    assert_eq!(installs, [INSTALL], "docker/relay/Dockerfile");
 }
 
 #[test]

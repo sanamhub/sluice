@@ -4,8 +4,8 @@
 //! no unknown key refused, a missing `access` read as everyone, `enable_relay` true unless written,
 //! and `enable_metrics` true unless written (main.rs:94-159 and 370-389). Whatever the guard lets
 //! start is what iroh-relay would run: closed means iroh-relay's own `access` is an allowlist, an
-//! HTTP check or shared tokens, rendezvous means its relay half is off, and closed or open means it
-//! is on. `--behind-proxy` and a `[tls]` table agree. The environment variable is modelled too: a
+//! HTTP check or shared tokens, and open means it is open with a byte limit. The relay half is on
+//! in both. `--behind-proxy` and a `[tls]` table agree. The environment variable is modelled too: a
 //! value that is set but empty is refused, and a set one replaces the `shared_token` list
 //! (main.rs:236-244).
 //!
@@ -98,7 +98,7 @@ fuzz_target!(|data: &[u8]| {
         1 => Some("t"),
         _ => Some(""),
     };
-    for mode in [Mode::Closed, Mode::Open, Mode::Rendezvous] {
+    for mode in [Mode::Closed, Mode::Open] {
         for behind_proxy in [false, true] {
             let checked = check_config(&text, mode, token, behind_proxy);
             if token == Some("") {
@@ -116,7 +116,6 @@ fuzz_target!(|data: &[u8]| {
                 Ok(loose) => loose,
                 Err(err) => panic!("the guard passed {mode:?} text iroh-relay cannot read: {err}"),
             };
-            let rendezvous = mode == Mode::Rendezvous;
             match mode {
                 Mode::Closed => assert!(
                     matches!(
@@ -127,31 +126,23 @@ fuzz_target!(|data: &[u8]| {
                     ),
                     "the guard passed as closed what iroh-relay runs open"
                 ),
-                Mode::Rendezvous => assert!(
-                    !loose.enable_relay,
-                    "the guard passed as rendezvous what iroh-relay runs as a relay"
-                ),
                 Mode::Open => assert!(
                     has_rate(&loose),
                     "the guard passed open with no per-client byte limit"
                 ),
             }
-            if !rendezvous {
-                assert!(
-                    loose.enable_relay,
-                    "the guard passed {mode:?} with the relay half off"
-                );
-                // A relay config's [tls] and the flag are the one pair that must agree: no [tls]
-                // means the operator says a proxy ends TLS, and [tls] means iroh-relay does.
-                assert_eq!(
-                    behind_proxy,
-                    loose.tls.is_none(),
-                    "the guard passed {mode:?} with --behind-proxy={behind_proxy} and [tls]={}",
-                    loose.tls.is_some()
-                );
-            } else {
-                assert!(!behind_proxy, "the guard passed rendezvous with --behind-proxy");
-            }
+            assert!(
+                loose.enable_relay,
+                "the guard passed {mode:?} with the relay half off"
+            );
+            // A relay config's [tls] and the flag are the one pair that must agree: no [tls]
+            // means the operator says a proxy ends TLS, and [tls] means iroh-relay does.
+            assert_eq!(
+                behind_proxy,
+                loose.tls.is_none(),
+                "the guard passed {mode:?} with --behind-proxy={behind_proxy} and [tls]={}",
+                loose.tls.is_some()
+            );
             // From here the asserts restate the guard's own rules: they are regression checks that
             // a rule was not deleted, not a comparison with what iroh-relay does.
             assert!(

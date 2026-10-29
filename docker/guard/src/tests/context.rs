@@ -1,12 +1,10 @@
-//! The build context. BuildKit reads `Dockerfile.dockerignore` beside each Dockerfile, and the
+//! The build context. BuildKit reads `Dockerfile.dockerignore` beside the Dockerfile, and the
 //! legacy builder reads only `docker/.dockerignore`, so the two must let in the same files. Order
-//! is part of a rule: a later `!` re-includes what an earlier line excluded, so each image's rules
-//! must appear in the shared file in the same order. The Dockerfiles must copy only what the image
+//! is part of a rule: a later `!` re-includes what an earlier line excluded, so the shared file
+//! must hold the image's rules in the same order. The Dockerfile must copy only what the image
 //! needs, and only from the guard's folder.
 
-use std::collections::BTreeSet;
-
-use super::{docker_dir, read, relay_dir, rendezvous_dir};
+use super::{docker_dir, read, relay_dir};
 
 /// The lines of an ignore file that are rules: no comment, no blank line.
 fn rules(text: &str) -> Vec<String> {
@@ -17,34 +15,21 @@ fn rules(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether `needle` appears in `haystack` in the same order, possibly with other lines between.
-fn is_subsequence(needle: &[String], haystack: &[String]) -> bool {
-    let mut rest = haystack.iter();
-    needle.iter().all(|rule| rest.any(|line| line == rule))
-}
-
 #[test]
-fn the_legacy_builders_ignore_file_is_the_union_of_the_two_images_in_order() {
-    let relay = rules(&read(&relay_dir().join("Dockerfile.dockerignore")));
-    let rendezvous = rules(&read(&rendezvous_dir().join("Dockerfile.dockerignore")));
+fn the_legacy_builders_ignore_file_is_the_images_in_order() {
+    let image = rules(&read(&relay_dir().join("Dockerfile.dockerignore")));
     let shared = rules(&read(&docker_dir().join(".dockerignore")));
     assert_eq!(
         shared.first().map(String::as_str),
         Some("*"),
         "an allowlist"
     );
-    // Each image's rules, in its own order, or a re-included path could be excluded again.
-    for (image, rules) in [("relay", &relay), ("rendezvous", &rendezvous)] {
-        assert_eq!(rules.first().map(String::as_str), Some("*"), "{image}");
-        assert!(
-            is_subsequence(rules, &shared),
-            "docker/{image}/Dockerfile.dockerignore is not in the shared file's order"
-        );
-    }
-    // And the shared file lets in nothing that neither image names.
-    let both: BTreeSet<&String> = relay.iter().chain(&rendezvous).collect();
-    let named: BTreeSet<&String> = shared.iter().collect();
-    assert_eq!(both, named);
+    assert_eq!(image.first().map(String::as_str), Some("*"));
+    // The same rules in the same order, or a re-included path could be excluded again.
+    assert_eq!(
+        image, shared,
+        "docker/.dockerignore is not the image's rules"
+    );
 }
 
 /// A Dockerfile instruction as Docker reads it: the keyword, and the rest after the space or tab
@@ -122,15 +107,6 @@ fn each_dockerfile_copies_only_what_the_image_needs() {
         context_readers(&read(&relay_dir().join("Dockerfile"))),
         expected,
         "docker/relay/Dockerfile"
-    );
-
-    let mut expected = guard.to_vec();
-    expected.extend(common);
-    expected.push("COPY rendezvous/manual.toml /etc/rendezvous/");
-    assert_eq!(
-        context_readers(&read(&rendezvous_dir().join("Dockerfile"))),
-        expected,
-        "docker/rendezvous/Dockerfile"
     );
 }
 

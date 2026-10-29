@@ -27,12 +27,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # One row per image of ADR 0013. They share the build, so a change to one can break the other.
+  # One row per image. The relay is the only one, and the build below is what a release runs.
   build:
     strategy:
       fail-fast: false
       matrix:
-        image: [rendezvous, relay]
+        image: [relay]
     runs-on: ubuntu-latest
     # Compiling iroh-relay is most of it. As in release.yml's image builds, 60 minutes leaves room
     # without letting a hung build run for GitHub's default of 6 hours.
@@ -96,7 +96,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [rendezvous, relay]
+        image: [relay]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
