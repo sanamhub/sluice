@@ -172,15 +172,19 @@ async fn open_stream(
     let conn = opened.receiver.connect(ticket, events.clone()).await?;
     let (theirs, _send, mut recv) = hello::greet_stream(&conn)
         .await
-        .map_err(|e| Error::Network(format!("the greeting failed: {e}")))?;
+        .map_err(|e| Error::Network(format!("the greeting failed: {}", crate::plain(&e))))?;
     if !theirs.both(&hello::Hello::ours(), hello::CAP_LIVE) {
         return Err(Error::Policy(
             "the provider does not serve live content".to_string(),
         ));
     }
     let open = read_record(&mut recv).await?;
-    let log = LogReceiver::new(stream.0, stream.1, &open)
-        .map_err(|e| Error::Verify(format!("the live stream did not open: {e}")))?;
+    let log = LogReceiver::new(stream.0, stream.1, &open).map_err(|e| {
+        Error::Verify(format!(
+            "the live stream did not open: {}",
+            crate::plain(&e)
+        ))
+    })?;
     Ok((recv, log))
 }
 

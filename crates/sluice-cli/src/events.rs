@@ -5,11 +5,10 @@ use std::time::{Duration, Instant};
 use sluice_core::{
     Error,
     engine::{Event, PathKind},
-    manifest::path::shown,
 };
 use tokio::{sync::mpsc::UnboundedReceiver, task::JoinHandle};
 
-use crate::output::{Format, Output, bytes_text, summary};
+use crate::output::{Format, Output, bytes_text, line, summary};
 
 /// How often a progress line is printed. Verification and path events are not throttled.
 const PROGRESS_EVERY: Duration = Duration::from_millis(500);
@@ -33,7 +32,9 @@ pub fn printer(
             }
             match output.format() {
                 Format::Json => output.write_stdout(&format!("{}\n", event.json()))?,
-                Format::Human => output.write_stderr(&format!("{}\n", human(&event, verb))),
+                // An event can carry a name or a message a stranger chose, and it is written here
+                // for people, so this is where it is escaped.
+                Format::Human => output.write_stderr(&line(&human(&event, verb))),
             }
         }
         Ok(())
@@ -66,7 +67,7 @@ fn human(event: &Event, verb: &str) -> String {
             congestion,
         } => {
             let what = match name {
-                Some(name) => format!("{verb} {}", shown(name)),
+                Some(name) => format!("{verb} {name}"),
                 None => format!("{verb} {files} files"),
             };
             format!("{what} ({}) with {congestion}", bytes_text(*bytes),)
@@ -115,6 +116,7 @@ mod tests {
     use sluice_core::engine::{Congestion, Event, PathKind};
 
     use super::human;
+    use crate::output::line;
 
     #[test]
     fn a_relay_is_named_and_a_direct_path_is_not() {
@@ -161,8 +163,21 @@ mod tests {
             congestion: Congestion::Cubic,
         };
         assert_eq!(
-            human(&started, "receiving"),
-            "receiving report\\u{202e}fdp.exe (1.5 KiB) with cubic"
+            line(&human(&started, "receiving")),
+            "receiving report\\u{202e}fdp.exe (1.5 KiB) with cubic\n"
+        );
+    }
+
+    /// A relay is named in one line, and a warning is a line of its own: it too can hold a message
+    /// a stranger wrote, so it is escaped at the same boundary as a name.
+    #[test]
+    fn a_warning_escapes_the_text_a_stranger_wrote() {
+        let warning = Event::Warning {
+            message: "the peer said \u{1b}[2J and \u{202e}, then\u{2028}a break".into(),
+        };
+        assert_eq!(
+            line(&human(&warning, "receiving")),
+            "warning: the peer said \\u{1b}[2J and \\u{202e}, then\\u{2028}a break\n"
         );
     }
 

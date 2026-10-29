@@ -341,9 +341,15 @@ fn is_display_control(c: char) -> bool {
 }
 
 /// `text` with every character that could change what a terminal shows written as an escape, so a
-/// name a stranger chose cannot reorder the line it is printed in or write an escape sequence into
-/// it. These are the characters `SPEC.md` section 8 refuses in a path: a name from a manifest passed
-/// that rule, and the name of a live stream comes from the sender's disk and has not.
+/// name or a message a stranger chose cannot reorder the line it is printed in or write an escape
+/// sequence into it.
+///
+/// These are the characters of [`is_display_control`], the two Unicode line separators, and the
+/// backslash. `SPEC.md` section 8 refuses all but the separators in a manifest path, so a path from
+/// a manifest cannot carry one; a live stream's name is a file name on the sender's disk, which on
+/// Unix may hold a backslash. The backslash is doubled so that a name holding the four characters
+/// `\u{202e}` cannot be read as the escape written for U+202E: the printed line uses `\` as the
+/// introducer of an escape, so a literal one has to be written twice.
 ///
 /// # Examples
 ///
@@ -353,17 +359,28 @@ fn is_display_control(c: char) -> bool {
 /// assert_eq!(shown("a.txt"), "a.txt");
 /// assert_eq!(shown("report\u{202e}fdp.exe"), r"report\u{202e}fdp.exe");
 /// assert_eq!(shown("a\u{1b}[2Jb"), r"a\u{1b}[2Jb");
+/// assert_eq!(shown(r"a\u{202e}b"), r"a\\u{202e}b");
+/// assert_eq!(shown("a\u{2028}b\u{2029}c"), r"a\u{2028}b\u{2029}c");
 /// ```
 pub fn shown(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
-        if is_display_control(c) {
+        if c == '\\' {
+            out.push_str(r"\\");
+        } else if is_display_control(c) || is_line_separator(c) {
             out.push_str(&format!("\\u{{{:x}}}", u32::from(c)));
         } else {
             out.push(c);
         }
     }
     out
+}
+
+/// The characters Unicode puts in the `Zl` and `Zp` categories. Each category holds exactly one
+/// code point, and a terminal may break the line at either of them, which a name or a message from
+/// a stranger could use to split the line it is printed in.
+fn is_line_separator(c: char) -> bool {
+    matches!(c, '\u{2028}' | '\u{2029}')
 }
 
 /// Rule 8. Windows reads `con.tar.gz` and `CON .txt` as the console, so the name is what comes

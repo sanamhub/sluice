@@ -144,9 +144,11 @@ pub(super) async fn read_stream_varint(recv: &mut RecvStream) -> Result<u64, std
     let mut value = 0u64;
     for count in 1..=10u32 {
         let mut byte = [0u8; 1];
+        // The transport error is kept whole rather than as its message: a peer that closed the
+        // connection chose a reason, and the reason sits below the read error in the chain.
         recv.read_exact(&mut byte)
             .await
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
+            .map_err(std::io::Error::other)?;
         let bits = u64::from(byte[0] & 0x7f);
         if count == 10 && bits > 1 {
             return Err(bad("a Hello varint is longer than u64"));

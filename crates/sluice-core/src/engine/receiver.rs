@@ -94,11 +94,9 @@ impl Receiver {
                 .map_err(|_| Error::Policy("the ticket relay URL cannot be read".to_string()))?;
             addr.addrs.insert(TransportAddr::Relay(relay));
         }
-        let conn = self
-            .endpoint
-            .connect(addr, alpn)
-            .await
-            .map_err(|e| Error::Network(format!("cannot reach the provider: {e}")))?;
+        let conn = self.endpoint.connect(addr, alpn).await.map_err(|e| {
+            Error::Network(format!("cannot reach the provider: {}", crate::plain(&e)))
+        })?;
         let _watch = events::watch_path(conn.clone(), events);
         Ok(conn)
     }
