@@ -3758,6 +3758,7 @@ dependencies = [
  "clap_complete",
  "insta",
  "iroh",
+ "iroh-blobs",
  "portmapper",
  "serde_json",
  "sluice-core",

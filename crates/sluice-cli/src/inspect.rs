@@ -34,7 +34,13 @@ pub fn run(args: &InspectArgs) -> Result<Outcome, Error> {
         .enable_all()
         .build()
         .map_err(|e| Error::Storage(format!("cannot start the transfer runtime: {e}")))?;
-    let offering = runtime.block_on(inspect(&text, Limits::default()))?;
+    // Dropping the future is what removes the throwaway store this made, and the interrupt has to
+    // reach the end of the command so that the exit wait for removals runs. A runtime whose select
+    // is skipped would leave the store under `home/tmp` until the next command sweeps it.
+    let offering = runtime.block_on(crate::recv::until_interrupted(inspect(
+        &text,
+        Limits::default(),
+    )))?;
     Ok(Outcome::Offering {
         offering,
         all: args.all,
