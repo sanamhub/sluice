@@ -36,7 +36,8 @@ pub(crate) struct Places {
     limit: Option<usize>,
     /// The endpoint ids that hold a place, in the order they took one.
     holders: BTreeSet<[u8; 32]>,
-    /// The endpoint ids a refusal line has been made for.
+    /// The endpoint ids a refusal line has been made for. No id is added once the cap is reached,
+    /// so a ticket holder that makes fresh endpoint ids cannot grow this set past the lines.
     refused: BTreeSet<[u8; 32]>,
     /// How many refusal lines have been made.
     lines: usize,
@@ -95,10 +96,10 @@ impl Places {
             self.last_active_ms = now;
             return Admission::Took;
         }
-        if !self.refused.insert(endpoint) {
+        if self.lines >= REFUSAL_LINES {
             return Admission::Unreported;
         }
-        if self.lines >= REFUSAL_LINES {
+        if !self.refused.insert(endpoint) {
             return Admission::Unreported;
         }
         self.lines += 1;
@@ -174,6 +175,21 @@ mod tests {
         assert!(!places.holds(&[1; 32]));
         places.set_limit(Some(1));
         assert_eq!(places.admit([1; 32], 2), Admission::Took);
+    }
+
+    /// Past the cap a flood of fresh endpoints adds nothing to the set: the set only serves to name
+    /// an endpoint once among the printed lines, and a ticket holder can make as many ids as it
+    /// likes.
+    #[test]
+    fn a_flood_after_the_cap_leaves_the_refused_set_bounded() {
+        let mut places = places(1);
+        places.admit([1; 32], 1);
+        for index in 0..1000u32 {
+            let mut endpoint = [0u8; 32];
+            endpoint[..4].copy_from_slice(&index.to_be_bytes());
+            places.admit(endpoint, 2);
+        }
+        assert_eq!(places.refused.len(), REFUSAL_LINES);
     }
 
     /// A send with no limit counts nobody and refuses nobody, which is what plain `--keep` was.
