@@ -6,6 +6,8 @@
 
 <p align="center">Sluice sends a file straight from one computer to another. Nothing is stored in between.</p>
 
+<p align="center"><a href="https://sluicedrop.com">sluicedrop.com</a></p>
+
 <p align="center">
   <a href="https://github.com/sanamhub/sluice/actions/workflows/ci.yml">
     <img src="https://github.com/sanamhub/sluice/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
