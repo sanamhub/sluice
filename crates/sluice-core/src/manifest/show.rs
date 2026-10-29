@@ -35,10 +35,12 @@ fn is_line_separator(c: char) -> bool {
 ///
 /// The escape for a character is `\u{…}`, so a backslash in the text could be read as the start of
 /// one: a name holding the literal text `\u{202e}` would print exactly like the escape written for
-/// U+202E. A backslash therefore becomes `\\` when what follows it would read as one of these
-/// escapes, and only then. Doubling every backslash would make every Windows path in a message read
-/// `C:\\Users\\…`, and a reader would have no way to tell which of the two backslashes the sender's
-/// text held.
+/// U+202E. Every backslash in a run is therefore doubled when that run ends where an escape could
+/// follow — the literal `u{`, or a character this function writes as `\u{…}` — and a run that ends
+/// anywhere else is kept as it is. Doubling the whole run, not only its last backslash, is what
+/// keeps two different names from printing alike; doubling every backslash everywhere would make
+/// every Windows path in a message read `C:\\Users\\…`, and a reader would have no way to tell
+/// which of the two backslashes the sender's text held.
 ///
 /// # Examples
 ///
@@ -54,24 +56,41 @@ fn is_line_separator(c: char) -> bool {
 /// ```
 pub fn shown(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    for (at, c) in text.char_indices() {
+    let mut at = 0;
+    while at < text.len() {
+        let c = text[at..]
+            .chars()
+            .next()
+            .expect("an index into the string is on a character");
+        if c == '\\' {
+            let mut end = at;
+            while text[end..].starts_with('\\') {
+                end += 1;
+            }
+            if ends_where_an_escape_could_follow(text, end) {
+                for _ in at..end {
+                    out.push_str(r"\\");
+                }
+            } else {
+                out.push_str(&text[at..end]);
+            }
+            at = end;
+            continue;
+        }
         if is_display_control(c) || is_line_separator(c) {
             out.push_str(&format!("\\u{{{:x}}}", u32::from(c)));
-        } else if c == '\\' && starts_an_escape(text, at) {
-            out.push_str(r"\\");
         } else {
             out.push(c);
         }
+        at += c.len_utf8();
     }
     out
 }
 
-/// Whether a backslash at byte `at` of `text` has to be doubled: what comes after it would read as
-/// an escape this module writes. That is the literal text `u{`, and also a character that the next
-/// step writes as `\u{…}`, whose backslash would otherwise join the literal one into a `\\` a reader
-/// would take for the whole text.
-fn starts_an_escape(text: &str, at: usize) -> bool {
-    let rest = &text[at + 1..];
+/// Whether an escape this module writes could start at byte `end`, which is just past a run of
+/// backslashes: the literal `u{`, or a character the next step would write as `\u{…}`.
+fn ends_where_an_escape_could_follow(text: &str, end: usize) -> bool {
+    let rest = &text[end..];
     match rest.chars().next() {
         None => false,
         Some('u') => rest.starts_with("u{"),
@@ -91,19 +110,43 @@ mod tests {
         }
     }
 
-    /// A backslash is doubled only where what follows it would be read as an escape, so a Windows
+    /// A backslash is doubled only in a run that ends where an escape could follow, so a Windows
     /// path keeps the one backslash each of its separators is written with.
     #[test]
     fn a_backslash_is_doubled_only_where_it_could_start_an_escape() {
-        for text in [r"C:\Users\me\a.txt", r"a\b", r"a\ub", "a\\"] {
+        for text in [
+            r"C:\Users\me\a.txt",
+            r"a\b",
+            r"a\ub",
+            "a\\",
+            r"a\b\u",
+            r"a\",
+        ] {
             assert_eq!(shown(text), text, "{text:?}");
         }
         assert_eq!(shown(r"a\u{202e}b"), r"a\\u{202e}b");
         assert_eq!(shown(r"a\u{}"), r"a\\u{}");
-        // A literal backslash before a character this module escapes: the printed escape's own
-        // backslash must not pair with the literal one.
+        // A literal backslash before a character this module escapes: the escape's own backslash
+        // must not pair with the literal one, so the whole run is doubled.
         assert_eq!(shown("a\\\u{202e}"), r"a\\\u{202e}");
         assert_eq!(shown("a\\\u{1b}[2J"), r"a\\\u{1b}[2J");
+    }
+
+    /// The run is the whole run: with only its last backslash doubled, two different names printed
+    /// alike, one of `k` backslashes and the literal text `u{202e}`, and one of `k - 1` backslashes
+    /// and U+202E.
+    #[test]
+    fn a_run_of_two_or_three_backslashes_does_not_collide_with_an_escape() {
+        for k in [2usize, 3] {
+            let literal = format!("{}u{{202e}}", "\\".repeat(k));
+            let escaped = format!("{}\u{202e}", "\\".repeat(k - 1));
+            assert_ne!(literal, escaped);
+            assert_ne!(
+                shown(&literal),
+                shown(&escaped),
+                "two names printed alike for {k} backslashes"
+            );
+        }
     }
 
     /// Text that cannot change what a terminal shows is printed as it is, and text that can is not.
@@ -117,5 +160,26 @@ mod tests {
             r"a\u{0}\u{1f}\u{7f}\u{9f}\u{61c}\u{200e}\u{200f}\u{202a}\u{202e}\u{2066}\u{2069}b"
         );
         assert!(printed.is_ascii());
+    }
+
+    /// Two different names never print alike. The alphabet holds the characters the escaping rules
+    /// are about: backslashes, the letters and braces of an escape, hex digits, the controls that
+    /// are written as one, and an ordinary letter and control.
+    #[test]
+    fn two_names_never_print_alike() {
+        use proptest::prelude::*;
+
+        const ALPHABET: &[char] = &[
+            '\\', 'u', '{', '}', '0', '1', 'a', 'f', '\u{202e}', '\u{2028}', '\u{1b}', 'x',
+        ];
+        let text = || {
+            prop::collection::vec(prop::sample::select(ALPHABET.to_vec()), 0..16)
+                .prop_map(|chars| chars.into_iter().collect::<String>())
+        };
+        proptest!(|(a in text(), b in text())| {
+            if shown(&a) == shown(&b) {
+                prop_assert_eq!(a, b);
+            }
+        });
     }
 }
