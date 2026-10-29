@@ -1,7 +1,8 @@
 // The Worker that serves dist/, with no code of its own (ADR 0022). Workers Builds runs
 // `npm ci && npm run build` in site/ and then deploys the result; the assets are the whole Worker.
-// There is no domain yet, so the files are served under workers.dev. When one exists, set SITE_URL
-// in site/src/site.ts and add a routes entry here in the same change.
+// The site lives at sluicedrop.com, a custom domain on this Worker; SITE_URL in site/src/site.ts
+// names the same address. The workers.dev address is off, so the site has one public home, and
+// every version gets a preview URL, so a pull request can be looked at before it deploys.
 {
     "name": "sluice",
     "compatibility_date": "2026-10-01",
@@ -10,6 +11,8 @@
         "not_found_handling": "404-page",
         "html_handling": "auto-trailing-slash",
     },
-    "workers_dev": true,
+    "routes": [{ "pattern": "sluicedrop.com", "custom_domain": true }],
+    "workers_dev": false,
+    "preview_urls": true,
     "observability": { "enabled": false },
 }
