@@ -56,7 +56,9 @@ impl Places {
         self.holders.contains(endpoint)
     }
 
-    /// Whether every place is taken. A send with no limit is never full.
+    /// Whether every place is taken. The policy's view runs ahead of the wait's, which counts the
+    /// reports it has read instead, so only a test asks this.
+    #[cfg(test)]
     pub(crate) fn full(&self) -> bool {
         self.limit.is_some_and(|limit| self.holders.len() >= limit)
     }
