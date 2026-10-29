@@ -107,6 +107,15 @@ impl Provider {
         None
     }
 
+    /// Milliseconds until the ticket deadline, or the far future when the ticket has none. A wait
+    /// of its own reads the clock rather than trusting a timer across a clock change.
+    pub(super) fn expiry_ms_left(&self) -> u64 {
+        match self.expiry {
+            Some(expiry) => expiry.saturating_sub(now_ms()),
+            None => 100 * 365 * 24 * 60 * 60 * 1000,
+        }
+    }
+
     /// Whether every place a limited send offers is taken.
     fn places_full(&self) -> bool {
         lock_places(&self.places).full()
