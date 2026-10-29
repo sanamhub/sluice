@@ -62,10 +62,17 @@ pub const TARGETS: [Target; 6] = [
 ];
 
 impl Target {
+    /// The folder the target's archive unpacks to: `dist` names it for the archive, without the
+    /// suffix, and puts the binary inside it. Every format that points inside an archive has to
+    /// agree with this one spelling, or it points at nothing.
+    pub fn folder(&self) -> String {
+        format!("sluice-cli-{}", self.triple)
+    }
+
     /// The artifact's file name in the release.
     pub fn artifact(&self) -> String {
         let suffix = if self.zipped { "zip" } else { "tar.xz" };
-        format!("sluice-cli-{}.{suffix}", self.triple)
+        format!("{}.{suffix}", self.folder())
     }
 }
 

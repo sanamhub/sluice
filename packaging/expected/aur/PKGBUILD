@@ -16,8 +16,8 @@ sha256sums_aarch64=('736c756963652d636c692d616172636836342d756e6b6e6f776e2d6c696
 
 package() {
   case "$CARCH" in
-    x86_64) _target=x86_64-unknown-linux-gnu ;;
-    aarch64) _target=aarch64-unknown-linux-gnu ;;
+    x86_64) _folder=sluice-cli-x86_64-unknown-linux-gnu ;;
+    aarch64) _folder=sluice-cli-aarch64-unknown-linux-gnu ;;
   esac
-  install -Dm755 "$srcdir/sluice-$_target/sluice" "$pkgdir/usr/bin/sluice"
+  install -Dm755 "$srcdir/$_folder/sluice" "$pkgdir/usr/bin/sluice"
 }
