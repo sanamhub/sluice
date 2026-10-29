@@ -124,9 +124,10 @@ impl Provider {
             }
             Stop::Live(log) => self.live(log, events).await,
             Stop::Keep { limit, roots } => {
-                // The limit lives in the policy, which decides every request, and it is set before
-                // this send can answer one: a ticket is printed only after `serve` has begun.
-                lock_places(&self.places).set_limit(limit);
+                // The limit lives in the policy, which decides every request. The caller has set
+                // it before the ticket print when it could; setting it again here keeps a send
+                // that never reserved bounded too.
+                self.set_limit(limit);
                 self.keep(limit, roots.into_iter().map(Hash::from).collect(), events)
                     .await
             }
