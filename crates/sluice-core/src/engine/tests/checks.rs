@@ -103,7 +103,7 @@ async fn an_oversized_manifest_is_refused_after_its_size_is_proved() {
         .unwrap();
     let body = vec![9u8; 1 << 20];
     let hash = store.add_slice(&body).await.unwrap().hash;
-    let provider = Provider::start(
+    let mut provider = Provider::start(
         &home,
         store,
         BTreeSet::from([*hash.as_bytes()]),
@@ -114,6 +114,8 @@ async fn an_oversized_manifest_is_refused_after_its_size_is_proved() {
     )
     .await
     .unwrap();
+    // A send sets its mode before its ticket is printed; this test receives without serving.
+    provider.set_limit(None);
     let addr = provider.addr();
     let ticket = Ticket::new(
         *addr.id.as_bytes(),
@@ -173,7 +175,7 @@ async fn a_request_for_the_last_chunk_leaves_the_sender_serving() {
     let store = FsStore::load(dir.path().join("store")).await.unwrap();
     let body = vec![6u8; 1 << 20];
     let hash = store.add_slice(&body).await.unwrap().hash;
-    let provider = Provider::start(
+    let mut provider = Provider::start(
         &home,
         store,
         BTreeSet::from([*hash.as_bytes()]),
@@ -185,6 +187,8 @@ async fn a_request_for_the_last_chunk_leaves_the_sender_serving() {
     .await
     .unwrap();
     let addr = provider.addr();
+    // A send sets its mode before its ticket is printed; this test asks before `serve` starts.
+    provider.set_limit(None);
     let (client, client_store) = client_of(&dir).await;
     let conn = client.connect(addr, iroh_blobs::ALPN).await.unwrap();
     client_store

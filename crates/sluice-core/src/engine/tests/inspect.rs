@@ -124,9 +124,11 @@ async fn a_raw_ticket_offers_its_size_and_no_name() {
     let dir = tempfile::tempdir().unwrap();
     let home = Home::open(&dir.path().join("home")).unwrap();
     let body = vec![4u8; 2 * 1024];
-    let outgoing = crate::engine::prepare_send_stdin_from(&home, body.clone())
+    let mut outgoing = crate::engine::prepare_send_stdin_from(&home, body.clone())
         .await
         .unwrap();
+    // A send sets its mode before its ticket is printed; this test inspects without serving.
+    outgoing.provider.set_limit(None);
     let text = outgoing.ticket.encode();
     let offering = inspect(&text, Limits::default(), None).await.unwrap();
     let Offering::Static(offered) = offering else {

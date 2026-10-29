@@ -132,7 +132,7 @@ async fn provider_of(
         .unwrap();
     let mut allowed: BTreeSet<[u8; 32]> = manifest.hash_sequence().into_iter().collect();
     allowed.insert(manifest.sequence_root());
-    let provider = Provider::start(
+    let mut provider = Provider::start(
         home,
         store,
         allowed,
@@ -143,6 +143,8 @@ async fn provider_of(
     )
     .await
     .unwrap();
+    // A send sets its mode before its ticket is printed; these tests get a ticket back.
+    provider.set_limit(None);
     let addr = provider.addr();
     let ticket = Ticket::new(
         *addr.id.as_bytes(),
@@ -172,10 +174,22 @@ fn tree(dir: &TempDir) -> std::path::PathBuf {
 }
 
 async fn prepared(dir: &TempDir, body: &[u8]) -> (super::Outgoing, String) {
+    prepare_sender(dir, body, true).await
+}
+
+/// A sender that has not set its mode yet, for a test of the moment between preparing the endpoint
+/// and printing the ticket.
+async fn prepared_without_mode(dir: &TempDir, body: &[u8]) -> (super::Outgoing, String) {
+    prepare_sender(dir, body, false).await
+}
+
+/// A sender prepared the way `send` prepares one: its mode is set before the ticket exists, so a
+/// test that asks before `serve` starts still finds it serving.
+async fn prepare_sender(dir: &TempDir, body: &[u8], mode: bool) -> (super::Outgoing, String) {
     let home = Home::open(&dir.path().join("home")).unwrap();
     let source = dir.path().join("source.bin");
     fs::write(&source, body).unwrap();
-    let outgoing = super::prepare_send(
+    let mut outgoing = super::prepare_send(
         &home,
         &source,
         RelayModeChoice::Disabled,
@@ -185,6 +199,9 @@ async fn prepared(dir: &TempDir, body: &[u8]) -> (super::Outgoing, String) {
     )
     .await
     .unwrap();
+    if mode {
+        outgoing.provider.set_limit(None);
+    }
     let text = outgoing.ticket.encode();
     (outgoing, text)
 }
@@ -201,7 +218,7 @@ async fn prepared_paths_in(
     paths: &[std::path::PathBuf],
 ) -> (super::Outgoing, String) {
     let home = Home::open(&dir.path().join(home)).unwrap();
-    let outgoing = super::prepare_send_paths(
+    let mut outgoing = super::prepare_send_paths(
         &home,
         paths,
         RelayModeChoice::Disabled,
@@ -211,6 +228,8 @@ async fn prepared_paths_in(
     )
     .await
     .unwrap();
+    // A send sets its mode before its ticket is printed, so these are armed like one.
+    outgoing.provider.set_limit(None);
     let text = outgoing.ticket.encode();
     (outgoing, text)
 }
@@ -302,7 +321,7 @@ async fn provider_of_lying_manifest(
         .unwrap();
     let mut allowed: BTreeSet<[u8; 32]> = manifest.hash_sequence().into_iter().collect();
     allowed.insert(manifest.sequence_root());
-    let provider = Provider::start(
+    let mut provider = Provider::start(
         &home,
         store,
         allowed,
@@ -313,6 +332,7 @@ async fn provider_of_lying_manifest(
     )
     .await
     .unwrap();
+    provider.set_limit(None);
     let addr = provider.addr();
     let ticket = Ticket::new(
         *addr.id.as_bytes(),

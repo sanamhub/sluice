@@ -40,7 +40,7 @@ async fn a_range_request_leaves_the_sender_serving() {
     let store = FsStore::load(dir.path().join("store")).await.unwrap();
     let body = vec![7u8; 1 << 20];
     let hash = store.add_slice(&body).await.unwrap().hash;
-    let provider = Provider::start(
+    let mut provider = Provider::start(
         &home,
         store,
         BTreeSet::from([*hash.as_bytes()]),
@@ -52,6 +52,8 @@ async fn a_range_request_leaves_the_sender_serving() {
     .await
     .unwrap();
     let addr = provider.addr();
+    // The request this test watches arrives before `serve` starts, as a ticket's could.
+    provider.set_limit(None);
     let (client, client_store) = client_of(&dir).await;
     let conn = client.connect(addr, iroh_blobs::ALPN).await.unwrap();
     crate::engine::fetch::fetch_range(
@@ -175,7 +177,7 @@ async fn provider_of_sequence_only(
         .await
         .unwrap();
     let allowed: BTreeSet<[u8; 32]> = BTreeSet::from([manifest.sequence_root()]);
-    let provider = Provider::start(
+    let mut provider = Provider::start(
         &home,
         store.clone(),
         allowed.clone(),
@@ -186,6 +188,8 @@ async fn provider_of_sequence_only(
     )
     .await
     .unwrap();
+    // A send sets its mode before its ticket is printed; this test gets a ticket back.
+    provider.set_limit(None);
     let addr = provider.addr();
     let ticket = Ticket::new(
         *addr.id.as_bytes(),

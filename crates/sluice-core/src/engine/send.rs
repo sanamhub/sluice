@@ -72,9 +72,9 @@ pub enum Keep {
 /// Imports `path` in place and starts a provider for it. `expiry` is UTC milliseconds or none.
 ///
 impl Outgoing {
-    /// Claims the places this send offers, before its ticket is printed. `serve` sets the same
-    /// limit again, but a ticket that is already known can be dialled before `serve` starts, and a
-    /// request answered in that moment would be served without taking a place.
+    /// Sets the places this send offers and lets its requests in, before its ticket is printed.
+    /// `serve` sets the mode again, but a ticket that is already known can be dialled before
+    /// `serve` starts, and a request answered in that moment would be served without a place.
     pub fn reserve(&mut self, keep: Keep) {
         self.provider.set_limit(match keep {
             Keep::Receivers(limit) => Some(limit),

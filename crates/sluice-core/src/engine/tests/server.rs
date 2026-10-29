@@ -15,7 +15,7 @@ async fn fixture(expiry: Option<u64>) -> Fixture {
     let home = Home::open(&dir.path().join("home")).unwrap();
     let store = FsStore::load(dir.path().join("store")).await.unwrap();
     let hash = store.add_slice(b"a small file").await.unwrap().hash;
-    let provider = Provider::start(
+    let mut provider = Provider::start(
         &home,
         store,
         BTreeSet::from([*hash.as_bytes()]),
@@ -26,6 +26,8 @@ async fn fixture(expiry: Option<u64>) -> Fixture {
     )
     .await
     .unwrap();
+    // The fixture stands for a send that has printed its ticket, so its mode is set.
+    provider.set_limit(None);
     let endpoint = endpoint::bind(
         None,
         &RelayModeChoice::Disabled,

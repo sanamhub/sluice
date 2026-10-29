@@ -20,13 +20,18 @@ pub(crate) enum Admission {
     Took,
     /// Refused, and the line about it is owed.
     Refused,
-    /// Refused, and the line was said already or the cap has been reached.
+    /// Refused, and the line is owed to nobody: the send's mode is not set yet, the endpoint was
+    /// named already, or the cap has been reached.
     Unreported,
 }
 
 /// The places a send offers and the activity that keeps an idle holder from ending it early.
 #[derive(Debug, Default)]
 pub(crate) struct Places {
+    /// Whether the send's mode is set, which is what lets a request in at all. The endpoint accepts
+    /// connections from the moment the send is prepared, so until this is set every request is
+    /// refused, silently and without taking a place.
+    armed: bool,
     /// How many endpoint ids may hold a place, or none for a send that does not count.
     limit: Option<usize>,
     /// The endpoint ids that hold a place, in the order they took one.
@@ -40,10 +45,18 @@ pub(crate) struct Places {
 }
 
 impl Places {
-    /// Sets how many places the send offers. The serve loop sets it before it starts, and a send
-    /// that is not counting leaves it at none.
+    /// Sets how many places the send offers and lets its requests in. The sender calls this before
+    /// the ticket is printed; the serve loop calls it again for a caller that skipped that, so a
+    /// request that arrives in the meantime is refused rather than served without a place.
     pub(crate) fn set_limit(&mut self, limit: Option<u32>) {
         self.limit = limit.map(|limit| limit as usize);
+        self.armed = true;
+    }
+
+    /// Lets the requests of a send that offers no places in. A one-time, live or plain `--keep`
+    /// send counts no places, but it still has to wait for its mode to be set.
+    pub(crate) fn arm(&mut self) {
+        self.armed = true;
     }
 
     /// How many places the send offers, or `None` when it does not count.
@@ -64,9 +77,12 @@ impl Places {
     }
 
     /// Admits a request from `endpoint`, taking its place the first time. A send with no limit
-    /// admits everything. `now` is when the request arrived, so a holder's activity can be read
-    /// without another clock.
+    /// admits everything once its mode is set; until then nothing is admitted. `now` is when the
+    /// request arrived, so a holder's activity can be read without another clock.
     pub(crate) fn admit(&mut self, endpoint: [u8; 32], now: u64) -> Admission {
+        if !self.armed {
+            return Admission::Unreported;
+        }
         let Some(limit) = self.limit else {
             return Admission::Served;
         };
@@ -149,10 +165,22 @@ mod tests {
         assert_eq!(lines, REFUSAL_LINES);
     }
 
+    /// The endpoint accepts from the moment the send is prepared, before its mode is set. Such a
+    /// request is refused and must not spend a place that the limit set afterwards would count.
+    #[test]
+    fn a_request_before_the_mode_is_set_takes_no_place() {
+        let mut places = Places::default();
+        assert_eq!(places.admit([1; 32], 1), Admission::Unreported);
+        assert!(!places.holds(&[1; 32]));
+        places.set_limit(Some(1));
+        assert_eq!(places.admit([1; 32], 2), Admission::Took);
+    }
+
     /// A send with no limit counts nobody and refuses nobody, which is what plain `--keep` was.
     #[test]
     fn a_send_without_a_limit_admits_everything() {
         let mut places = Places::default();
+        places.set_limit(None);
         for byte in 1..10 {
             assert_eq!(places.admit([byte; 32], 1), Admission::Served);
         }

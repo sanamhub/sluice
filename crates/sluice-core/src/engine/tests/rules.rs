@@ -85,7 +85,7 @@ async fn the_time_is_restored_unless_told_not_to() {
     let at = UNIX_EPOCH + Duration::from_secs(1_600_000_000);
     set_mtime(&source, at);
     let wanted = mtime_ms(&source);
-    let outgoing = super::prepare_send(
+    let mut outgoing = super::prepare_send(
         &home,
         &source,
         RelayModeChoice::Disabled,
@@ -95,6 +95,8 @@ async fn the_time_is_restored_unless_told_not_to() {
     )
     .await
     .unwrap();
+    // A send sets its mode before its ticket is printed; this test receives without serving.
+    outgoing.provider.set_limit(None);
     let text = outgoing.ticket.encode();
     let out = dir.path().join("out");
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
@@ -102,7 +104,7 @@ async fn the_time_is_restored_unless_told_not_to() {
     assert_eq!(mtime_ms(&received.path), wanted);
     outgoing.provider.shutdown().await.unwrap();
 
-    let outgoing = super::prepare_send(
+    let mut outgoing = super::prepare_send(
         &home,
         &source,
         RelayModeChoice::Disabled,
@@ -112,6 +114,7 @@ async fn the_time_is_restored_unless_told_not_to() {
     )
     .await
     .unwrap();
+    outgoing.provider.set_limit(None);
     let text = outgoing.ticket.encode();
     let out = dir.path().join("untimed");
     let mut untimed = options(&out);

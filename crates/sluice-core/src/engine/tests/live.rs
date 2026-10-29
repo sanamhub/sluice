@@ -80,7 +80,7 @@ async fn fixture(dir: &TempDir, home: &Home) -> Fixture {
         sender.log_open(),
         Arc::new(Mutex::new(BTreeSet::new())),
     ));
-    let provider = Provider::start_live(
+    let mut provider = Provider::start_live(
         home,
         store.clone(),
         log.clone(),
@@ -91,6 +91,8 @@ async fn fixture(dir: &TempDir, home: &Home) -> Fixture {
     )
     .await
     .unwrap();
+    // The fixture stands for a live send that has printed its ticket, so its mode is set.
+    provider.set_limit(None);
     let addr = provider.addr();
     let ticket = Ticket::new(
         *addr.id.as_bytes(),
