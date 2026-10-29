@@ -53,6 +53,45 @@ async fn a_folder_ticket_offers_its_folders_and_files() {
     outgoing.provider.shutdown().await.unwrap();
 }
 
+/// A ticket that promises a size its manifest does not add up to is refused as a receive refuses
+/// it, before anything is shown: a name and a size a receive would never write must not be read as
+/// if it would.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_ticket_whose_size_the_manifest_does_not_match_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = vec![9u8; 2048];
+    let (provider, _hash, consistent) = provider_of_lying_manifest(&dir, &body, 2048, 0).await;
+    let addr = provider.addr();
+    let Body::Static { root, format, .. } = consistent.body() else {
+        panic!("a live ticket");
+    };
+    let promised = 2047;
+    let lying = Ticket::new(
+        *addr.id.as_bytes(),
+        addr.ip_addrs().copied().collect(),
+        None,
+        None,
+        Body::Static {
+            root: *root,
+            size: promised,
+            format: *format,
+        },
+    )
+    .unwrap();
+
+    let inspected = inspect(&lying.encode(), Limits::default())
+        .await
+        .unwrap_err();
+    let out = dir.path().join("lying-out");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let received = receive(&lying.encode(), &options(&out), &tx)
+        .await
+        .unwrap_err();
+    assert_eq!(inspected.to_string(), received.to_string());
+    assert!(inspected.to_string().contains("promises 2047"));
+    provider.shutdown().await.unwrap();
+}
+
 /// A live ticket carries no manifest, so there is nothing to read: it is reported as a live stream
 /// without reaching the sender at all.
 #[tokio::test]

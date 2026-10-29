@@ -1,14 +1,12 @@
 //! What a ticket offers, read from its manifest alone: the names it will write and how much they
 //! come to. Nothing is downloaded but the sequence and the manifest, and no store is kept.
 
-use iroh::endpoint::Connection;
-use iroh_blobs::{Hash, store::fs::FsStore};
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::unbounded_channel;
 
-use super::{Congestion, Event, Receiver, RelayModeChoice, fetch, recv::refuse_expired, storage};
+use super::{Congestion, Receiver, RelayModeChoice, recv::refuse_expired, storage};
 use crate::{
     Error,
-    manifest::{Kind, Limits, Manifest, parse_sequence},
+    manifest::{Kind, Limits, Manifest},
     ticket::{Body, Format, Ticket},
 };
 
@@ -50,9 +48,11 @@ pub struct OfferedEntry {
 }
 
 impl Offered {
-    /// The counts and the names of `manifest`.
-    fn of(manifest: &Manifest) -> Result<Self, Error> {
+    /// The counts and the names of `manifest`, after the check that its files add up to what the
+    /// ticket promises: a size a receive would refuse is not shown as if it would arrive.
+    fn of(manifest: &Manifest, ticket: &Ticket) -> Result<Self, Error> {
         let totals = super::recv::totals(manifest)?;
+        super::recv::check_promised(ticket, totals.bytes)?;
         Ok(Self {
             files: totals.files,
             folders: totals.folders,
@@ -108,47 +108,19 @@ pub async fn inspect(text: &str, limits: Limits) -> Result<Offering, Error> {
 }
 
 /// Connects and reads the manifest into a throwaway store of its own, which is removed whether the
-/// manifest could be read or not.
+/// manifest could be read or not. The manifest is read by the same function a receive uses, so the
+/// two cannot disagree about which bytes are the manifest or what it says.
 async fn offer(receiver: &Receiver, ticket: &Ticket, limits: Limits) -> Result<Offering, Error> {
     // A channel nobody reads: what a transfer that only reads a manifest reports is not news, and
     // `emit` does nothing once the reader has gone.
     let (events, _unread) = unbounded_channel();
     let conn = receiver.connect(ticket, events.clone()).await?;
     let meta = storage::MetaStore::open().await?;
-    let read = read(&conn, ticket, meta.store(), limits, &events).await;
+    let read = super::recv::fetch_manifest(&conn, ticket, meta.store(), limits, &events).await;
     let closed = meta.close().await;
     let manifest = read?;
     closed?;
-    Ok(Offering::Static(Offered::of(&manifest)?))
-}
-
-/// Fetches the hash sequence and the manifest and checks that one names the other, under `limits`.
-async fn read(
-    conn: &Connection,
-    ticket: &Ticket,
-    store: &FsStore,
-    limits: Limits,
-    events: &UnboundedSender<Event>,
-) -> Result<Manifest, Error> {
-    let Body::Static { root, .. } = ticket.body() else {
-        return Err(Error::Policy(
-            "this ticket names a live stream, so it has no manifest".to_string(),
-        ));
-    };
-    let sequence_bytes =
-        fetch::bounded_blob(store, conn, Hash::from(*root), limits, events).await?;
-    let sequence = parse_sequence(&sequence_bytes, limits)?;
-    let manifest_root = *sequence
-        .first()
-        .ok_or_else(|| Error::Policy("the hash sequence names no manifest root".to_string()))?;
-    let bytes = fetch::bounded_blob(store, conn, Hash::from(manifest_root), limits, events).await?;
-    let manifest = Manifest::decode(&bytes, limits)?;
-    if manifest.hash_sequence() != sequence {
-        return Err(Error::Policy(
-            "the hash sequence does not match the manifest".to_string(),
-        ));
-    }
-    Ok(manifest)
+    Ok(Offering::Static(Offered::of(&manifest, ticket)?))
 }
 
 /// The relay the ticket names, if any: a ticket without one is met over a direct path only.
