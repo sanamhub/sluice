@@ -11,11 +11,11 @@ from GitHub's attestation store.
 | PowerShell installer | Windows, both architectures | `irm ... \| iex` |
 | Archives | all six | `gh release download v0.1.0` |
 | Homebrew | macOS and Linux, both architectures | `brew install sanamhub/tap/sluice` |
-| Scoop | Windows, both architectures | `scoop install sluice` |
+| Scoop | Windows, both architectures | `scoop bucket add sanamhub https://github.com/sanamhub/scoop-bucket`, then `scoop install sluice` |
 | winget | Windows, both architectures | `winget install --id sanamhub.sluice -e` |
 | AUR | Arch Linux, x86-64 and ARM64 | `yay -S sluice-bin` |
 | Container image | Linux amd64 and arm64 | `docker pull ghcr.io/sanamhub/sluice:0.1.0` |
-| From source | the six targets, with Rust | `cargo install --path crates/sluice-cli` |
+| From source | the six targets, with Rust | `cargo install --path crates/sluice-cli --locked` |
 
 The archives are the reference form. The installers check less than an archive checked by hand, and
 the package managers check the archive's hash but not its attestation. If a channel and this page
@@ -208,7 +208,8 @@ On Docker's default bridge the container has a private address, so a peer elsewh
 through a relay passed with `--relay`; the transfer still works, at the relay's rate.
 [`docker/cli/README.md`](../docker/cli/README.md) has the volume, the network modes and the build.
 
-Upgrade with `docker pull ghcr.io/sanamhub/sluice:0.1.0` for the next version. Uninstall with
+Upgrade by pulling the next version's tag, for example `docker pull ghcr.io/sanamhub/sluice:0.1.1`,
+and running that tag. Uninstall with
 `docker image rm`, and remove the identity with `docker volume rm sluice-home`.
 
 ## The relay image

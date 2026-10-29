@@ -64,6 +64,8 @@ jobs:
     timeout-minutes: 60
     env:
       PACKAGE: ${{ matrix.package }}
+      DOCKERFILE: ${{ matrix.dockerfile }}
+      CONTEXT: ${{ matrix.context }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -72,7 +74,7 @@ jobs:
       # step a yanked release or a moved base image breaks. The flags are those of release.yml.
       - run: |
           docker build --provenance=false --sbom=false --tag "$PACKAGE:ci" \
-            --file "${{ matrix.dockerfile }}" "${{ matrix.context }}"
+            --file "$DOCKERFILE" "$CONTEXT"
       # The distroless image has no shell, so the binary is run directly.
       - if: matrix.image == 'relay'
         run: docker run --rm --entrypoint /usr/local/bin/iroh-relay "$PACKAGE:ci" --version

@@ -63,3 +63,8 @@ USER 65532:65532
 
 # No ports are exposed: a send binds an ephemeral UDP port, which --port fixes in advance.
 ENTRYPOINT ["sluice"]
+
+# sluice stops on Ctrl+C, which is SIGINT, and installs no SIGTERM handler. As PID 1 it would
+# ignore the SIGTERM `docker stop` sends by default and be killed when the grace period ends, so
+# the stop signal is SIGINT: a sender ends as it does on Ctrl+C and removes its store.
+STOPSIGNAL SIGINT

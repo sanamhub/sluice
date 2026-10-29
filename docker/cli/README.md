@@ -53,8 +53,9 @@ docker run --rm -it --network host -v sluice-home:/home/sluice \
 ```
 
 The mounted folder has to be readable by uid 65532 to send from it, and writable to receive into
-it. The `-it` is what lets Ctrl+C stop a sender that is still serving; without a terminal it serves
-until the one download arrives.
+it. The `-it` is what lets Ctrl+C stop a sender that is still serving. Without a terminal it serves
+until the one download arrives, and `docker stop` ends it the same way: the image's stop signal is
+SIGINT, which sluice treats as Ctrl+C.
 
 `--network host` is what gives the container the host's addresses on Linux, so a direct path works
 as it does for the binary on the host. On Docker's default bridge the container has a private
@@ -62,12 +63,14 @@ address, which a peer on another machine cannot dial, so the transfer is carried
 with `--relay`. It still works, at the relay's rate. Two containers on the same user-defined
 network can reach each other directly, which is what the smoke test does with no route out.
 
-A UDP port is chosen at start. To name it for a firewall rule, add `--port 7842` to `send` and
-publish that port:
+A UDP port is chosen at start. To name it for a firewall rule, add `--port` to `send`. With
+`--network host` the port is the host's, and nothing is published. On a bridge network, publish the
+same port as UDP, for example `-p 7850:7850/udp`. Pick a port no other service on the host uses; the
+relay image's address discovery uses 7842.
 
 ```
 docker run --rm -it --network host -v sluice-home:/home/sluice -v "$PWD:/data" \
-  ghcr.io/sanamhub/sluice:0.1.0 send /data/report.pdf --port 7842
+  ghcr.io/sanamhub/sluice:0.1.0 send /data/report.pdf --port 7850
 ```
 
 ## Read-only root
