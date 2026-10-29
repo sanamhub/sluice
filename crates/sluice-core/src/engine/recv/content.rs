@@ -1,14 +1,11 @@
 //! Fetching every content blob and pack before anything is written, with the queue's retry rule.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::Duration,
-};
+use std::{collections::BTreeSet, time::Duration};
 
 use iroh_blobs::{Hash, store::fs::FsStore};
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::plan::{Plan, size_overflow};
+use super::plan::{self, Plan};
 use crate::{
     Error,
     engine::{Event, Receiver, emit, fetch},
@@ -73,34 +70,23 @@ pub(super) async fn ensure_content(
 
 /// Every pack that holds a taken file, then every distinct content blob of a taken file. A blob that
 /// several taken entries share is fetched once. A pack is one blob, so a taken file inside it needs
-/// the whole pack; a pack with nothing taken is not requested at all.
+/// the whole pack; a pack with nothing taken is not requested at all. The progress total is the
+/// bytes these requests move, which is what the free-space check counted.
 async fn fetch_content(
     session: &Session<'_>,
     conn: &iroh::endpoint::Connection,
 ) -> Result<(), Error> {
-    let shares = shared_bytes(session.manifest, &session.plan.chosen)?;
+    let shares = plan::shared_bytes(session.manifest, &session.plan.chosen)?;
     let mut progress = 0u64;
-    let mut packs = BTreeSet::new();
-    for &at in &session.plan.chosen {
-        if let Loc::Packed { pack_index, .. } = session.manifest.entries()[at].loc {
-            packs.insert(pack_index);
-        }
-    }
-    for index in packs {
-        let pack = session
-            .manifest
-            .packs()
-            .get(index as usize)
-            .ok_or_else(|| {
-                Error::Policy("the manifest points at a pack that is not listed".to_string())
-            })?;
+    for index in plan::packs_of(session.manifest, &session.plan.chosen) {
+        let pack = plan::pack(session.manifest, index)?;
         fetch::content_blob(
             session.store,
             conn,
             Hash::from(pack.root),
             pack.size,
             progress,
-            session.plan.bytes,
+            session.plan.fetched,
             session.rate,
             session.events,
         )
@@ -126,7 +112,7 @@ async fn fetch_content(
             Hash::from(root),
             entry.size,
             progress,
-            session.plan.bytes,
+            session.plan.fetched,
             session.rate,
             session.events,
         )
@@ -137,30 +123,12 @@ async fn fetch_content(
     Ok(())
 }
 
-/// How many bytes each blob root holds among the entries taken, counted once per entry that names
-/// it. A hostile manifest can make these add up past `u64::MAX`, which would wrap the progress
-/// total.
-fn shared_bytes(manifest: &Manifest, chosen: &[usize]) -> Result<BTreeMap<[u8; 32], u64>, Error> {
-    let mut shares: BTreeMap<[u8; 32], u64> = BTreeMap::new();
-    for &at in chosen {
-        let entry = &manifest.entries()[at];
-        if entry.kind != Kind::File {
-            continue;
-        }
-        if let Loc::Blob { root } = entry.loc {
-            let total = shares.entry(root).or_default();
-            *total = total.checked_add(entry.size).ok_or_else(size_overflow)?;
-        }
-    }
-    Ok(shares)
-}
-
 fn report(session: &Session<'_>, progress: u64) {
     emit(
         session.events,
         Event::Progress {
-            bytes: progress.min(session.plan.bytes),
-            total: session.plan.bytes,
+            bytes: progress.min(session.plan.fetched),
+            total: session.plan.fetched,
         },
     );
 }

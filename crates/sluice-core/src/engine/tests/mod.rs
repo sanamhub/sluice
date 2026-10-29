@@ -23,7 +23,7 @@ use tempfile::TempDir;
 use super::{Provider, Receiver, RelayModeChoice, endpoint};
 use crate::{
     Error, Home,
-    manifest::{Entry, Kind, Limits, Loc, Manifest, path::ManifestPath},
+    manifest::{Entry, Kind, Limits, Loc, Manifest, PackRef, path::ManifestPath},
     ticket::{Body, Format, Ticket},
 };
 
@@ -33,6 +33,7 @@ mod done;
 mod inspect;
 mod lifecycle;
 mod live;
+mod pack;
 mod resume;
 mod rules;
 mod select;

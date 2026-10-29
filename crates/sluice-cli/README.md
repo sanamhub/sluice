@@ -110,11 +110,12 @@ the pattern; give it more than once to take the entries any of them match. `*` m
 name and `**` crosses a `/`, and the match is case-sensitive. A pattern that does not parse, or that
 matches nothing in the ticket, is refused before anything is fetched or written. A folder is made
 when an entry under it is taken, a link is taken when it matches, and only the taken files' content
-is fetched. A partial store made with one selection is not continued by a receive with another: it
-starts a store of its own. Because this receive takes only a part of the ticket, it does not end a
-one-time `sluice send`: the sender is still serving afterwards, and only a receive of the whole
-ticket stops it. A sender that serves partial receivers should run with `--keep` and stop it with
-Ctrl+C.
+is fetched. A file under 1 MiB travels inside a pack beside other files, and a pack is one blob, so
+taking a packed file fetches its whole pack; the planned line says how many bytes that moves. A
+partial store made with one selection is not continued by a receive with another: it starts a store
+of its own. Because this receive takes only a part of the ticket, it does not end a one-time
+`sluice send`: the sender is still serving afterwards, and only a receive of the whole ticket stops
+it. A sender that serves partial receivers should run with `--keep` and stop it with Ctrl+C.
 
 Several tickets run through the queue: three at once by default, high before normal before low, and
 a network failure waits the queue's backoff before the same ticket is tried again from its partial
@@ -132,6 +133,9 @@ line `sluice inspect` prints: `3 files, 2 folders, 1.2 GiB`. In `--json` that is
 own, `{"event":"planned","files":3,"folders":2,"links":0,"bytes":1258291}`. With `--include` the
 line counts only what it takes and says what part of the transfer that is, `1 file, 1.0 KiB of 9
 files, 12.0 MiB`, and the JSON event carries `"of_files":9,"of_bytes":12582912` beside the counts.
+When the content fetched is more than the content written, because a taken file sits in a pack, the
+line ends with the bytes that move, `1 file, 1.0 KiB of 9 files, 12.0 MiB, 30.0 MiB to fetch`, and
+the JSON event carries `"fetched":31457280`.
 
 **`sluice inspect`**
 

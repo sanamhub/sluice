@@ -113,8 +113,11 @@ pub async fn receive(
         .map_err(|e| storage::policy_path("create", &options.out, e))?;
     // The ticket's size is the sum of the manifest's files, and a manifest that disagrees with it
     // is refused before any content. Checking the room here means a transfer that cannot fit never
-    // opens a store, so its refusal leaves nothing behind.
-    if let Body::Static { size, .. } = ticket.body() {
+    // opens a store, so its refusal leaves nothing behind. A selection takes part of the ticket and
+    // may fetch whole packs, so its room is checked once the manifest says what it takes.
+    if let Body::Static { size, .. } = ticket.body()
+        && options.include.is_none()
+    {
         plan::check_space(options, *size)?;
     }
     let receiver = Receiver::open(relay_of(&ticket), options.congestion).await?;
@@ -219,6 +222,9 @@ async fn exchange(
             bytes: plan.bytes,
             of_files: of.as_ref().map(|totals| totals.files),
             of_bytes: of.as_ref().map(|totals| totals.bytes),
+            // The line counts what lands on disk, and a pack is fetched whole: when that moves more
+            // bytes than the entries it writes, the line says how much.
+            fetched: (plan.fetched != plan.bytes).then_some(plan.fetched),
         },
     );
     emit(

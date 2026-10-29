@@ -61,12 +61,18 @@ fn human(event: &Event, verb: &str) -> String {
             bytes,
             of_files,
             of_bytes,
+            fetched,
         } => {
             let mut line = summary(*files, *folders, *links, *bytes);
             // A selection says what part of the ticket it takes, so a user sees that the patterns
             // did something before the transfer starts.
             if let (Some(of_files), Some(of_bytes)) = (of_files, of_bytes) {
                 line.push_str(&format!(" of {of_files} files, {}", bytes_text(*of_bytes)));
+            }
+            // A packed file brings its whole pack, so the bytes moved can be more than the bytes
+            // written; the line says how many, because that is what the transfer waits for.
+            if let Some(fetched) = fetched {
+                line.push_str(&format!(", {} to fetch", bytes_text(*fetched)));
             }
             line
         }
@@ -163,6 +169,7 @@ mod tests {
             bytes: 1536,
             of_files: None,
             of_bytes: None,
+            fetched: None,
         };
         assert_eq!(
             human(&planned, "receiving"),
@@ -177,6 +184,38 @@ mod tests {
         assert_eq!(
             line(&human(&started, "receiving")),
             "receiving report\\u{202e}fdp.exe (1.5 KiB) with cubic\n"
+        );
+    }
+
+    /// A selection that fetches a whole pack for a small file says what part of the ticket it takes
+    /// and, after it, how many bytes the transfer moves: the two are different numbers.
+    #[test]
+    fn a_selection_that_fetches_more_than_it_writes_says_so() {
+        let planned = Event::Planned {
+            files: 1,
+            folders: 1,
+            links: 0,
+            bytes: 5,
+            of_files: Some(3),
+            of_bytes: Some(40),
+            fetched: Some(30),
+        };
+        assert_eq!(
+            human(&planned, "receiving"),
+            "1 file, 1 folder, 5 bytes of 3 files, 40 bytes, 30 bytes to fetch"
+        );
+        let same = Event::Planned {
+            files: 1,
+            folders: 1,
+            links: 0,
+            bytes: 5,
+            of_files: Some(3),
+            of_bytes: Some(40),
+            fetched: None,
+        };
+        assert_eq!(
+            human(&same, "receiving"),
+            "1 file, 1 folder, 5 bytes of 3 files, 40 bytes"
         );
     }
 
