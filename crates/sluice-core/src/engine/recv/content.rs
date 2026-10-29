@@ -71,15 +71,29 @@ pub(super) async fn ensure_content(
     }
 }
 
-/// Every pack, then every distinct content blob. A blob that several entries share is fetched
-/// once, and its whole size is added to the progress then.
+/// Every pack that holds a taken file, then every distinct content blob of a taken file. A blob that
+/// several taken entries share is fetched once. A pack is one blob, so a taken file inside it needs
+/// the whole pack; a pack with nothing taken is not requested at all.
 async fn fetch_content(
     session: &Session<'_>,
     conn: &iroh::endpoint::Connection,
 ) -> Result<(), Error> {
-    let shares = shared_bytes(session.manifest)?;
+    let shares = shared_bytes(session.manifest, &session.plan.chosen)?;
     let mut progress = 0u64;
-    for pack in session.manifest.packs() {
+    let mut packs = BTreeSet::new();
+    for &at in &session.plan.chosen {
+        if let Loc::Packed { pack_index, .. } = session.manifest.entries()[at].loc {
+            packs.insert(pack_index);
+        }
+    }
+    for index in packs {
+        let pack = session
+            .manifest
+            .packs()
+            .get(index as usize)
+            .ok_or_else(|| {
+                Error::Policy("the manifest points at a pack that is not listed".to_string())
+            })?;
         fetch::content_blob(
             session.store,
             conn,
@@ -95,7 +109,8 @@ async fn fetch_content(
         report(session, progress);
     }
     let mut seen = BTreeSet::new();
-    for entry in session.manifest.entries() {
+    for &at in &session.plan.chosen {
+        let entry = &session.manifest.entries()[at];
         if entry.kind != Kind::File || entry.size == 0 {
             continue;
         }
@@ -122,11 +137,13 @@ async fn fetch_content(
     Ok(())
 }
 
-/// How many bytes each blob root holds in the manifest, counted once per entry that names it. A
-/// hostile manifest can make these add up past `u64::MAX`, which would wrap the progress total.
-fn shared_bytes(manifest: &Manifest) -> Result<BTreeMap<[u8; 32], u64>, Error> {
+/// How many bytes each blob root holds among the entries taken, counted once per entry that names
+/// it. A hostile manifest can make these add up past `u64::MAX`, which would wrap the progress
+/// total.
+fn shared_bytes(manifest: &Manifest, chosen: &[usize]) -> Result<BTreeMap<[u8; 32], u64>, Error> {
     let mut shares: BTreeMap<[u8; 32], u64> = BTreeMap::new();
-    for entry in manifest.entries() {
+    for &at in chosen {
+        let entry = &manifest.entries()[at];
         if entry.kind != Kind::File {
             continue;
         }

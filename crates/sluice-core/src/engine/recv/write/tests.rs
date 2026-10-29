@@ -35,6 +35,7 @@ fn options(out: &std::path::Path) -> ReceiveOptions {
         rate: None,
         write_limit: None,
         max_network_failures: crate::queue::MAX_NETWORK_FAILURES,
+        include: None,
     }
 }
 
@@ -52,6 +53,7 @@ async fn run(
         folders: 0,
         links: 0,
         ours: std::collections::BTreeSet::new(),
+        chosen: (0..manifest.entries().len()).collect(),
     };
     write(manifest, &plan, store, &options(out), partial, false, &tx)
         .await
@@ -89,6 +91,7 @@ async fn a_kept_store_is_given_its_own_bytes_back() {
         folders: 0,
         links: 0,
         ours: std::collections::BTreeSet::new(),
+        chosen: (0..manifest.entries().len()).collect(),
     };
     let mut options = options(&out);
     // The first file fits and the second does not, so the transfer fails with the store kept.
@@ -349,6 +352,7 @@ async fn a_store_copy_linked_to_an_edited_file_is_not_exported() {
         folders: 0,
         links: 0,
         ours: std::collections::BTreeSet::new(),
+        chosen: (0..manifest.entries().len()).collect(),
     };
     let mut options = options(&out);
     options.force = true;

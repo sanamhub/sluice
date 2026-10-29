@@ -71,8 +71,8 @@ async fn tree(
     events: &UnboundedSender<Event>,
     shared: &mut Shared,
 ) -> Result<(), Error> {
-    let counts = blob_counts(manifest);
-    let dirs = create_dirs(manifest, &options.out, &plan.ours)?;
+    let counts = blob_counts(manifest, &plan.chosen);
+    let dirs = create_dirs(manifest, &options.out, &plan.ours, &plan.chosen)?;
     let tmp = storage::temp_dir(&options.out)?;
     let mut writer = Writer {
         store,
@@ -86,11 +86,11 @@ async fn tree(
         events,
         shared,
     };
-    writer.files(manifest).await?;
+    writer.files(manifest, &plan.chosen).await?;
     drop(writer);
     let outcome = async {
         if options.links {
-            link::write_all(manifest, options, resume)?;
+            link::write_all(manifest, options, resume, &plan.chosen)?;
         }
         for (target, mtime_ms, mode, made_here) in dirs.iter().rev() {
             // A folder that was already there keeps the mode and time it had: a resume writes into
@@ -113,12 +113,13 @@ async fn tree(
     outcome
 }
 
-/// How many File entries name each blob root. One naming it can take the store's own file, because
-/// nothing else needs it afterwards; several cannot, because the first would leave the store and
-/// the rest with no bytes to read.
-fn blob_counts(manifest: &Manifest) -> BTreeMap<[u8; 32], u64> {
+/// How many taken File entries name each blob root. One naming it can take the store's own file,
+/// because nothing else this run writes needs it; several cannot, because the first would leave the
+/// rest with no bytes to read.
+fn blob_counts(manifest: &Manifest, chosen: &[usize]) -> BTreeMap<[u8; 32], u64> {
     let mut counts = BTreeMap::new();
-    for entry in manifest.entries() {
+    for &at in chosen {
+        let entry = &manifest.entries()[at];
         if entry.kind == Kind::File
             && let Loc::Blob { root } = entry.loc
         {
@@ -160,10 +161,12 @@ struct Writer<'a> {
 }
 
 impl Writer<'_> {
-    /// Every file, in manifest order. One pack is written the first time an entry names it.
-    async fn files(&mut self, manifest: &Manifest) -> Result<(), Error> {
+    /// Every taken file, in manifest order. One pack is written the first time a taken entry names
+    /// it, and only the taken entries of it are written.
+    async fn files(&mut self, manifest: &Manifest, chosen: &[usize]) -> Result<(), Error> {
         let mut packs = std::collections::BTreeSet::new();
-        for entry in manifest.entries() {
+        for &at in chosen {
+            let entry = &manifest.entries()[at];
             if entry.kind != Kind::File {
                 continue;
             }
@@ -171,7 +174,7 @@ impl Writer<'_> {
                 Loc::Blob { root } => Box::pin(self.blob(entry, Hash::from(root))).await?,
                 Loc::Packed { pack_index, .. } => {
                     if packs.insert(pack_index) {
-                        Box::pin(self.pack(manifest, pack_index as usize)).await?;
+                        Box::pin(self.pack(manifest, pack_index as usize, chosen)).await?;
                     }
                 }
                 Loc::None => {
@@ -316,13 +319,20 @@ impl Writer<'_> {
         Ok(false)
     }
 
-    /// Writes every file of one pack. The pack was fetched and checked before anything was written.
-    async fn pack(&mut self, manifest: &Manifest, index: usize) -> Result<(), Error> {
+    /// Writes every taken file of one pack. The pack was fetched and checked before anything was
+    /// written, and an entry of it this run does not take is not written.
+    async fn pack(
+        &mut self,
+        manifest: &Manifest,
+        index: usize,
+        chosen: &[usize],
+    ) -> Result<(), Error> {
         let pack = manifest.packs().get(index).ok_or_else(|| {
             Error::Policy("the manifest points at a pack that is not listed".to_string())
         })?;
         let mut reader = self.store.blobs().reader(Hash::from(pack.root));
-        for entry in manifest.entries() {
+        for &at in chosen {
+            let entry = &manifest.entries()[at];
             let Loc::Packed { pack_index, .. } = entry.loc else {
                 continue;
             };

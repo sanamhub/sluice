@@ -8,7 +8,7 @@ mod write;
 
 use claim::{claim_store, hex, read_manifest};
 pub(super) use plan::check_one;
-pub(in crate::engine) use plan::{check_promised, totals};
+pub(in crate::engine) use plan::{check_promised, choose, size_overflow, totals};
 pub(super) use write::write_range;
 
 use std::{fs, path::PathBuf, time::Instant};
@@ -16,7 +16,7 @@ use std::{fs, path::PathBuf, time::Instant};
 use iroh_blobs::{Hash, store::fs::FsStore};
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::{Congestion, Event, Receiver, RelayModeChoice, emit, fetch, storage};
+use super::{Congestion, Event, Receiver, RelayModeChoice, Selection, emit, fetch, storage};
 use crate::{
     Error,
     manifest::{Kind, Limits, Manifest, parse_sequence},
@@ -83,6 +83,9 @@ pub struct ReceiveOptions {
     /// How many network failures in a row a receive retries before it gives up. A real caller uses
     /// [crate::queue::MAX_NETWORK_FAILURES]; a test lowers it to reach the end quickly.
     pub max_network_failures: u32,
+    /// The entries this receive takes, or `None` for all of them. A selection is matched against the
+    /// manifest's paths and can never take anything the sender did not list.
+    pub include: Option<Selection>,
 }
 
 /// What arrived.
@@ -136,13 +139,16 @@ async fn run(
     options: &ReceiveOptions,
     events: &UnboundedSender<Event>,
 ) -> Result<Received, Error> {
+    let selection = options.include.clone().unwrap_or_default();
     let owner = hex(&root);
     let partial = storage::partial_dir(&options.out, &owner);
     let conn = receiver.connect(ticket, events.clone()).await?;
     let manifest = read_manifest(&conn, ticket, options, events).await?;
-    let (store, resume, plan) = claim_store(&partial, &owner, &manifest, ticket, options).await?;
+    let (store, resume, plan) =
+        claim_store(&partial, &owner, &manifest, ticket, options, &selection).await?;
     let outcome = exchange(
         receiver, ticket, &manifest, plan, &store, &partial, options, resume, conn, events,
+        &selection,
     )
     .await;
     let closed = store.close().await;
@@ -195,7 +201,15 @@ async fn exchange(
     resume: bool,
     conn: iroh::endpoint::Connection,
     events: &UnboundedSender<Event>,
+    selection: &Selection,
 ) -> Result<(Received, f64), Error> {
+    // What the whole manifest holds, when this run takes only part of it: the planned line says
+    // what is coming out of what the ticket offers, so a user knows the selection did something.
+    let of = if selection.is_empty() {
+        None
+    } else {
+        Some(plan::totals(manifest)?)
+    };
     emit(
         events,
         Event::Planned {
@@ -203,6 +217,8 @@ async fn exchange(
             folders: plan.folders,
             links: plan.links,
             bytes: plan.bytes,
+            of_files: of.as_ref().map(|totals| totals.files),
+            of_bytes: of.as_ref().map(|totals| totals.bytes),
         },
     );
     emit(

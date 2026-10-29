@@ -386,6 +386,7 @@ mod tests {
             rate: None,
             write_limit: None,
             max_network_failures: 1,
+            include: None,
         };
         let (events, _unread) = tokio::sync::mpsc::unbounded_channel();
         let error = receive_live(&ticket.encode(), &options, &store, &events)

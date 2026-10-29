@@ -10,7 +10,7 @@ async fn a_one_file_ticket_offers_one_file() {
     let dir = tempfile::tempdir().unwrap();
     let body = vec![3u8; 4096];
     let (outgoing, text) = prepared(&dir, &body).await;
-    let offering = inspect(&text, Limits::default()).await.unwrap();
+    let offering = inspect(&text, Limits::default(), None).await.unwrap();
     let Offering::Static(offered) = offering else {
         panic!("a file ticket was read as a live stream");
     };
@@ -37,7 +37,7 @@ async fn a_folder_ticket_offers_its_folders_and_files() {
     fs::write(source.join("a.txt"), b"aaaa").unwrap();
     fs::write(source.join("sub").join("b.txt"), b"bb").unwrap();
     let (outgoing, text) = prepared_paths(&dir, std::slice::from_ref(&source)).await;
-    let offering = inspect(&text, Limits::default()).await.unwrap();
+    let offering = inspect(&text, Limits::default(), None).await.unwrap();
     let Offering::Static(offered) = offering else {
         panic!("a folder ticket was read as a live stream");
     };
@@ -79,7 +79,7 @@ async fn a_ticket_whose_size_the_manifest_does_not_match_is_refused() {
     )
     .unwrap();
 
-    let inspected = inspect(&lying.encode(), Limits::default())
+    let inspected = inspect(&lying.encode(), Limits::default(), None)
         .await
         .unwrap_err();
     let out = dir.path().join("lying-out");
@@ -112,7 +112,9 @@ async fn a_live_ticket_is_a_live_stream() {
         },
     )
     .unwrap();
-    let offering = inspect(&ticket.encode(), Limits::default()).await.unwrap();
+    let offering = inspect(&ticket.encode(), Limits::default(), None)
+        .await
+        .unwrap();
     assert!(matches!(offering, Offering::Live));
 }
 
@@ -126,7 +128,7 @@ async fn a_raw_ticket_offers_its_size_and_no_name() {
         .await
         .unwrap();
     let text = outgoing.ticket.encode();
-    let offering = inspect(&text, Limits::default()).await.unwrap();
+    let offering = inspect(&text, Limits::default(), None).await.unwrap();
     let Offering::Static(offered) = offering else {
         panic!("a raw ticket was read as a live stream");
     };

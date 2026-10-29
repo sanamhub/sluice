@@ -294,7 +294,7 @@ async fn a_partial_folder_this_home_did_not_record_is_refused_and_kept() {
     crate::engine::storage::claim(&partial).unwrap();
     let id = crate::engine::storage::remember_record(&partial, &owner).unwrap();
     let names = std::collections::BTreeSet::from(["tree".to_string()]);
-    crate::engine::storage::remember(&partial, &owner, &names, false, &id).unwrap();
+    crate::engine::storage::remember(&partial, &owner, &names, false, &id, "all").unwrap();
     fs::create_dir_all(out.join("tree")).unwrap();
     fs::write(out.join("tree").join("a.txt"), b"clobbered").unwrap();
     let err = super::receive(&text, &options(&out), &tx)

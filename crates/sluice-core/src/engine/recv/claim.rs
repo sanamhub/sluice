@@ -21,8 +21,21 @@ pub(super) async fn claim_store(
     manifest: &Manifest,
     ticket: &Ticket,
     options: &ReceiveOptions,
+    selection: &crate::engine::Selection,
 ) -> Result<(storage::Store, bool, Plan), Error> {
+    // A store is only continued by a run that takes the same entries: one made for other patterns
+    // holds a different set of finished files, and resuming into it would write a tree no run asked
+    // for. The store and its record go, and this run claims its own.
+    let key = selection.key();
     let (resumed, checked) = decide(partial, owner).await?;
+    let (resumed, checked) = match resumed {
+        Some(found) if found.select.as_deref().unwrap_or("all") != key => {
+            storage::discard_apart(partial).await;
+            (None, None)
+        }
+        other => (other, checked),
+    };
+
     let resume = resumed.is_some();
     // A run that was allowed to replace what was in the output was a deliberate choice, so the run
     // that continues it has to make the same one.
@@ -33,7 +46,7 @@ pub(super) async fn claim_store(
         )));
     }
     let ours = resumed.map(|found| found.names).unwrap_or_default();
-    let (plan, created) = plan::check(manifest, ticket, options, resume, &ours)?;
+    let (plan, created) = plan::check(manifest, ticket, options, resume, &ours, selection)?;
     // The folder that was checked and the folder that is opened have to be one folder: another user
     // who can write in the output can rename a store away and put one there under the same name
     // between the two calls. A resumed store's identity comes from the handle its marker was read
@@ -41,7 +54,7 @@ pub(super) async fn claim_store(
     let before = if resume {
         checked
     } else {
-        start_store(partial, owner, &created, options).await?;
+        start_store(partial, owner, &created, options, &key).await?;
         storage::identify(partial)?
     };
     // A store that a cancelled command left sharing an inode with a file in the output is given its
@@ -128,12 +141,14 @@ async fn start_store(
     owner: &str,
     created: &std::collections::BTreeSet<String>,
     options: &ReceiveOptions,
+    selection: &str,
 ) -> Result<(), Error> {
     let dir = partial.to_owned();
     let root = owner.to_owned();
     let names = created.clone();
     let force = options.force;
-    tokio::task::spawn_blocking(move || storage::begin(&dir, &root, &names, force))
+    let select = selection.to_owned();
+    tokio::task::spawn_blocking(move || storage::begin(&dir, &root, &names, force, &select))
         .await
         .map_err(|error| Error::Storage(format!("cannot claim {}: {error}", partial.display())))?
 }

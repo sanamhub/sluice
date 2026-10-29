@@ -1,12 +1,13 @@
 //! Every check a receive makes before the first content request: the ticket's size against the
-//! manifest, the top-level names, hidden names, every target path, every clash, every ancestor that
-//! could be a symlink, and the free space for the whole tree.
+//! manifest, the entries a selection takes, the top-level names, hidden names, every target path,
+//! every clash, every ancestor that could be a symlink, and the free space for the whole tree.
 
 use std::{collections::BTreeSet, fs, path::Path};
 
 use super::ReceiveOptions;
 use crate::{
     Error,
+    engine::Selection,
     manifest::{Entry, Kind, Manifest},
     ticket::{Body, Ticket},
 };
@@ -26,6 +27,8 @@ pub(super) struct Plan {
     /// folder under one of them was made by the run this one continues, so it gets its mode and
     /// time like any other.
     pub ours: std::collections::BTreeSet<String>,
+    /// The entries this receive writes, by position in the manifest, in manifest order.
+    pub chosen: Vec<usize>,
 }
 
 /// What the manifest will write, counted by kind.
@@ -46,27 +49,98 @@ pub(super) fn check(
     options: &ReceiveOptions,
     resume: bool,
     ours: &BTreeSet<String>,
+    selection: &Selection,
 ) -> Result<(Plan, BTreeSet<String>), Error> {
-    let totals = totals(manifest)?;
-    check_promised(ticket, totals.bytes)?;
-    check_space(options, totals.bytes)?;
-    let created = check_top(manifest, options, ours)?;
+    let all = totals(manifest)?;
+    // The ticket promises the size of the whole manifest, even when this run takes only part of it.
+    check_promised(ticket, all.bytes)?;
+    let chosen = choose(manifest, selection)?;
+    let taken = totals_of(manifest, &chosen)?;
+    check_space(options, taken.bytes)?;
+    let created = check_top(manifest, options, ours, &chosen)?;
     let made = created.union(ours).cloned().collect();
-    for entry in manifest.entries() {
+    for &at in &chosen {
+        let entry = &manifest.entries()[at];
         let target = entry.path.under(&options.out);
         check_ancestors(&options.out, &target)?;
         check_target(&target, entry.kind, options.force || resume)?;
     }
     Ok((
         Plan {
-            files: totals.files,
-            folders: totals.folders,
-            links: totals.links,
-            bytes: totals.bytes,
+            files: taken.files,
+            folders: taken.folders,
+            links: taken.links,
+            bytes: taken.bytes,
             ours: made,
+            chosen,
         },
         created,
     ))
+}
+
+/// The entries a selection takes, by position in the manifest, with the folder entries above them: a
+/// folder is made when something under it is taken, and one a pattern names itself is taken too. No
+/// patterns take everything. A selection on a one-file ticket is refused, because there is nothing
+/// to choose between and the ticket's one name is the file.
+pub(in crate::engine) fn choose(
+    manifest: &Manifest,
+    selection: &Selection,
+) -> Result<Vec<usize>, Error> {
+    let entries = manifest.entries();
+    if selection.is_empty() {
+        return Ok((0..entries.len()).collect());
+    }
+    if matches!(entries, [entry] if entry.kind == Kind::File) {
+        return Err(Error::Policy(
+            "--include takes some of a folder ticket's entries, and this ticket is one file"
+                .to_string(),
+        ));
+    }
+    let by_path: std::collections::BTreeMap<&str, usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(at, entry)| (entry.path.as_str(), at))
+        .collect();
+    let mut chosen: BTreeSet<usize> = entries
+        .iter()
+        .enumerate()
+        .filter(|(_, entry)| selection.selects(entry.path.as_str()))
+        .map(|(at, _)| at)
+        .collect();
+    if chosen.is_empty() {
+        return Err(Error::Policy(format!(
+            "the pattern{} {} match{} nothing in this ticket",
+            if selection.patterns().len() == 1 {
+                ""
+            } else {
+                "s"
+            },
+            selection
+                .patterns()
+                .iter()
+                .map(|pattern| crate::manifest::path::shown(pattern))
+                .collect::<Vec<_>>()
+                .join(", "),
+            if selection.patterns().len() == 1 {
+                "es"
+            } else {
+                ""
+            },
+        )));
+    }
+    for at in chosen.clone() {
+        for ancestor in ancestors(entries[at].path.as_str()) {
+            if let Some(&found) = by_path.get(ancestor) {
+                chosen.insert(found);
+            }
+        }
+    }
+    Ok(chosen.into_iter().collect())
+}
+
+/// The folder paths above `path`, innermost first: `a/b/c.txt` gives `a/b` and `a`.
+fn ancestors(path: &str) -> impl Iterator<Item = &str> {
+    path.match_indices('/').map(move |(at, _)| &path[..at])
 }
 
 /// How many of each kind there are and how many bytes the files add up to. A manifest comes from a
@@ -74,8 +148,15 @@ pub(super) fn check(
 /// could be made to match a ticket's size and pass the free-space check for a tree far larger than
 /// it.
 pub(in crate::engine) fn totals(manifest: &Manifest) -> Result<Totals, Error> {
+    let all: Vec<usize> = (0..manifest.entries().len()).collect();
+    totals_of(manifest, &all)
+}
+
+/// [`totals`] over the entries a receive takes, by position in the manifest.
+fn totals_of(manifest: &Manifest, chosen: &[usize]) -> Result<Totals, Error> {
     let mut totals = Totals::default();
-    for entry in manifest.entries() {
+    for &at in chosen {
+        let entry = &manifest.entries()[at];
         match entry.kind {
             Kind::File => {
                 // The decoder's entry limit is far below `u64::MAX`, so this cannot pass it.
@@ -92,7 +173,7 @@ pub(in crate::engine) fn totals(manifest: &Manifest) -> Result<Totals, Error> {
     Ok(totals)
 }
 
-pub(super) fn size_overflow() -> Error {
+pub(in crate::engine) fn size_overflow() -> Error {
     Error::Policy("the manifest's file sizes add up past u64::MAX".to_string())
 }
 
@@ -137,9 +218,11 @@ fn check_top(
     manifest: &Manifest,
     options: &ReceiveOptions,
     ours: &BTreeSet<String>,
+    chosen: &[usize],
 ) -> Result<BTreeSet<String>, Error> {
     let mut created = BTreeSet::new();
-    for entry in manifest.entries() {
+    for &at in chosen {
+        let entry = &manifest.entries()[at];
         let name = entry.path.as_str();
         if name.contains('/') {
             continue;

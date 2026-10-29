@@ -84,6 +84,10 @@ rcgen = "0.14"
 # The ticket envelope. SPEC.md section 4 states its bytes, which are postcard 1.x's. Only `alloc`,
 # for `to_allocvec`: the defaults add nothing this crate uses.
 postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
+# The patterns `--include` matches a manifest's paths with. Its `literal_separator` option is what
+# makes `*` stop at `/` while `**` crosses it, and it resolves the same regex crate the tree already
+# holds through `regex-automata`.
+globset = "0.4.21"
 # Property tests for parsers. Without default features it skips fork and timeout, which add
 # rusty-fork and tempfile to run each case in a child process. No test here needs that.
 proptest = { version = "1.12", default-features = false, features = ["std"] }

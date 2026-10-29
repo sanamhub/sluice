@@ -34,6 +34,9 @@ pub struct Owner {
     /// The id this home's record of the store carries, so a folder that was replaced under the
     /// same name is not taken for the one the record names.
     pub id: Option<String>,
+    /// The entries the run that made the store took, as [`crate::engine::Selection::key`] names
+    /// them, or `None` for a store from before the line was written, which took every entry.
+    pub select: Option<String>,
 }
 
 /// What a folder that may hold a store says: its marker, when it has one, and the identity of the
@@ -73,8 +76,9 @@ pub fn recorded(dir: &Path) -> Result<Option<Found>, Error> {
 }
 
 /// The first line is the root; every `name ` line after it is a top-level entry the transfer
-/// created, an `id ` line is the record this store is named by, and a `force` line records that the
-/// run that made the store was allowed to replace what was already there.
+/// created, an `id ` line is the record this store is named by, a `select ` line is the entries it
+/// took, and a `force` line records that the run that made the store was allowed to replace what was
+/// already there.
 fn parse_marker(text: &str) -> Option<Owner> {
     let mut lines = text.lines();
     let root = lines.next()?.trim();
@@ -84,12 +88,16 @@ fn parse_marker(text: &str) -> Option<Owner> {
     let mut names = BTreeSet::new();
     let mut force = false;
     let mut id = None;
+    let mut select = None;
     for line in lines {
         if let Some(name) = line.strip_prefix("name ") {
             names.insert(name.to_string());
         }
         if let Some(record) = line.strip_prefix("id ") {
             id = Some(record.trim().to_string());
+        }
+        if let Some(taken) = line.strip_prefix("select ") {
+            select = Some(taken.trim().to_string());
         }
         force |= line.trim() == "force";
     }
@@ -98,6 +106,7 @@ fn parse_marker(text: &str) -> Option<Owner> {
         names,
         force,
         id,
+        select,
     })
 }
 
@@ -129,11 +138,17 @@ pub fn claim(dir: &Path) -> Result<(), Error> {
 /// record, which the next run refuses as another transfer's, or a record naming a folder that is
 /// gone. The caller runs this on a blocking thread and does not act on its answer: a command that
 /// is cancelled while this is queued leaves either a store the next run can resume, or nothing.
-pub fn begin(dir: &Path, root: &str, names: &BTreeSet<String>, force: bool) -> Result<(), Error> {
+pub fn begin(
+    dir: &Path,
+    root: &str,
+    names: &BTreeSet<String>,
+    force: bool,
+    select: &str,
+) -> Result<(), Error> {
     registry::with_hold(dir, || {
         claim(dir)?;
         let id = registry::remember(dir, root)?;
-        if let Err(e) = remember(dir, root, names, force, &id) {
+        if let Err(e) = remember(dir, root, names, force, &id, select) {
             // The hold is already this task's, and a folder without a marker is one no later run
             // could tell from another transfer's.
             registry::discard_here(dir);
@@ -144,18 +159,20 @@ pub fn begin(dir: &Path, root: &str, names: &BTreeSet<String>, force: bool) -> R
 }
 
 /// Writes the marker of a store this receive just made, naming the top-level entries it creates,
-/// whether it may replace what is there, and the id this home's record of the store carries. A
-/// later run reads it to tell this receive's folders from the user's, to refuse to continue a run
-/// that was forced when it is not forced itself, and to match the store to its record.
+/// whether it may replace what is there, the id this home's record of the store carries, and the
+/// entries it takes. A later run reads it to tell this receive's folders from the user's, to refuse
+/// to continue a run that was forced when it is not forced itself, to continue only a run that took
+/// the same entries, and to match the store to its record.
 pub fn remember(
     dir: &Path,
     root: &str,
     names: &BTreeSet<String>,
     force: bool,
     id: &str,
+    select: &str,
 ) -> Result<(), Error> {
     let marker = dir.join(MARKER);
-    let mut text = format!("{root}\nid {id}\n");
+    let mut text = format!("{root}\nid {id}\nselect {select}\n");
     if force {
         text.push_str("force\n");
     }
