@@ -74,7 +74,17 @@ impl Selection {
         let mut sorted: Vec<&str> = self.patterns.iter().map(String::as_str).collect();
         sorted.sort_unstable();
         sorted.dedup();
-        let digest = blake3::hash(sorted.join("\n").as_bytes());
+        // Each pattern is fed with its length in front, so two selections that differ only in
+        // where a newline falls cannot hash the same bytes: joining the patterns would make
+        // `a\nb` and `c` one key with `a`, `b` and `c`. A marker written before this change holds
+        // a key made from the join, so it names a selection this one is not, and the store it
+        // holds starts over; `all` and a marker with no key still mean the whole ticket.
+        let mut feed = Vec::new();
+        for pattern in &sorted {
+            feed.extend_from_slice(&(pattern.len() as u64).to_le_bytes());
+            feed.extend_from_slice(pattern.as_bytes());
+        }
+        let digest = blake3::hash(&feed);
         format!("b3:{}", digest.to_hex())
     }
 }
@@ -132,6 +142,17 @@ mod tests {
         );
         assert_eq!(Selection::default().key(), "all");
         assert_ne!(selection(&["a"]).key(), selection(&["b"]).key());
+    }
+
+    /// A pattern may hold any character, so a newline inside one is not where the next pattern
+    /// starts: two patterns, one of them holding a newline, are not three patterns.
+    #[test]
+    fn a_newline_inside_a_pattern_is_not_a_separator() {
+        assert_ne!(
+            selection(&["a\nb", "c"]).key(),
+            selection(&["a", "b", "c"]).key()
+        );
+        assert_ne!(selection(&["ab", "c"]).key(), selection(&["a", "bc"]).key());
     }
 
     /// A pattern that does not parse is refused where the command line is read.
