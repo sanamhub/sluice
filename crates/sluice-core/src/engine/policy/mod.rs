@@ -208,88 +208,119 @@ impl Gate {
     /// Answers one request. A get is checked against the allowlist, then its events decide when
     /// every byte of the blob went out.
     async fn answer(&self, message: ProviderMessage) {
-        match message {
-            ProviderMessage::GetRequestReceived(mut msg) => {
-                let hash = msg.request.hash;
-                // The id this process gave the connection. A connection the handshake never saw
-                // has none, so its request is still checked against the allowlist but counted for
-                // no completion: an id inherited from a closed connection would let a peer end a
-                // send it never received.
-                let connection = self.ids.own(msg.connection_id).unwrap_or_default();
-                let peer = self.ids.peer(connection);
-                let ok = self.may(peer, hash);
-                let whole = msg.request.ranges.is_all();
-                let asked = requested(&msg.request.ranges);
-                if msg.tx.send(answer(ok)).await.is_err() || !ok {
-                    return;
-                }
-                if connection != 0 {
-                    lock(&self.asked).remember(connection, hash);
-                }
-                let done = self.done.clone();
-                let store = self.store.clone();
-                let totals = Arc::clone(&self.totals);
-                let served = Arc::clone(&self.served);
-                let places = Arc::clone(&self.places);
-                let endpoint = peer.map(|peer| peer.endpoint);
-                n0_future::task::spawn(async move {
-                    let sent = Sent {
-                        store: &store,
-                        totals: &totals,
-                        served: &served,
-                        connection,
-                    };
-                    while let Ok(Some(update)) = msg.rx.recv().await {
-                        // A holder that is moving bytes has not gone quiet, so it is not a
-                        // connection that does nothing.
-                        if let Some(endpoint) = endpoint {
-                            lock(&places).touch(&endpoint, super::now_ms());
-                        }
-                        let Some(covered) = sent.checked(hash, &asked, update, whole).await else {
-                            continue;
-                        };
-                        // Id 0 is no connection of this process, so a delivery on it is not one a
-                        // completion code can be matched to.
-                        if covered && connection != 0 {
-                            let _ = done.send(ServeEvent::Downloaded { hash, connection });
-                        }
-                        break;
-                    }
-                });
-            }
-            ProviderMessage::GetManyRequestReceived(msg) => {
-                let peer = self
-                    .ids
-                    .peer(self.ids.own(msg.connection_id).unwrap_or_default());
-                let ok = self.may_all(peer, &msg.request.hashes);
-                msg.tx.send(answer(ok)).await.ok();
-            }
-            ProviderMessage::ObserveRequestReceived(msg) => {
-                let peer = self
-                    .ids
-                    .peer(self.ids.own(msg.connection_id).unwrap_or_default());
-                let ok = self.may(peer, msg.request.hash);
-                msg.tx.send(answer(ok)).await.ok();
-            }
-            ProviderMessage::ConnectionClosed(msg) => {
-                if let Some(connection) = self.ids.own(msg.connection_id) {
-                    let _ = self.done.send(ServeEvent::Closed { connection });
-                }
-            }
-            ProviderMessage::Throttle(msg) => {
-                // The wait is a task of its own, not this gate's: one paced chunk would otherwise
-                // hold up the permission checks and close events of every other connection. The
-                // provider waits for the answer before it writes, so the pacing still applies.
-                let rate = self.rate.clone();
-                n0_future::task::spawn(async move {
-                    if let Some(rate) = rate {
-                        rate.acquire(msg.size).await;
-                    }
-                    let _ = msg.tx.send(Ok(())).await;
-                });
-            }
-            _ => {}
+        if matches!(&message, ProviderMessage::GetRequestReceived(_)) {
+            self.get_request(message).await;
+        } else if matches!(&message, ProviderMessage::GetManyRequestReceived(_)) {
+            self.get_many(message).await;
+        } else if matches!(&message, ProviderMessage::ObserveRequestReceived(_)) {
+            self.observe(message).await;
+        } else if matches!(&message, ProviderMessage::ConnectionClosed(_)) {
+            self.connection_closed(message);
+        } else if matches!(&message, ProviderMessage::Throttle(_)) {
+            self.throttle(message);
         }
+    }
+
+    /// One get: its permission, and the task that watches what it sends.
+    async fn get_request(&self, message: ProviderMessage) {
+        let ProviderMessage::GetRequestReceived(mut msg) = message else {
+            unreachable!("the caller passes a get request")
+        };
+        let hash = msg.request.hash;
+        // The id this process gave the connection. A connection the handshake never saw has none,
+        // so its request is still checked against the allowlist but counted for no completion: an
+        // id inherited from a closed connection would let a peer end a send it never received.
+        let connection = self.ids.own(msg.connection_id).unwrap_or_default();
+        let peer = self.ids.peer(connection);
+        let ok = self.may(peer, hash);
+        let whole = msg.request.ranges.is_all();
+        let asked = requested(&msg.request.ranges);
+        if msg.tx.send(answer(ok)).await.is_err() || !ok {
+            return;
+        }
+        if connection != 0 {
+            lock(&self.asked).remember(connection, hash);
+        }
+        let done = self.done.clone();
+        let store = self.store.clone();
+        let totals = Arc::clone(&self.totals);
+        let served = Arc::clone(&self.served);
+        let places = Arc::clone(&self.places);
+        let endpoint = peer.map(|peer| peer.endpoint);
+        n0_future::task::spawn(async move {
+            let sent = Sent {
+                store: &store,
+                totals: &totals,
+                served: &served,
+                connection,
+            };
+            while let Ok(Some(update)) = msg.rx.recv().await {
+                // A holder that is moving bytes has not gone quiet, so it is not a connection that
+                // does nothing.
+                if let Some(endpoint) = endpoint {
+                    lock(&places).touch(&endpoint, super::now_ms());
+                }
+                let Some(covered) = sent.checked(hash, &asked, update, whole).await else {
+                    continue;
+                };
+                // Id 0 is no connection of this process, so a delivery on it is not one a
+                // completion code can be matched to.
+                if covered && connection != 0 {
+                    let _ = done.send(ServeEvent::Downloaded { hash, connection });
+                }
+                break;
+            }
+        });
+    }
+
+    /// One request for several blobs at once, which is refused as a whole when one is not allowed.
+    async fn get_many(&self, message: ProviderMessage) {
+        let ProviderMessage::GetManyRequestReceived(msg) = message else {
+            unreachable!("the caller passes a get-many request")
+        };
+        let peer = self
+            .ids
+            .peer(self.ids.own(msg.connection_id).unwrap_or_default());
+        let ok = self.may_all(peer, &msg.request.hashes);
+        msg.tx.send(answer(ok)).await.ok();
+    }
+
+    /// One observe request, which is the same rule as a get.
+    async fn observe(&self, message: ProviderMessage) {
+        let ProviderMessage::ObserveRequestReceived(msg) = message else {
+            unreachable!("the caller passes an observe request")
+        };
+        let peer = self
+            .ids
+            .peer(self.ids.own(msg.connection_id).unwrap_or_default());
+        let ok = self.may(peer, msg.request.hash);
+        msg.tx.send(answer(ok)).await.ok();
+    }
+
+    /// A connection that closed, told to the send so a wait can end on it.
+    fn connection_closed(&self, message: ProviderMessage) {
+        let ProviderMessage::ConnectionClosed(msg) = message else {
+            unreachable!("the caller passes a close")
+        };
+        if let Some(connection) = self.ids.own(msg.connection_id) {
+            let _ = self.done.send(ServeEvent::Closed { connection });
+        }
+    }
+
+    /// One paced chunk. The wait is a task of its own, not this gate's: one paced chunk would
+    /// otherwise hold up the permission checks and close events of every other connection. The
+    /// provider waits for the answer before it writes, so the pacing still applies.
+    fn throttle(&self, message: ProviderMessage) {
+        let ProviderMessage::Throttle(msg) = message else {
+            unreachable!("the caller passes a throttle request")
+        };
+        let rate = self.rate.clone();
+        n0_future::task::spawn(async move {
+            if let Some(rate) = rate {
+                rate.acquire(msg.size).await;
+            }
+            let _ = msg.tx.send(Ok(())).await;
+        });
     }
 
     /// The one access rule: an allowed hash, before the ticket's deadline, and a place when the send
