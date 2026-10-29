@@ -8,6 +8,7 @@ mod registry;
 mod removals;
 mod repair;
 mod store;
+mod sweep;
 mod temp;
 mod temp_store;
 
@@ -28,7 +29,8 @@ pub use removals::wait_for_removals;
 pub use repair::repair;
 pub(crate) use repair::{changed, data_path, name_count};
 pub use store::{FolderId, Owner, begin, identify, partial_dir, recorded};
-pub use temp::{Temp, sweep_temporary_store, temp_dir, temp_path};
+pub use sweep::sweep_temporary_store;
+pub use temp::{Temp, temp_dir, temp_path};
 pub use temp_store::TempStore;
 
 // A receive makes its store, records it and names it through `begin`. A test also drives those

@@ -414,7 +414,7 @@ The QUIC stack is tested by its own project, so we don't simulate QUIC.
 
 | Concern | Tool |
 |---|---|
-| Toolchain | `rust-toolchain.toml`, Rust 2024 edition. MSRV 1.90 is one CI job, `cargo +1.90 check --all-targets --workspace --exclude sluice-probe`, not a matrix entry: `iroh` 1.4.0 and `iroh-blobs` 0.103.1 need Rust 1.91, and the probe is not a product crate |
+| Toolchain | `rust-toolchain.toml`, Rust 2024 edition. MSRV 1.91 is one CI job, `cargo +1.91 check --all-targets --workspace --exclude sluice-probe`, not a matrix entry: 1.91 is the floor `iroh` 1.4 and `iroh-blobs` 0.103 set, so no older compiler can build the product, and the probe is not a product crate |
 | Tasks | `cargo xtask` |
 | Tests and snapshots | `cargo nextest`, `insta` |
 | Benchmarks | Planned, none run by a workflow: `divan` with CodSpeed for CPU work per pull request, and a self-hosted pair for throughput |

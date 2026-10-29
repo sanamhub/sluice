@@ -123,21 +123,24 @@ async fn a_discard_that_outlives_its_receive_leaves_the_next_store_alone() {
         .unwrap()
         .unwrap_err();
     assert!(matches!(error, Error::Storage(_)), "{error}");
+    assert_the_store_is_the_second_runs(&partial, &owner);
+    outgoing.provider.shutdown().await.unwrap();
+}
 
-    // The store the second receive claimed is its own: the folder, the record and the marker agree,
-    // and the removal the first receive left behind did not take any of them.
+/// The store the second receive claimed is its own: the folder, the record and the marker agree,
+/// and the removal the first receive left behind did not take any of them.
+fn assert_the_store_is_the_second_runs(partial: &Path, owner: &str) {
     assert!(
         partial.exists(),
         "the store the second receive claimed was removed"
     );
-    let record = crate::engine::storage::find_record(&partial, &owner)
+    let record = crate::engine::storage::find_record(partial, owner)
         .unwrap()
         .expect("the record of the second store was forgotten");
-    let found = crate::engine::storage::recorded(&partial)
+    let found = crate::engine::storage::recorded(partial)
         .unwrap()
         .expect("the marker of the second store was removed");
     assert_eq!(found.owner.id.as_deref(), Some(record.id.as_str()));
-    outgoing.provider.shutdown().await.unwrap();
 }
 
 /// Arms the removal of `partial` once the receive reports that it started, which is after it has
