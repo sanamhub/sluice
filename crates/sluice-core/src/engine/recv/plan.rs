@@ -1,14 +1,18 @@
 //! Every check a receive makes before the first content request: the ticket's size against the
 //! manifest, the entries a selection takes, the top-level names, hidden names, every target path,
-//! every clash, every ancestor that could be a symlink, and the free space for the whole tree.
+//! every clash, every ancestor that could be a symlink, and the free space for the bytes fetched.
 
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 use super::ReceiveOptions;
 use crate::{
     Error,
     engine::Selection,
-    manifest::{Entry, Kind, Manifest},
+    manifest::{Entry, Kind, Loc, Manifest, PackRef},
     ticket::{Body, Ticket},
 };
 
@@ -23,6 +27,9 @@ pub(super) struct Plan {
     pub links: u64,
     /// Their total size in bytes.
     pub bytes: u64,
+    /// The bytes the content requests will move. A packed file is fetched inside its whole pack, so
+    /// this can be more than `bytes`; it is what the free-space check and the progress total use.
+    pub fetched: u64,
     /// The top-level names this receive made, which a folder that is already there belongs to. A
     /// folder under one of them was made by the run this one continues, so it gets its mode and
     /// time like any other.
@@ -56,7 +63,10 @@ pub(super) fn check(
     check_promised(ticket, all.bytes)?;
     let chosen = choose(manifest, selection)?;
     let taken = totals_of(manifest, &chosen)?;
-    check_space(options, taken.bytes)?;
+    // A selection fetches each pack that holds a taken file whole, so the room it needs is the
+    // fetched bytes and not the bytes that land on disk.
+    let fetched = fetched_bytes(manifest, &chosen)?;
+    check_space(options, fetched)?;
     let created = check_top(manifest, options, ours, &chosen)?;
     let made = created.union(ours).cloned().collect();
     for &at in &chosen {
@@ -71,6 +81,7 @@ pub(super) fn check(
             folders: taken.folders,
             links: taken.links,
             bytes: taken.bytes,
+            fetched,
             ours: made,
             chosen,
         },
@@ -170,6 +181,68 @@ fn totals_of(manifest: &Manifest, chosen: &[usize]) -> Result<Totals, Error> {
 
 pub(in crate::engine) fn size_overflow() -> Error {
     Error::Policy("the manifest's file sizes add up past u64::MAX".to_string())
+}
+
+/// The indexes of the packs that hold a taken file. A pack is one blob, so taking one file inside it
+/// asks for the whole pack.
+pub(in crate::engine) fn packs_of(manifest: &Manifest, chosen: &[usize]) -> BTreeSet<u32> {
+    let mut packs = BTreeSet::new();
+    for &at in chosen {
+        if let Loc::Packed { pack_index, .. } = manifest.entries()[at].loc {
+            packs.insert(pack_index);
+        }
+    }
+    packs
+}
+
+/// The pack at `index`, or the refusal a manifest that names one it does not list earns. The rules
+/// already refuse such a manifest, so this is a bug if it is ever reached.
+pub(in crate::engine) fn pack(manifest: &Manifest, index: u32) -> Result<&PackRef, Error> {
+    manifest.packs().get(index as usize).ok_or_else(|| {
+        Error::Policy("the manifest points at a pack that is not listed".to_string())
+    })
+}
+
+/// How many bytes the content requests will move: every pack that holds a taken file, whole, and
+/// every taken file that is a blob of its own, counted once per entry that names it. A selection of
+/// one small packed file therefore moves its whole pack. The manifest's pack sizes are the sums of
+/// the files laid out in each pack by rule 16, and the size a pack really has is proved before its
+/// body is requested, so this is an estimate the sender cannot inflate for free.
+pub(in crate::engine) fn fetched_bytes(
+    manifest: &Manifest,
+    chosen: &[usize],
+) -> Result<u64, Error> {
+    let mut total = 0u64;
+    for index in packs_of(manifest, chosen) {
+        total = total
+            .checked_add(pack(manifest, index)?.size)
+            .ok_or_else(size_overflow)?;
+    }
+    for bytes in shared_bytes(manifest, chosen)?.into_values() {
+        total = total.checked_add(bytes).ok_or_else(size_overflow)?;
+    }
+    Ok(total)
+}
+
+/// How many bytes each blob root holds among the entries taken, counted once per entry that names
+/// it. A hostile manifest can make these add up past `u64::MAX`, which would wrap the progress
+/// total.
+pub(in crate::engine) fn shared_bytes(
+    manifest: &Manifest,
+    chosen: &[usize],
+) -> Result<BTreeMap<[u8; 32], u64>, Error> {
+    let mut shares: BTreeMap<[u8; 32], u64> = BTreeMap::new();
+    for &at in chosen {
+        let entry = &manifest.entries()[at];
+        if entry.kind != Kind::File {
+            continue;
+        }
+        if let Loc::Blob { root } = entry.loc {
+            let total = shares.entry(root).or_default();
+            *total = total.checked_add(entry.size).ok_or_else(size_overflow)?;
+        }
+    }
+    Ok(shares)
 }
 
 /// Refuses a manifest whose files do not add up to the size the ticket promises. `inspect` runs it
