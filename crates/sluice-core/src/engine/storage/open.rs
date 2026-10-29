@@ -148,7 +148,11 @@ pub(crate) fn hand_on(store: Option<FsStore>, dir: Option<super::Temp>) {
     match (store, dir) {
         (Some(store), Some(dir)) => {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                // Counted before the task is spawned, so the end of the command waits for a close
+                // and a removal that have not been scheduled yet.
+                let doing = super::removals::Doing::begin();
                 handle.spawn(async move {
+                    let _doing = doing;
                     {
                         let _settled = SETTLING.lock().await;
                         let _ = store.shutdown().await;

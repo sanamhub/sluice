@@ -45,6 +45,7 @@ pub use send::{
     prepare_with_rate as prepare_send_with_rate,
 };
 pub use storage::sweep_temporary_store;
+pub use storage::wait_for_removals;
 
 mod provider;
 mod receiver;
