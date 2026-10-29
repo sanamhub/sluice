@@ -4,6 +4,7 @@
 //! and never removed.
 
 use std::{
+    collections::BTreeSet,
     fs, io,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, Weak},
@@ -20,15 +21,24 @@ pub struct Record {
     pub path: PathBuf,
     /// The ticket root, as the marker spells it.
     pub root: String,
+    /// The top-level names the run that made the store created. They are kept here as well as in the
+    /// marker so a run of the same ticket into the same output can carry them after the folder is
+    /// gone, which is what makes a second selection write into the folder the first one made.
+    pub names: BTreeSet<String>,
 }
 
 /// Writes the record of a store this receive has just made and returns its id. The id is also
 /// written into the store's marker, so a folder that was replaced under the same name is not taken
 /// for this one.
-pub fn remember(path: &Path, root: &str) -> Result<String, Error> {
+pub fn remember(path: &Path, root: &str, names: &BTreeSet<String>) -> Result<String, Error> {
     let dir = Home::partial_records()?;
     let id = random_id()?;
-    let text = format!("path {}\nroot {root}\n", canonical(path)?.display());
+    let mut text = format!("path {}\nroot {root}\n", canonical(path)?.display());
+    for name in names {
+        text.push_str("name ");
+        text.push_str(name);
+        text.push('\n');
+    }
     fs::write(dir.join(&id), text).map_err(|e| storage("write a record in", &dir, e))?;
     Ok(id)
 }
@@ -121,6 +131,25 @@ pub fn discard(path: &Path) {
     }
 }
 
+/// [`discard`] for a store whose run finished but which took only part of the ticket: the folder
+/// goes, and the record stays when the folder is really gone, so the next claim of this ticket into
+/// this output can carry the top-level names the run made. A folder that survived the removal keeps
+/// nothing: its record goes as it always did, so a leftover folder is refused unread rather than
+/// taken for a store.
+pub async fn discard_apart_keeping_names(path: &Path) {
+    let dir = path.to_owned();
+    let _ = tokio::task::spawn_blocking(move || {
+        let gone = with_hold(&dir, || {
+            remove_quietly(&dir);
+            fs::symlink_metadata(&dir).is_err()
+        });
+        if !gone.unwrap_or(false) {
+            forget(&dir);
+        }
+    })
+    .await;
+}
+
 /// [`discard`] for a caller that already holds the path, such as a claim that made a folder and
 /// then could not write its marker.
 pub(super) fn discard_here(path: &Path) {
@@ -193,17 +222,21 @@ pub(crate) fn remember_as(path: &Path, root: &str, id: &str) -> Result<(), Error
 fn parse(id: &str, text: &str) -> Option<Record> {
     let mut path = None;
     let mut root = None;
+    let mut names = BTreeSet::new();
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("path ") {
             path = Some(PathBuf::from(rest));
         } else if let Some(rest) = line.strip_prefix("root ") {
             root = Some(rest.to_string());
+        } else if let Some(rest) = line.strip_prefix("name ") {
+            names.insert(rest.to_string());
         }
     }
     Some(Record {
         id: id.to_string(),
         path: path.filter(|path| path.is_absolute())?,
         root: root?,
+        names,
     })
 }
 

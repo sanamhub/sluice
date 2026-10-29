@@ -113,7 +113,9 @@ when an entry under it is taken, a link is taken when it matches, and only the t
 is fetched. A file under 1 MiB travels inside a pack beside other files, and a pack is one blob, so
 taking a packed file fetches its whole pack; the planned line says how many bytes that moves. A
 partial store made with one selection is not continued by a receive with another: it starts a store
-of its own. Because this receive takes only a part of the ticket, it does not end a one-time
+of its own. The top-level names an earlier selection's run made stay this ticket's in this output, so
+a second selection writes into them without `--force`; a file that run did not write still clashes
+as any other. Because this receive takes only a part of the ticket, it does not end a one-time
 `sluice send`: the sender is still serving afterwards, and only a receive of the whole ticket stops
 it. A sender that serves partial receivers should run with `--keep` and stop it with Ctrl+C.
 

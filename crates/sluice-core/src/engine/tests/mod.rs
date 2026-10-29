@@ -33,6 +33,7 @@ mod done;
 mod inspect;
 mod lifecycle;
 mod live;
+mod names;
 mod pack;
 mod resume;
 mod rules;
@@ -41,8 +42,8 @@ mod server;
 mod transfer;
 
 use super::{
-    ALPN, Congestion, Event, Hello, ReceiveOptions, ServeEnd, Stop, StopEnd, greet, hello, now_ms,
-    prepare_send, receive,
+    ALPN, Congestion, Event, Hello, ReceiveOptions, Selection, ServeEnd, Stop, StopEnd, greet,
+    hello, now_ms, prepare_send, receive,
 };
 
 /// Every byte a send left in the home: what is under its temporary area and in the `blobs` folder an
@@ -84,6 +85,29 @@ fn options(out: &Path) -> super::ReceiveOptions {
         max_network_failures: crate::queue::MAX_NETWORK_FAILURES,
         include: None,
     }
+}
+
+/// The options of a receive that takes only the entries the patterns match.
+fn selecting(out: &Path, patterns: &[&str]) -> super::ReceiveOptions {
+    let mut options = options(out);
+    let patterns: Vec<String> = patterns
+        .iter()
+        .map(|pattern| (*pattern).to_string())
+        .collect();
+    options.include = Some(Selection::new(&patterns).unwrap());
+    options
+}
+
+/// A folder of one file at the top, one below it and one deeper still, with a second top-level file
+/// that no pattern in these tests names.
+fn tree(dir: &TempDir) -> std::path::PathBuf {
+    let tree = dir.path().join("tree");
+    fs::create_dir_all(tree.join("sub").join("deep")).unwrap();
+    fs::write(tree.join("a.txt"), b"aaaa").unwrap();
+    fs::write(tree.join("sub").join("b.txt"), b"bb").unwrap();
+    fs::write(tree.join("sub").join("deep").join("c.txt"), b"ccc").unwrap();
+    fs::write(tree.join("skip.log"), b"never taken").unwrap();
+    tree
 }
 
 async fn prepared(dir: &TempDir, body: &[u8]) -> (super::Outgoing, String) {

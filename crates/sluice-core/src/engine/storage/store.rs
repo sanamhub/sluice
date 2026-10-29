@@ -147,7 +147,7 @@ pub fn begin(
 ) -> Result<(), Error> {
     registry::with_hold(dir, || {
         claim(dir)?;
-        let id = registry::remember(dir, root)?;
+        let id = registry::remember(dir, root, names)?;
         if let Err(e) = remember(dir, root, names, force, &id, select) {
             // The hold is already this task's, and a folder without a marker is one no later run
             // could tell from another transfer's.

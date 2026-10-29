@@ -2,18 +2,6 @@
 //! the run needs and the progress total are the pack's bytes rather than the bytes it writes.
 
 use super::*;
-use crate::engine::Selection;
-
-/// The options of a receive that takes only the entries the patterns match.
-fn selecting(out: &Path, patterns: &[&str]) -> super::ReceiveOptions {
-    let mut options = options(out);
-    let patterns: Vec<String> = patterns
-        .iter()
-        .map(|pattern| (*pattern).to_string())
-        .collect();
-    options.include = Some(Selection::new(&patterns).unwrap());
-    options
-}
 
 /// A provider of a manifest whose two small files share one pack, and which also lists a big file
 /// that is a blob of its own. A selection of one small file therefore fetches the whole pack, and a

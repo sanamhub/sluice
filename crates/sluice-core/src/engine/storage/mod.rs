@@ -21,7 +21,8 @@ pub(super) use open::{GC_INTERVAL, open_store_after};
 #[cfg(test)]
 pub(crate) use registry::remember_as;
 pub use registry::{
-    clash as registry_clash, discard_apart, find as find_record, forget as forget_record, with_hold,
+    clash as registry_clash, discard_apart, discard_apart_keeping_names, find as find_record,
+    forget as forget_record, with_hold,
 };
 #[cfg(test)]
 pub(crate) use removals::exclusive as exclusive_removals;
@@ -36,7 +37,9 @@ pub use temp_store::TempStore;
 // A receive makes its store, records it and names it through `begin`. A test also drives those
 // three steps on their own, so they are part of the test build and not of the library.
 #[cfg(test)]
-pub use registry::remember as remember_record;
+pub fn remember_record(path: &Path, root: &str) -> Result<String, Error> {
+    registry::remember(path, root, &std::collections::BTreeSet::new())
+}
 #[cfg(test)]
 pub use store::{MARKER, claim, remember};
 #[cfg(test)]
