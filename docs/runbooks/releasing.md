@@ -15,38 +15,91 @@ making one.
 | `release-plz.yml` | every push to `main` | opens or updates the release pull request with the version bump and the new changelog section |
 | `release.yml` | a tag `v<version>` | runs all of `ci.yml`, checks the tag, builds six binaries and the relay image for amd64 and arm64, waits for every build and an approval, publishes the release as a draft and then publishes it, then pushes and attests the image: each architecture first, then the version index |
 
-## Who can release
+## Who releases
 
-The tag ruleset's bypass list names **Repository admin**, and in a repository owned by a user that
-is the owner alone. GitHub's ruleset page lists "Repository admins" as eligible for bypass, and its
-permissions page says a personal repository "has a single owner who has full control" ([About
-rulesets][about-rulesets], [Permission levels][permission-levels]). The owner can therefore tag a
-commit that is not on `main`, whose `release.yml` names no environment and asks for any permissions.
-Nothing in this repository stops that.
+One person, the owner, makes a release. The `release` environment and the `release tags` ruleset
+make that person stop before anything becomes public, and the checks below are what they run while
+it is stopped. Neither setting adds a second person to the release. That is deliberate: the owner
+releases alone, and the pause is a pause, not a review by someone else.
 
-The approval protects against two things: a release started by anyone other than the owner, and a
-mistake by the owner, such as a tag on the wrong commit, a tag pushed before the release pull
-request merged, or a changed `.github/`. The two checks below catch the last two when a review runs.
+The owner of `sanamhub/sluice` is `@sanamhub`. GitHub's permissions page says a personal repository
+"has a single owner who has full control" ([Permission levels][permission-levels]).
 
-The owner can undo every setting that makes the review real: allow administrators to bypass again,
-remove the second reviewer, or untick **Prevent self-review**. Then a tag on `main` runs with no
-review. So the approval is a check on someone else's release and on the owner's mistakes, not a bar
-to the owner releasing alone.
+### The settings, as they are
+
+- **The `release` environment.** Settings > Environments > `release`:
+  - **Required reviewers** lists `sanamhub`, and **Prevent self-review** is off, so the owner may
+    approve a deployment they started.
+  - **Deployment branches and tags** is **Selected branches and tags**, with one policy: the tag
+    `v*`.
+  - **Allow administrators to bypass configured protection rules** is ticked
+    (`can_admins_bypass: true`), so the owner may also skip the pause.
+- **The `release tags` ruleset.** Settings > Rules > Rulesets > `release tags`: enforcement Active,
+  target tags matching `refs/tags/v*`, and **Restrict creations**, **Restrict updates**,
+  **Restrict deletions** and **Block force pushes** all on. The bypass list holds **Repository
+  admin**, which in this repository is the owner, with bypass mode **Always**.
+- **The repository owner.** Settings > General shows `sanamhub` as owner; the same login is the
+  only entry in both settings above.
+
+The API returns these values, so a reader can check them without the settings pages:
+
+```
+gh api repos/sanamhub/sluice/environments/release \
+  --jq '{reviewers: [.protection_rules[] | select(.type == "required_reviewers")
+                         | .reviewers[].reviewer.login],
+         prevent_self_review: [.protection_rules[] | select(.type == "required_reviewers")
+                               | .prevent_self_review],
+         admins_bypass: .can_admins_bypass,
+         branches: .deployment_branch_policy}'
+gh api repos/sanamhub/sluice/environments/release/deployment-branch-policies \
+  --jq '.branch_policies[] | {name, type}'
+gh api repos/sanamhub/sluice/rulesets --jq '.[] | select(.name == "release tags") | .id'
+gh api repos/sanamhub/sluice/rulesets/<id> \
+  --jq '{refs: .conditions.ref_name.include, rules: [.rules[].type], bypass: .bypass_actors}'
+```
+
+### What the pause protects against
+
+- **A tag pushed by mistake.** Pushing the tag starts the run, and nothing is published until the
+  owner approves `host`; the binary files, the release and the image all wait.
+- **A tag on the wrong commit.** The checks below refuse a tag that is not on `main`, and one whose
+  `.github/` differs from `main`'s, so a workflow that was not reviewed does not run.
+- **A changed `.github/`.** `release.yml` runs from the tagged commit. The environment makes that
+  commit's workflow wait, and the `.github/` check shows whether it is the one on `main`.
+- **A release that starts itself.** No tag publishes anything on its own. The pause is between the
+  tag and the first public file.
+
+### What it does not do
+
+- **It is not a second person.** The only reviewer is the owner, and **Prevent self-review** is off,
+  so the same person who pushed the tag approves the deployment. Nothing here catches a mistake the
+  owner does not notice.
+- **It does not bind the owner.** The owner can change every setting above: the reviewer, self
+  review, the deployment branches, the environment's admin bypass, and the ruleset's bypass or
+  rules. Both bypasses are on now, so the owner can also step around the pause without changing it.
+- **It does not catch every tag.** A commit whose `release.yml` names no environment asks nobody
+  for an approval. The ruleset still limits who can create the tag, not what the tag's workflow
+  says.
+- **It does not prove the tag is the release pull request's merge commit.** The checks say the tag
+  is on `main` with `main`'s `.github/`. A later commit on `main` that keeps `.github/` the same
+  passes them too.
 
 ## What gets approved
 
-1. **The release pull request.** Run its checks, review the version and the changelog, and edit the
-   changelog until each entry says what a user notices. Merging it is the first approval.
-2. **The tag.** Push it by hand; it is the one event that starts a release.
-3. **The `release` environment, for the binaries.** `host` waits for a required reviewer: Actions >
-   the run > **Review deployments** > tick `release` > **Approve and deploy**. It has to be someone
-   other than whoever pushed the tag.
-4. **The `release` environment, for the image.** The `image-publish` job starts only after `host`
-   has made the release, so it waits for a second review in the same run.
+A release has four points where the owner acts:
 
-One release asks for four approvals: the merge, the tag, and two reviews by the second person, both
-within 35 days of the tag push ([why][cut-a-release]). GitHub's documentation says each job that
-names an environment with required reviewers waits for one; that has not been seen on a run yet.
+1. **The release pull request.** Run its checks, review the version and the changelog, and edit the
+   changelog until each entry says what a user notices. Merging it is the first act.
+2. **The tag.** Push it by hand; it is the one event that starts a release.
+3. **The `release` environment, for the binaries.** `host` waits for an approval: Actions > the run
+   > **Review deployments** > tick `release` > **Approve and deploy**.
+4. **The `release` environment, for the image.** `image-publish` starts only after `host` has made
+   the release, so it waits for a second approval in the same run. One approval covers the one
+   image.
+
+Each job that names the environment waits separately, so `host` and `image-publish` are approved
+one after the other. Both approvals are the owner's, and both are within 35 days of the tag push
+([why][cut-a-release]).
 
 ### Checks before approving `host`
 
@@ -68,16 +121,17 @@ nobody is asked to approve, so nobody runs them. And they pass for a later commi
 keeps `.github/` the same, so they say the tag is on `main` with the reviewed workflow, not that it
 is the release pull request's merge commit.
 
-### Re-runs and who approves
+### Re-runs
 
-GitHub says that when an environment prevents self-approval, "you will not be able to approve a
-deployment from a workflow run you initiated" ([Reviewing deployments][reviewing-deployments]). A
-re-run has two actors: `github.actor` is "the user that triggered the initial workflow run" and
-`github.triggering_actor` is "the user that initiated the workflow run"; they may differ
-([Contexts][contexts]).
+With **Prevent self-review** off, the owner can approve a re-run as well, including one they
+started. The checks above still apply to the commit the re-run builds, and the limits below still
+apply to the run.
 
-No page says which one **Prevent self-review** reads, and no run has shown it. Treat both as barred:
-whoever pushed the tag or clicked **Re-run** does not approve that run.
+**The limits are GitHub's.** A run is cancelled 35 days after it starts, and approval time counts
+([Limits][run-limits]). A re-run is possible only up to 30 days after the initial run ([Re-running
+workflows and jobs][re-running-runs]). An environment waits at most 30 days for its approval
+([Reviewing deployments][reviewing-deployments]). Past any of those limits the fix is a new patch
+version: the run and its artifacts are gone, and the version cannot be reused.
 
 ## Checks on the release pull request
 
@@ -120,18 +174,18 @@ The version in the tag must be the one in `Cargo.toml`: `dist` refuses a tag tha
 version.
 4. Watch the `release` run. The `ci` jobs come first, then `plan`, which refuses a tag with anything
    but letters, digits, `.` and `-` after the `v`. Then the six binary builds, the two image builds
-   and the installers. `host` waits for all of them, and the approver approves it when they are
-   green, then `image-publish` once the release is up.
+   and the installers. `host` waits for all of them, and the owner approves it when they are green,
+   then `image-publish` once the release is up.
 
 **A failed build publishes nothing.** If the image fails on either architecture, `host` does not
 start, so no file or image is public. Open the run and choose **Re-run failed jobs**: the builds
-that passed keep their artifacts (30 days for binaries, 35 for images), and `host` waits for the
-reviewer again. If the re-run fails the same way, the cause is in the tagged commit: delete the tag,
+that passed keep their artifacts (30 days for binaries, 35 for images), and `host` waits for an
+approval again. If the re-run fails the same way, the cause is in the tagged commit: delete the tag,
 fix it on `main`, and tag the next patch version.
 
 If `host` fails after creating the draft, the draft remains and the next `host` refuses to start
 while a release or draft for the tag exists. It names the command: `gh release delete <tag> --yes`.
-Then **Re-run failed jobs**, and the approver approves again.
+Then **Re-run failed jobs**, and approve again.
 
 A failed push after `host` is different: the release is already public. This is the order, and what
 a failure leaves:
@@ -144,13 +198,7 @@ a failure leaves:
    | the index attestation | the index, unattested |
 
 Every step of a re-run writes its tag again, so a re-run overwrites what the failed one left. Re-run
-that job within 30 days of the tag push, and the second reviewer approves it again.
-
-**The limits are GitHub's.** A run is cancelled 35 days after it starts, and approval time counts
-([Limits][run-limits]). A re-run is possible only up to 30 days after the initial run ([Re-running
-workflows and jobs][re-running-runs]). An environment waits at most 30 days for its approval
-([Reviewing deployments][reviewing-deployments]). Past any of those limits the fix is a new patch
-version: the run and its artifacts are gone, and the version cannot be reused.
+that job within 30 days of the tag push, and approve it again.
 
 **How `host` publishes.** It creates the release as a draft with every file attached, and marks it
 published in a last step. An immutable release refuses a file added later ([Managing
@@ -169,7 +217,7 @@ exists leaves it for the operator to delete.
    | `sluice-cli.cdx.xml`, the SBOM | 1 |
    | `dist-manifest.json`, what dist built and where | 1 |
 
-Then verify one archive and one image as in [`docs/install.md`](../install.md).
+Then verify one archive and the image as in [`docs/install.md`](../install.md).
 
 ## Roll back
 
@@ -195,35 +243,23 @@ A release cannot be edited into a good one. Take it down and go back to the one 
 
 ## Repository settings
 
-- **A tag ruleset, first.** `release.yml` runs from the tagged commit, so a writer could tag a
-  commit whose workflow drops `environment: release`. A ruleset is the one thing that commit cannot
-  change. Settings > Rules > Rulesets > New ruleset > **New tag ruleset**: name `release tags`,
-  enforcement Active; bypass list **Repository admin**; target tags `v*`; tick **Restrict
-  creations**, **Restrict updates** and **Restrict deletions**, and leave **Block force pushes**
-  ticked.
-- **The `release` environment.** Settings > Environments > New environment > `release`. Tick
-  **Required reviewers**, add at least one person besides the maintainer, and tick **Prevent
-  self-review**. Under **Deployment branches and tags**, choose **Selected branches and tags** and
-  add `v*`. Nothing can be released until that person is added.
-- **Administrators must not bypass the environment.** On the same page, untick **Allow
-  administrators to bypass configured protection rules**. The default is the opposite ([Deployments
-  and environments][deployments], [Managing environments][managing-environments]), and with it
-  ticked the owner could force every pending job through alone. The audit log's environment events
-  are documented for organizations only; a personal account has a security log. No page says either
-  records this change, so the other person should look at the box before approving.
-- **Release immutability.** Settings > **Releases** > tick **Enable release immutability**. It
-  applies from the next release on ([Prevent release changes][prevent-changes], [Immutable
-  releases][immutable]). Turn it on before the first release, or that one stays mutable.
+The approval settings are under **Who releases**. These are the other settings a release needs:
+
+- **Release immutability.** Settings > **Releases** > **Enable release immutability**. It applies
+  from the next release on ([Prevent release changes][prevent-changes], [Immutable
+  releases][immutable]). It is off now
+  (`gh api repos/sanamhub/sluice/immutable-releases` says `"enabled": false`), and it should be on
+  before the first release, or that one stays mutable.
+- **Actions may open pull requests.** Settings > Actions > General > Workflow permissions >
+  **Allow GitHub Actions to create and approve pull requests** is on. Without it release-plz cannot
+  open its pull request.
+- **The image package is public.** After the first run, open `sluice-relay` under **Packages**,
+  then Package settings > **Change visibility** > Public. A new ghcr.io package starts private.
 - **No package can name one workflow.** Package settings grant Actions access to a repository, not a
   workflow file ([Package access][package-access]), so any workflow in a repository with that access
   and `packages: write` can push. The source label and the environment say which jobs are meant to
-  push, not which ones can. Check an image as [`docs/install.md`](../install.md#verify-an-image)
-  shows.
-- **Actions may open pull requests.** Settings > Actions > General > Workflow permissions > tick
-  **Allow GitHub Actions to create and approve pull requests**. Without it release-plz cannot open
-  its pull request.
-- **The image package is public.** After the first run, open `sluice-relay` under **Packages**,
-  then Package settings > **Change visibility** > Public. A new ghcr.io package starts private.
+  push, not which ones can. Check an image as
+  [`docs/install.md`](../install.md#verify-an-image) shows.
 - Attestations need a public repository, or a private one on GitHub Enterprise Cloud.
 
 No secret is needed. Every workflow uses `GITHUB_TOKEN` with the narrowest permissions each job
@@ -271,16 +307,12 @@ download hashes to the same value.
 
 [cut-a-release]: #cut-a-release
 [github-token]: https://docs.github.com/en/actions/concepts/security/github_token
-[managing-environments]: https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments
 [reviewing-deployments]: https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments
 [re-running-runs]: https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs
 [run-limits]: https://docs.github.com/en/actions/reference/limits
-[contexts]: https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
-[deployments]: https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments
 [events]: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
 [immutable]: https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases
 [prevent-changes]: https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes
 [package-access]: https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility
-[about-rulesets]: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets
 [permission-levels]: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/repository-access-and-collaboration/permission-levels-for-a-personal-account-repository
 [managing-releases]: https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository

@@ -18,20 +18,22 @@
 # * the `relay` image is built here, the GitHub release waits for it, and it is pushed only after
 #   the release is made: a failed build publishes nothing, and an image push that fails after the
 #   GitHub release leaves the release without its image (docs/runbooks/releasing.md);
-# * the image build records each image's ID as a job output before syft is installed, and the
+# * the image build records the image's ID as a job output before syft is installed, and the
 #   publishing job refuses a loaded image whose ID is not the one recorded: the check cannot be
 #   changed by a later step, and the index is built from the digests that were attested;
 # * the GitHub release is made as a draft with every file, then published, and `host` refuses to
 #   start when a release or draft for the tag is already there
 #   (docs/runbooks/releasing.md);
-# * every artifact `host` reads is kept 30 days and the images 35, so each outlives the run that
-#   would read it;
+# * every artifact `host` reads is kept 30 days and the image artifacts 35, so each outlives the
+#   run that would read it;
 # * the steps dist writes for system packages, containers and announcements are gone, because
 #   no target uses them.
 #
-# A tag `v<version>` starts a release. The maintainer pushes it by hand after merging the release
-# pull request, and the publishing jobs then wait for a reviewer of the `release` environment. A
-# pull request runs `dist plan` only, which checks dist-workspace.toml and builds nothing.
+# A tag `v<version>` starts a release. The owner pushes it by hand after merging the release pull
+# request, and the publishing jobs then wait in the `release` environment for the owner's approval:
+# the pause is not a second person, and docs/runbooks/releasing.md says what it does and does not
+# protect against. A pull request runs `dist plan` only, which checks dist-workspace.toml and builds
+# nothing.
 
 name: release
 
