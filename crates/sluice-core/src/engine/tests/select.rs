@@ -2,18 +2,6 @@
 //! for, and how it meets a partial store.
 
 use super::*;
-use crate::engine::Selection;
-
-/// The options of a receive that takes only the entries the patterns match.
-fn selecting(out: &Path, patterns: &[&str]) -> super::ReceiveOptions {
-    let mut options = options(out);
-    let patterns: Vec<String> = patterns
-        .iter()
-        .map(|pattern| (*pattern).to_string())
-        .collect();
-    options.include = Some(Selection::new(&patterns).unwrap());
-    options
-}
 
 /// The ticket's store path under `out`, and the root its record is keyed by.
 fn store_of(out: &Path, ticket: &str) -> (String, std::path::PathBuf) {
@@ -39,16 +27,6 @@ fn record_id(partial: &Path, owner: &str) -> String {
             std::fs::read_to_string(partial.join("ticket"))
         ),
     }
-}
-
-fn tree(dir: &TempDir) -> std::path::PathBuf {
-    let tree = dir.path().join("tree");
-    fs::create_dir_all(tree.join("sub").join("deep")).unwrap();
-    fs::write(tree.join("a.txt"), b"aaaa").unwrap();
-    fs::write(tree.join("sub").join("b.txt"), b"bb").unwrap();
-    fs::write(tree.join("sub").join("deep").join("c.txt"), b"ccc").unwrap();
-    fs::write(tree.join("skip.log"), b"never taken").unwrap();
-    tree
 }
 
 /// Two patterns take the files either of them names, with the folders above them, and the rest of
@@ -163,8 +141,6 @@ async fn a_store_is_continued_by_the_same_selection_and_not_by_another() {
     // The other selection takes another file, so it cannot continue a store holding the first set.
     let mut other = selecting(&out, &["tree/sub/**"]);
     other.write_limit = Some(1);
-    // The first runs made the top-level folder, which a run that starts its own store meets.
-    other.force = true;
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let third = super::receive(&text, &other, &tx).await.unwrap_err();
     assert!(matches!(third, Error::Storage(_)), "{third}");

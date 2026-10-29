@@ -1,6 +1,8 @@
 //! Claiming the partial store of one transfer, and the metadata store the manifest is read into
 //! until every check has passed.
 
+use std::collections::BTreeSet;
+
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::{
@@ -9,6 +11,18 @@ use super::{
 };
 use crate::engine::storage;
 use crate::{Error, manifest::Manifest, ticket::Ticket};
+
+/// What this home knows about the store folder this run would use.
+enum Found {
+    /// A store of this home's, in the folder its record names, with a marker that matches the
+    /// record: a run that took the same entries may continue it.
+    Store(storage::Owner, Option<storage::FolderId>),
+    /// The record of a store whose folder is gone. Nothing is left to continue, and the top-level
+    /// names that run made are still this ticket's in this output.
+    Names(BTreeSet<String>),
+    /// No store and no record.
+    Nothing,
+}
 
 /// Runs every check that needs no content blob, then claims the partial store and opens it. The
 /// order is the point: a refusal leaves no store for a later run to resume, and a folder is this
@@ -27,13 +41,15 @@ pub(super) async fn claim_store(
     // holds a different set of finished files, and resuming into it would write a tree no run asked
     // for. The store and its record go, and this run claims its own.
     let key = selection.key();
-    let (resumed, checked) = decide(partial, owner).await?;
-    let (resumed, checked) = match resumed {
-        Some(found) if found.select.as_deref().unwrap_or("all") != key => {
+    let (resumed, checked, carried, consume) = match decide(partial, owner).await? {
+        Found::Store(found, _) if found.select.as_deref().unwrap_or("all") != key => {
+            let carried = found.names;
             storage::discard_apart(partial).await;
-            (None, None)
+            (None, None, carried, false)
         }
-        other => (other, checked),
+        Found::Store(found, checked) => (Some(found), checked, BTreeSet::new(), false),
+        Found::Names(names) => (None, None, names, true),
+        Found::Nothing => (None, None, BTreeSet::new(), false),
     };
 
     let resume = resumed.is_some();
@@ -45,8 +61,20 @@ pub(super) async fn claim_store(
             options.out.display()
         )));
     }
-    let ours = resumed.map(|found| found.names).unwrap_or_default();
-    let (plan, created) = plan::check(manifest, ticket, options, resume, &ours, selection)?;
+    // The top-level names a store recorded are this ticket's in this output, whether that store is
+    // here to continue or only its record is left: a second selection writes into the folder the
+    // first one made instead of needing --force, which would also allow replacing its files.
+    let ours = match resumed {
+        Some(found) => found.names,
+        None => carried,
+    };
+    let (plan, _created) = plan::check(manifest, ticket, options, resume, &ours, selection)?;
+    // Every check passed, so this run is about to claim the folder. A record of names it carried is
+    // replaced by its own store's record now; two records for one folder would leave the next run
+    // guessing which is its own.
+    if consume {
+        storage::forget_record(partial);
+    }
     // The folder that was checked and the folder that is opened have to be one folder: another user
     // who can write in the output can rename a store away and put one there under the same name
     // between the two calls. A resumed store's identity comes from the handle its marker was read
@@ -54,7 +82,7 @@ pub(super) async fn claim_store(
     let before = if resume {
         checked
     } else {
-        start_store(partial, owner, &created, options, &key).await?;
+        start_store(partial, owner, &plan.ours, options, &key).await?;
         storage::identify(partial)?
     };
     // A store that a cancelled command left sharing an inode with a file in the output is given its
@@ -88,10 +116,7 @@ pub(super) async fn claim_store(
 /// to a blocking task that outlives the future which asked for it. Taking the hold here means this
 /// decision is made about the folder that is there once that removal is over, so a store this run
 /// resumes cannot be taken away under it.
-async fn decide(
-    partial: &std::path::Path,
-    owner: &str,
-) -> Result<(Option<storage::Owner>, Option<storage::FolderId>), Error> {
+async fn decide(partial: &std::path::Path, owner: &str) -> Result<Found, Error> {
     let dir = partial.to_owned();
     let root = owner.to_owned();
     tokio::task::spawn_blocking(move || storage::with_hold(&dir, || resumable_store(&dir, &root)))
@@ -107,10 +132,7 @@ async fn decide(
 /// the one that record was written with, and that marker names this ticket's root. Anything else is
 /// refused and left alone: it could have been planted where the store was, or be another
 /// transfer's, and resuming from it would trust bytes nobody in this home wrote.
-fn resumable_store(
-    partial: &std::path::Path,
-    owner: &str,
-) -> Result<(Option<storage::Owner>, Option<storage::FolderId>), Error> {
+fn resumable_store(partial: &std::path::Path, owner: &str) -> Result<Found, Error> {
     let record = storage::find_record(partial, owner)?;
     let exists = std::fs::symlink_metadata(partial).is_ok();
     match (record, exists) {
@@ -121,16 +143,15 @@ fn resumable_store(
             if mine != Some(record.id.as_str()) || found.owner.root != owner {
                 return Err(storage::registry_clash(partial));
             }
-            Ok((Some(found.owner), found.id))
+            Ok(Found::Store(found.owner, found.id))
         }
-        (Some(_), false) => {
-            // A record of a store that is gone: this home left it behind, so drop it.
-            storage::forget_record(partial);
-            Ok((None, None))
-        }
+        // A record whose folder is gone. The run that wrote it took part of this ticket into this
+        // output, so the top-level names it made are this ticket's here; nothing of its store is
+        // left, so nothing is continued.
+        (Some(record), false) => Ok(Found::Names(record.names)),
         // A folder with the store's name that this home did not record.
         (None, true) => Err(storage::registry_clash(partial)),
-        (None, false) => Ok((None, None)),
+        (None, false) => Ok(Found::Nothing),
     }
 }
 /// Makes this receive's store: the folder, the home's record of it, and the marker that ties the

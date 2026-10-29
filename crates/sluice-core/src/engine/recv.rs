@@ -165,8 +165,15 @@ async fn run(
             if let Some(message) = did_not_close(closed, endpoint) {
                 emit(events, Event::Warning { message });
             }
-            // Every content blob was moved or copied out; what is left is metadata.
-            storage::discard_apart(&partial).await;
+            // Every content blob was moved or copied out; what is left is metadata. A run that took
+            // part of the ticket keeps the record of the top-level names it made, so a later
+            // selection of the same ticket into this output writes beside them without --force; a
+            // run that took the whole ticket leaves nothing at all.
+            if selection.is_empty() {
+                storage::discard_apart(&partial).await;
+            } else {
+                storage::discard_apart_keeping_names(&partial).await;
+            }
             emit(
                 events,
                 Event::Verified {
