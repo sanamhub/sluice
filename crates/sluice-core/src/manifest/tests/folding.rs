@@ -144,8 +144,18 @@ fn a_composing_mark() -> impl Strategy<Value = char> {
 
 proptest! {
     /// A letter and its other case are one name once a combining mark is appended. Their folds
-    /// leave the composition undone differently, and only the last NFKC joins them. The NFC/NFD
-    /// test cannot see this, because the first NFKC already makes those two the same text.
+    /// leave the composition undone differently, and only the last NFKC joins them: the smallest
+    /// pair this finds is `ϊ` with U+0342 against `Ϊ` with U+0342, which a volume that resolves case
+    /// reads as one name.
+    ///
+    /// Each step of the key is guarded on its own elsewhere: the fold by
+    /// `full_folding_joins_a_string_with_its_expansion`, the dotless read by
+    /// `the_dotless_i_is_read_as_i`, the dropped code points by
+    /// `a_default_ignorable_code_point_is_read_away`, and the last composition by
+    /// `the_key_composes_after_the_fold_and_the_dotless_i_read`. The last of those is also the one
+    /// this property fails with when that composition is taken away, as does the composition test
+    /// itself. This property draws letters and marks only, so it would still pass a key that lost
+    /// the dotless read or the drop.
     #[test]
     fn a_letter_and_its_other_case_get_one_key(
         base in a_composing_letter(),
