@@ -122,34 +122,11 @@ async fn a_third_receiver_is_refused_while_a_place_holder_transfers() {
     wait_for_started(&mut events).await;
 
     // The third endpoint asks for the same blob and is refused before any byte is written.
-    let (third, store) = client(&dir, "third").await;
-    let refused_conn = third.connect(addr.clone(), iroh_blobs::ALPN).await.unwrap();
-    let refused = store
-        .remote()
-        .execute_get(refused_conn.clone(), GetRequest::blob(root))
-        .complete()
-        .await;
-    assert!(refused.is_err(), "a third receiver was served");
-    wait_for_refused(&mut events, 2).await;
-    refused_conn.close(0u32.into(), b"refused");
-    third.close().await;
+    refuse_third(&dir, &addr, root, &mut events, 2).await;
 
     // The holder finishes and closes, which ends the send: both places were taken and neither
     // holder has a connection left.
-    let mut done = false;
-    while let Some(item) = stream.next().await {
-        match item {
-            iroh_blobs::api::remote::GetProgressItem::Done(_) => {
-                done = true;
-                break;
-            }
-            iroh_blobs::api::remote::GetProgressItem::Progress(_) => {}
-            iroh_blobs::api::remote::GetProgressItem::Error(e) => {
-                panic!("the held transfer failed: {e}")
-            }
-        }
-    }
-    assert!(done, "the held transfer did not finish");
+    finish_held(stream).await;
     held.close(crate::engine::COMPLETE_CLOSE.into(), b"complete");
 
     let end = tokio::time::timeout(Duration::from_secs(10), serving)
@@ -159,6 +136,44 @@ async fn a_third_receiver_is_refused_while_a_place_holder_transfers() {
         .unwrap();
     assert_eq!(end, ServeEnd::Downloaded);
     second.close().await;
+}
+
+/// A third endpoint asks for `root` and is refused, and the sender says so once with the limit.
+async fn refuse_third(
+    dir: &TempDir,
+    addr: &iroh::EndpointAddr,
+    root: Hash,
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>,
+    places: u32,
+) {
+    let (third, store) = client(dir, "third").await;
+    let connection = third.connect(addr.clone(), iroh_blobs::ALPN).await.unwrap();
+    let refused = store
+        .remote()
+        .execute_get(connection.clone(), GetRequest::blob(root))
+        .complete()
+        .await;
+    assert!(refused.is_err(), "a third receiver was served");
+    wait_for_refused(events, places).await;
+    connection.close(0u32.into(), b"refused");
+    third.close().await;
+}
+
+/// Reads a held request to its end, so the connection can then close with the completion code.
+async fn finish_held<S>(mut stream: std::pin::Pin<&mut S>)
+where
+    S: n0_future::Stream<Item = iroh_blobs::api::remote::GetProgressItem>,
+{
+    while let Some(item) = stream.next().await {
+        match item {
+            iroh_blobs::api::remote::GetProgressItem::Done(_) => return,
+            iroh_blobs::api::remote::GetProgressItem::Progress(_) => {}
+            iroh_blobs::api::remote::GetProgressItem::Error(e) => {
+                panic!("the held transfer failed: {e}")
+            }
+        }
+    }
+    panic!("the held transfer did not finish");
 }
 
 /// A receive that took everything but closed without the completion code still holds a place, and
