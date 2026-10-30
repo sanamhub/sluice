@@ -7,12 +7,12 @@
     "64bit": {
       "url": "https://github.com/sanamhub/sluice/releases/download/v1.2.3/sluice-cli-x86_64-pc-windows-msvc.zip",
       "hash": "736c756963652d636c692d7838365f36342d70632d77696e646f77732d6d7376",
-      "bin": "sluice-cli-x86_64-pc-windows-msvc/sluice.exe"
+      "bin": "sluice.exe"
     },
     "arm64": {
       "url": "https://github.com/sanamhub/sluice/releases/download/v1.2.3/sluice-cli-aarch64-pc-windows-msvc.zip",
       "hash": "736c756963652d636c692d616172636836342d70632d77696e646f77732d6d73",
-      "bin": "sluice-cli-aarch64-pc-windows-msvc/sluice.exe"
+      "bin": "sluice.exe"
     }
   },
   "checkver": {

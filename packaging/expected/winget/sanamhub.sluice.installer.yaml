@@ -8,13 +8,13 @@ Installers:
     InstallerUrl: https://github.com/sanamhub/sluice/releases/download/v1.2.3/sluice-cli-x86_64-pc-windows-msvc.zip
     InstallerSha256: 736C756963652D636C692D7838365F36342D70632D77696E646F77732D6D7376
     NestedInstallerFiles:
-      - RelativeFilePath: sluice-cli-x86_64-pc-windows-msvc/sluice.exe
+      - RelativeFilePath: sluice.exe
         PortableCommandAlias: sluice
   - Architecture: arm64
     InstallerUrl: https://github.com/sanamhub/sluice/releases/download/v1.2.3/sluice-cli-aarch64-pc-windows-msvc.zip
     InstallerSha256: 736C756963652D636C692D616172636836342D70632D77696E646F77732D6D73
     NestedInstallerFiles:
-      - RelativeFilePath: sluice-cli-aarch64-pc-windows-msvc/sluice.exe
+      - RelativeFilePath: sluice.exe
         PortableCommandAlias: sluice
 ManifestType: installer
 ManifestVersion: 1.6.0

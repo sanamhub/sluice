@@ -58,8 +58,8 @@ The manifest goes in a bucket: a repository named `scoop-bucket` under the same 
 
 - **What it needs:** an account with write access to the bucket. Nothing is stored here.
 - **Check it first, on Windows with Scoop:** `scoop checkver sluice` and `scoop install sluice`, then
-  `sluice --version`. The `bin` entry points inside the archive's own folder, which is where `dist`
-  puts `sluice.exe`.
+  `sluice --version`. The `bin` entry is `sluice.exe`, because `dist` puts a `.zip`'s files at its
+  root; a `.tar.xz` keeps them under a folder named for the archive.
 - **Then:** commit the manifest to the bucket. The `autoupdate` block lets the bucket's own
   `checkver` job move it on when a newer release appears.
 
