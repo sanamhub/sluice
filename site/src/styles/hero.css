@@ -41,7 +41,7 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  grid-template-columns: minmax(0, 10fr) minmax(0, 14fr);
   align-items: center;
   gap: clamp(1.5rem, 4vw, 4rem);
 }
@@ -49,7 +49,13 @@
 .hero-copy {
   display: grid;
   gap: var(--space-3);
-  max-width: 36rem;
+  max-width: 38rem;
+}
+
+/* Three lines at most beside the scene: the headline is set a step below the page's largest size,
+   which belongs to a headline with the whole width to itself. */
+.hero h1 {
+  font-size: clamp(2.3rem, 1.1rem + 3.3vw, 4.1rem);
 }
 
 .lede {
@@ -66,14 +72,15 @@
 
 .hero-art {
   position: relative;
-  aspect-ratio: 1000 / 620;
-  margin-right: calc(-1 * clamp(0rem, 4vw, 3rem));
+  aspect-ratio: 1000 / 680;
+  /* The scene runs on into the page margin, where its fade ends, instead of stopping at the column. */
+  margin-right: calc(-1 * max(var(--gutter), (100vw - var(--wrap)) / 2 - 1rem));
 }
 
 /* The scene has no frame: its edges fade into the page. */
 .hero-art {
   mask-image:
-    linear-gradient(90deg, transparent 0, #000 9%, #000 91%, transparent 100%),
+    linear-gradient(90deg, transparent 0, #000 5%, #000 95%, transparent 100%),
     linear-gradient(180deg, #000 80%, transparent 100%);
   mask-composite: intersect;
 }
@@ -237,27 +244,68 @@
   font-weight: 600;
 }
 
+.install-command + .install-command {
+  margin-top: 0.85rem;
+}
+
+.install-caption {
+  margin-bottom: 0.35rem;
+  color: var(--mist);
+  font-size: var(--step--1);
+}
+
+/* The command and its button side by side: the button keeps its own column, so a long command
+   wraps beside it instead of running under it. A wrapped line hangs under the prompt. */
 .install-code {
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 0.75rem;
 }
 
 .install-code pre {
-  flex: 1;
-  min-width: 0;
   margin: 0;
-  overflow-x: auto;
   color: var(--ink);
   font-size: 0.86rem;
   line-height: 1.6;
-  white-space: pre;
-  scrollbar-width: thin;
+  white-space: normal;
 }
 
-.install-code pre::before {
+.install-code .line {
+  display: block;
+  padding-left: 1.2em;
+  text-indent: -1.2em;
+  /* Commands hold no runs of spaces, so the template's own indentation can collapse. */
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.install-code .line::before {
   content: "$ ";
   color: var(--water);
+}
+
+/* The rest of a command that runs over two lines: indented, with no prompt of its own. */
+.install-code .line.more {
+  padding-left: 2.4em;
+}
+
+.install-code .line.more::before {
+  content: none;
+}
+
+/* A command offered for selection only: one click selects the whole of it. */
+.install-code[data-manual] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.install-code[data-manual] pre {
+  padding-block: 0.45rem;
+  padding-right: 0.6rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-s);
+  user-select: all;
+  cursor: text;
 }
 
 .install-note {

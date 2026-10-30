@@ -204,25 +204,34 @@
 
 .compare-scroll {
   overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
 }
 
 .compare-table {
   width: 100%;
-  min-width: 40rem;
+  min-width: 58rem;
+  table-layout: fixed;
   font-size: var(--step--1);
+  line-height: 1.45;
 }
 
 .compare-table th,
 .compare-table td {
-  padding: 1rem 1.1rem;
+  padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
 }
 
+.compare-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
 .compare-table thead th {
   color: var(--mist);
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .compare-table thead th:nth-child(2) {
@@ -231,19 +240,45 @@
   font-weight: 700;
 }
 
+.compare-table thead th:first-child {
+  width: 13%;
+}
+
+.compare-table thead th:nth-child(2) {
+  width: 21%;
+}
+
+/* The question column stays put while the tools scroll past it on a narrow screen. */
+.compare-table tbody th,
+.compare-table thead th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--basin);
+}
+
 .compare-table tbody th {
-  width: 24%;
   color: var(--ink);
   font-weight: 600;
 }
 
 .compare-table td:nth-child(2),
-.compare-table th:nth-child(2) {
+.compare-table thead th:nth-child(2) {
   background: var(--water-soft);
+  color: var(--ink);
 }
 
-.compare-table td:nth-child(3) {
+.compare-table td {
   color: var(--mist);
+}
+
+.compare-table td.unstated {
+  color: color-mix(in srgb, var(--mist) 60%, transparent);
+  font-style: italic;
+}
+
+.compare-sources {
+  max-width: var(--measure);
 }
 
 /* Security: three facts and a ticket with punched notches, as a ticket has. */
@@ -332,6 +367,287 @@
     color-mix(in srgb, var(--stone) 55%, var(--basin));
 }
 
+/* The channel drawing beside the steps. Each stage is a still pose first; motion is added on top
+   only for readers who have not asked for less, so the reduced picture is the same story. */
+
+.channel {
+  margin: var(--space-4) 0 0;
+}
+
+.channel svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.c-bed {
+  fill: var(--stone-2);
+  stroke: var(--line-strong);
+}
+
+.c-water {
+  fill: var(--water-deep);
+  opacity: 0.55;
+}
+
+.c-machine > rect {
+  fill: var(--stone);
+  stroke: var(--line-strong);
+  stroke-width: 1.5;
+}
+
+.c-cell {
+  fill: var(--line);
+}
+
+.c-cell.on {
+  fill: var(--water);
+}
+
+.c-stage {
+  opacity: 0;
+  transition: opacity 400ms ease;
+}
+
+[data-stage="1"] .c-stage-1,
+[data-stage="2"] .c-stage-2,
+[data-stage="3"] .c-stage-3 {
+  opacity: 1;
+}
+
+/* The receiver's face fills only once blocks have crossed. */
+[data-stage="3"] .c-receiver .c-cell {
+  fill: var(--water);
+}
+
+[data-stage="3"] .c-receiver .c-cell:nth-child(7) {
+  fill: var(--brass);
+}
+
+/* Stage 1: the ticket, held at the top of its arc. */
+.c-arc {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 6;
+}
+
+.c-ticket {
+  transform: translate(240px, 40px);
+}
+
+.c-ticket path {
+  fill: var(--brass);
+}
+
+.c-ticket-line {
+  fill: var(--brass-ink);
+  opacity: 0.7;
+}
+
+/* Stage 2: the relay is asked, and the direct path is open. */
+.c-relay rect {
+  fill: var(--stone);
+  stroke: var(--line-strong);
+  stroke-width: 1.5;
+}
+
+.c-relay circle {
+  fill: var(--mist);
+}
+
+.c-ask {
+  fill: none;
+  stroke: var(--mist);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 5;
+}
+
+.c-direct {
+  fill: none;
+  stroke: var(--water);
+  stroke-width: 3;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 6px var(--water-soft));
+}
+
+/* Stage 3: blocks spaced along the channel, the bad one fallen under the gate. */
+.c-gate rect {
+  fill: var(--brass);
+}
+
+.c-gate-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  fill: none;
+  stroke: var(--brass);
+  stroke-width: 2;
+  opacity: 0.35;
+}
+
+.c-block {
+  fill: var(--water);
+  transform: translateX(calc(var(--n) * 52px));
+}
+
+.c-block.bad {
+  fill: none;
+  stroke: var(--mist);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+  transform: translate(112px, 74px);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-stage="1"] .c-arc {
+    animation: c-flow 1.2s linear infinite;
+  }
+
+  [data-stage="1"] .c-ticket {
+    animation: c-ticket 3.6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+
+  [data-stage="2"] .c-ask {
+    stroke-dashoffset: 140;
+    animation: c-ask 4.2s ease-out infinite;
+  }
+
+  [data-stage="2"] .c-direct {
+    stroke-dasharray: 224;
+    animation: c-direct 4.2s ease-in-out infinite;
+  }
+
+  [data-stage="2"] .c-relay circle {
+    animation: c-blink 4.2s ease infinite;
+  }
+
+  [data-stage="3"] .c-block {
+    animation: c-cross 3.5s linear infinite;
+    animation-delay: calc(var(--n) * 0.7s);
+  }
+
+  [data-stage="3"] .c-block.bad {
+    animation-name: c-drop;
+  }
+
+  [data-stage="3"] .c-gate-ring {
+    animation: c-check 0.7s ease-out infinite;
+  }
+}
+
+@keyframes c-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+@keyframes c-ticket {
+  0% {
+    transform: translate(78px, 104px) scale(0.6);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  50% {
+    transform: translate(240px, 40px) scale(1);
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(402px, 104px) scale(0.6);
+    opacity: 0;
+  }
+}
+
+@keyframes c-ask {
+  0% {
+    stroke-dashoffset: 140;
+    opacity: 1;
+  }
+  35%,
+  70% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.25;
+  }
+}
+
+@keyframes c-direct {
+  0%,
+  40% {
+    stroke-dashoffset: 224;
+  }
+  70%,
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes c-blink {
+  0%,
+  10%,
+  40%,
+  100% {
+    fill: var(--mist);
+  }
+  20%,
+  30% {
+    fill: var(--water);
+  }
+}
+
+@keyframes c-cross {
+  0% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  8%,
+  86% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(234px);
+    opacity: 0;
+  }
+}
+
+@keyframes c-drop {
+  0% {
+    transform: translate(0, 0);
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  48% {
+    transform: translate(112px, 0);
+  }
+  70% {
+    transform: translate(112px, 74px);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(112px, 90px);
+    opacity: 0;
+  }
+}
+
+@keyframes c-check {
+  from {
+    opacity: 0.8;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.3);
+  }
+}
+
 /* Relay and install: a heading beside its content. */
 
 .relay-grid,
@@ -363,6 +679,88 @@
 .relay-modes div {
   padding-top: var(--space-2);
   border-top: 2px solid var(--water-deep);
+}
+
+/* The path drawing above each mode. The hello always goes through the relay; the blocks follow
+   the route the mode gives them, below it or through it. */
+.relay-path {
+  width: 100%;
+  max-width: 16rem;
+  height: auto;
+  margin-bottom: var(--space-2);
+}
+
+.r-node rect,
+.r-machine {
+  fill: var(--stone);
+  stroke: var(--line-strong);
+  stroke-width: 1.5;
+}
+
+.r-node circle {
+  fill: var(--mist);
+}
+
+.carry .r-node circle {
+  fill: var(--water);
+}
+
+.r-hello {
+  fill: none;
+  stroke: var(--mist);
+  stroke-width: 1.25;
+  stroke-dasharray: 3 4;
+}
+
+.r-route {
+  fill: none;
+  stroke: var(--water-deep);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.7;
+}
+
+.meet .r-route {
+  stroke: var(--water);
+}
+
+.r-block {
+  fill: var(--water);
+  offset-rotate: 0deg;
+  offset-distance: calc(var(--n) * 33%);
+}
+
+@supports not (offset-path: path("M0 0")) {
+  .r-block {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .r-hello {
+    animation: c-flow 1.2s linear infinite;
+  }
+
+  .r-block {
+    animation: r-move 2.4s linear infinite;
+    animation-delay: calc(var(--n) * -0.8s);
+  }
+}
+
+@keyframes r-move {
+  from {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  12%,
+  88% {
+    opacity: 1;
+  }
+  to {
+    offset-distance: 100%;
+    opacity: 0;
+  }
 }
 
 .relay-modes dt {

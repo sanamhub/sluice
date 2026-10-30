@@ -1,5 +1,6 @@
 ---
 import { RELAY_README } from "../data/links";
+import RelayPath from "./RelayPath.astro";
 ---
 
 <section class="section relay" aria-labelledby="relay-title">
@@ -15,10 +16,12 @@ import { RELAY_README } from "../data/links";
         <div class="relay-body">
             <dl class="relay-modes">
                 <div>
+                    <RelayPath mode="meet" />
                     <dt>Meeting point</dt>
                     <dd>Coordinates the hole punch at 64 KiB/s per client and carries no file data.</dd>
                 </div>
                 <div>
+                    <RelayPath mode="carry" />
                     <dt>Full relay</dt>
                     <dd>Also carries the bytes for pairs that cannot connect directly.</dd>
                 </div>

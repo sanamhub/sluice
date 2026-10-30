@@ -1,0 +1,72 @@
+---
+// The picture beside "How a file crosses". One drawing in three stages, one per step:
+//   1. the sender prints a ticket, and it reaches the receiver some other way;
+//   2. the machines ask a relay where the other is, then open a direct path between them;
+//   3. blocks cross the channel, each checked at the gate; a bad one is dropped, a cut link
+//      resumes from the blocks already kept.
+// The steps' text says all of this, so the drawing is decoration to a screen reader. Without the
+// script, or with reduced motion, it shows each stage as a still.
+const CELLS = Array.from({ length: 12 }, (_, i) => ({ x: (i % 4) * 22, y: Math.floor(i / 4) * 22 }));
+const BLOCKS = [0, 1, 2, 3, 4];
+---
+
+<figure class="channel" data-channel data-stage="3" aria-hidden="true">
+    <svg viewBox="0 0 480 280" focusable="false">
+        <!-- The channel bed, and the water in it. -->
+        <rect class="c-bed" x="120" y="150" width="240" height="26" rx="6"></rect>
+        <rect class="c-water" x="124" y="156" width="232" height="14" rx="4"></rect>
+
+        <!-- Two machines, each with a face of cells: lit cells are blocks it holds. -->
+        <g class="c-machine" transform="translate(28 112)">
+            <rect width="100" height="100" rx="12"></rect>
+            <g transform="translate(17 20)">
+                {CELLS.map((cell) => <rect class="c-cell on" x={cell.x} y={cell.y} width="16" height="16" rx="3" />)}
+            </g>
+        </g>
+        <g class="c-machine c-receiver" transform="translate(352 112)">
+            <rect width="100" height="100" rx="12"></rect>
+            <g transform="translate(17 20)">
+                {
+                    CELLS.map((cell, i) => (
+                        <rect class="c-cell" style={`--n:${i}`} x={cell.x} y={cell.y} width="16" height="16" rx="3" />
+                    ))
+                }
+            </g>
+        </g>
+
+        <!-- Stage 1: the ticket leaves the sender and reaches the receiver over any channel. -->
+        <g class="c-stage c-stage-1">
+            <path class="c-arc" d="M78 104 C 120 20, 360 20, 402 104"></path>
+            <g class="c-ticket">
+                <path d="M-34 -14 h68 v9 a5 5 0 0 0 0 10 v9 h-68 v-9 a5 5 0 0 0 0 -10 z"></path>
+                <rect class="c-ticket-line" x="-24" y="-4" width="40" height="3" rx="1.5"></rect>
+                <rect class="c-ticket-line short" x="-24" y="3" width="26" height="3" rx="1.5"></rect>
+            </g>
+        </g>
+
+        <!-- Stage 2: both machines reach the relay, then a direct path opens between them. -->
+        <g class="c-stage c-stage-2">
+            <g class="c-relay" transform="translate(240 46)">
+                <rect x="-30" y="-18" width="60" height="36" rx="10"></rect>
+                <circle r="5"></circle>
+            </g>
+            <path class="c-ask c-ask-left" d="M110 112 L 214 58"></path>
+            <path class="c-ask c-ask-right" d="M370 112 L 266 58"></path>
+            <path class="c-direct" d="M128 128 L 352 128"></path>
+        </g>
+
+        <!-- Stage 3: blocks cross; the gate checks each. One fails and drops; the rest land. -->
+        <g class="c-stage c-stage-3">
+            <g class="c-gate" transform="translate(240 0)">
+                <rect x="-4" y="104" width="8" height="78" rx="2"></rect>
+                <rect x="-22" y="100" width="44" height="8" rx="3"></rect>
+                <circle class="c-gate-ring" cy="163" r="16"></circle>
+            </g>
+            {BLOCKS.map((n) => <rect class:list={["c-block", { bad: n === 2 }]} style={`--n:${n}`} x="118" y="152" width="20" height="20" rx="4" />)}
+        </g>
+    </svg>
+</figure>
+
+<script>
+    import "../scripts/channel";
+</script>

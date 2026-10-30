@@ -1,44 +1,31 @@
 ---
-// Every channel 0.1.0 ships, in the same tabs as the hero. Names match docs/install.md and the
-// package files the release generates.
+// Every channel 0.1.0 ships, in the same tabs as the hero.
+import { AUR, BREW, DOCKER, POWERSHELL_BY_HAND, SCOOP, SHELL, SOURCE, WINGET } from "../data/install";
 import { INSTALL } from "../data/links";
 import InstallTabs from "./InstallTabs.astro";
 
 const channels = [
-    {
-        id: "shell",
-        label: "Shell",
-        lines: [
-            "curl --proto '=https' --tlsv1.2 -LsSf \\",
-            "  https://github.com/sanamhub/sluice/releases/latest/download/sluice-cli-installer.sh | sh",
-        ],
-        note: "Linux and macOS, x86-64 and ARM64.",
-    },
+    { id: "shell", label: "Shell", commands: [{ lines: SHELL }], note: "Linux and macOS, x86-64 and ARM64." },
     {
         id: "powershell",
         label: "PowerShell",
-        lines: ["irm https://github.com/sanamhub/sluice/releases/latest/download/sluice-cli-installer.ps1 | iex"],
+        commands: [{ ...POWERSHELL_BY_HAND, caption: "Select the line to copy it." }],
         note: "Windows, x86-64 and ARM64.",
     },
-    { id: "brew", label: "Homebrew", lines: ["brew install sanamhub/tap/sluice"], note: "macOS and Linux." },
-    {
-        id: "scoop",
-        label: "Scoop",
-        lines: ["scoop bucket add sanamhub https://github.com/sanamhub/scoop-bucket", "scoop install sluice"],
-        note: "Windows.",
-    },
-    { id: "winget", label: "winget", lines: ["winget install --id sanamhub.sluice -e"], note: "Windows." },
-    { id: "aur", label: "AUR", lines: ["yay -S sluice-bin"], note: "Arch Linux, x86-64 and ARM64." },
+    { id: "brew", label: "Homebrew", commands: [{ lines: BREW }], note: "macOS and Linux." },
+    { id: "scoop", label: "Scoop", commands: [{ lines: SCOOP }], note: "Windows." },
+    { id: "winget", label: "winget", commands: [{ lines: WINGET }], note: "Windows." },
+    { id: "aur", label: "AUR", commands: [{ lines: AUR }], note: "Arch Linux, x86-64 and ARM64." },
     {
         id: "docker",
         label: "Docker",
-        lines: ["docker pull ghcr.io/sanamhub/sluice:0.1.0"],
+        commands: [{ lines: DOCKER }],
         note: "Linux, amd64 and arm64. The home lives on a volume.",
     },
     {
         id: "source",
         label: "Source",
-        lines: ["cargo install --git https://github.com/sanamhub/sluice sluice-cli --locked"],
+        commands: [{ lines: SOURCE }],
         note: "Any of the six targets, with Rust 1.91 or newer.",
     },
 ];

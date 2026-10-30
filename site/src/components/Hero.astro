@@ -1,25 +1,13 @@
 ---
+import { BREW, POWERSHELL_BY_HAND, SCOOP, SHELL } from "../data/install";
 import { INSTALL, REPO } from "../data/links";
 import HeroStill from "./HeroStill.astro";
 import InstallTabs from "./InstallTabs.astro";
 
 const quick = [
-    {
-        id: "unix",
-        label: "macOS and Linux",
-        lines: [
-            "curl --proto '=https' --tlsv1.2 -LsSf \\",
-            "  https://github.com/sanamhub/sluice/releases/latest/download/sluice-cli-installer.sh | sh",
-        ],
-    },
-    {
-        id: "windows",
-        label: "Windows",
-        lines: [
-            "irm https://github.com/sanamhub/sluice/releases/latest/download/sluice-cli-installer.ps1 | iex",
-        ],
-    },
-    { id: "brew", label: "Homebrew", lines: ["brew install sanamhub/tap/sluice"] },
+    { id: "unix", label: "macOS and Linux", commands: [{ lines: SHELL }] },
+    { id: "windows", label: "Windows", commands: [{ lines: SCOOP }, POWERSHELL_BY_HAND] },
+    { id: "brew", label: "Homebrew", commands: [{ lines: BREW }] },
 ];
 ---
 
