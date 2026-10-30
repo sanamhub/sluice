@@ -27,9 +27,15 @@ fn shipped(version: &str, triple: &str) -> String {
     url(version, &target(triple).artifact())
 }
 
-/// The path of `name` inside `triple`'s archive, which unpacks to the folder `dist` names for it.
+/// The path of `name` inside `triple`'s archive. `dist` puts a `.tar.xz` under a folder named for the
+/// archive and a `.zip` at its root, as the 0.1.0 archives show.
 fn inside(triple: &str, name: &str) -> String {
-    format!("{}/{}", target(triple).folder(), name)
+    let target = target(triple);
+    if target.zipped {
+        name.to_string()
+    } else {
+        format!("{}/{}", target.folder(), name)
+    }
 }
 
 /// A Homebrew formula for the four Unix targets.
