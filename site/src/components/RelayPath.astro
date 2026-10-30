@@ -1,0 +1,24 @@
+---
+// Where the bytes go in each relay mode. As a meeting point the relay only passes the hello, and
+// the blocks then take the direct path below it; as a full relay the blocks go up through it. The
+// text beside it says the same, so the drawing is decoration to a screen reader.
+interface Props {
+    mode: "meet" | "carry";
+}
+
+const { mode } = Astro.props;
+const BLOCKS = [0, 1, 2];
+const route = mode === "meet" ? "M52 92 L 188 92" : "M52 84 L 120 30 L 188 84";
+---
+
+<svg class:list={["relay-path", mode]} viewBox="0 0 240 120" aria-hidden="true" focusable="false">
+    <g class="r-node" transform="translate(120 28)">
+        <rect x="-24" y="-15" width="48" height="30" rx="8"></rect>
+        <circle r="4"></circle>
+    </g>
+    <path class="r-hello" d="M52 84 L 120 30 L 188 84"></path>
+    <path class="r-route" d={route}></path>
+    <rect class="r-machine" x="8" y="74" width="44" height="36" rx="7"></rect>
+    <rect class="r-machine" x="188" y="74" width="44" height="36" rx="7"></rect>
+    {BLOCKS.map((n) => <rect class="r-block" style={`--n:${n}; offset-path: path("${route}")`} x="-6" y="-6" width="12" height="12" rx="3" />)}
+</svg>

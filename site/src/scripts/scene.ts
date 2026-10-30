@@ -354,7 +354,7 @@ export function mount(host: HTMLElement) {
 
   const built = build(host);
   const camera = new PerspectiveCamera(26, 1, 0.1, 60);
-  const target = new Vector3(0, 0.45, 0);
+  const target = new Vector3(0, 0.55, 0);
   const pointer = { x: 0, y: 0, ex: 0, ey: 0 };
   let distance = 13;
 
@@ -364,7 +364,7 @@ export function mount(host: HTMLElement) {
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     // Keep both machines in view on a narrow screen by stepping back, not by shrinking the fov.
-    distance = 13 * Math.min(1.9, Math.max(1, 1.6 / camera.aspect));
+    distance = 11.6 * Math.min(1.9, Math.max(1, 1.62 / camera.aspect));
     camera.updateProjectionMatrix();
   };
   new ResizeObserver(resize).observe(host);
@@ -402,10 +402,11 @@ export function mount(host: HTMLElement) {
     last = now;
     pointer.ex += (pointer.x - pointer.ex) * 0.04;
     pointer.ey += (pointer.y - pointer.ey) * 0.04;
-    // A three-quarter view from the receiver's side and above, so the gate's two posts, the
-    // channel's depth and both faces read. The pointer and a slow sway turn it a little.
-    const azimuth = 0.42 + Math.sin(clock * 0.12) * 0.05 + pointer.ex * 0.12;
-    const elevation = 0.44 - pointer.ey * 0.08;
+    // A near-frontal view from above, turned a little toward the receiver, so both machines stand
+    // the same size either side of the gate and the channel's depth still reads. The pointer and a
+    // slow sway turn it a little.
+    const azimuth = 0.2 + Math.sin(clock * 0.12) * 0.04 + pointer.ex * 0.1;
+    const elevation = 0.5 - pointer.ey * 0.06;
     camera.position.set(
       Math.sin(azimuth) * Math.cos(elevation) * distance,
       Math.sin(elevation) * distance,

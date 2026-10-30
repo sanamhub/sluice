@@ -2,6 +2,7 @@
 // The three things that happen in a transfer, in order. The line beside them fills with water as
 // the reader scrolls, and each step's mark turns brass when the water reaches it.
 import { DESIGN, IROH, IROH_BLOBS } from "../data/links";
+import ChannelDiagram from "./ChannelDiagram.astro";
 import Prose from "./Prose.astro";
 
 const steps = [
@@ -32,6 +33,7 @@ const steps = [
                 connection and <a href={IROH_BLOBS}>iroh-blobs</a> for verified storage; the
                 <a href={DESIGN}>design notes</a> have the rest.
             </p>
+            <ChannelDiagram />
         </div>
         <ol class="how-steps">
             {

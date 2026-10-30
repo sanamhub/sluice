@@ -45,13 +45,19 @@ for (const block of document.querySelectorAll<HTMLElement>("[data-tabs]")) {
 for (const button of document.querySelectorAll<HTMLButtonElement>(
   "[data-copy]",
 )) {
-  const code = button.parentElement?.querySelector("code");
+  const lines = [
+    ...(button.parentElement?.querySelectorAll(".line") ?? []),
+  ].map(
+    (line) =>
+      (line.classList.contains("more") ? "  " : "") +
+      (line.textContent ?? "").replace(/\s+/g, " ").trim(),
+  );
   const text = button.querySelector(".copy-text");
-  if (!code || !text || !navigator.clipboard) continue;
+  if (lines.length === 0 || !text || !navigator.clipboard) continue;
   button.hidden = false;
   button.addEventListener("click", async () => {
     try {
-      await navigator.clipboard.writeText(code.textContent ?? "");
+      await navigator.clipboard.writeText(lines.join("\n"));
       text.textContent = "Copied";
     } catch {
       text.textContent = "Select and copy";

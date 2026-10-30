@@ -1,11 +1,21 @@
 ---
 // Install commands behind tabs. With no script every panel shows, each under its own heading, so
 // nothing is hidden from a reader who never runs the page's code; the script turns them into tabs
-// and adds a copy button.
+// and adds a copy button to each command that offers one.
+//
+// A command marked `copy: false` gets no button. Content blockers treat a page that writes a piped
+// PowerShell download (`irm ... | iex`) to the clipboard as an attack, so that line is shown to be
+// selected by hand instead.
+interface Command {
+    lines: string[];
+    copy?: boolean;
+    caption?: string;
+}
+
 interface Option {
     id: string;
     label: string;
-    lines: string[];
+    commands: Command[];
     note?: string;
 }
 
@@ -15,6 +25,11 @@ interface Props {
 }
 
 const { name, options } = Astro.props;
+
+/** A long URL wraps after a slash, never inside a word: each part ends at a slash. */
+function breakable(line: string): string[] {
+    return line.split(/(?<=\/)/);
+}
 ---
 
 <div class="install" data-tabs>
@@ -44,12 +59,25 @@ const { name, options } = Astro.props;
                 tabindex="0"
             >
                 <p class="install-label">{option.label}</p>
-                <div class="install-code">
-                    <pre translate="no"><code>{option.lines.join("\n")}</code></pre>
-                    <button class="copy" type="button" data-copy hidden>
-                        <span class="copy-text" aria-live="polite">Copy</span>
-                    </button>
-                </div>
+                {option.commands.map((command) => (
+                    <div class="install-command">
+                        {command.caption && <p class="install-caption">{command.caption}</p>}
+                        <div class="install-code" data-manual={command.copy === false ? "" : undefined}>
+                            <pre translate="no"><code>
+                                {command.lines.map((line) => (
+                                    <span class:list={["line", { more: line.startsWith(" ") }]}>
+                                        {breakable(line.trimStart()).map((part, at) => (at > 0 ? [<wbr />, part] : part))}
+                                    </span>
+                                ))}
+                            </code></pre>
+                            {command.copy !== false && (
+                                <button class="copy" type="button" data-copy hidden>
+                                    <span class="copy-text" aria-live="polite">Copy</span>
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                ))}
                 {option.note && <p class="install-note">{option.note}</p>}
             </div>
         ))
