@@ -157,6 +157,10 @@ A ticket is a read capability, so it is secret. Our envelope wraps whatever `iro
 internally, so an `iroh-blobs` protocol change becomes a version bump in our ticket rather than a
 broken one.
 
+`sluice send --qr` draws the same ticket as a QR code on standard error, for a phone to read, and
+leaves the ticket line on standard output exactly as it is. The code is refused when standard error
+is not a terminal, so it never reaches a pipe or a log.
+
 ### Transfer queue
 
 Three active transfers by default, the rest queued in order. Per-transfer priority (`--priority

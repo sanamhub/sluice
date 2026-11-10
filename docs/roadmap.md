@@ -38,6 +38,7 @@ is revised in [`performance.md`](performance.md) with the measurement attached.
 - live mode for files still being written
 - directory manifest and small-file packing
 - the transfer queue with priorities and bandwidth caps
+- the ticket as a QR code on a terminal, with `send --qr`
 - direct or relayed shown on every transfer, and `sluice doctor`
 - the `relay` container image, with the meeting-point and full-relay recipes
 - signed releases for Linux, macOS and Windows through `dist`
@@ -54,7 +55,7 @@ a self-hosted meeting point that carries none of the file. Every at-rest budget 
 - In-process bindings for Python, Node, Swift and Kotlin, and the C header.
 - Delta transfers.
 - Mount on Linux and Windows, and on macOS through FSKit if it is ready.
-- Short codes, QR codes, paired devices, signed receipts.
+- Short codes, paired devices, signed receipts.
 - Fan-out to several receivers, and fetching from several providers at once.
 - The TCP bulk path, if the transport measurement left it out of 1.0.
 
