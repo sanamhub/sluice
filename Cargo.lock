@@ -3811,8 +3811,10 @@ version = "0.1.1"
 dependencies = [
  "anstream",
  "assert_cmd",
+ "blake3",
  "clap",
  "clap_complete",
+ "ed25519-dalek",
  "insta",
  "iroh",
  "iroh-blobs",
