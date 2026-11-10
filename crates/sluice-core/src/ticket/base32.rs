@@ -24,7 +24,7 @@ const DECODE: [u8; 256] = {
 
 /// The bytes as lower-case base32, 5 bits per character, most significant bit first. The last
 /// character is filled up with zero bits.
-pub(super) fn encode(bytes: &[u8]) -> String {
+pub(crate) fn encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity((bytes.len() * 8).div_ceil(5));
     let (mut acc, mut bits) = (0u32, 0u32);
     for &byte in bytes {
@@ -45,14 +45,18 @@ pub(super) fn encode(bytes: &[u8]) -> String {
 
 /// The bytes `text` stands for. The errors say where a character is wrong, never what it was.
 pub(super) fn decode(text: &str) -> Result<Vec<u8>, Error> {
+    decode_bytes(text).map_err(|reason| refuse(&reason))
+}
+
+/// [`decode`] with the reason as text and no noun in front of it, so a second container format
+/// written in this alphabet can refuse a body in its own words.
+pub(crate) fn decode_bytes(text: &str) -> Result<Vec<u8>, String> {
     let mut out = Vec::with_capacity(text.len() * 5 / 8);
     let (mut acc, mut bits) = (0u32, 0u32);
     for (at, byte) in text.bytes().enumerate() {
         let value = DECODE[usize::from(byte)];
         if value == INVALID {
-            return Err(refuse(&format!(
-                "has a character outside the alphabet at byte {at}"
-            )));
+            return Err(format!("has a character outside the alphabet at byte {at}"));
         }
         acc = (acc << 5) | u32::from(value);
         bits += 5;
@@ -65,12 +69,10 @@ pub(super) fn decode(text: &str) -> Result<Vec<u8>, Error> {
     // 5 or more bits left over means the last character carries no data, which whole bytes cannot
     // produce.
     if bits >= 5 {
-        return Err(refuse("body length cannot come from whole bytes"));
+        return Err("body length cannot come from whole bytes".to_string());
     }
     if acc != 0 {
-        return Err(refuse(
-            "body has non-zero unused bits in its last character",
-        ));
+        return Err("body has non-zero unused bits in its last character".to_string());
     }
     Ok(out)
 }
