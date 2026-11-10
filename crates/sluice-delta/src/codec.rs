@@ -37,6 +37,19 @@ impl Entry {
         Ok(Self { len, strong })
     }
 
+    /// The entry of one chunk of content: its length and the first 16 bytes of its BLAKE3 hash.
+    ///
+    /// This is how a provider builds the list it serves, and how a requester prepares the chunks of
+    /// its own file, so both sides hash a chunk the same way.
+    pub fn of_bytes(chunk: &[u8]) -> Result<Self, Error> {
+        let len = u32::try_from(chunk.len()).map_err(|_| Error::ChunkLength)?;
+        let digest = blake3::hash(chunk);
+        let strong: [u8; 16] = digest.as_bytes()[..16]
+            .try_into()
+            .expect("a BLAKE3 digest is 32 bytes");
+        Self::new(len, strong)
+    }
+
     /// The chunk's length in bytes.
     pub fn len(&self) -> u32 {
         self.len

@@ -14,6 +14,14 @@ matches strong hashes, and fetches what is left (ADR 0005, ADR 0008).
 - `SigList`, `Entry`: the chunk lengths and the first 16 bytes of each chunk's BLAKE3 hash, as the
   provider sends them.
 - `NeedRanges`, `Range`: the target ranges a requester still needs, ascending and apart.
+- `Candidate`: the chunks of the file the requester already holds, cut with the same parameters.
+- `plan`: the matcher. It takes the provider's `SigList` and the requester's `Candidate` and returns
+  a `Plan`, which is the runs of the target that come from the candidate and the runs that have to
+  be fetched, in order and with each byte covered once. Adjacent runs are merged, so a plan asks for
+  one range where it would have asked for a thousand.
+- `Plan::need_ranges` turns the fetched runs into the message that asks for them, and
+  `Plan::rebuild` assembles the target from the candidate and the fetched bytes. That is the
+  reference the engine's own assembly is checked against.
 
 ## What it does not do
 
