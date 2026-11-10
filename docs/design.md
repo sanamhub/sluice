@@ -305,7 +305,8 @@ checks.
 
 **The browser is always relayed.** iroh in a tab has no UDP socket, so it reaches peers over a
 WebSocket relay for the whole session. Browser throughput is relay throughput, and the web UI needs
-a relay you run. The traffic stays end-to-end encrypted. ADR 0011, ADR 0014.
+a relay you run. The traffic stays end-to-end encrypted. ADR 0011, ADR 0014. What the browser build
+needs, and what its first proof measured, is in [`browser.md`](browser.md).
 
 ## Data path
 
