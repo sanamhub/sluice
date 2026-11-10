@@ -12,8 +12,9 @@
 //! provider, and with `default-features = false` and no TLS feature the pinned `iroh` and
 //! `iroh-blobs` build for `wasm32-unknown-unknown` here. `docs/browser.md` records the measurements.
 
-use iroh::{RelayMap, RelayMode, RelayUrl};
+use iroh::{Endpoint, RelayMap, RelayMode, RelayUrl, endpoint::presets};
 use iroh_blobs::{Hash, store::mem::MemStore};
+use wasm_bindgen::prelude::*;
 
 /// The error of a relay URL or a hash a ticket names that this build cannot read.
 ///
@@ -89,4 +90,35 @@ mod tests {
         assert!(hash("0").is_err());
         assert!(hash(&"g".repeat(64)).is_err());
     }
+}
+
+/// Opens an endpoint that reaches the network through `relay` and returns the id a ticket would
+/// name, as 64 lower-case hex characters.
+///
+/// This is the first thing a tab has to be able to do, and it is exported so the packaging can be
+/// tried in a page or in Node before anything is built on it. The endpoint is closed before the
+/// promise resolves: this is a probe of the transport, not a session.
+///
+/// # Errors
+///
+/// A relay URL that is not one, or an endpoint that cannot be bound, is a string for the caller to
+/// show. The URL never appears in it: a relay can name a private host.
+#[wasm_bindgen]
+pub async fn endpoint_id(relay_url: &str) -> Result<String, JsValue> {
+    let url = relay(relay_url).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let endpoint = Endpoint::builder(presets::Empty)
+        .relay_mode(relay_only(url))
+        .bind()
+        .await
+        .map_err(|e| JsValue::from_str(&format!("cannot open an endpoint: {e}")))?;
+    let id = endpoint.id().to_string();
+    endpoint.close().await;
+    Ok(id)
+}
+
+/// Whether a string is a relay URL this build can dial, for a page that checks a field before it
+/// starts anything.
+#[wasm_bindgen]
+pub fn relay_reads(text: &str) -> bool {
+    relay(text).is_ok()
 }
