@@ -1,8 +1,8 @@
 # The browser build
 
-What a browser build of Sluice needs, and what the first proof of it found on the machine this was
-written on. The design is ADR 0009 (one Svelte 5 UI), ADR 0011 (a browser endpoint is always
-relayed) and ADR 0014 (one hashing thread and no special response headers).
+What a browser build of Sluice needs, what the first step of it established, and what it has not
+done yet. The design is ADR 0009 (one Svelte 5 UI), ADR 0011 (a browser endpoint is always relayed)
+and ADR 0014 (one hashing thread and no special response headers).
 
 ## What is settled
 
@@ -12,37 +12,38 @@ relayed) and ADR 0014 (one hashing thread and no special response headers).
   native build uses for the same roots.
 - The page needs no special response headers, so it works from any static host.
 
-## The TLS provider needs a C toolchain
+## The dependency set
 
-`aws-lc-rs` does not build for `wasm32-unknown-unknown` at all. The provider a browser build can use
-is `ring`, which ADR 0014 names, and `ring` compiles C and assembly for the target, so the build
-machine needs a wasm-capable C compiler. On the machine this was written on there is none, and the
-build stops exactly here:
+The native binary asks `iroh` for `tls-aws-lc-rs`, and that provider has no build for
+`wasm32-unknown-unknown`. The obvious reading is that a tab needs the other provider, `tls-ring`,
+which ADR 0014 names. That reading is wrong, and measuring it is what the first step of this part
+did.
 
+With `iroh`'s `tls-ring` feature, the build stops at `ring`'s C compiler: this machine has no
+`clang`, so `cc` fails with `ToolNotFound: failed to find tool "clang"`. A wasm-capable clang makes
+that path build, and it is still the wrong path: a tab reaches its relay over the WebSocket the
+browser already has, so the wasm build needs no Rust TLS provider at all. With
+`default-features = false` and no TLS feature, `iroh` 1.4 and `iroh-blobs` 0.103.1 build for the
+target on this machine, and they also build for the host, which is what lets the crate be checked by
+the gates.
+
+So `crates/sluice-wasm` declares its own `iroh` and `iroh-blobs`, not the workspace's, and the two
+commands are:
+
+```sh
+cargo check -p sluice-wasm                                     # the host, as the gates do
+cargo build -p sluice-wasm --target wasm32-unknown-unknown     # a tab
 ```
-error: failed to run custom build command for `ring v0.17.14`
-  warning: ring@0.17.14: Compiler family detection failed due to error: ToolNotFound: failed to find tool "clang": program not found
-  process didn't exit successfully: `...\build-script-build` (exit code: 1)
-  error occurred in cc-rs: failed to find tool "clang": program not found
-```
 
-The same crate builds for the host on that machine without a C compiler, and `bench/wasm-hash`
-builds for `wasm32-unknown-unknown` there, so the target and the wasm toolchain are in place; what is
-missing is `clang` (and with it `wasm-ld`) for the target. Either of these makes a browser build
-possible on this machine:
+Building the whole workspace for the target does not work and is not meant to: the native crates ask
+for `aws-lc-rs`, which has no wasm build, and cargo unifies a package's features across one build.
 
-- install LLVM and put `clang` and `wasm-ld` on the path, which is what the CI runners have
-- replace `ring` with a pure-Rust TLS provider that supports the target, of which there is none in
-  `iroh` today: its only two providers are `ring` and `aws-lc-rs`
+## One thing the first step found
 
-## One question the first proof has to answer
-
-`iroh` chooses its TLS provider with a cargo feature, and the native build of this workspace asks for
-`tls-aws-lc-rs`. Cargo unifies features for one package across one build, so a workspace member that
-asks for `tls-ring` may end up with both providers, and `aws-lc-rs` does not build for the target at
-all. The `fuzz/` crates of this repository are their own workspaces for a neighbouring reason, and the
-browser crate may need the same. This has not been tested: the build stops at `ring` long before the
-unification matters.
+`iroh_blobs::Hash`'s parser asserts on a string whose length is not 64 rather than answering with an
+error. A page that hands a tab a pasted root must not be able to stop it with a short string, so
+`sluice_wasm::hash` checks the length and the characters before the parser sees them, and a test
+holds that.
 
 ## What the first proof is
 
@@ -55,5 +56,6 @@ Part F's first step, and the thing to do before building anything on top of it:
 3. the same page loaded in a headless browser, with the ticket passed in and the verified result
    checked by the driver
 
-That run has not happened. The finding above is the state of the first step on this machine, and it
-is recorded here so the next attempt starts from it rather than from the error.
+That run has not happened. The crate has no wasm-bindgen export, no page and no fetch: what it
+establishes is the dependency set and the two build commands, and the finding above is what the next
+attempt starts from.
