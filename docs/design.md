@@ -161,6 +161,22 @@ broken one.
 leaves the ticket line on standard output exactly as it is. The code is refused when standard error
 is not a terminal, so it never reaches a pipe or a log.
 
+### Receipts
+
+A receipt is 144 bytes: the content's root and length, the sender's key, the time it was signed, and
+an Ed25519 signature over the first 80 of them under the label `sluice/receipt/1`. The label is what
+keeps a receipt's signature from being good for a live record, and a record's from being good for a
+receipt. The verifier checks the signature strictly and refuses a key that breaks the rule every
+other key in Sluice follows, so no two implementations disagree on whether one receipt is signed.
+
+A receipt is text: those 144 bytes in the ticket's base32 behind `sluicereceipt1`. It is not a
+capability, so it can be written in a file, pasted into a message and mailed. `sluice receipt verify
+FILE` checks one and prints what it names, and with `--file` it hashes a file and compares the result
+with the root and the length, which is how a receiver shows that the content it holds is the content
+the receipt is about. A receive does not write one yet: section 10 of `SPEC.md` states how a sender
+delivers one on the `sluice/1` connection when both sides set `RECEIPTS`, and the flag that asks for
+one is not in this build.
+
 ### Transfer queue
 
 Three active transfers by default, the rest queued in order. Per-transfer priority (`--priority
