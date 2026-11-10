@@ -106,7 +106,7 @@ mod tests {
 #[wasm_bindgen]
 pub async fn endpoint_id(relay_url: &str) -> Result<String, JsValue> {
     let url = relay(relay_url).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let endpoint = Endpoint::builder(presets::Empty)
+    let endpoint = Endpoint::builder(presets::Minimal)
         .relay_mode(relay_only(url))
         .bind()
         .await
