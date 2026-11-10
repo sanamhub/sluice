@@ -70,14 +70,17 @@ pub enum Outcome {
     Doctor { lines: Vec<Line>, code: u8 },
     /// What `sluice inspect` read from a ticket, and whether every name is shown.
     Offering { offering: Offering, all: bool },
+    /// What `sluice receipt verify` found.
+    Receipt(crate::receipt::Report),
 }
 
 impl Outcome {
     /// The exit code once the outcome is printed: 0, except for a doctor report with a failed
-    /// check.
+    /// check, and for a receipt whose named file is not the content it names.
     pub fn code(&self) -> u8 {
         match self {
             Outcome::Doctor { code, .. } => *code,
+            Outcome::Receipt(report) => report.code,
             _ => 0,
         }
     }
@@ -118,6 +121,8 @@ impl Output {
             (Outcome::Offering { offering, .. }, Format::Json) => {
                 (crate::inspect::json(offering), false)
             }
+            (Outcome::Receipt(report), Format::Human) => (crate::receipt::text(report), false),
+            (Outcome::Receipt(report), Format::Json) => (crate::receipt::json(report), false),
         };
         // Through `AutoStream` only when there are escape codes, which it turns on in a Windows
         // console that has them off. Everything else goes out as it is.

@@ -21,6 +21,8 @@ path = "src/main.rs"
 
 [dependencies]
 anstream.workspace = true
+# Hashes the file that `receipt verify --file` is given, from the crate every root comes from.
+blake3.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 iroh = { workspace = true, features = ["unstable-net-report"] }
@@ -34,6 +36,8 @@ tokio.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
+# Signs the receipts that the tests of the verify command read, from the crate the identity uses.
+ed25519-dalek.workspace = true
 # A test that keeps `inspect` waiting registers the static content protocol's ALPN on its own
 # endpoint, so it names that protocol rather than repeating its bytes.
 iroh-blobs.workspace = true
