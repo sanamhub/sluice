@@ -185,6 +185,30 @@ fn a_removal_that_never_ran_is_kept_for_the_end_of_the_command() {
     assert!(!folder.exists(), "the kept folder was left for the sweep");
 }
 
+/// A removal that was already kept is tried once more even when the budget is gone: a command whose
+/// own removals were still parked when it began to end used the whole wait, and the folder would
+/// otherwise sit until the sweep, which removes one only a day old.
+#[test]
+fn a_path_kept_before_the_budget_ran_out_is_still_tried() {
+    use std::time::Duration;
+
+    use super::super::{removals::left, wait_for_removals};
+
+    let _alone = crate::engine::storage::exclusive_removals();
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("folder");
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::write(folder.join("file"), b"bytes").unwrap();
+    // What a removal that gave up leaves, and what the retry is for.
+    left(&folder);
+
+    wait_for_removals(Duration::ZERO);
+    assert!(
+        !folder.exists(),
+        "a kept folder was left for the sweep because the budget had gone"
+    );
+}
+
 /// The paths a removal keeps are keyed by the one form the hold uses, so a later removal that
 /// spells the folder another way clears the entry: nothing retries a folder that is gone or that a
 /// claim now owns.
