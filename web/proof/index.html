@@ -16,7 +16,9 @@
     }
     const module = await import('../sluice_wasm.js');
     await module.default();
-    // The ticket's root is the hash sequence: the manifest root and then each file's root.
+    // The ticket's root is the hash sequence: the manifest root, then each file's root. This page
+    // reads the one after the manifest, so it is the single-file case; a folder ticket needs the
+    // manifest read to know which roots are files and what they are called.
     const sequence = new Uint8Array(await module.fetch_blob(parts.get('relay'), parts.get('sender'), parts.get('root')));
     line('sequence ' + sequence.length + ' bytes');
     const root = hex(sequence.slice(32));
