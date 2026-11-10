@@ -10,7 +10,7 @@ syntax = "proto3";
 package sluice.v1;
 
 // One Sluice engine, in this user's home.
-service Control {
+service ControlService {
   // Starts a send of files or folders, and returns the ticket it will serve.
   rpc StartSend(StartSendRequest) returns (StartSendReply);
 
