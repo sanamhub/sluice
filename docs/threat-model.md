@@ -95,6 +95,12 @@ pipe, a file or a log.
 - **A macOS extended ACL on the home.** `chmod 0700` does not remove an ACL entry that gives another
   user access, and neither `open` nor `doctor` reads the ACL. A home that came from somewhere else
   should be looked at with `ls -le` before it is used.
+- **A receipt as a record of delivery.** A receipt proves that the key a ticket names offered content
+  with that root and length at about the time it carries, within the clock window of `SPEC.md`
+  section 10. It does not say who received the content, whether anyone kept it, or who holds that
+  key, and a sender can sign one for content nobody fetched. `sluice receipt verify` prints those
+  fields and makes no claim beyond them, and a receipt file names the sender's key and the content's
+  root to anyone who reads it.
 
 ## Known weaknesses
 

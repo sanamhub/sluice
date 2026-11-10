@@ -124,6 +124,17 @@ sluice inspect <ticket>
 sluice inspect <ticket> --all
 ```
 
+Check a receipt. It is the sender's signed statement that it offered some content at about the time
+it names, and with `--file` the command also hashes a file and checks it against the root and the
+length:
+
+```sh
+sluice receipt verify receipt.txt --file ./report.pdf
+```
+
+It prints the root, the sender's key and the time. It cannot tell you that anyone received the
+content or still holds it, and it says so.
+
 Take part of a folder. The pattern is matched against the ticket's own paths:
 
 ```sh

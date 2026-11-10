@@ -791,6 +791,40 @@ A verifier refuses a receipt whose `sender_key` breaks rule 8 of section 4: it i
 encoding, or it is a point of small order. Every key Sluice reads follows that one rule, so a key
 that one part of an implementation refuses is never accepted by another.
 
+**Delivery.** When both peers set `RECEIPTS` in `Hello` (section 3), a receiver MAY ask for a receipt
+once it has verified and installed every file of a static transfer. It asks before it closes the
+content connection with the completion code, because a one-download sender stops serving when it
+sees that code.
+
+The receiver dials the sender on `sluice/1`, sends its `Hello`, and reads one record. The sender
+answers with its `Hello` and then writes:
+
+```
+ReceiptRecord = { receipt: Receipt }   // 144 bytes
+```
+
+The record travels as a record of section 6 does: its length as a varint, then its bytes. The length
+MUST be 144 and nothing is padded, so the record has one spelling and the length is how a receiver
+knows which record it has. Nothing else is written on that stream, and the sender ends it after the
+record.
+
+A receiver MUST treat the receipt as absent, and MUST NOT fail the transfer over it, when:
+
+1. the record's length is not 144
+2. `sender_key` is not the endpoint id of the connection the content came from
+3. `root` and `total_len` are not the ones its ticket names and it verified
+4. `utc_ms` is more than 300000 milliseconds before or after its own clock when the record arrives
+5. `sig` does not verify under `sender_key`, as **Signatures** of section 6 says
+6. no record arrives within 10 seconds of the `sluice/1` connection coming up
+
+The content was verified against its root before any of this, so a receipt cannot make a transfer
+wrong: it can only be missing. A receiver that asked for one and did not get one that passes every
+rule has none.
+
+A sender that sets `RECEIPTS` MUST sign a receipt for the root and the length of the ticket it is
+serving, with the identity key that ticket names, at a time within the window above, and MUST write
+it to every receiver that asks. A sender that clears the bit MUST NOT write one.
+
 A receipt proves the sender offered that content at that time. It does not prove delivery, and
 implementations MUST NOT describe it as proof of delivery.
 
