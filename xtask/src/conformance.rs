@@ -1,6 +1,7 @@
 //! `cargo xtask conformance`: runs every vector under `tests/vectors/` against this implementation
 //! and exits non-zero if one disagrees. The format is in `tests/vectors/README.md`.
 
+mod delta;
 mod live;
 #[cfg(test)]
 mod live_tests;
@@ -86,6 +87,7 @@ pub fn check(root: &Path) -> Result<Report> {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         match kind.as_str() {
+            "delta" => delta::run(&dir, &mut report)?,
             "live" => live::run(&dir, &mut report)?,
             "manifests" => manifests::run(&dir, &mut report)?,
             "packs" => packs::run(&dir, &mut report)?,

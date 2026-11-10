@@ -87,21 +87,21 @@ fn a_long_path_is_cut_in_the_failure_line() {
 #[test]
 fn a_directory_without_a_runner_is_skipped_and_not_counted() {
     let dir = TempDir::new("skipped");
-    dir.write("delta/x.json", r#"{ "description": "d", "cases": [] }"#);
+    dir.write("frobs/x.json", r#"{ "description": "d", "cases": [] }"#);
     dir.write(
         "paths/x.json",
         r#"{ "description": "d", "cases": [ { "path": "a", "valid": true } ] }"#,
     );
     let report = check(dir.path()).expect("run");
-    assert_eq!(report.skipped, ["delta"]);
+    assert_eq!(report.skipped, ["frobs"]);
     assert_eq!(report.failed, 0);
     assert_eq!(report.passed_in("paths"), 1);
-    assert_eq!(report.passed_in("delta"), 0);
+    assert_eq!(report.passed_in("frobs"), 0);
     assert!(
         report
             .lines
             .iter()
-            .any(|l| l.starts_with("delta/") && l.contains("skipped"))
+            .any(|l| l.starts_with("frobs/") && l.contains("skipped"))
     );
 }
 

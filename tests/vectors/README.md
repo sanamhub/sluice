@@ -408,3 +408,24 @@ bytes of `SPEC.md` section 10 behind `sluicereceipt1`, in the same lower-case ba
 
 A valid case also checks the encoder: the text an implementation writes for those fields must be
 the one the case holds, in lower case, so one receipt has one spelling.
+
+## `delta/`
+
+A `delta/` case is a file the requester already has, a file it wants, and what a delta must make of
+the pair. Both files are hex, and the average chunk size is the one the case names.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | What the case is. A runner prints it next to a failure and does not compare it |
+| `avg_bytes` | integer | The average chunk size, which sets the minimum and the maximum |
+| `candidate` | string | The file the requester already has, as lower-case hex, possibly empty |
+| `target` | string | The file it wants, as lower-case hex, possibly empty |
+| `boundaries` | array | Where every chunk of the target ends, in order. Empty for an empty target |
+| `fetch` | array | The target ranges that have to be fetched, each a start and a length, in ascending order |
+
+To check an implementation: cut the target where `boundaries` says, plan the pair against the
+candidate with the signatures of those chunks, and compare the ranges it would fetch with `fetch`.
+A plan that covers the target with other ranges, or cuts the target elsewhere, is not compatible.
+The case files were written from `SPEC.md` section 7 by the implementation in this tree, so they
+check that the cut, the matching and the fetch agree with each other and with the rule; a bug that
+the chunker and the vectors share would not show.
