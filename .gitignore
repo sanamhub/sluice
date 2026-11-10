@@ -15,6 +15,11 @@ dist/
 bench/wasm-hash/page/src/generated/
 # Playwright output.
 bench/wasm-hash/page/test-results/
+# Written by the browser proof recipe in `web/proof/README.md`.
+web/sluice_wasm.js
+web/sluice_wasm.d.ts
+web/sluice_wasm_bg.wasm
+web/sluice_wasm_bg.wasm.d.ts
 
 # local state and benchmark output
 .sluice/
