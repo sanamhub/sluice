@@ -10,7 +10,7 @@ use crate::doctor;
 use crate::id;
 use crate::inspect;
 use crate::output::Format;
-use crate::{recv, send};
+use crate::{receipt, recv, send};
 
 /// The congestion controller as the command line spells it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
@@ -99,6 +99,8 @@ pub enum Command {
     /// it writes nothing: the manifest is read into a temporary store that is removed again. A live
     /// ticket has no manifest, so it says so.
     Inspect(inspect::InspectArgs),
+    /// Check a receipt: the sender's signed statement that it offered some content
+    Receipt(receipt::ReceiptArgs),
     /// Check the home, who can reach it, its lock and identity key, and say how to fix a problem
     ///
     /// It only reads: it never creates, locks, repairs or deletes anything. The exit code is 0

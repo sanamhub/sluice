@@ -14,6 +14,7 @@ mod network;
 mod output;
 mod qr;
 mod queue;
+mod receipt;
 mod recv;
 mod send;
 
@@ -110,6 +111,7 @@ fn execute(command: Command, output: &Output) -> Result<u8, sluice_core::Error> 
         Command::Send(args) => return send::run(&args, output),
         Command::Recv(args) => return recv::run(&args, output),
         Command::Inspect(args) => inspect::run(&args)?,
+        Command::Receipt(args) => receipt::run(&args)?,
         Command::Doctor(args) => doctor::run(&args)?,
     };
     output.print(&outcome)?;
