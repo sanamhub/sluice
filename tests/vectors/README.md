@@ -21,6 +21,7 @@ tests/vectors/
   sequences/    the hash sequence of a folder ticket, SPEC.md section 8
   writer/       the top-level rules a receiver applies before it writes, SPEC.md section 8
   live/         the signed segment log, SPEC.md section 6
+  receipts/     a sender's signed statement that it offered content, SPEC.md section 10
   delta/        not written yet
 ```
 
@@ -392,3 +393,18 @@ folder is a clash unless the caller asked to replace it or the transfer is resum
 Only the top-level name is a rule of this kind. A nested path is accepted here; its ancestors and
 its own target are checked against the output folder, which needs a file system and is covered by
 the engine tests.
+
+## `receipts/`
+
+A `receipts/` case is one receipt text and the verdict a verifier must reach. The text is the 144
+bytes of `SPEC.md` section 10 behind `sluicereceipt1`, in the same lower-case base32 a ticket uses.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `receipt` | string | The receipt exactly as a file holds it, without a line ending |
+| `valid` | boolean | `true` if a verifier MUST accept it, `false` if it MUST refuse it |
+| `fields` | object | Present when `valid` is `true`. `root` and `sender_key` as 64 lower-case hex characters, `total_len` and `utc_ms` as decimal strings |
+| `refused` | string | Present when `valid` is `false`. `text` for a text that does not decode, `signature` for one that decodes and whose signature does not verify under the key it names |
+
+A valid case also checks the encoder: the text an implementation writes for those fields must be
+the one the case holds, in lower case, so one receipt has one spelling.

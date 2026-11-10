@@ -1,0 +1,15 @@
+{
+  "description": "Receipts an implementation MUST verify: the 144 bytes of section 10 in the ticket's base32 behind the prefix, signed under sluice/receipt/1",
+  "cases": [
+    {
+      "receipt": "sluicereceipt1144gj289144gj289144gj289144gj289144gj289144gj289144g010000000000x956rrz2kh90nfqna1xh6bp5z6amexneqtz7q4j23vn6j526t8p00m2w32hg2000py5sh016n4t7vq2fnzgk34jnaz8qgf97jk6xa92kwgfx2yhs2rdshvjzb811rmmwxyyxzhcfk8710ja0pghbsagv5htb0vn3kcb9r0g",
+      "valid": true,
+      "fields": { "root": "0909090909090909090909090909090909090909090909090909090909090909", "total_len": "1024", "sender_key": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c", "utc_ms": "1800000000000" }
+    },
+    {
+      "receipt": "sluicereceipt10000000000000000000000000000000000000000000000000000000000000000x956rrz2kh90nfqna1xh6bp5z6amexneqtz7q4j23vn6j526t8p0000000000000d4drmgsk1ygxdqt00dx0cetczg74xz3vt75rcvnh2m7pssj4ek250ya5f0sd2m8xw6q0vwc5940hye9xqf24kmem51spkr6q2wa4w20",
+      "valid": true,
+      "fields": { "root": "0000000000000000000000000000000000000000000000000000000000000000", "total_len": "0", "sender_key": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c", "utc_ms": "0" }
+    }
+  ]
+}
