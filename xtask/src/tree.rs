@@ -51,13 +51,24 @@ const TOP_LEVEL: [&str; 31] = [
 /// How many reasons an error lists before it counts the rest.
 const SHOWN: usize = 20;
 
-/// Checks every path git tracks in this repository and says what does not belong.
+/// The longest a Rust source file may be. A file of this length carries more than one thing, and
+/// what is asked for is the seam between them: a module of its own, or a file beside it.
+const LONGEST: usize = 400;
+
+/// The Rust files that are longer than the rule allows, and why each is. A reason is a sentence
+/// about that one file: what it holds that a reader needs in one place.
+const EXEMPT: &[(&str, &str)] = &[];
+
+/// Checks every path git tracks in this repository, and every Rust file's length, and says what
+/// does not belong.
 pub fn run() -> anyhow::Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .ok_or_else(|| anyhow::anyhow!("the xtask manifest is in the repository's root"))?;
     let tracked = tracked(root)?;
-    let found = problems(&tracked);
+    let mut found = problems(&tracked);
+    let lengths = rust_lengths(root, &tracked)?;
+    found.extend(over_long(&lengths, EXEMPT));
     if !found.is_empty() {
         let mut text = found
             .iter()
@@ -68,10 +79,40 @@ pub fn run() -> anyhow::Result<()> {
         if found.len() > SHOWN {
             text.push_str(&format!("\n  and {} more", found.len() - SHOWN));
         }
-        anyhow::bail!("the tree holds paths that do not belong:\n  {text}");
+        anyhow::bail!("the tree breaks its rules:\n  {text}");
     }
-    println!("{} tracked paths, none of them a build's", tracked.len());
+    println!(
+        "{} tracked paths, none of them a build's, and every Rust source within {LONGEST} lines",
+        tracked.len()
+    );
     Ok(())
+}
+
+/// The Rust files that are over [`LONGEST`], each named with its length. A path in `exempt` is let
+/// through, and its reason is checked by a test.
+fn over_long(files: &[(String, usize)], exempt: &[(&str, &str)]) -> Vec<String> {
+    let mut found: Vec<String> = files
+        .iter()
+        .filter(|(path, length)| {
+            *length > LONGEST && !exempt.iter().any(|(exempt, _)| exempt == path)
+        })
+        .map(|(path, length)| {
+            format!("{path} is {length} lines long, over the {LONGEST} a source file may be")
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+/// The length of every Rust file git tracks, with the path git gives it.
+fn rust_lengths(root: &Path, tracked: &[String]) -> anyhow::Result<Vec<(String, usize)>> {
+    let mut files = Vec::new();
+    for path in tracked.iter().filter(|path| path.ends_with(".rs")) {
+        let text = std::fs::read_to_string(root.join(path))
+            .map_err(|error| anyhow::anyhow!("cannot read {path}: {error}"))?;
+        files.push((path.clone(), text.lines().count()));
+    }
+    Ok(files)
 }
 
 /// The reasons these paths do not belong in the tree, and none when they all do. A path is written
@@ -129,7 +170,7 @@ fn tracked(root: &Path) -> anyhow::Result<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::problems;
+    use super::{EXEMPT, over_long, problems};
 
     fn paths(list: &[&str]) -> Vec<String> {
         list.iter().map(|path| (*path).to_string()).collect()
@@ -190,5 +231,55 @@ mod tests {
     fn one_unlisted_entry_is_reported_once() {
         let found = problems(&paths(&["stray/one", "stray/two", "stray/deep/three"]));
         assert_eq!(found.len(), 1, "{found:?}");
+    }
+
+    fn lengths(list: &[(&str, usize)]) -> Vec<(String, usize)> {
+        list.iter()
+            .map(|(path, length)| ((*path).to_string(), *length))
+            .collect()
+    }
+
+    /// A Rust file one line over the length is named with its length, and the file at the length
+    /// itself is not: the rule is a bound, not a target.
+    #[test]
+    fn a_rust_file_over_the_length_is_named_with_its_length() {
+        let found = over_long(
+            &lengths(&[
+                ("crates/sluice-core/src/short.rs", 400),
+                ("crates/sluice-core/src/long.rs", 401),
+            ]),
+            &[],
+        );
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("long.rs"), "{found:?}");
+        assert!(found[0].contains("401"), "{found:?}");
+    }
+
+    /// An exemption lets one named file through, and only that file.
+    #[test]
+    fn an_exempt_file_is_let_through_and_its_neighbour_is_not() {
+        let exempt = &[(
+            "crates/sluice-core/src/long.rs",
+            "one wire format changed one field at a time",
+        )];
+        let found = over_long(
+            &lengths(&[
+                ("crates/sluice-core/src/long.rs", 500),
+                ("crates/sluice-core/src/other.rs", 500),
+            ]),
+            exempt,
+        );
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("other.rs"), "{found:?}");
+    }
+
+    /// An exemption is a path git tracks and a sentence about it, so a list entry that says nothing
+    /// is caught here rather than by the reader of a diff.
+    #[test]
+    fn every_exemption_has_a_reason() {
+        for (path, reason) in EXEMPT {
+            assert!(path.ends_with(".rs"), "{path} is not a Rust source");
+            assert!(!reason.trim().is_empty(), "{path} has no reason");
+        }
     }
 }
