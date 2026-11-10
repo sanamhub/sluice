@@ -16,6 +16,12 @@ list, where another local user can read it, and the shell writes it to its histo
 in one `recv` are all there. `sluice recv -` reads one ticket from standard input instead, and a
 caller that cares pipes it.
 
+**A ticket on the screen is visible.** `sluice send --qr` draws the ticket as a QR code on standard
+error so a phone can take it. Anything that can see that screen, a camera across the room or a
+screen-sharing session, holds the ticket until it expires. The code is drawn only where standard
+error is a terminal, and the ticket line on standard output is unchanged, so a code never lands in a
+pipe, a file or a log.
+
 ## Protected
 
 | Threat | Defense |

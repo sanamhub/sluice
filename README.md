@@ -83,6 +83,16 @@ sluice recv <ticket> --out ./inbox
 names, and fetches no content. `recv` prints progress, verifies each block as it arrives, and ends
 with a line that names the path it wrote. The sender stops after that one complete download.
 
+A phone can take the ticket from the screen. `--qr` draws the same ticket as a QR code on standard
+error, so the ticket line stays the one a script reads:
+
+```sh
+sluice send --qr ./report.pdf
+```
+
+The code is the ticket, so a camera that can see the screen can take the file while the ticket
+lasts.
+
 ## What makes it different
 
 - **The file does not go through storage.** The sender reads it where it is, and the receiver writes
@@ -190,7 +200,8 @@ A ticket is a read capability. It names the sender's endpoint id, the addresses 
 reached at, the relay if one is used, the content root or live key, and the expiry. It does not
 contain file names. Anyone who has the ticket can fetch the content while the sender is serving it
 and the ticket has not expired, so treat it like a password. An unexpired ticket that is forwarded
-grants the same access as the original.
+grants the same access as the original. `send --qr` draws it on the terminal as well, so a camera
+pointed at that screen has the same access as a copy of the text.
 
 [`docs/threat-model.md`](docs/threat-model.md) lists what is protected, what is not, and the known
 weaknesses. Report a vulnerability privately through GitHub Security Advisories as
