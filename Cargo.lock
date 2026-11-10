@@ -3860,6 +3860,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sluice-delta"
+version = "0.1.1"
+dependencies = [
+ "blake3",
+ "proptest",
+]
+
+[[package]]
 name = "sluice-live"
 version = "0.1.1"
 dependencies = [

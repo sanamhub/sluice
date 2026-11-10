@@ -4,6 +4,7 @@ members = [
   "crates/sluice-core",
   "crates/sluice-live",
   "crates/sluice-cli",
+  "crates/sluice-delta",
   "bench/probe",
   "bench/harness",
   "bench/wasm-hash",

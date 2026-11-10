@@ -1,0 +1,27 @@
+[package]
+name = "sluice-delta"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Delta hints for Sluice: chunk signatures and need ranges, without IO"
+homepage.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["p2p", "file-transfer", "chunking", "blake3", "iroh"]
+categories = ["network-programming"]
+
+# No sluice-core: this crate is bytes in, actions out (ADR 0008), and the browser build uses it
+# too. blake3 is the hash every root in the tree already comes from.
+[dependencies]
+blake3.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
+
+# Not released: dist builds only the `sluice` binary of sluice-cli (dist-workspace.toml).
+[package.metadata.dist]
+dist = false
