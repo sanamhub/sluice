@@ -14,7 +14,7 @@ use std::{collections::BTreeSet, path::Path, process::Command};
 const BUILD_FILES: [&str; 3] = ["CACHEDIR.TAG", ".rustc_info.json", ".cargo-lock"];
 
 /// Every top-level entry this repository has.
-const TOP_LEVEL: [&str; 33] = [
+const TOP_LEVEL: [&str; 34] = [
     ".cargo",
     ".config",
     ".dockerignore",
@@ -47,6 +47,7 @@ const TOP_LEVEL: [&str; 33] = [
     "rustfmt.toml",
     "site",
     "tests",
+    "web",
     "xtask",
 ];
 
