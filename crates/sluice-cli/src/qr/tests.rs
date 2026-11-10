@@ -104,24 +104,23 @@ fn the_longest_ticket_a_code_holds_reads_back() {
 /// into a code that says something else.
 #[test]
 fn a_ticket_longer_than_a_code_holds_is_refused() {
-    let ticket = Ticket::new(
-        [1; 32],
-        vec![],
-        None,
-        None,
-        Body::Static {
-            root: [2; 32],
-            size: 0,
-            format: Format::Raw,
-        },
-    )
-    .unwrap()
-    .encode();
+    let ticket = shortest().encode();
     let padded = format!("{ticket}{}", "a".repeat(LONGEST));
     let error = block(&padded).unwrap_err().to_string();
     assert!(error.contains(&LONGEST.to_string()), "{error}");
     assert!(!error.contains(&ticket), "the refusal quotes the ticket");
     assert!(error.contains("--qr"), "{error}");
+}
+
+/// The capacity the refusal names is the real one: a code holds [`LONGEST`] characters of ticket
+/// text and not one more, so the number in the message is not an estimate.
+#[test]
+fn a_code_holds_exactly_the_capacity_it_names() {
+    assert!(rows(&"a".repeat(LONGEST)).is_ok());
+    assert!(
+        rows(&"a".repeat(LONGEST + 1)).is_err(),
+        "a code holds more than {LONGEST} characters"
+    );
 }
 
 /// Above the length a ticket can be at all, the refusal says so rather than naming the code's
