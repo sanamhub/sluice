@@ -25,6 +25,8 @@ clap.workspace = true
 clap_complete.workspace = true
 iroh = { workspace = true, features = ["unstable-net-report"] }
 portmapper = "0.19.3"
+# The QR code `send --qr` prints. It draws nothing itself: the half blocks are written here.
+qrcodegen.workspace = true
 # Only for the JSON error object, whose message needs escaping.
 serde_json.workspace = true
 sluice-core = { path = "../sluice-core" }
@@ -36,6 +38,9 @@ assert_cmd.workspace = true
 # endpoint, so it names that protocol rather than repeating its bytes.
 iroh-blobs.workspace = true
 insta.workspace = true
+# Reads a rendered code back in the tests of `send --qr`. Without its default features it drops the
+# image crate: the test hands it the module grid the renderer wrote, not a file.
+rqrr = { version = "0.11", default-features = false }
 tempfile.workspace = true
 
 [lints]

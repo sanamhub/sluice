@@ -12,6 +12,7 @@ mod id;
 mod inspect;
 mod network;
 mod output;
+mod qr;
 mod queue;
 mod recv;
 mod send;

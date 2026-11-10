@@ -91,6 +91,10 @@ globset = "0.4.21"
 # Property tests for parsers. Without default features it skips fork and timeout, which add
 # rusty-fork and tempfile to run each case in a child process. No test here needs that.
 proptest = { version = "1.12", default-features = false, features = ["std"] }
+# The QR code of `send --qr`. It encodes only: no image, no drawing, no I/O, and no dependencies of
+# its own, which is what keeps a terminal rendering out of the tree. Same projection as Nayuki's
+# reference library in the other languages, and its release has been stable since 2022.
+qrcodegen = "1.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Home folders for tests, removed on drop.
