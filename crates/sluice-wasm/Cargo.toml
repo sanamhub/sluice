@@ -29,6 +29,7 @@ wasm-bindgen = { workspace = true }
 # The version the lock resolves beside that `wasm-bindgen`, which is what an async export needs.
 wasm-bindgen-futures = "=0.4.79"
 
+
 [lints]
 workspace = true
 

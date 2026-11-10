@@ -104,6 +104,15 @@ Part F's first step, and the thing to do before building anything on top of it:
 3. the same page loaded in a headless browser, with the ticket passed in and the verified result
    checked by the driver
 
-Step 2 needs the blob fetch, which is not written, and step 3 needs a page and a headless browser.
-The endpoint itself is proved (the command above), so what is left is the fetch, its verification,
-and the same in a tab rather than in Node.
+The endpoint is proved (the command above). The fetch is written and does not work yet: with a relay
+on this machine, a native `sluice send` through it and the ticket's parts handed to `fetch_blob`, the
+module answers
+
+```
+the fetch stopped: Unable to download 278b5293184ca53b6528d057ad59f78b99f94f639b4d8e3dcf0266129d435d94
+```
+
+The sender was serving and the same ticket's relay was up, so the failure is in the browser side: the
+wasm endpoint's WebSocket to the relay, or the way the peer is looked up from an endpoint id with no
+addresses. That is the next thing to settle, and it is a diagnosis rather than a design question.
+A page and a headless browser come after it.
