@@ -48,7 +48,8 @@ for `aws-lc-rs`, which has no wasm build.
 
 ## What is here again
 
-Two wasm-bindgen exports: `relay_reads` and `endpoint_id`. The second binds a real endpoint through
+Three wasm-bindgen exports: `relay_reads`, `endpoint_id` and `fetch_blob`. The second binds a real endpoint through
 a relay, and it is proved in Node: the module loads, the relay URL is read, and an endpoint id comes
-back. There is no page and no fetch of a blob yet; `docs/browser.md` says what the first proof is and
-what it has found so far.
+back. `fetch_blob` compiles and runs, and has not downloaded a blob yet: against a relay on this
+machine it fails with `Unable to download <root>`. There is no page; `docs/browser.md` says what
+the first proof is and what it has found so far.

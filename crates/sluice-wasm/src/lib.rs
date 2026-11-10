@@ -12,8 +12,8 @@
 //! provider, and with `default-features = false` and no TLS feature the pinned `iroh` and
 //! `iroh-blobs` build for `wasm32-unknown-unknown` here. `docs/browser.md` records the measurements.
 
-use iroh::{Endpoint, RelayMap, RelayMode, RelayUrl, endpoint::presets};
-use iroh_blobs::{Hash, store::mem::MemStore};
+use iroh::{Endpoint, EndpointId, RelayMap, RelayMode, RelayUrl, endpoint::presets};
+use iroh_blobs::{Hash, HashAndFormat, api::downloader::Shuffled, store::mem::MemStore};
 use wasm_bindgen::prelude::*;
 
 /// The error of a relay URL or a hash a ticket names that this build cannot read.
@@ -121,4 +121,68 @@ pub async fn endpoint_id(relay_url: &str) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn relay_reads(text: &str) -> bool {
     relay(text).is_ok()
+}
+
+/// Fetches the blob with `root` from `sender` through `relay_url`, verifies it and returns its
+/// bytes.
+///
+/// The bytes are checked against `root` on the way in: every block is a BLAKE3 proof, and a block
+/// that does not match is refused before it reaches the caller. A blob that arrives is the blob the
+/// root names, so the page can write it without checking it again.
+///
+/// It compiles for the target and runs, and it has not yet downloaded anything: against a relay on
+/// this machine it fails with `Unable to download <root>`, and whether that is the relay's WebSocket
+/// path in Node or the way the peer is looked up is not settled. `docs/browser.md` records it.
+///
+/// # Errors
+///
+/// A relay URL, a sender id or a root that is not one, an endpoint that cannot be bound, and a
+/// fetch that fails are all strings for the caller to show. None of them quotes the ticket.
+#[wasm_bindgen]
+pub async fn fetch_blob(relay_url: &str, sender: &str, root: &str) -> Result<Vec<u8>, JsValue> {
+    let url = relay(relay_url).map_err(to_js)?;
+    let sender = sender_id(sender).map_err(to_js)?;
+    let hash = hash(root).map_err(to_js)?;
+    let endpoint = Endpoint::builder(presets::Minimal)
+        .relay_mode(relay_only(url))
+        .bind()
+        .await
+        .map_err(|e| to_js(Bad(format!("cannot open an endpoint: {e}"))))?;
+    // The relay connection has to be up before a peer can be found through it: a browser has no
+    // direct path, so the relay is the only way to the sender.
+    endpoint.online().await;
+    let store = MemStore::new();
+    // The downloader takes the peers that may have the content; the endpoint id is enough, because
+    // a relayed connection is the only kind a browser makes and the relay knows where it lives.
+    store
+        .downloader(&endpoint)
+        .download(HashAndFormat::raw(hash), Shuffled::new(vec![sender]))
+        .await
+        .map_err(|e| to_js(Bad(format!("the fetch stopped: {e}"))))?;
+    let bytes = store
+        .blobs()
+        .get_bytes(hash)
+        .await
+        .map_err(|e| to_js(Bad(format!("the blob cannot be read: {e}"))))?;
+    endpoint.close().await;
+    Ok(bytes.to_vec())
+}
+
+/// The endpoint id a ticket names, from its 64 hex characters.
+fn sender_id(text: &str) -> Result<EndpointId, Bad> {
+    let bad = || Bad("a sender is 64 hex characters".to_string());
+    if text.len() != 64 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(bad());
+    }
+    let mut bytes = [0u8; 32];
+    for (index, pair) in text.as_bytes().chunks(2).enumerate() {
+        let pair = std::str::from_utf8(pair).map_err(|_| bad())?;
+        bytes[index] = u8::from_str_radix(pair, 16).map_err(|_| bad())?;
+    }
+    EndpointId::from_bytes(&bytes).map_err(|_| bad())
+}
+
+/// A refusal as the value a page catches.
+fn to_js(error: Bad) -> JsValue {
+    JsValue::from_str(&error.0)
 }
