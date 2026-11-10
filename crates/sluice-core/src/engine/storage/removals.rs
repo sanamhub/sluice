@@ -118,10 +118,15 @@ pub(super) fn gone(path: &Path) {
 /// ```
 pub fn wait_for_removals(budget: Duration) {
     let deadline = Instant::now() + budget;
+    // A pass is made for what is already kept even when waiting for the running removals used the
+    // whole budget. A path that was kept before the wait would otherwise be left for the sweep
+    // without a single try, which is what a command whose own removals were still parked did: it
+    // left the folder for a day. A pass sleeps nowhere of its own, so the wait still ends within a
+    // look per path of its budget.
     wait_for_running(deadline);
     loop {
         let paths = std::mem::take(&mut *left_list());
-        if paths.is_empty() || Instant::now() >= deadline {
+        if paths.is_empty() {
             return;
         }
         let mut still = Vec::new();
@@ -143,6 +148,9 @@ pub fn wait_for_removals(budget: Duration) {
         drop(kept);
         #[cfg(test)]
         seam::after_merge();
+        if Instant::now() >= deadline {
+            return;
+        }
         std::thread::sleep(RETRY_EVERY);
     }
 }
