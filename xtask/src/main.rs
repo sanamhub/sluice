@@ -6,6 +6,7 @@ mod conformance;
 mod fuzz_seeds;
 mod man;
 mod package;
+mod ticket;
 mod tree;
 mod unicode_ignorable;
 mod wasm_features;
@@ -54,6 +55,12 @@ enum Command {
         #[arg(long, value_name = "DIR", default_value = "packaging")]
         out: PathBuf,
     },
+    /// Print the fields a ticket names: its sender, its relay, its root and its size
+    TicketParts {
+        /// The ticket, as text
+        #[arg(value_name = "TICKET")]
+        ticket: String,
+    },
     /// Fail if the tree holds a file a build writes or a top-level entry that does not belong
     Tree,
     /// Write one Unicode property's ranges from the character database as Rust source
@@ -73,6 +80,7 @@ fn main() -> anyhow::Result<()> {
         Command::FuzzSeeds { target, dir } => fuzz_seeds::run(target, &dir),
         Command::Man { dir } => man::run(&dir),
         Command::Package { version, from, out } => package::run(&version, &from, &out),
+        Command::TicketParts { ticket } => ticket::run(&ticket),
         Command::Tree => tree::run(),
         Command::UnicodeIgnorable { source, out } => unicode_ignorable::run(&source, &out),
     }
