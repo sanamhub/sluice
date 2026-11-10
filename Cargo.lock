@@ -3901,6 +3901,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sluice-wasm"
+version = "0.1.1"
+dependencies = [
+ "iroh",
+ "iroh-blobs",
+]
+
+[[package]]
 name = "sluice-wasm-hash"
 version = "0.1.1"
 dependencies = [

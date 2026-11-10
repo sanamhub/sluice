@@ -1,0 +1,32 @@
+[package]
+name = "sluice-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The browser half of Sluice: an endpoint in a tab, through a relay"
+homepage.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["p2p", "file-transfer", "wasm", "browser", "iroh"]
+categories = ["network-programming", "wasm"]
+
+[lib]
+# cdylib is what wasm-bindgen reads. rlib is what lets this crate be checked on the host, where the
+# browser transport is not compiled in and the helpers are still type-checked.
+crate-type = ["cdylib", "rlib"]
+
+# Its own dependency spec and not `workspace = true`: the native binary asks `iroh` for
+# `tls-aws-lc-rs`, and a tab must not. A browser reaches a relay over the WebSocket the browser
+# already has, so the wasm build needs no TLS provider of its own, and `aws-lc-rs` cannot build for
+# the target at all.
+[dependencies]
+iroh = { version = "1.4", default-features = false }
+iroh-blobs = { version = "0.103.1", default-features = false }
+
+[lints]
+workspace = true
+
+# Not released: dist builds only the `sluice` binary of sluice-cli (dist-workspace.toml).
+[package.metadata.dist]
+dist = false
