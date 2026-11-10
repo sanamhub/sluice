@@ -62,6 +62,12 @@ chrome --headless=new --no-sandbox --remote-debugging-port=9222 \
 page over the DevTools protocol rather than from a dump. The body says `sequence 64 bytes`, then the
 file's root, then the file's length, its SHA-256 and how long it took.
 
+## What it assumes
+
+The page reads one root out of the sequence, the one after the manifest root, so the sender's content
+is one file. A folder ticket names several roots and needs the manifest read to know which are files
+and what they are called; that is part F's second step, not this page.
+
 ## What it proved
 
 A 2 MiB file, 1,654 ms, `sha256 dac7494485cf5bce3989b90f0135d5cc2f68ae532a3e9b7fad4b9ce2f4dba88c`,
