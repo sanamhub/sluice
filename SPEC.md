@@ -418,6 +418,50 @@ Flow:
 
 Delta is a hint layer. No verification outcome may ever depend on it.
 
+**Chunking.** Content is cut by FastCDC v2020 with a 64-bit gear hash. `avg_bytes` is a power of two
+from 256 to 4,194,304 (4 MiB), and the other sizes follow from it: `min` is `avg_bytes / 4` and
+`max` is `avg_bytes * 8`. A sender writes 8192 unless it is told another. The gear table has 256
+entries, and entry `i` is the first eight bytes, little-endian, of `BLAKE3("sluice/delta/gear/1" ||
+[i])`, so the table is derived from this paragraph rather than transcribed. The scan starts at `min`
+with the hash at zero, cuts on `hash & ((1 << (log2(avg_bytes) + 2)) - 1) == 0` before `avg_bytes`,
+cuts on `hash & ((1 << (log2(avg_bytes) - 2)) - 1) == 0` after it, and stops at `max` or the end of
+the input. Those two masks are what pull boundaries towards the average.
+
+**Bytes.** The little-endian rule of section 2 applies, and each count is a varint.
+
+| Field | Bytes |
+|---|---|
+| `SigList.algo` | 1, and 1 is FastCDC v2020 with a 64-bit gear hash |
+| `SigList.avg_bytes` | 4 |
+| `SigList.entries` count | a varint |
+| `SigEntry` | `len` in 4, `strong` 16 |
+| `NeedRanges.root` | 32 |
+| `NeedRanges.ranges` count | a varint |
+| one range | `start` in 8, `len` in 8 |
+
+`strong` is the first 16 bytes of the chunk's BLAKE3 hash, and `len` is the chunk's length, which is
+from 1 to `max`. `SigList` carries no length of its own: the sum of its `len` fields MUST equal the
+length of the content the ticket names, and a receiver MUST refuse a list whose sum is another
+length, because such a list was cut from other content.
+
+A `RangeSet` is the count followed by that many ranges, each a start and a length. The ranges MUST
+be ascending, MUST NOT touch or overlap, and MUST NOT be empty, and `start + len` MUST fit in a
+`u64`. One set of needed bytes therefore has one encoding.
+
+**Stream.** When both peers set `DELTA` in `Hello`, a requester asks on a `sluice/1` connection it
+dials itself. After the greeting it writes the 32 bytes of the content root it is asking about, and
+the provider answers with one `SigList` frame and nothing else on that stream. A frame travels as a
+record of section 6 does: its length as a varint, then its bytes. The requester then sends one
+`NeedRanges` frame on the same connection, in a stream of its own, and the provider ends the
+connection. The provider MUST send signatures only for content it is already serving, and MUST
+refuse a root that its allowlist does not hold. The requester MUST send nothing derived from its
+candidate files except the ranges it still needs.
+
+**Limits.** A `SigList` or a `NeedRanges` carries at most 1,048,576 entries, and a decoder MUST
+refuse a count above that before it reserves memory for the entries. A frame is bounded by
+`max_frame_bytes` of the greeting as well. A file under 65,536 bytes is not worth a delta, and a
+requester SHOULD fetch it plainly.
+
 ---
 
 ## 8. Directory manifest
