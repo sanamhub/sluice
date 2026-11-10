@@ -193,6 +193,19 @@ pub(super) struct Completion {
     pub ids: Arc<ConnIds>,
 }
 
+impl Receiver {
+    /// The peer this report is about.
+    pub(super) fn endpoint(&self) -> [u8; 32] {
+        match self {
+            Self::Opened { endpoint, .. }
+            | Self::Placed { endpoint, .. }
+            | Self::Refused { endpoint, .. }
+            | Self::RefusedGroup { endpoint, .. }
+            | Self::Closed { endpoint, .. } => *endpoint,
+        }
+    }
+}
+
 /// A watcher that reports every content connection, and whether it closed with
 /// [`super::COMPLETE_CLOSE`]. Only the static content protocol carries the code, so a `sluice/1`
 /// connection that closes with it means nothing here.
