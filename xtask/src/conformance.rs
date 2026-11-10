@@ -7,6 +7,7 @@ mod live_tests;
 mod manifests;
 mod packs;
 mod paths;
+mod receipts;
 mod sequences;
 #[cfg(test)]
 mod tests;
@@ -89,6 +90,7 @@ pub fn check(root: &Path) -> Result<Report> {
             "manifests" => manifests::run(&dir, &mut report)?,
             "packs" => packs::run(&dir, &mut report)?,
             "paths" => paths::run(&dir, &mut report)?,
+            "receipts" => receipts::run(&dir, &mut report)?,
             "sequences" => sequences::run(&dir, &mut report)?,
             "tickets" => tickets::run(&dir, &mut report)?,
             "writer" => writer::run(&dir, &mut report)?,

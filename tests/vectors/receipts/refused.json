@@ -1,0 +1,12 @@
+{
+  "description": "Receipts an implementation MUST refuse, by the part of the receipt that is wrong",
+  "cases": [
+    { "receipt": "sluicereceipt1144gj289144gj289144gj289144gj289144gj289144gj289144g01000000a000x956rrz2kh90nfqna1xh6bp5z6amexneqtz7q4j23vn6j526t8p00m2w32hg2000py5sh016n4t7vq2fnzgk34jnaz8qgf97jk6xa92kwgfx2yhs2rdshvjzb811rmmwxyyxzhcfk8710ja0pghbsagv5htb0vn3kcb9r0g", "valid": false, "refused": "signature" },
+    { "receipt": "sluicereceipt1144gj289144gj289144gj289144gj289144gj289144gj289144g010000000000x956rrz2kh90nfqna1xh6bp5z6amexneqtz7q4j23vn6j526t8p00m2w32hg2000a8ycpgr72g0eja1t803e7jqt927fhd40kfq6pfk82x1dxc0137yn32pszkq0mk4sh8w3bgwqj2hzqcg5vzja6gbzdd1th2jg616d608", "valid": false, "refused": "signature" },
+    { "receipt": "sluicereceipt1144gj289144gj289144gj289144gj289144gj289144gj289144g010000000000zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzg0m2w32hg20000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", "valid": false, "refused": "signature" },
+    { "receipt": "sluicereceipt1144gj289144gj289144gj289144gj289144gj289144gj289144g01000000000004000000000000000000000000000000000000000000000000000m2w32hg20000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", "valid": false, "refused": "signature" },
+    { "receipt": "sluicereceipt1144gj289144gj289144gj289144gj289144gj289144gj289144g010000000000x956rrz2kh90nfqna1xh6bp5z6amexneqtz7q4j23vn6j526t8p00m2w32hg200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", "valid": false, "refused": "text" },
+    { "receipt": "sluice1144gj289144gj289144gj289144gj289144gj289144gj289144g010000000000x956rrz2kh90nfqna1xh6bp5z6amexneqtz7q4j23vn6j526t8p00m2w32hg2000py5sh016n4t7vq2fnzgk34jnaz8qgf97jk6xa92kwgfx2yhs2rdshvjzb811rmmwxyyxzhcfk8710ja0pghbsagv5htb0vn3kcb9r0g", "valid": false, "refused": "text" },
+    { "receipt": "sluicereceipt1144-j289144gj289144gj289144gj289144gj289144gj289144g010000000000x956rrz2kh90nfqna1xh6bp5z6amexneqtz7q4j23vn6j526t8p00m2w32hg2000py5sh016n4t7vq2fnzgk34jnaz8qgf97jk6xa92kwgfx2yhs2rdshvjzb811rmmwxyyxzhcfk8710ja0pghbsagv5htb0vn3kcb9r0g", "valid": false, "refused": "text" }
+  ]
+}
