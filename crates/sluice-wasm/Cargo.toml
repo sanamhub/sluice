@@ -23,6 +23,11 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 iroh = { version = "1.4", default-features = false }
 iroh-blobs = { version = "0.103.1", default-features = false }
+# The JS side of the module. Pinned exactly, like the hashing crate, to the version `cargo xtask
+# wasm-hash` installs.
+wasm-bindgen = { workspace = true }
+# The version the lock resolves beside that `wasm-bindgen`, which is what an async export needs.
+wasm-bindgen-futures = "=0.4.79"
 
 [lints]
 workspace = true
