@@ -15,9 +15,14 @@ use std::time::{Duration, Instant};
 use super::storage;
 use crate::Error;
 
+mod check;
+mod owner;
 mod private;
 mod resolve;
 
+use check::check_folder;
+pub(crate) use check::check_folder_id;
+pub(in crate::home) use owner::owned_by_this_user;
 pub(in crate::home) use resolve::resolve;
 #[cfg(test)]
 pub(in crate::home) use resolve::{cannot_resolve, resolve_with};
@@ -270,113 +275,6 @@ pub(super) fn create_private_folder(root: &Path, name: &str) -> Result<PathBuf, 
     Ok(folder)
 }
 
-/// Refuses `folder` unless it is a real folder of this user: not a link, and not another user's.
-/// Read before anything is read out of a folder that holds a store, because a link there would lead
-/// somewhere else and another user's folder can be changed after anything sluice writes in it.
-pub(crate) fn check_folder(folder: &Path) -> Result<(), Error> {
-    check_folder_id(folder).map(|_| ())
-}
-
-/// [`check_folder`] with the identity of the folder it checked. The kind, the owner and the
-/// identity come from one open handle, so a name swapped for another object between two of them
-/// cannot mix the answers: a caller that opens a store in the folder later compares this identity
-/// with the folder the store was opened in, and one folder swapped for another is noticed even when
-/// both carry the same marker.
-pub(crate) fn check_folder_id(folder: &Path) -> Result<Option<(u64, u64)>, Error> {
-    imp::check(folder)
-}
-
-/// The refusal for a name that is a link or is not a folder.
-fn not_a_folder(folder: &Path) -> Error {
-    Error::Policy(format!(
-        "{} is a link or is not a folder, so it cannot hold a partial store; remove it",
-        folder.display()
-    ))
-}
-
-#[cfg(unix)]
-mod imp {
-    use std::{fs, path::Path};
-
-    use rustix::fs::{FileType, Mode, OFlags};
-    use rustix::io::Errno;
-
-    use super::{accepted_uid, not_a_folder, private, storage};
-    use crate::Error;
-
-    pub(super) fn check(folder: &Path) -> Result<Option<(u64, u64)>, Error> {
-        // `NOFOLLOW` makes a link at the name fail instead of opening what it points at, and
-        // `NONBLOCK` keeps a FIFO at the name from waiting for a writer; the handle is then checked
-        // for its kind, its owner and its identity, so all three describe one object.
-        let flags = OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
-        match rustix::fs::open(folder, flags, Mode::empty()) {
-            Ok(file) => {
-                let stat =
-                    rustix::fs::fstat(&file).map_err(|e| storage("read", folder, e.into()))?;
-                if FileType::from_raw_mode(stat.st_mode) != FileType::Directory {
-                    return Err(not_a_folder(folder));
-                }
-                if !accepted_uid(stat.st_uid) {
-                    return Err(private::owned_by_other(folder));
-                }
-                Ok(Some((stat.st_dev as u64, stat.st_ino as u64)))
-            }
-            Err(Errno::LOOP | Errno::NOTDIR) => Err(not_a_folder(folder)),
-            // The folder cannot be opened. Its owner still decides whether that refusal is "another
-            // user's" or a broken file system, and the identity is read from the entry itself, as
-            // `lstat` does. The caller refuses the folder unless it is this user's or root's.
-            Err(Errno::ACCESS | Errno::PERM) => {
-                let meta = fs::symlink_metadata(folder).map_err(|e| storage("read", folder, e))?;
-                if !meta.is_dir() || meta.file_type().is_symlink() {
-                    return Err(not_a_folder(folder));
-                }
-                if !super::owned_by_this_user(folder)
-                    .map_err(|e| storage("read the owner of", folder, e))?
-                {
-                    return Err(private::owned_by_other(folder));
-                }
-                use std::os::unix::fs::MetadataExt;
-                Ok(Some((meta.dev(), meta.ino())))
-            }
-            Err(e) => Err(storage("read", folder, e.into())),
-        }
-    }
-}
-
-#[cfg(windows)]
-mod imp {
-    use std::path::Path;
-
-    use super::{not_a_folder, private, storage};
-    use crate::Error;
-    use crate::home::private_windows::{Checked, checked_folder};
-
-    pub(super) fn check(folder: &Path) -> Result<Option<(u64, u64)>, Error> {
-        match checked_folder(folder).map_err(|e| storage("read", folder, e))? {
-            Checked::Folder { first, second } => Ok(Some((first, second))),
-            Checked::NotAFolder => Err(not_a_folder(folder)),
-            Checked::SomeoneElses => Err(private::owned_by_other(folder)),
-        }
-    }
-}
-
-#[cfg(not(any(unix, windows)))]
-mod imp {
-    use std::path::Path;
-
-    use super::not_a_folder;
-    use crate::Error;
-
-    pub(super) fn check(folder: &Path) -> Result<Option<(u64, u64)>, Error> {
-        let meta =
-            std::fs::symlink_metadata(folder).map_err(|e| super::storage("read", folder, e))?;
-        if !meta.is_dir() || meta.file_type().is_symlink() {
-            return Err(not_a_folder(folder));
-        }
-        Ok(None)
-    }
-}
-
 /// Makes a folder with the private builder: mode 0700 from the moment it exists, so a folder that
 /// another user can read is never on disk even for the moment before an access list is set, and
 /// the call fails when the name is already there.
@@ -389,48 +287,6 @@ pub(crate) fn create_private_dir(folder: &Path) -> io::Result<()> {
 pub(crate) fn restrict_folder(folder: &Path) -> Result<(), Error> {
     check_folder(folder)?;
     private::keep_home_private(folder)
-}
-
-/// Whether this user made the entry at `path`: on Unix its uid is the effective uid or root, and on
-/// Windows its owner is this user, `Administrators` or `SYSTEM`. The owner is read from a handle
-/// opened without following a link and without waiting, so it is the owner of the object the name
-/// holds now. A folder this user may not open, as another user's mode 0700 folder is, still has an
-/// owner that `lstat` reads without the access the open needed.
-#[cfg(unix)]
-pub(in crate::home) fn owned_by_this_user(path: &Path) -> io::Result<bool> {
-    use std::os::unix::fs::MetadataExt;
-
-    use rustix::fs::{Mode, OFlags};
-
-    // This name may hold a file and not a folder. A FIFO here would wait for a writer, and the
-    // caller refuses it by kind, so the open does not block and that refusal stays reachable.
-    let flags = OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
-    match rustix::fs::open(path, flags, Mode::empty()) {
-        Ok(file) => Ok(accepted_uid(rustix::fs::fstat(&file)?.st_uid)),
-        Err(e) if e == rustix::io::Errno::ACCESS || e == rustix::io::Errno::PERM => {
-            // The folder cannot be opened, and the owner is what decides whether that refusal is
-            // "another user's" or a broken file system. lstat needs no access to the entry.
-            Ok(accepted_uid(fs::symlink_metadata(path)?.uid()))
-        }
-        Err(e) => Err(e.into()),
-    }
-}
-
-/// Root can already do anything to every file, so a folder it owns is as good as this user's, and
-/// a home a backup tool restored as root still opens.
-#[cfg(unix)]
-fn accepted_uid(uid: u32) -> bool {
-    uid == rustix::process::geteuid().as_raw() || uid == 0
-}
-
-#[cfg(windows)]
-pub(in crate::home) fn owned_by_this_user(path: &Path) -> io::Result<bool> {
-    super::private_windows::is_owned_by_this_user(path)
-}
-
-#[cfg(not(any(unix, windows)))]
-pub(in crate::home) fn owned_by_this_user(_path: &Path) -> io::Result<bool> {
-    Ok(true)
 }
 
 fn folder_builder(recursive: bool) -> DirBuilder {
