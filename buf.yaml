@@ -1,0 +1,20 @@
+# The control API's schema, linted and checked for breaking changes against `main`.
+#
+# `SPEC.md` section 11 makes `proto/sluice/v1` the definition of the local interface, governed by
+# buf. The STANDARD rules keep the style of every message the same, and FILE breaking changes keep
+# a client built against an older schema working with a newer daemon.
+version: v2
+
+modules:
+  - path: proto
+
+lint:
+  use:
+    - STANDARD
+
+breaking:
+  use:
+    - FILE
+  # A daemon and a client are built and shipped together, so a breaking change is caught between
+  # releases rather than between two versions a user could mix.
+  against_git_ref: main

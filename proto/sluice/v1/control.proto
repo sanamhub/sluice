@@ -1,0 +1,291 @@
+// The local control interface of Sluice, as `SPEC.md` section 11 says. It is a control plane: a
+// client asks the engine to move bytes and watches what happens. No file byte ever traverses it,
+// and nothing here carries content.
+//
+// Text a peer chose never appears as a plain string. A name, a link target, a relay URL and a close
+// reason each have a message type of their own, so a client cannot mistake one for a sentence the
+// daemon wrote about itself.
+syntax = "proto3";
+
+package sluice.v1;
+
+// One Sluice engine, in this user's home.
+service Control {
+  // Starts a send of files or folders, and returns the ticket it will serve.
+  rpc StartSend(StartSendRequest) returns (StartSendReply);
+
+  // Starts a receive of what a ticket names, into a folder the daemon was started with.
+  rpc StartReceive(StartReceiveRequest) returns (StartReceiveReply);
+
+  // Reads a ticket's manifest and says what it offers, without fetching content.
+  rpc InspectTicket(InspectTicketRequest) returns (InspectTicketReply);
+
+  // The jobs this daemon knows about, newest last. A ticket is never in this answer.
+  rpc ListJobs(ListJobsRequest) returns (ListJobsReply);
+
+  // One job's events, from the moment the call is made, as a stream that ends when the job does.
+  rpc WatchEvents(WatchEventsRequest) returns (stream Event);
+
+  // Stops a job. A receive keeps its partial store, so the next receive of the same ticket resumes.
+  rpc CancelJob(CancelJobRequest) returns (CancelJobReply);
+
+  // The daemon's version, and the version of the protocol it serves.
+  rpc Version(VersionRequest) returns (VersionReply);
+
+  // The same checks `sluice doctor` makes, with the exit code that report would have.
+  rpc Doctor(DoctorRequest) returns (DoctorReply);
+}
+
+// A ticket, in its text form. A ticket is a read capability and a secret: a daemon must not log
+// one, must not put one in an error, and must not show one to a call that did not make it.
+message Ticket {
+  string text = 1;
+}
+
+// A name from a manifest, chosen by a peer.
+message PeerName {
+  string text = 1;
+}
+
+// A link target from a manifest, chosen by a peer.
+message LinkTarget {
+  string text = 1;
+}
+
+// A relay URL a peer named in a ticket, or that a connection was relayed through.
+message PeerRelayUrl {
+  string text = 1;
+}
+
+// The reason a peer gave for closing a connection.
+message PeerCloseReason {
+  string text = 1;
+}
+
+// Where a send's or a receive's bytes go, or come from.
+message LocalPath {
+  string path = 1;
+}
+
+message StartSendRequest {
+  // Absolute paths inside the roots the daemon was started with.
+  repeated LocalPath paths = 1;
+  // How long the ticket works, in seconds from now, or zero for a ticket that never expires.
+  uint64 expires_seconds = 2;
+  // How many receivers a kept send offers, or zero for one, and one download.
+  uint32 keep_for = 3;
+  // Serve until cancelled instead of stopping after the receivers are served.
+  bool keep = 4;
+}
+
+message StartSendReply {
+  // The ticket the job serves. A secret, and the only answer that carries one.
+  Ticket ticket = 1;
+  string job_id = 2;
+  uint64 bytes = 3;
+  uint64 files = 4;
+}
+
+message StartReceiveRequest {
+  Ticket ticket = 1;
+  // A folder under a root the daemon was started with.
+  LocalPath out = 2;
+  // Replace a file that is already there.
+  bool force = 3;
+  // Write a receipt here when the transfer completes, if the sender offers one.
+  LocalPath receipt = 4;
+}
+
+message StartReceiveReply {
+  string job_id = 1;
+}
+
+message InspectTicketRequest {
+  Ticket ticket = 1;
+}
+
+message InspectTicketReply {
+  uint64 files = 1;
+  uint64 folders = 2;
+  uint64 links = 3;
+  uint64 bytes = 4;
+  // The names, up to the daemon's limit, each as the peer chose it.
+  repeated PeerName names = 5;
+  // How many more names there are than were returned.
+  uint64 more_names = 6;
+  // Whether the ticket names a live stream, which has no manifest to read.
+  bool live = 7;
+}
+
+message ListJobsRequest {
+  // Return only jobs in this state, or every state when it is UNSPECIFIED.
+  JobState state = 1;
+}
+
+message ListJobsReply {
+  repeated JobSummary jobs = 1;
+}
+
+// What a job is, and what has happened to it. It names no ticket.
+message JobSummary {
+  string id = 1;
+  JobKind kind = 2;
+  JobState state = 3;
+  uint64 bytes_total = 4;
+  uint64 bytes_done = 5;
+  // For a send, how many receivers the job has served.
+  uint32 receivers = 6;
+  // For a receive, whether the partial store is kept for a resume.
+  bool resumable = 7;
+}
+
+enum JobKind {
+  JOB_KIND_UNSPECIFIED = 0;
+  JOB_KIND_SEND = 1;
+  JOB_KIND_RECEIVE = 2;
+  JOB_KIND_INSPECT = 3;
+}
+
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_QUEUED = 1;
+  JOB_STATE_RUNNING = 2;
+  JOB_STATE_DONE = 3;
+  JOB_STATE_FAILED = 4;
+  JOB_STATE_CANCELLED = 5;
+}
+
+message WatchEventsRequest {
+  string job_id = 1;
+}
+
+// One thing that happened to a job. The set is the one `SPEC.md` section 11 names, in the order a
+// transfer may report them.
+message Event {
+  string job_id = 1;
+  // Milliseconds since the Unix epoch, on the daemon's clock.
+  uint64 utc_ms = 2;
+  oneof event {
+    Started started = 3;
+    Connected connected = 4;
+    PathChanged path_changed = 5;
+    Relayed relayed = 6;
+    Progress progress = 7;
+    Retrying retrying = 8;
+    Warning warning = 9;
+    Verified verified = 10;
+    Done done = 11;
+    Dropped dropped = 12;
+  }
+}
+
+message Started {
+  JobKind kind = 1;
+  uint64 files = 2;
+  uint64 bytes = 3;
+}
+
+message Connected {
+  // The chosen path, as one of these.
+  PathKind path = 1;
+  // The relay, when the path is through one.
+  PeerRelayUrl relay = 2;
+}
+
+enum PathKind {
+  PATH_KIND_UNSPECIFIED = 0;
+  PATH_KIND_DIRECT = 1;
+  PATH_KIND_RELAYED = 2;
+}
+
+message PathChanged {
+  PathKind path = 1;
+  PeerRelayUrl relay = 2;
+}
+
+message Relayed {
+  PeerRelayUrl relay = 1;
+  // How long the connection waited for a direct path before this was reported.
+  uint64 waited_seconds = 2;
+}
+
+message Progress {
+  uint64 bytes_done = 1;
+  uint64 bytes_total = 2;
+  uint64 bytes_per_second = 3;
+}
+
+message Retrying {
+  uint32 attempt = 1;
+  // A sentence the daemon wrote, not one a peer chose.
+  string reason = 2;
+}
+
+// Something the daemon noticed that is not a failure. The message is the daemon's; anything a peer
+// chose arrives in a field of its own.
+message Warning {
+  string message = 1;
+  PeerName name = 2;
+  PeerRelayUrl relay = 3;
+}
+
+message Verified {
+  // The BLAKE3 root of what was verified, as 64 lower-case hex characters.
+  string root = 1;
+  uint64 bytes = 2;
+}
+
+message Done {
+  JobState state = 1;
+  // The daemon's sentence for a failure, and nothing a peer chose.
+  string message = 2;
+  // The peer's own reason for closing, when there is one.
+  PeerCloseReason peer_close_reason = 3;
+}
+
+// The watcher could not keep up and this many events were dropped. A watcher is never allowed to
+// grow a buffer without a bound, so this is how it learns that its stream has a gap.
+message Dropped {
+  uint64 count = 1;
+}
+
+message CancelJobRequest {
+  string job_id = 1;
+}
+
+message CancelJobReply {
+  // Whether the job was still running when the call arrived.
+  bool was_running = 1;
+}
+
+message VersionRequest {}
+
+message VersionReply {
+  string version = 1;
+  // The protocol version of the control interface, which is 1.
+  uint32 protocol = 2;
+}
+
+message DoctorRequest {}
+
+message DoctorReply {
+  repeated Check checks = 1;
+  // What `sluice doctor` would exit with: 0, 5 for storage or 6 for policy.
+  uint32 exit_code = 2;
+}
+
+message Check {
+  // The check's name, which the daemon writes.
+  string name = 1;
+  CheckState state = 2;
+  // One sentence about what was found, which the daemon writes. A path in it is the caller's own,
+  // and a name a peer chose never appears here.
+  string message = 3;
+}
+
+enum CheckState {
+  CHECK_STATE_UNSPECIFIED = 0;
+  CHECK_STATE_OK = 1;
+  CHECK_STATE_WARN = 2;
+  CHECK_STATE_FAIL = 3;
+}
