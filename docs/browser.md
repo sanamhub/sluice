@@ -116,8 +116,18 @@ What is known about it, from the same harness:
 
 - a native `sluice recv` of the same ticket receives and verifies the file, so the sender, the ticket
   and the relay are all serving. It connected directly, which a browser cannot do.
-- the relay's `--dev` mode listens on `::` and refuses `127.0.0.1` on this machine, and a plain
-  WebSocket from Node to `[::1]:3340` does not open on any path tried.
+- the relay's `--dev` mode listens on `::` and refuses `127.0.0.1` on this machine. It can be made to
+  listen on IPv4 with a config file, because `--dev` only fills in a bind address that is absent:
+
+      http_bind_addr = "0.0.0.0:3340"
+      enable_metrics = false
+
+  With that file (`--dev -c relay.toml`) it answers `127.0.0.1:3340`, and the fetch still fails in
+  429 ms, so the bind address was not the cause.
+- a plain WebSocket from Node to that relay does not open on any path tried either, although HTTP on
+  the same address answers 200. A relay's WebSocket needs the path and subprotocol its client uses,
+  so that probe proves only that the harness's own WebSocket is not a relay client; it does not
+  prove the relay broken.
 
 So the failure is consistent with the harness's transport: Node's WebSocket reaching an IPv6-only
 relay, rather than the wasm client's dial. That is not settled, and settling it is the next step:
