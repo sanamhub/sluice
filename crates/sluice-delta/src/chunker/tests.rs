@@ -40,52 +40,47 @@ fn an_empty_input_has_no_chunks_and_a_short_one_is_one_chunk() {
 }
 
 proptest! {
-    /// Every byte of the input lands in exactly one chunk, in order.
-    #[test]
-    fn the_chunks_cover_the_input(data in prop::collection::vec(any::<u8>(), 0..40_000)) {
-        let chunks: Vec<&[u8]> = params().chunks(&data).collect();
-        prop_assert_eq!(chunks.concat(), data);
-    }
+/// Every byte of the input lands in exactly one chunk, in order.
+#[test]
+fn the_chunks_cover_the_input(data in prop::collection::vec(any::<u8>(), 0..40_000)) {
+    let chunks: Vec<&[u8]> = params().chunks(&data).collect();
+    prop_assert_eq!(chunks.concat(), data);
+}
 
-    /// The same bytes cut at the same places every time, which is the whole of matching.
-    #[test]
-    fn the_same_bytes_cut_at_the_same_places(data in prop::collection::vec(any::<u8>(), 0..40_000)) {
-        prop_assert_eq!(params().boundaries(&data), params().boundaries(&data));
-    }
+/// The same bytes cut at the same places every time, which is the whole of matching.
+#[test]
+fn the_same_bytes_cut_at_the_same_places(data in prop::collection::vec(any::<u8>(), 0..40_000)) {
+    prop_assert_eq!(params().boundaries(&data), params().boundaries(&data));
+}
 
-    /// No chunk is shorter than the minimum or longer than the maximum, except the last one, which
-    /// is the rest of the input.
-    #[test]
-    fn every_chunk_stays_within_the_bounds(data in prop::collection::vec(any::<u8>(), 0..80_000)) {
-        let params = params();
-        let chunks: Vec<&[u8]> = params.chunks(&data).collect();
-        for (index, chunk) in chunks.iter().enumerate() {
-            if index + 1 == chunks.len() {
-                prop_assert!(!chunk.is_empty());
-                prop_assert!(chunk.len() <= params.max() as usize);
-            } else {
-                prop_assert!(chunk.len() >= params.min() as usize);
-                prop_assert!(chunk.len() <= params.max() as usize);
-            }
+/// No chunk is shorter than the minimum or longer than the maximum, except the last one, which
+/// is the rest of the input.
+#[test]
+fn every_chunk_stays_within_the_bounds(data in prop::collection::vec(any::<u8>(), 0..80_000)) {
+    let params = params();
+    let chunks: Vec<&[u8]> = params.chunks(&data).collect();
+    for (index, chunk) in chunks.iter().enumerate() {
+        if index + 1 == chunks.len() {
+            prop_assert!(!chunk.is_empty());
+            prop_assert!(chunk.len() <= params.max() as usize);
+        } else {
+            prop_assert!(chunk.len() >= params.min() as usize);
+            prop_assert!(chunk.len() <= params.max() as usize);
         }
     }
-
-    /// The property a delta lives on: one changed byte moves its own boundary and, at most, the one
-    /// after it, and the rest of the file cuts as it did. A file of 64 KiB has about eight chunks.
-    #[test]
-    fn one_changed_byte_moves_at_most_two_boundaries(
-        mut data in prop::collection::vec(any::<u8>(), 64 * 1024..64 * 1024 + 1),
-        at in 0usize..64 * 1024,
-    ) {
-        let before = params().boundaries(&data);
-        data[at] ^= 0xff;
-        let after = params().boundaries(&data);
-        let common = before.iter().filter(|end| after.contains(end)).count();
-        prop_assert!(
-            common + 2 >= before.len().min(after.len()),
-            "{} of {} boundaries stayed",
-            common,
-            before.len()
-        );
-    }
 }
+
+/// Every boundary before a changed byte stays where it was, because a boundary is decided by
+/// the bytes before it and nothing else. That is the property a delta lives on: a change cannot
+/// reach backwards.
+#[test]
+fn a_change_leaves_every_boundary_before_it(
+    mut data in prop::collection::vec(any::<u8>(), 0..60_000),
+    at in 0usize..60_000,
+) {
+    prop_assume!(at < data.len());
+    let before: Vec<usize> = params().boundaries(&data).into_iter().filter(|end| *end <= at).collect();
+    data[at] ^= 0xff;
+    let after: Vec<usize> = params().boundaries(&data).into_iter().filter(|end| *end <= at).collect();
+    prop_assert_eq!(before, after);
+}}

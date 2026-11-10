@@ -10,9 +10,11 @@
 
 mod chunker;
 mod codec;
+mod matcher;
 
 pub use chunker::{Params, SMALLEST};
 pub use codec::{Entry, MAX_ENTRIES, NeedRanges, Range, SigList};
+pub use matcher::{Candidate, Plan, Span, plan};
 
 /// The average chunk size this release writes when nothing else is asked for: 8 KiB. The smallest
 /// file worth a delta is [`chunker::SMALLEST`]; below it a plain fetch costs less than the hint.
@@ -38,6 +40,12 @@ pub enum Error {
     Ranges,
     /// A range whose end does not fit in a `u64`.
     Overflow,
+    /// A signature list whose lengths are not the length of the content it claims to be about.
+    Length,
+    /// A plan that copies past the end of the candidate, which no honest list produces.
+    Candidate,
+    /// A plan that does not cover the target exactly once.
+    Plan,
 }
 
 impl std::fmt::Display for Error {
@@ -53,6 +61,9 @@ impl std::fmt::Display for Error {
             Self::Algorithm(algo) => write!(f, "algorithm {algo} is not one this release reads"),
             Self::Ranges => f.write_str("ranges are empty, not ascending, or overlap"),
             Self::Overflow => f.write_str("a range ends past the largest offset"),
+            Self::Length => f.write_str("the chunk lengths are not the length of the content"),
+            Self::Candidate => f.write_str("a matched chunk runs past the end of the candidate"),
+            Self::Plan => f.write_str("the plan does not cover the target once"),
         }
     }
 }
