@@ -1,5 +1,6 @@
 //! `sluice send <file>`: import in place, print the ticket, then serve until one download.
 
+use std::io::IsTerminal;
 use std::{fs, path::PathBuf};
 
 use clap::Args;
@@ -55,9 +56,16 @@ pub struct SendArgs {
     /// `50MB`: `KB` is 1000 bytes and `KiB` 1024, and `K`, `M`, `G`, `T`, `P` alone are powers of 1024
     #[arg(long, value_name = "RATE")]
     pub limit_rate: Option<String>,
+    /// Also print the ticket as a QR code on standard error, for a phone or a second screen. The
+    /// code is the ticket, so a camera that can see this screen can take the file
+    #[arg(long)]
+    pub qr: bool,
 }
 
 pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
+    if args.qr {
+        crate::qr::check_terminal(std::io::stderr().is_terminal())?;
+    }
     let relay = RelayModeChoice::from_flags(args.relay.as_deref(), args.n0_relays)?;
     if args.n0_relays {
         output.write_stderr(&format!("{N0_WARNING}\n"));
@@ -149,7 +157,13 @@ fn serve(
             outgoing(&home, paths, args, relay, expiry, rate).await?
         };
         outgoing.reserve(keep);
-        events::ticket(*output, &outgoing.ticket.encode())?;
+        let ticket = outgoing.ticket.encode();
+        // The code goes first and to standard error: the line below is what a script reads, and a
+        // ticket that no code holds stops the command before either is written.
+        if args.qr {
+            crate::qr::write(output, &ticket)?;
+        }
+        events::ticket(*output, &ticket)?;
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "sending");
         let end = outgoing.serve(keep, &tx).await;

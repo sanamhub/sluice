@@ -296,3 +296,21 @@ fn help_goes_to_stdout_with_the_same_colour_choice() {
         .success();
     assert!(!has_escape(&stdout_text(&plain)));
 }
+
+/// `--qr` is refused where no person can see the code: a block written into a pipe is characters in
+/// a log, and the ticket it draws is a secret. Nothing goes to standard output either, so a script
+/// that asked for a send does not get a ticket with no send behind it.
+#[test]
+fn qr_without_a_terminal_is_refused_before_anything_is_sent() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("file.bin");
+    fs::write(&file, b"bytes").unwrap();
+    let assert = sluice(dir.path())
+        .args(["send", &file.to_string_lossy(), "--qr"])
+        .assert()
+        .code(6);
+    assert_eq!(stdout_text(&assert), "");
+    let stderr = stderr_text(&assert);
+    assert!(stderr.contains("not a terminal"), "{stderr:?}");
+    assert!(stderr.contains("--qr"), "{stderr:?}");
+}
