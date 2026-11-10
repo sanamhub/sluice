@@ -112,7 +112,14 @@ module answers
 the fetch stopped: Unable to download 278b5293184ca53b6528d057ad59f78b99f94f639b4d8e3dcf0266129d435d94
 ```
 
-The sender was serving and the same ticket's relay was up, so the failure is in the browser side: the
-wasm endpoint's WebSocket to the relay, or the way the peer is looked up from an endpoint id with no
-addresses. That is the next thing to settle, and it is a diagnosis rather than a design question.
-A page and a headless browser come after it.
+What is known about it, from the same harness:
+
+- a native `sluice recv` of the same ticket receives and verifies the file, so the sender, the ticket
+  and the relay are all serving. It connected directly, which a browser cannot do.
+- the relay's `--dev` mode listens on `::` and refuses `127.0.0.1` on this machine, and a plain
+  WebSocket from Node to `[::1]:3340` does not open on any path tried.
+
+So the failure is consistent with the harness's transport: Node's WebSocket reaching an IPv6-only
+relay, rather than the wasm client's dial. That is not settled, and settling it is the next step:
+either a relay that listens on IPv4, or a browser, whose WebSocket handles `[::1]`. A page and a
+headless browser come after that, and the same function is what they call.
