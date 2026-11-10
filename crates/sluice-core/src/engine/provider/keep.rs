@@ -11,7 +11,7 @@ use iroh_blobs::Hash;
 use super::{GRACE, Provider, ServeEnd, lock_places, reports_stopped, wait_grace};
 use crate::{
     Error,
-    engine::{endpoint, now_ms},
+    engine::{endpoint, now_ms, policy::Places},
 };
 
 /// The timer that bounds the wait for a holder that is still connected.
@@ -31,6 +31,9 @@ impl Provider {
         let roots: BTreeSet<Hash> = roots.into_iter().collect();
         let mut held = Held::default();
         let mut grace: Option<Grace> = None;
+        // The lines of one report, and the lines a place releases, reused rather than made again
+        // for every report.
+        let mut due: Vec<endpoint::Receiver> = Vec::new();
         loop {
             let left = self.expiry_ms_left();
             if left == 0 && self.expiry.is_some() {
@@ -51,7 +54,7 @@ impl Provider {
                     let Some(reported) = reported else {
                         return Err(reports_stopped());
                     };
-                    if let Some(end) = self.on_report(reported, &roots, limit, &mut held, &mut grace, events) {
+                    if let Some(end) = self.on_report(reported, &roots, limit, &mut held, &mut due, &mut grace, events) {
                         return Ok(end);
                     }
                 }
@@ -65,10 +68,10 @@ impl Provider {
         }
     }
 
-    /// What one receiver report does to the wait: notes the connection, prints its line, and says
-    /// whether the send is now done. A limited send is done once the reports it has read show every
-    /// place taken and no connection of a holder left; until then its grace runs from the holder's
-    /// last activity.
+    /// What one receiver report does to the wait: notes the connection, prints the lines that are
+    /// due, and says whether the send is now done. A limited send is done once the reports it has
+    /// read show every place taken and no connection of a holder left; until then its grace runs
+    /// from the holder's last activity.
     #[allow(clippy::too_many_arguments)]
     fn on_report(
         &self,
@@ -76,11 +79,14 @@ impl Provider {
         roots: &BTreeSet<Hash>,
         limit: Option<u32>,
         held: &mut Held,
+        due: &mut Vec<endpoint::Receiver>,
         grace: &mut Option<Grace>,
         events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
     ) -> Option<ServeEnd> {
-        held.note(&reported);
-        self.report(reported, limit.is_some(), roots, events);
+        held.due(reported, &lock_places(&self.places), due);
+        for report in due.drain(..) {
+            self.report(report, limit.is_some(), roots, events);
+        }
         let limit = limit?;
         if let Some(end) = held.end(limit) {
             return Some(end);
@@ -121,6 +127,14 @@ struct Held {
     /// Every content connection still open, with the endpoint it belongs to, so no refused
     /// connection of an endpoint without a place counts as a holder.
     open: BTreeMap<u64, [u8; 32]>,
+    /// The closes read before the report of the place they belong to. The close is made by the
+    /// endpoint's own task and the place by the task that answers a request, so the close can be
+    /// in the channel first although the place was taken first, and printing it where it arrived
+    /// would put a receiver's finish line above its start line. A close is held back only while
+    /// the policy already holds a place for its endpoint and the wait has not read that place's
+    /// report, which is already on its way, so this holds one close per placed connection whose
+    /// place report is unread and never more.
+    waiting: Vec<endpoint::Receiver>,
 }
 
 impl Held {
@@ -141,6 +155,37 @@ impl Held {
                 self.open.remove(connection);
             }
             endpoint::Receiver::Refused { .. } | endpoint::Receiver::RefusedGroup { .. } => {}
+        }
+    }
+
+    /// Notes one report and appends the reports whose lines are due now, in the order they belong
+    /// in. `places` is the policy's own view, which is ahead of the channel and says whether a
+    /// place the wait has not read yet was taken.
+    fn due(
+        &mut self,
+        reported: endpoint::Receiver,
+        places: &Places,
+        due: &mut Vec<endpoint::Receiver>,
+    ) {
+        self.note(&reported);
+        match reported {
+            placed @ endpoint::Receiver::Placed { endpoint, .. } => {
+                due.push(placed);
+                let mut index = 0;
+                while index < self.waiting.len() {
+                    if self.waiting[index].endpoint() == endpoint {
+                        due.push(self.waiting.remove(index));
+                    } else {
+                        index += 1;
+                    }
+                }
+            }
+            closed @ endpoint::Receiver::Closed { endpoint, .. }
+                if places.holds(&endpoint) && !self.placed.contains(&endpoint) =>
+            {
+                self.waiting.push(closed);
+            }
+            other => due.push(other),
         }
     }
 
@@ -219,5 +264,49 @@ mod tests {
 
         held.note(&closed(2, b));
         assert_eq!(held.end(2), Some(ServeEnd::Downloaded));
+    }
+
+    /// A close that reaches the wait before the report of the place it belongs to holds its line
+    /// back: the place's line is the receiver's start and the close's is its finish, and the person
+    /// watching the send reads them in that order whatever the two tasks made first.
+    #[test]
+    fn a_close_read_before_the_place_keeps_its_start_line_first() {
+        let a = [b'a'; 32];
+        let mut places = Places::default();
+        places.set_limit(Some(1));
+        // The policy took the place while it answered the request, so the place's own report is on
+        // its way and the close is the one that got here first.
+        assert_eq!(places.admit(a, 1), Admission::Took);
+
+        let mut held = Held::default();
+        let mut due = Vec::new();
+        for report in [opened(1, a), closed(1, a)] {
+            held.due(report, &places, &mut due);
+        }
+        assert_eq!(
+            due,
+            vec![opened(1, a)],
+            "the close printed before the place"
+        );
+
+        due.clear();
+        held.due(placed(a), &places, &mut due);
+        assert_eq!(
+            due,
+            vec![placed(a), closed(1, a)],
+            "the start line did not come first"
+        );
+    }
+
+    /// A close of a connection whose endpoint the send never placed is printed where it arrived: no
+    /// place is coming for it, so holding it would lose the line.
+    #[test]
+    fn a_close_without_a_place_is_not_held() {
+        let a = [b'a'; 32];
+        let places = Places::default();
+        let mut held = Held::default();
+        let mut due = Vec::new();
+        held.due(closed(1, a), &places, &mut due);
+        assert_eq!(due, vec![closed(1, a)]);
     }
 }
