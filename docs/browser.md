@@ -93,43 +93,55 @@ error. A page that hands a tab a pasted root must not be able to stop it with a 
 `sluice_wasm::hash` checks the length and the characters before the parser sees them, and a test
 holds that.
 
-## What the first proof is
+## The first proof, made
 
-Part F's first step, and the thing to do before building anything on top of it:
+Part F's first step is done, and it ran in a browser: a headless Chromium loaded a page from a local
+static server, the page opened an endpoint that reaches the network only through a relay, and it
+fetched content from a native `sluice send` through that relay.
 
-1. a relay on this machine, started the way the probe's tests start one, and a native `sluice send`
-   of one small file through it
-2. a page that opens an endpoint in the tab, fetches that one blob, and verifies it against the root
-   in its ticket
-3. the same page loaded in a headless browser, with the ticket passed in and the verified result
-   checked by the driver
-
-The endpoint is proved (the command above). The fetch is written and does not work yet: with a relay
-on this machine, a native `sluice send` through it and the ticket's parts handed to `fetch_blob`, the
-module answers
+What ran: `iroh-relay --dev` with `http_bind_addr = "0.0.0.0:3340"` and metrics off; a native
+`sluice send payload.bin --relay http://127.0.0.1:3340/` serving a 2 MiB file of fixed bytes; and a
+page that calls `fetch_blob` twice. The first call fetches the ticket's root, which is the 64-byte
+hash sequence of the manifest: the manifest root and the file's root. The page takes the file root
+out of those bytes and fetches it too.
 
 ```
-the fetch stopped: Unable to download 278b5293184ca53b6528d057ad59f78b99f94f639b4d8e3dcf0266129d435d94
+sequence 64 bytes
+file root e325b507062d2c94ca342bdb8bba07506e28cf478d99f8a81210393ea0dc7a78
+file 2097152 bytes, sha256 dac7494485cf5bce3989b90f0135d5cc2f68ae532a3e9b7fad4b9ce2f4dba88c, 1654 ms
 ```
 
-What is known about it, from the same harness:
+The SHA-256 of the file the sender served is `dac7494485cf5bce3989b90f0135d5cc2f68ae532a3e9b7fad4b9ce2f4dba88c`,
+so the bytes in the tab are the bytes on the sender's disk. Every block was verified against the
+file's BLAKE3 root by `iroh-blobs` on the way in, and the bytes only reach the page after that. The
+sender's own log says what happened: `receiver … connected through a relay`.
 
-- a native `sluice recv` of the same ticket receives and verifies the file, so the sender, the ticket
-  and the relay are all serving. It connected directly, which a browser cannot do.
-- the relay's `--dev` mode listens on `::` and refuses `127.0.0.1` on this machine. It can be made to
-  listen on IPv4 with a config file, because `--dev` only fills in a bind address that is absent:
+## What made it work
 
-      http_bind_addr = "0.0.0.0:3340"
-      enable_metrics = false
+The first attempt failed with `Unable to download <root>`, in a browser as well as in Node, and the
+cause was the peer's address. A tab can reach nothing directly, and `presets::Minimal` configures no
+address lookup, so the endpoint had an id and no way to dial it. The ticket already says which relay
+the sender is on, so `fetch_blob` now hands that address to the endpoint:
 
-  With that file (`--dev -c relay.toml`) it answers `127.0.0.1:3340`, and the fetch still fails in
-  429 ms, so the bind address was not the cause.
-- a plain WebSocket from Node to that relay does not open on any path tried either, although HTTP on
-  the same address answers 200. A relay's WebSocket needs the path and subprotocol its client uses,
-  so that probe proves only that the harness's own WebSocket is not a relay client; it does not
-  prove the relay broken.
+```rust
+let lookup = MemoryLookup::new();
+lookup.add_endpoint_info(EndpointAddr::new(sender).with_relay_url(url.clone()));
+```
 
-So the failure is consistent with the harness's transport: Node's WebSocket reaching an IPv6-only
-relay, rather than the wasm client's dial. That is not settled, and settling it is the next step:
-either a relay that listens on IPv4, or a browser, whose WebSocket handles `[::1]`. A page and a
-headless browser come after that, and the same function is what they call.
+That is the whole fix, and it is the difference between a browser that can fetch and one that cannot.
+
+## What is not done
+
+- The page is a test page, not the app. Part F's screens, the Svelte 5 UI, the PWA, the service
+  worker, the content security policy and the budgets are all unwritten.
+- Receiving writes nothing yet: the 2 MiB sat in the tab's memory. Streaming to disk through the
+  File System Access API or OPFS, resume, and the manifest limits are the next part.
+- Sending from a tab is not started.
+- Nothing is tested by Vitest or Playwright in CI; the run above was driven by hand.
+
+## Two harness notes
+
+A `sluice send -` fed through a PowerShell pipe blocks forever, because the pipe is not closed until
+the child exits; a `cmd /c … < file` redirect is what lets the ticket print. And `--dump-dom` dumps
+while a fetch is still in flight, so the result above was read through the DevTools protocol from a
+long-lived page instead.

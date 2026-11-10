@@ -50,6 +50,6 @@ for `aws-lc-rs`, which has no wasm build.
 
 Three wasm-bindgen exports: `relay_reads`, `endpoint_id` and `fetch_blob`. The second binds a real endpoint through
 a relay, and it is proved in Node: the module loads, the relay URL is read, and an endpoint id comes
-back. `fetch_blob` compiles and runs, and has not downloaded a blob yet: against a relay on this
-machine it fails with `Unable to download <root>`. There is no page; `docs/browser.md` says what
-the first proof is and what it has found so far.
+back. `fetch_blob` fetched a 2 MiB file from a native `sluice send` through a local relay, in a
+headless browser, and the SHA-256 of the bytes matched the sender's. `docs/browser.md` records the
+run and the address lookup that made it work. There is no app yet.

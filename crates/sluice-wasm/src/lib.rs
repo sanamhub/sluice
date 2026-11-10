@@ -12,7 +12,10 @@
 //! provider, and with `default-features = false` and no TLS feature the pinned `iroh` and
 //! `iroh-blobs` build for `wasm32-unknown-unknown` here. `docs/browser.md` records the measurements.
 
-use iroh::{Endpoint, EndpointId, RelayMap, RelayMode, RelayUrl, endpoint::presets};
+use iroh::{
+    Endpoint, EndpointAddr, EndpointId, RelayMap, RelayMode, RelayUrl,
+    address_lookup::MemoryLookup, endpoint::presets,
+};
 use iroh_blobs::{Hash, HashAndFormat, api::downloader::Shuffled, store::mem::MemStore};
 use wasm_bindgen::prelude::*;
 
@@ -130,9 +133,9 @@ pub fn relay_reads(text: &str) -> bool {
 /// that does not match is refused before it reaches the caller. A blob that arrives is the blob the
 /// root names, so the page can write it without checking it again.
 ///
-/// It compiles for the target and runs, and it has not yet downloaded anything: against a relay on
-/// this machine it fails with `Unable to download <root>`, and whether that is the relay's WebSocket
-/// path in Node or the way the peer is looked up is not settled. `docs/browser.md` records it.
+/// It has fetched from a native `sluice send` through a relay, in a headless browser: a 2 MiB file
+/// whose SHA-256 matched the sender's. The address it needs is the ticket's relay, which names where
+/// the sender is, because a tab can reach nothing directly. `docs/browser.md` has the run.
 ///
 /// # Errors
 ///
@@ -143,8 +146,14 @@ pub async fn fetch_blob(relay_url: &str, sender: &str, root: &str) -> Result<Vec
     let url = relay(relay_url).map_err(to_js)?;
     let sender = sender_id(sender).map_err(to_js)?;
     let hash = hash(root).map_err(to_js)?;
+    // The only address a tab can use is the relay, and the ticket already says which one the sender
+    // is on. Without this, a browser has an id and no way to dial it: there is no discovery service
+    // configured and a tab can reach nothing directly.
+    let lookup = MemoryLookup::new();
+    lookup.add_endpoint_info(EndpointAddr::new(sender).with_relay_url(url.clone()));
     let endpoint = Endpoint::builder(presets::Minimal)
         .relay_mode(relay_only(url))
+        .address_lookup(lookup)
         .bind()
         .await
         .map_err(|e| to_js(Bad(format!("cannot open an endpoint: {e}"))))?;
