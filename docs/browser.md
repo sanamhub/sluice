@@ -35,15 +35,36 @@ TLS feature is enabled (`iroh-1.4.1/src/endpoint/presets.rs`). So the count that
 that runs are different counts, and a browser endpoint needs `ring` after all.
 
 `zig cc` was tried as a stand-in for `clang`, with its freestanding wasm target, because it is the
-one C compiler on this machine. It reaches `ring`'s own code and stops there:
+one C compiler on this machine. It first stopped at the same place:
 
 ```
 ring-core/check.h:27:11: fatal error: 'assert.h' file not found
 ```
 
-A freestanding target ships no C library headers, and `ring` includes `assert.h`. What a browser
-build needs is a wasm-capable LLVM `clang` with a sysroot for the target, which the CI runners have
-and this machine does not.
+That one is answerable. `ring`'s build script passes `-nostdlibinc` and defines
+`RING_CORE_NOSTDLIBINC` when the compiler is clang-like, and its own headers then skip the C library.
+`cc` could not tell that `zig cc` is clang, so those flags never arrived; giving them by hand, and
+turning off the checks whose runtime the wasm link does not carry, builds `ring` for the target:
+
+```
+CC_wasm32_unknown_unknown="zig cc -target wasm32-freestanding -nostdlibinc -O2"
+AR_wasm32_unknown_unknown="zig ar"
+CFLAGS_wasm32_unknown_unknown="-DRING_CORE_NOSTDLIBINC=1"
+```
+
+`-O2` has to come last, or the debug profile's `-O0` re-enables the checks and the link fails on
+`__ubsan_handle_type_mismatch_v1`. With that, `sluice-wasm` builds for `wasm32-unknown-unknown` on a
+machine with no LLVM, and the endpoint is real:
+
+```sh
+wasm-bindgen --target nodejs --out-dir out \
+  target/wasm32-unknown-unknown/debug/sluice_wasm.wasm
+node -e 'require("./out/sluice_wasm.js").endpoint_id("http://127.0.0.1:3340/")'
+# an endpoint id, 64 hex characters
+```
+
+That is the first half of the first proof: an endpoint that reaches the network through a relay,
+opened from the wasm module in Node. What it has not done is fetch anything.
 
 ## What the crate establishes
 
@@ -83,5 +104,6 @@ Part F's first step, and the thing to do before building anything on top of it:
 3. the same page loaded in a headless browser, with the ticket passed in and the verified result
    checked by the driver
 
-Steps 2 and 3 need a working endpoint, and the endpoint needs the C toolchain above. That run has
-not happened.
+Step 2 needs the blob fetch, which is not written, and step 3 needs a page and a headless browser.
+The endpoint itself is proved (the command above), so what is left is the fetch, its verification,
+and the same in a tab rather than in Node.

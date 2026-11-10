@@ -11,13 +11,28 @@ with, and a store to fetch into.
 - `store`: the memory store a tab fetches into.
 - `hash`: a BLAKE3 root from the 64 hex characters a ticket or a manifest carries.
 
-## Two things it settles
+## The provider, and how the target build gets one
 
 **The dependency set.** The native binary asks `iroh` for `tls-aws-lc-rs`, which cannot build for
-`wasm32-unknown-unknown`. A tab reaches its relay over the WebSocket the browser already has, so the
-wasm build needs no TLS provider at all. With `default-features = false` and no TLS feature, the
-pinned `iroh` 1.4 and `iroh-blobs` 0.103.1 build for the target, and this crate's own dependency
-spec says so, separately from the workspace's.
+`wasm32-unknown-unknown`. A tab needs the other provider, `ring`, through `tls-ring`: `iroh`'s
+endpoint builder accepts no endpoint without a crypto provider, and `ring` is the only one that can
+be built for the target. This crate declares its own `iroh` with `features = ["tls-ring"]`, separately
+from the workspace's, and unbundling it is not possible.
+
+**The C compiler.** `ring` compiles C for the target, so the wasm build needs a wasm-capable C
+compiler. LLVM's `clang` is what the CI runners have. A machine without one can point `cc` at
+`zig cc` with the freestanding wasm target, and `ring` builds there because its build script drops
+the C library headers when the compiler is clang-like:
+
+```sh
+export CC_wasm32_unknown_unknown="zig cc -target wasm32-freestanding -nostdlibinc -O2"
+export AR_wasm32_unknown_unknown="zig ar"
+CFLAGS_wasm32_unknown_unknown="-DRING_CORE_NOSTDLIBINC=1" \
+  cargo build -p sluice-wasm --target wasm32-unknown-unknown
+```
+
+`-O2` has to come last: the debug profile's `-O0` would re-enable the checks whose runtime the link
+does not have.
 
 **The build command.** The workspace is built for the host by the gates, and this crate is built for
 the target by hand:
@@ -31,7 +46,9 @@ cargo build -p sluice-wasm --target wasm32-unknown-unknown     # a tab
 Building the whole workspace for the target does not work and is not meant to: the native crates ask
 for `aws-lc-rs`, which has no wasm build.
 
-## What is not here
+## What is here again
 
-No wasm-bindgen export, no page, no fetch of a blob, and no browser run. `docs/browser.md` says what
-the first proof is and what it found.
+Two wasm-bindgen exports: `relay_reads` and `endpoint_id`. The second binds a real endpoint through
+a relay, and it is proved in Node: the module loads, the relay URL is read, and an endpoint id comes
+back. There is no page and no fetch of a blob yet; `docs/browser.md` says what the first proof is and
+what it has found so far.

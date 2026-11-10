@@ -21,7 +21,7 @@ crate-type = ["cdylib", "rlib"]
 # already has, so the wasm build needs no TLS provider of its own, and `aws-lc-rs` cannot build for
 # the target at all.
 [dependencies]
-iroh = { version = "1.4", default-features = false }
+iroh = { version = "1.4", default-features = false, features = ["tls-ring"] }
 iroh-blobs = { version = "0.103.1", default-features = false }
 # The JS side of the module. Pinned exactly, like the hashing crate, to the version `cargo xtask
 # wasm-hash` installs.
