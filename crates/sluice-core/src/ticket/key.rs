@@ -30,7 +30,7 @@ pub(super) fn check(endpoint_id: &[u8; 32], body: &Body) -> Result<(), Error> {
 ///
 /// A key of small order is refused too: no signature from it verifies strictly, so a ticket that
 /// names one could only lead to a provider or a stream nothing can trust.
-pub(super) fn is_valid(bytes: &[u8; 32]) -> bool {
+pub(crate) fn is_valid(bytes: &[u8; 32]) -> bool {
     let Ok(key) = VerifyingKey::from_bytes(bytes) else {
         return false;
     };

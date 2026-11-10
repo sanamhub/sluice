@@ -4,8 +4,8 @@
 //! `Serialize`, its `Debug` hides everything but the kind and the endpoint id, and the errors of
 //! [`Ticket::decode`] never quote the text they refused.
 
-mod base32;
-mod key;
+pub(crate) mod base32;
+pub(crate) mod key;
 mod relay;
 #[cfg(test)]
 mod tests;
