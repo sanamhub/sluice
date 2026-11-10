@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>sluice in a tab: fetch one file from a native send</title>
+<body><pre id="out">starting</pre>
+<script type="module">
+  // The parts come from the query string, so the page is the same for every run:
+  //   index.html?relay=http://127.0.0.1:3340/&sender=<64 hex>&root=<64 hex>
+  const out = document.getElementById('out');
+  const parts = new URLSearchParams(location.search);
+  const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const line = (text) => { out.textContent += text + '\n'; };
+  const started = Date.now();
+  try {
+    if (!parts.get('relay') || !parts.get('sender') || !parts.get('root')) {
+      throw new Error('relay, sender and root are query parameters');
+    }
+    const module = await import('../sluice_wasm.js');
+    await module.default();
+    // The ticket's root is the hash sequence: the manifest root and then each file's root.
+    const sequence = new Uint8Array(await module.fetch_blob(parts.get('relay'), parts.get('sender'), parts.get('root')));
+    line('sequence ' + sequence.length + ' bytes');
+    const root = hex(sequence.slice(32));
+    line('file root ' + root);
+    // Every block of this one is verified against that root before it arrives here.
+    const file = new Uint8Array(await module.fetch_blob(parts.get('relay'), parts.get('sender'), root));
+    line('file ' + file.length + ' bytes, sha256 ' + hex(await crypto.subtle.digest('SHA-256', file)) + ', ' + (Date.now() - started) + ' ms');
+    document.title = 'done';
+  } catch (e) {
+    out.textContent = 'ERROR ' + String(e);
+    document.title = 'failed';
+  }
+</script>
