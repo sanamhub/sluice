@@ -61,12 +61,20 @@ Serve the page, from `web/` alone so nothing else in the tree is reachable:
 cd web
 python -m http.server 8099 --bind 127.0.0.1
 chrome --headless=new --no-sandbox --remote-debugging-port=9222 \
-  "http://127.0.0.1:8099/proof/index.html?relay=http://127.0.0.1:3340/&sender=<64 hex>&root=<64 hex>&size=<the ticket's size>"
+  "http://127.0.0.1:8099/proof/index.html#relay=http://127.0.0.1:3340/&sender=<64 hex>&root=<64 hex>&size=<the ticket's size>"
 ```
+
+The parts are in the fragment, after the `#`, and not in the query string. A fragment is not part of
+a request, so the server the page came from, and any proxy or log between them, never sees the
+sender or the root.
 
 `--dump-dom` returns before a fetch of two megabytes finishes, so the result is read from the live
 page over the DevTools protocol rather than from a dump. The body says `sequence 64 bytes`, then the
 file's root, then the file's length, its SHA-256 and how long it took.
+
+The page's script is `main.js`, a file beside the page rather than a block inside it: the page is
+served with a policy that allows scripts only from its own origin, and a policy that also allowed an
+inline block would allow any injected one.
 
 ## What it assumes
 
