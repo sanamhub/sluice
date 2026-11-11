@@ -34,7 +34,14 @@ async fn the_native_builds_default_provider_negotiates_the_post_quantum_group() 
         .connect(outgoing.provider.addr(), iroh_blobs::ALPN)
         .await
         .unwrap();
-    assert_eq!(format!("{:?}", negotiated(&conn)), "X25519MLKEM768");
+    assert_eq!(
+        format!("{:?}", negotiated(&conn)),
+        "X25519MLKEM768",
+        "this build's default provider is `ring`. iroh prefers it when both TLS features are on, \
+         and the browser crate's `tls-ring` is what puts it in the build: `cargo nextest run \
+         --workspace` builds that crate too. The gates build the default members, which leave it \
+         out, and that is the build this test is about."
+    );
 
     drop(conn);
     peer.close().await;
