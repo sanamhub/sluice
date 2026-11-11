@@ -284,6 +284,41 @@ fn record(receipt: &Receipt) -> Vec<u8> {
     bytes
 }
 
+/// A request record that is not 32 bytes is closed with nothing written. The length is the first
+/// thing the sender reads, so a request of another length names no root it could answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_request_that_is_not_32_bytes_is_closed_with_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (outgoing, text) = prepared(&dir, BODY).await;
+    let ticket = Ticket::decode(&text).unwrap();
+    let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &no_events()).await });
+    let socket = Receiver::open(RelayModeChoice::Disabled, super::Congestion::Cubic)
+        .await
+        .unwrap();
+    let conn = socket
+        .connect_alpn(&ticket, super::ALPN, no_events())
+        .await
+        .unwrap();
+    let ours = super::Hello::ours().with(crate::engine::CAP_RECEIPTS);
+    let (theirs, mut send, mut recv) = crate::engine::hello::greet_stream_with(&conn, ours)
+        .await
+        .unwrap();
+    assert!(theirs.both(&ours, crate::engine::CAP_RECEIPTS));
+    let mut request = crate::engine::hello::varint_bytes(31);
+    request.extend_from_slice(&[0; 31]);
+    tokio::io::AsyncWriteExt::write_all(&mut send, &request)
+        .await
+        .unwrap();
+    tokio::io::AsyncWriteExt::flush(&mut send).await.unwrap();
+    let mut byte = [0u8; 1];
+    assert!(
+        recv.read_exact(&mut byte).await.is_err(),
+        "the sender answered a request that names no root"
+    );
+    serve.abort();
+    let _ = serve.await;
+}
+
 /// Rule 6: an asker the policy admitted, answered with nothing, waits its window and finishes with
 /// no receipt. The sender keeps serving through the wait, and the transfer it already took is
 /// whole.

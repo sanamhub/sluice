@@ -26,9 +26,7 @@ use tokio::{
     sync::{Notify, mpsc::UnboundedSender},
 };
 
-use super::hello::{
-    CAP_RECEIPTS, Hello, read_hello, read_stream_varint, varint_bytes, write_hello,
-};
+use super::hello::{CAP_RECEIPTS, Hello, read_stream_varint, varint_bytes};
 use super::policy::{Asked, Places};
 use super::{Event, Receiver, now_ms};
 use crate::receipt::Receipt;
@@ -282,10 +280,8 @@ async fn exchange(
     root: [u8; 32],
     total_len: u64,
 ) -> Option<Receipt> {
-    let (mut send, mut recv) = conn.open_bi().await.ok()?;
     let ours = Hello::ours().with(CAP_RECEIPTS);
-    write_hello(&mut send, ours).await.ok()?;
-    let theirs = read_hello(&mut recv).await.ok()?;
+    let (theirs, mut send, mut recv) = super::hello::greet_stream_with(conn, ours).await.ok()?;
     if !ours.both(&theirs, CAP_RECEIPTS) {
         return None;
     }
