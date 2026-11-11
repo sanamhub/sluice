@@ -42,6 +42,10 @@ pub struct Provider {
     /// The places a limited send offers. The policy decides them; this side reads them to know when
     /// the send has served everyone it promised to.
     places: Arc<Mutex<policy::Places>>,
+    /// The endpoint ids a refused key exchange has already been printed for, capped at the same
+    /// number of lines as a refused receiver. Any peer can make a connection, so the terminal would
+    /// otherwise be at the mercy of a flood of them.
+    group_lines: Mutex<policy::Lines>,
     expiry: Option<u64>,
     /// The send's own folder, removed after this provider has closed its store. A provider that is
     /// dropped without being shut down hands the folder on with the store, so the two go in the
@@ -329,6 +333,14 @@ fn reports_stopped() -> Error {
 /// and reads a clock.
 fn lock_places(places: &Mutex<policy::Places>) -> std::sync::MutexGuard<'_, policy::Places> {
     places
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The refused-group lock, poisoned only by a panic that changed nothing it guards: it edits a set
+/// of endpoint ids.
+fn lock_lines(lines: &Mutex<policy::Lines>) -> std::sync::MutexGuard<'_, policy::Lines> {
+    lines
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }

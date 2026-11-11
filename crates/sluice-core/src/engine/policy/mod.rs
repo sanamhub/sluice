@@ -19,7 +19,9 @@ use asked::Asked;
 use gate::{Gate, mask};
 #[cfg(test)]
 pub(crate) use places::Admission;
-pub(crate) use places::Places;
+#[cfg(test)]
+pub(crate) use places::REFUSAL_LINES;
+pub(crate) use places::{Lines, Places};
 
 use super::endpoint::Receiver;
 

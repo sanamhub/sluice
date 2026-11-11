@@ -96,6 +96,34 @@ async fn a_classical_receiver_is_refused_and_the_sender_keeps_serving() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn refusals_from_fresh_endpoints_stop_after_the_cap() {
+    let dir = tempfile::tempdir().unwrap();
+    let (outgoing, text) = prepared(&dir, b"the file this send offers").await;
+    let addr = outgoing.provider.addr();
+    let (serve_tx, mut serve_rx) = tokio::sync::mpsc::unbounded_channel();
+    let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &serve_tx).await });
+
+    // Five peers, each a fresh endpoint id, as a peer that makes a new identity per try would be.
+    for _ in 0..5 {
+        let classical = classical_peer().await;
+        let _ = classical.connect(addr.clone(), iroh_blobs::ALPN).await;
+        classical.close().await;
+    }
+
+    let out = dir.path().join("received");
+    let (recv_tx, _recv_rx) = tokio::sync::mpsc::unbounded_channel();
+    super::receive(&text, &options(&out), &recv_tx)
+        .await
+        .unwrap();
+    assert_eq!(serve.await.unwrap().unwrap(), super::StopEnd::Downloaded);
+
+    let lines = std::iter::from_fn(|| serve_rx.try_recv().ok())
+        .filter(|event| matches!(event, Event::Warning { .. }))
+        .count();
+    assert_eq!(lines, crate::engine::policy::REFUSAL_LINES);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_receiver_refuses_a_classical_sender() {
     let classical = classical_peer().await;
     let store = iroh_blobs::store::mem::MemStore::new();
