@@ -62,14 +62,25 @@ message PeerCloseReason {
   string text = 1;
 }
 
-// Where a send's or a receive's bytes go, or come from.
-message LocalPath {
-  string path = 1;
+// Where a send's or a receive's bytes go, or come from: the root it is under and the path below
+// that root.
+//
+// A request never carries one absolute path for the daemon to split into a root and a remainder.
+// Splitting is decided by spelling, two folders can share a spelling, and a client that wrote the
+// whole path chose which one it meant. The daemon joins the two fields itself, refuses a path that
+// is absolute or carries `.` or `..`, and opens every component below the root from the root's own
+// handle.
+message RootPath {
+  // A root the daemon was started with, written the way `sluice daemon --root DIR` was given it.
+  string root = 1;
+  // The path below that root, with `/` between its components, no leading `/`, no `.` or `..`, and
+  // no empty component. Empty means the root itself.
+  string path = 2;
 }
 
 message StartSendRequest {
-  // Absolute paths inside the roots the daemon was started with.
-  repeated LocalPath paths = 1;
+  // Files and folders inside the roots the daemon was started with.
+  repeated RootPath paths = 1;
   // How long the ticket works, in seconds from now, or zero for a ticket that never expires.
   uint64 expires_seconds = 2;
   // How many receivers a kept send offers, or zero for one, and one download.
@@ -89,12 +100,12 @@ message StartSendResponse {
 message StartReceiveRequest {
   Ticket ticket = 1;
   // A folder under a root the daemon was started with.
-  LocalPath out = 2;
+  RootPath out = 2;
   // Replace a file that is already there.
   bool force = 3;
   // Write a receipt here when the transfer completes, if the sender offers one. Inside a root and
   // checked like `out`, so a receipt can never be written outside one.
-  LocalPath receipt = 4;
+  RootPath receipt = 4;
 }
 
 message StartReceiveResponse {
