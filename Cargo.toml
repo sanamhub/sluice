@@ -11,6 +11,22 @@ members = [
   "bench/wasm-hash",
   "xtask",
 ]
+# The browser crate is built for its target by its own workflow, and its `tls-ring` feature must not
+# join the native build: cargo unifies a package's features across one build, and `iroh` prefers
+# `ring` when both providers are on, which takes the post-quantum group out of every native test
+# peer. Everything else is a default member, so a plain `cargo nextest run`, `cargo clippy` and
+# `cargo build` see only the native tree; `crates/sluice-wasm/README.md` has the command that runs
+# the crate's own tests.
+default-members = [
+  "crates/sluice-core",
+  "crates/sluice-live",
+  "crates/sluice-cli",
+  "crates/sluice-delta",
+  "bench/probe",
+  "bench/harness",
+  "bench/wasm-hash",
+  "xtask",
+]
 
 [workspace.package]
 version = "0.1.1"
