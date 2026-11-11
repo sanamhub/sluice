@@ -175,7 +175,7 @@ pub fn begin(
         if let Err(e) = remember(dir, root, names, force, &id, select) {
             // The hold is already this task's, and a folder without a marker is one no later run
             // could tell from another transfer's.
-            registry::discard_here(dir);
+            registry::discard_here(crate::Home::partial_records().ok().as_deref(), dir);
             return Err(e);
         }
         Ok(())
@@ -264,6 +264,22 @@ pub struct FolderId {
 impl FolderId {
     pub(crate) fn of((first, second): (u64, u64)) -> Self {
         Self { first, second }
+    }
+
+    /// The identity as a note holds it: both numbers in hex, with the width each has.
+    pub(crate) fn to_note(self) -> String {
+        format!("{:016x}{:016x}", self.first, self.second)
+    }
+
+    /// The identity a note holds, or `None` for text that is not one.
+    pub(crate) fn from_note(text: &str) -> Option<Self> {
+        if text.len() != 32 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+        Some(Self {
+            first: u64::from_str_radix(&text[..16], 16).ok()?,
+            second: u64::from_str_radix(&text[16..], 16).ok()?,
+        })
     }
 }
 

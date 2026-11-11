@@ -150,20 +150,18 @@ fn passes(budget: Duration, records: Option<PathBuf>) {
             return;
         }
         let spent = Instant::now() >= deadline;
+        let dir = records.as_deref();
         // The folders this home has a record for, read once for the pass: a folder a record names
         // is a claim's, and removing it would take a store out from under a receive.
-        let named = records
-            .as_deref()
-            .map(super::registry::recorded_in)
-            .unwrap_or_default();
+        let named = dir.map(super::registry::recorded_in).unwrap_or_default();
         #[cfg(test)]
         seam::begin(spent);
         let mut still = Vec::new();
         for path in paths {
             let survives = if spent {
-                try_still_there(&path, &named) != Some(false)
+                try_still_there(&path, &named, dir) != Some(false)
             } else {
-                retry(&path, &named)
+                retry(&path, &named, dir)
             };
             if survives {
                 still.push(path);
@@ -192,15 +190,15 @@ fn passes(budget: Duration, records: Option<PathBuf>) {
 /// One more try at a kept path, for a pass whose budget is gone. `true` means the path is still
 /// there and `None` means it was not touched: either another removal holds it, or a record of this
 /// home names it, and the next wait or the sweep is what tries it again.
-fn try_still_there(path: &Path, named: &[PathBuf]) -> Option<bool> {
-    attempt(path, named)
+fn try_still_there(path: &Path, named: &[PathBuf], records: Option<&Path>) -> Option<bool> {
+    attempt(path, named, records)
 }
 
 /// One more try at a kept path, for a pass inside the budget. It waits for nothing either: a path
 /// another removal holds is kept for the next tick rather than waited on, so no pass can outlast
 /// the budget by a hold.
-fn retry(path: &Path, named: &[PathBuf]) -> bool {
-    attempt(path, named) != Some(false)
+fn retry(path: &Path, named: &[PathBuf], records: Option<&Path>) -> bool {
+    attempt(path, named, records) != Some(false)
 }
 
 /// One try at removing `path`, under its hold when the hold is free.
@@ -208,16 +206,23 @@ fn retry(path: &Path, named: &[PathBuf]) -> bool {
 /// A path a record names is a claim's and is left alone. A partial store is the one folder a claim
 /// can make between the records being read and the hold being taken, so it is asked about again
 /// under the hold: that read is what makes removing it safe, and it is cheap because only a folder
-/// named like a store is asked about twice.
-fn attempt(path: &Path, named: &[PathBuf]) -> Option<bool> {
+/// named like a store is asked about twice. A note that stands for the folder goes with it, so a
+/// later claim of the output does not take the name away from whatever is there by then.
+fn attempt(path: &Path, named: &[PathBuf], records: Option<&Path>) -> Option<bool> {
     let outcome = super::registry::try_with_hold(path, || {
         if names(path, named) {
             return false;
         }
-        if super::store::is_partial(path) && super::registry::named(path) {
+        if super::store::is_partial(path) && super::registry::named_in(records, path) {
             return false;
         }
-        super::remove_once(path).is_err()
+        match super::remove_once(path) {
+            Ok(()) => {
+                super::registry::forget_note(records, path);
+                false
+            }
+            Err(_) => true,
+        }
     });
     match outcome {
         Ok(Some(still)) => Some(still),

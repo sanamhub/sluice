@@ -1,6 +1,7 @@
 //! The sweep of temporary folders a killed command left behind. A command that is killed cannot
 //! remove anything, so the next command that makes one does it: a folder is removed when nobody
-//! holds its lock and it is older than a day.
+//! holds its lock and it is older than a day. A note a removal left for a folder is dropped at the
+//! same age.
 
 use std::{
     fs::{self, File},
@@ -9,14 +10,56 @@ use std::{
     time::SystemTime,
 };
 
-use super::{remove_quietly, storage, temp::PREFIX, temp::STALE_AFTER};
+use super::{
+    NOTE_PREFIX, remove_quietly, storage,
+    temp::{PREFIX, STALE_AFTER},
+};
 use crate::{Error, Home};
 
 /// Removes the temporary folders in the home's `tmp` that no running command holds and that are
-/// older than [`STALE_AFTER`]. A command calls this when it starts, so a killed one is cleaned up by
-/// the next command rather than by a sweep of the output folder, which is never done by name.
+/// older than [`STALE_AFTER`], and the notes of a removal that gave up on a folder as long ago. A
+/// command calls this when it starts, so a killed one is cleaned up by the next command rather than
+/// by a sweep of the output folder, which is never done by name.
 pub fn sweep_temporary_store(now: SystemTime) -> Result<(), Error> {
-    sweep(&Home::temporary_store()?, now)
+    let swept = sweep(&Home::temporary_store()?, now);
+    sweep_notes(Home::partial_records_for_read().as_deref(), now);
+    swept
+}
+
+/// Removes the notes older than [`STALE_AFTER`] from the records folder.
+///
+/// A note is a claim on one folder, and a claim takes it the next time a receive needs that output.
+/// A note that has stood for a day was not taken: the folder it names is refused as another
+/// transfer's until the user removes it, which is what happened before a note stood for it, and a
+/// note kept for longer would stand for a folder nobody is coming back for.
+fn sweep_notes(dir: Option<&Path>, now: SystemTime) {
+    let Some(dir) = dir else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with(NOTE_PREFIX) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let old = meta
+            .modified()
+            .ok()
+            .and_then(|at| now.duration_since(at).ok())
+            .is_some_and(|age| age >= STALE_AFTER);
+        if old {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// [`sweep_temporary_store`] in `parent`, with the clock as an argument so a test does not wait a
@@ -131,6 +174,27 @@ mod tests {
         fs::write(left_path.join("store"), b"bytes").unwrap();
         sweep(dir.path(), later).unwrap();
         assert!(!left_path.exists(), "an old folder nobody held was kept");
+    }
+
+    /// A note that has stood for a day is dropped, and a record beside it is not: the claim the note
+    /// was waiting for did not come, and the folder it names is refused as another transfer's from
+    /// then on, which is what happened before a note stood for it.
+    #[test]
+    fn the_sweep_drops_an_old_note_and_keeps_a_record() {
+        use super::{NOTE_PREFIX, sweep_notes};
+
+        let dir = tempfile::tempdir().unwrap();
+        let note = dir.path().join(format!("{NOTE_PREFIX}notes"));
+        fs::write(&note, "0".repeat(32)).unwrap();
+        let record = dir.path().join("0123456789abcdef0123456789abcdef");
+        fs::write(&record, "path /out/.sluice-partial-x\nroot one\n").unwrap();
+        let later = SystemTime::now() + STALE_AFTER + Duration::from_secs(1);
+
+        sweep_notes(Some(dir.path()), SystemTime::now());
+        assert!(note.exists(), "a fresh note was swept");
+        sweep_notes(Some(dir.path()), later);
+        assert!(!note.exists(), "an old note was kept");
+        assert!(record.exists(), "a record was swept as a note");
     }
 
     /// Only folders with the temporary prefix are looked at: the sweep never removes the home's

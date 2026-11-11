@@ -10,6 +10,9 @@ mod store;
 
 use std::path::Path;
 
+mod hold;
+pub(crate) use hold::Held;
+
 #[test]
 fn a_hundred_gigabytes_needs_about_a_hundred_and_not_two_hundred() {
     let need = needed_bytes(100 << 30, true);
