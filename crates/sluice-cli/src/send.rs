@@ -32,10 +32,11 @@ pub struct SendArgs {
     #[arg(long, default_value = "24h", value_name = "WHEN")]
     pub expires: String,
     /// Keep serving until Ctrl+C instead of stopping after one download. Without this, a sender
-    /// stops once every byte is delivered and the receiver has closed its connection, or 30
-    /// seconds after the last byte if the receiver keeps the connection open. With a number, the
-    /// send offers that many places: a receiver takes one with its first request, keeps it if it
-    /// reconnects, and any endpoint without one is refused, so `--keep 2` serves two receivers
+    /// stops once every byte is delivered and the receiver has closed its connection, once it has
+    /// written the receipt the receiver asked for, or 30 seconds after the last byte if the
+    /// receiver keeps the connection open. With a number, the send offers that many places: a
+    /// receiver takes one with its first request, keeps it if it reconnects, and any endpoint
+    /// without one is refused, so `--keep 2` serves two receivers
     #[arg(long, value_name = "N", num_args = 0..=1)]
     pub keep: Option<Option<u32>>,
     /// The UDP port to listen on, so a firewall rule can name it. Without it the port this home
