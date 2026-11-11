@@ -92,6 +92,15 @@ for the receiver's disk and nothing else, so it stops without changing what it p
 that ended early is finished by asking the sender for a new ticket. A sender that never sees the code
 stops by counting bytes, as **Static content** and the provider implementation describe.
 
+**Post-quantum key exchange.** Every connection MUST negotiate the hybrid group `X25519MLKEM768`
+(RFC 10024). A side whose handshake completes on another group, or on a handshake that records no
+group, MUST close the connection with the application close code `0x534C0002` before it serves or
+sends anything, MUST put the group it got and the group it requires in the close reason, and MUST
+print one line saying the same. A listener that refuses a connection MUST keep serving its other
+peers. A dialer that refuses one MUST fail the command with the `Policy` error. A build whose TLS
+provider offers no ML-KEM group cannot talk to a peer that applies this rule, which is the intended
+result.
+
 ---
 
 ## 4. Ticket
