@@ -76,6 +76,57 @@ fn the_end_of_a_command_waits_for_a_removal_that_is_still_running() {
     assert!(!folder.exists(), "the folder was left for the sweep");
 }
 
+/// A path a removal is still trying is not waited for once the budget is gone: the end of a command
+/// takes the hold only when it is free, so a removal parked on a held file cannot keep the command
+/// alive. The watcher releases the parked removal whether or not the wait came back, so the test
+/// reports the bug instead of hanging on it.
+#[test]
+fn the_end_of_a_command_does_not_wait_for_a_removal_that_is_still_running() {
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::{Duration, Instant},
+    };
+
+    use super::super::{registry::discard, removals::left, wait_for_removals};
+
+    let _alone = crate::engine::storage::exclusive_removals();
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("folder");
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::write(folder.join("file"), b"bytes").unwrap();
+    let (started, release) = super::super::parked::arm(&folder);
+    let at = folder.clone();
+    let worker = std::thread::spawn(move || discard(&at));
+    started.recv().unwrap();
+    // What the removal parked on the file would have left when it gave up.
+    left(&folder);
+
+    // A zero budget means the only pass made is the one a spent budget allows.
+    let returned = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&returned);
+    let watcher = std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !flag.load(Ordering::SeqCst) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let early = flag.load(Ordering::SeqCst);
+        release.send(()).unwrap();
+        early
+    });
+    wait_for_removals(Duration::ZERO);
+    returned.store(true, Ordering::SeqCst);
+
+    assert!(
+        watcher.join().unwrap(),
+        "the end of the command waited for a removal that was still running"
+    );
+    worker.join().unwrap();
+    assert!(!folder.exists(), "the parked removal did not finish");
+}
+
 /// A folder a hold kept is tried again when the command ends: a removal that gave up is not the
 /// last word, so a command that ends leaves nothing it made. The hold is released once the first
 /// removal has returned, so the retry has the file free whatever a slow machine did with the clock.

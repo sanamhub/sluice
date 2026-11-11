@@ -101,12 +101,15 @@ pub(super) fn gone(path: &Path) {
 }
 
 /// Waits until no removal is running, then tries again for the paths a hold kept, and returns after
-/// `budget` at the latest. Anything still there is left to the sweep of temporary folders.
+/// `budget` at the latest plus the pass it is in. Anything still there is left to the sweep of
+/// temporary folders.
 ///
 /// A command calls this on every way out, after its runtime is gone; an embedder calls the same
-/// function. A retry takes the path's hold and asks whether a record of this home names it: a claim
-/// may have made it a live store again, under another spelling of the same folder, since the removal
-/// gave up.
+/// function. A retry before the budget takes the path's hold, which waits for a removal that is
+/// still running, and asks whether a record of this home names it: a claim may have made it a live
+/// store again, under another spelling of the same folder, since the removal gave up. A retry after
+/// the budget takes the hold only when it is free and touches only a name a record cannot carry, so
+/// the pass costs one removal call per path and waits for nothing.
 ///
 /// # Examples
 ///
@@ -121,17 +124,26 @@ pub fn wait_for_removals(budget: Duration) {
     // A pass is made for what is already kept even when waiting for the running removals used the
     // whole budget. A path that was kept before the wait would otherwise be left for the sweep
     // without a single try, which is what a command whose own removals were still parked did: it
-    // left the folder for a day. A pass sleeps nowhere of its own, so the wait still ends within a
-    // look per path of its budget.
+    // left the folder for a day.
     wait_for_running(deadline);
     loop {
         let paths = std::mem::take(&mut *left_list());
         if paths.is_empty() {
             return;
         }
+        // A pass made once the budget is gone may not wait for anything. A removal another thread is
+        // still trying holds its path across retries that outlast what is left of the budget, and a
+        // partial store's records cannot be read without asking the disk. Such a pass takes a free
+        // path only, and leaves the rest for the next command's wait or for the sweep.
+        let spent = Instant::now() >= deadline;
         let mut still = Vec::new();
         for path in paths {
-            if still_there(&path) {
+            let survives = if spent {
+                try_still_there(&path) != Some(false)
+            } else {
+                still_there(&path)
+            };
+            if survives {
                 still.push(path);
             }
         }
@@ -152,6 +164,22 @@ pub fn wait_for_removals(budget: Duration) {
             return;
         }
         std::thread::sleep(RETRY_EVERY);
+    }
+}
+
+/// One more try at a kept path, for a pass whose budget is gone: the hold is taken without waiting,
+/// and a name a partial store could have is left alone. `true` means the path is still there, `None`
+/// means it was not touched. A path another removal holds, or one a record could name, is kept for
+/// the next wait rather than waited on or removed under a claim.
+fn try_still_there(path: &Path) -> Option<bool> {
+    if super::store::is_partial(path) {
+        return None;
+    }
+    match super::registry::try_with_hold(path, || super::remove_once(path).is_err()) {
+        Ok(Some(still)) => Some(still),
+        Ok(None) => None,
+        // A path whose folder cannot be resolved has no folder to remove.
+        Err(_) => Some(false),
     }
 }
 
