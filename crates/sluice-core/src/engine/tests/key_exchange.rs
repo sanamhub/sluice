@@ -80,18 +80,20 @@ async fn a_classical_receiver_is_refused_and_the_sender_keeps_serving() {
     );
     assert_eq!(serve.await.unwrap().unwrap(), super::StopEnd::Downloaded);
 
-    // The line the sender prints names the group it got and the one it requires.
+    // The line the sender prints names the exact group it got. `X25519` is a prefix of the
+    // required group's name, so a test that looks for both names in a line passes whatever the
+    // sender negotiated; the line has to be matched as one phrase instead.
     let mut lines = Vec::new();
     while let Ok(event) = serve_rx.try_recv() {
         if let Event::Warning { message } = event {
             lines.push(message);
         }
     }
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let line = &lines[0];
     assert!(
-        lines
-            .iter()
-            .any(|line| line.contains("X25519") && line.contains("X25519MLKEM768")),
-        "{lines:?}"
+        line.contains("negotiated X25519,") && line.contains("requires X25519MLKEM768"),
+        "{line}"
     );
 }
 
