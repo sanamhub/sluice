@@ -5,8 +5,8 @@ pages that use it and, in time, the app.
 
 ## What is here
 
-- `proof/`, part F's first proof: a page that fetches a file from a native `sluice send` through a
-  local relay and reports what it got, with the recipe to run it. It is a harness and not a test, and
+- `proof/`, the first proof: a page that fetches a file from a native `sluice send` through a local
+  relay and reports what it got, with the recipe to run it. It is a harness and not a test, and
   `proof/README.md` says so.
 
 ## What the module does

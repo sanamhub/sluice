@@ -20,8 +20,8 @@ The native binary asks `iroh` for `tls-aws-lc-rs`, and that provider has no buil
 
 Two measurements, in the order they were made:
 
-1. With `tls-ring`, the build stops inside `ring` 0.17.14, which compiles C for the target. This
-   machine has no `clang`, and `cc` fails with `ToolNotFound: failed to find tool "clang"`.
+1. With `tls-ring`, the build stops inside `ring` 0.17.14, which compiles C for the target. A
+   toolchain without `clang` fails with `ToolNotFound: failed to find tool "clang"`.
 2. Without any TLS feature, `iroh` 1.4 and `iroh-blobs` 0.103.1 build for the target, and the module
    loads and runs in Node. Binding an endpoint then fails at run time, and the message names why:
 
@@ -34,8 +34,8 @@ mandatory option on the endpoint builder, and its `Minimal` and `N0` presets set
 TLS feature is enabled (`iroh-1.4.1/src/endpoint/presets.rs`). So the count that builds and the count
 that runs are different counts, and a browser endpoint needs `ring` after all.
 
-`zig cc` was tried as a stand-in for `clang`, with its freestanding wasm target, because it is the
-one C compiler on this machine. It first stopped at the same place:
+`zig cc` is the stand-in for `clang` on a toolchain without LLVM, with the freestanding wasm target,
+and it first stops at the same place:
 
 ```
 ring-core/check.h:27:11: fatal error: 'assert.h' file not found
@@ -95,7 +95,7 @@ holds that.
 
 ## The first proof, made
 
-Part F's first step is done, and it ran in a browser: a headless Chromium loaded a page from a local
+The first step is done, and it ran in a browser: a headless Chromium loaded a page from a local
 static server, the page opened an endpoint that reaches the network only through a relay, and it
 fetched content from a native `sluice send` through that relay.
 
@@ -132,8 +132,8 @@ That is the whole fix, and it is the difference between a browser that can fetch
 
 ## What is not done
 
-- The page is a test page, not the app. Part F's screens, the Svelte 5 UI, the PWA, the service
-  worker, the content security policy and the budgets are all unwritten.
+- The page is a test page, not the app. The screens, the Svelte 5 UI, the PWA, the service worker,
+  the content security policy and the budgets are all unwritten.
 - Receiving writes nothing yet: the 2 MiB sat in the tab's memory. Streaming to disk through the
   File System Access API or OPFS, resume, and the manifest limits are the next part.
 - Sending from a tab is not started.
@@ -141,7 +141,11 @@ That is the whole fix, and it is the difference between a browser that can fetch
 
 ## Two harness notes
 
-A `sluice send -` fed through a PowerShell pipe blocks forever, because the pipe is not closed until
-the child exits; a `cmd /c … < file` redirect is what lets the ticket print. And `--dump-dom` dumps
-while a fetch is still in flight, so the result above was read through the DevTools protocol from a
-long-lived page instead.
+A `sluice send -` read from a pipe needs the writer to close it. A shell that keeps the pipe open
+until the child exits never does, and the send waits for ever; on Windows PowerShell that is the
+default. Redirect a file instead, with `cmd /c "sluice send - < payload.bin"`, or run the same
+redirect from a shell that closes the pipe when the file ends.
+
+`--dump-dom` prints the page while a fetch is still in flight, so read the result from the live page
+instead: start the browser with `--remote-debugging-port=9222`, and evaluate
+`document.body.innerText` over the DevTools protocol once the page has reported its digest.

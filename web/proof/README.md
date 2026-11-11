@@ -1,11 +1,11 @@
 # The first proof
 
-Part F's first step, as a page and a recipe: a tab fetches a file from a native `sluice send` through
-a local relay and reports what it got. It is the run `docs/browser.md` records, kept so it can be
+The first step, as a page and a recipe: a tab fetches a file from a native `sluice send` through a
+local relay and reports what it got. It is the run `docs/browser.md` records, kept so it can be
 repeated without inventing the harness again.
 
 What it is not: a test. Nothing runs this in CI, and the page has no UI, no state and no error
-handling beyond one line. Part F's app is what turns this into a program.
+handling beyond one line. The app is what turns this into a program.
 
 ## The recipe
 
@@ -66,7 +66,7 @@ file's root, then the file's length, its SHA-256 and how long it took.
 
 The page reads one root out of the sequence, the one after the manifest root, so the sender's content
 is one file. A folder ticket names several roots and needs the manifest read to know which are files
-and what they are called; that is part F's second step, not this page.
+and what they are called; that is the second step, not this page.
 
 ## What it proved
 
