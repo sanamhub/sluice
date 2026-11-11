@@ -7,8 +7,20 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use iroh_blobs::Hash;
+
 use super::{registry, remove_quietly, storage};
 use crate::Error;
+
+/// A content root from the 64 hex characters a store names a data file with, when the name is one.
+/// The upstream parser asserts on any other length, so a stray name in a store's folder would stop
+/// every repair of that store; the length and the alphabet are checked here before it is called.
+pub fn hash_from_hex(text: &str) -> Option<Hash> {
+    if text.len() != 64 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    text.parse().ok()
+}
 
 /// The name of the file inside a partial store that says which ticket made it, which top-level
 /// entries it made room for, and whether it ran with `--force`. Without it a store left by a failed

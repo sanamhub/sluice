@@ -162,7 +162,7 @@ fn sweep_paths(data: &Path, partial: &Path) -> Result<(), Error> {
         let Some(hex) = name.strip_suffix(".data") else {
             continue;
         };
-        let Ok(hash) = hex.parse::<Hash>() else {
+        let Some(hash) = super::store::hash_from_hex(hex) else {
             continue;
         };
         let Ok(meta) = fs::symlink_metadata(&path) else {
