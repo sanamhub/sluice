@@ -12,6 +12,7 @@ mod live;
 mod net;
 mod policy;
 mod rate;
+mod receipts;
 mod recv;
 mod recv_range;
 mod recv_stdout;
@@ -35,7 +36,7 @@ pub use live::{
 };
 pub use net::{NetworkReport, report as network_report};
 pub use rate::Rate;
-pub use recv::{ReceiveOptions, Received, receive, top_level_rule};
+pub use recv::{ReceiptTarget, ReceiveOptions, Received, receive, top_level_rule};
 pub use recv_range::receive_range;
 pub use recv_stdout::receive_stdout;
 pub use select::Selection;

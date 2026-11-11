@@ -135,6 +135,20 @@ sluice receipt verify receipt.txt --file ./report.pdf
 It prints the commitment, the sender's key and the time. It cannot tell you that anyone received the
 content or still holds it, and it says so.
 
+Ask the sender for a receipt as part of a receive. The file is written once the whole transfer is in
+place, and it is not replaced unless `--force` is given:
+
+```sh
+sluice recv <ticket> --out ./inbox --receipt ./inbox/receipt.txt
+```
+
+A send offers a receipt by default. `--no-receipt` clears the offer, and a receiver that asks is
+answered with nothing:
+
+```sh
+sluice send ./photos --no-receipt
+```
+
 Take part of a folder. The pattern is matched against the ticket's own paths:
 
 ```sh

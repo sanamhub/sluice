@@ -50,6 +50,9 @@ pub async fn prepare_with_rate(
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
     let (shown, name, entry_path, before) = checked_file(path)?;
+    // Read before the store exists, so a home whose identity cannot be read fails this send with
+    // nothing of its own left behind.
+    let seed = home.identity()?.secret_seed();
     let scratch = Scratch::open(home, storage::Collector::Off).await?;
     let tag = import(path, &shown, scratch.store()).await?;
     let hash = tag.hash();
@@ -66,6 +69,8 @@ pub async fn prepare_with_rate(
         home, scratch, allowed, relay, congestion, expiry_ms, port, rate,
     )
     .await?;
+    // Offered before the ticket is printed, so a receiver that has the ticket finds the offer.
+    provider.offer_receipts(manifest.sequence_root(), before.size, seed, expiry_ms);
     let ticket = match ticket_of(&provider, &manifest, before.size, expiry_ms, relay_text) {
         Ok(ticket) => ticket,
         Err(e) => {

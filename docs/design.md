@@ -181,9 +181,18 @@ FILE` checks one and prints what it names, and with `--file` it rebuilds the roo
 or folder would name, through the manifest code the send uses, and compares the result with the
 commitment and the length. That is how a receiver shows that the content it holds is the content the
 receipt is about. A receipt whose commitment is the root itself commits to no content, and the check
-refuses it. A receive does not write one yet: section 10 of `SPEC.md` states how a sender delivers
-one on the `sluice/1` connection when both sides set `RECEIPTS`, and the flag that asks for one is
-not in this build.
+refuses it.
+
+A receive asks for a receipt with `recv --receipt FILE`, and a send offers one unless it is given
+`--no-receipt`. The ask is a record of its own on a fresh `sluice/1` connection, after the two
+greetings, because the content connection belongs to the blob protocol and `Hello` is released. It
+names the root the receiver verified. The sender answers only when its policy admitted the endpoint
+that dialled for that root: it asked for the root on a connection the policy let in and, on a send
+that counts places, it holds one. Every other request is closed with nothing written. The sender
+signs for the root and length of the ticket it serves, and a one-download sender keeps answering for
+ten seconds after the last byte, or until it has written one receipt, so a receiver that is still
+installing what it received can ask. The file is written after the whole transfer, and it is never
+written through a link or over a file that is already there without `--force`.
 
 ### Transfer queue
 

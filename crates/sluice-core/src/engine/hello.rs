@@ -52,6 +52,14 @@ impl Hello {
         }
     }
 
+    /// This release's greeting with `capability` set as well.
+    pub const fn with(self, capability: u64) -> Self {
+        Self {
+            capabilities: self.capabilities | capability,
+            ..self
+        }
+    }
+
     /// Whether both sides offered `capability`.
     pub fn both(&self, other: &Self, capability: u64) -> bool {
         self.capabilities & other.capabilities & capability != 0
@@ -216,16 +224,25 @@ const CLOSE_VERSION: u32 = 1;
 const CLOSE_NO_LIVE: u32 = 2;
 
 /// The `sluice/1` listener. It reads the dialer's greeting, rejects another protocol version,
-/// answers with its own, and then writes the records of its live stream when there is one.
+/// answers with its own, and then writes the records of its live stream when there is one, or the
+/// receipt a request asks for.
 #[derive(Clone, Debug, Default)]
 pub struct SluiceProtocol {
     live: Option<std::sync::Arc<super::live::LiveLog>>,
+    receipts: Option<std::sync::Arc<super::receipts::Receipts>>,
 }
 
 impl SluiceProtocol {
-    /// A listener that serves the records of `log` after the greeting.
-    pub fn live(log: std::sync::Arc<super::live::LiveLog>) -> Self {
-        Self { live: Some(log) }
+    /// A listener that answers a receipt request from an endpoint its policy admitted, and serves
+    /// the records of `log` when there is one.
+    pub(crate) fn serving(
+        live: Option<std::sync::Arc<super::live::LiveLog>>,
+        receipts: std::sync::Arc<super::receipts::Receipts>,
+    ) -> Self {
+        Self {
+            live,
+            receipts: Some(receipts),
+        }
     }
 }
 
@@ -244,7 +261,11 @@ impl ProtocolHandler for SluiceProtocol {
                 return Err(AcceptError::from_err(cause));
             }
         };
-        write_hello(&mut send, Hello::ours())
+        let ours = match &self.receipts {
+            Some(receipts) if receipts.enabled() => Hello::ours().with(CAP_RECEIPTS),
+            _ => Hello::ours(),
+        };
+        write_hello(&mut send, ours)
             .await
             .map_err(AcceptError::from_err)?;
         if let Some(log) = &self.live {
@@ -258,6 +279,13 @@ impl ProtocolHandler for SluiceProtocol {
             // The records are the only thing this stream carries; a failure means the dialer
             // left, and the connection close below is the whole answer.
             let _ = log.write_to(&mut send).await;
+        } else if let Some(receipts) = &self.receipts
+            && ours.both(&theirs, CAP_RECEIPTS)
+        {
+            // One request and one record, and a refused request is answered with nothing: the
+            // caller finishes the stream and the connection close is the whole refusal.
+            let peer = *conn.remote_id().as_bytes();
+            let _ = super::receipts::serve_request(receipts, peer, &mut recv, &mut send).await;
         }
         send.finish()?;
         // Returning from `accept` closes the connection, which can discard what was written

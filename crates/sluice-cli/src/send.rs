@@ -70,6 +70,9 @@ pub struct SendArgs {
         value_enum
     )]
     pub qr: Option<crate::qr::Ask>,
+    /// Do not offer the receiver a signed receipt for this send
+    #[arg(long)]
+    pub no_receipt: bool,
 }
 
 pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
@@ -167,6 +170,9 @@ fn serve(
             outgoing(&home, paths, args, relay, expiry, rate).await?
         };
         outgoing.reserve(keep);
+        if args.no_receipt {
+            outgoing.no_receipt();
+        }
         let ticket = outgoing.ticket.encode();
         // The code goes first and to standard error: the line below is what a script reads, and a
         // ticket that no code holds stops the command before either is written.

@@ -42,6 +42,9 @@ pub async fn prepare_paths_with_rate(
     port: Option<u16>,
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
+    // Read before the store exists, so a home whose identity cannot be read fails this send with
+    // nothing of its own left behind.
+    let seed = home.identity()?.secret_seed();
     let Build::Ready(built) = Manifest::build_paths(paths)? else {
         return Err(Error::Policy(
             "a path cannot be sent because a receiver would reject one of its names".to_string(),
@@ -62,6 +65,8 @@ pub async fn prepare_paths_with_rate(
         home, scratch, allowed, relay, congestion, expiry_ms, port, rate,
     )
     .await?;
+    // Offered before the ticket is printed, so a receiver that has the ticket finds the offer.
+    provider.offer_receipts(sequence_root, total_bytes(manifest), seed, expiry_ms);
     let ticket = match ticket_of(&provider, manifest, sequence_root, expiry_ms) {
         Ok(ticket) => ticket,
         Err(e) => {

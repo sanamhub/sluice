@@ -18,10 +18,13 @@ use std::{fs, path::PathBuf, time::Instant};
 use iroh_blobs::{Hash, store::fs::FsStore};
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::{Congestion, Event, Receiver, RelayModeChoice, Selection, emit, fetch, storage};
+use super::{
+    Congestion, Event, Receiver, RelayModeChoice, Selection, emit, fetch, receipts, storage,
+};
 use crate::{
     Error,
     manifest::{Kind, Limits, Manifest, parse_sequence},
+    receipt::Receipt,
     ticket::{Body, Format, Ticket},
 };
 
@@ -88,6 +91,16 @@ pub struct ReceiveOptions {
     /// The entries this receive takes, or `None` for all of them. A selection is matched against the
     /// manifest's paths and can never take anything the sender did not list.
     pub include: Option<Selection>,
+    /// Where to write the sender's signed receipt once the content is in place, or `None` to not
+    /// ask for one. A receiver asks only when this is set.
+    pub receipt: Option<ReceiptTarget>,
+}
+
+/// The file a receive writes the sender's receipt to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReceiptTarget {
+    /// The file to write. It is not replaced unless the receive was given `--force`.
+    pub path: PathBuf,
 }
 
 /// What arrived.
@@ -111,6 +124,24 @@ pub async fn receive(
     let ticket = Ticket::decode(text)?;
     refuse_expired(&ticket)?;
     let root = static_root(&ticket)?;
+    if let Some(target) = &options.receipt {
+        // A receipt names a static ticket's root and length. A live stream has neither, and a raw
+        // stream's root is not the root a send of a file names.
+        if !matches!(
+            ticket.body(),
+            Body::Static {
+                format: Format::HashSequence,
+                ..
+            }
+        ) {
+            return Err(Error::Policy(
+                "a receipt is written for a static ticket of a file or folder, and not for a raw or \
+                 live one"
+                    .to_string(),
+            ));
+        }
+        receipts::ready(&target.path, options.force)?;
+    }
     fs::create_dir_all(&options.out)
         .map_err(|e| storage::policy_path("create", &options.out, e))?;
     // The ticket's size is the sum of the manifest's files, and a manifest that disagrees with it
@@ -127,9 +158,25 @@ pub async fn receive(
     // Closing the endpoint tells the sender that the last bytes arrived, so it can stop without
     // cutting the response off a moment after writing it.
     let closed = receiver.shutdown().await;
-    let received = result?;
+    let (received, receipt) = result?;
     if let Some(message) = did_not_close(Ok::<(), Error>(()), closed) {
         emit(events, Event::Warning { message });
+    }
+    // The receipt is asked for before the completion code, so the files are in place by now. A
+    // receive that asked for one and got none finishes, and says so in one line.
+    if let Some(target) = &options.receipt {
+        match receipt {
+            Some(receipt) => receipts::write_file(&target.path, &receipt, options.force)?,
+            None => emit(
+                events,
+                Event::Warning {
+                    message: format!(
+                        "no receipt arrived, so {} was not written",
+                        taken(&target.path)
+                    ),
+                },
+            ),
+        }
     }
     Ok(received)
 }
@@ -143,7 +190,7 @@ async fn run(
     root: [u8; 32],
     options: &ReceiveOptions,
     events: &UnboundedSender<Event>,
-) -> Result<Received, Error> {
+) -> Result<(Received, Option<Receipt>), Error> {
     let selection = options.include.clone().unwrap_or_default();
     let owner = hex(&root);
     let partial = storage::partial_dir(&options.out, &owner);
@@ -152,17 +199,20 @@ async fn run(
     let (store, resume, plan) =
         claim_store(&partial, &owner, &manifest, ticket, options, &selection).await?;
     let outcome = exchange(
-        receiver, ticket, &manifest, plan, &store, &partial, options, resume, conn, events,
+        receiver, ticket, root, &manifest, plan, &store, &partial, options, resume, conn, events,
         &selection,
     )
     .await;
     let closed = store.close().await;
     let endpoint = receiver.shutdown().await;
     match outcome {
-        Ok((received, seconds)) => Ok(finished(
-            received, seconds, closed, endpoint, events, &selection, &partial,
-        )
-        .await),
+        Ok((received, seconds, receipt)) => Ok((
+            finished(
+                received, seconds, closed, endpoint, events, &selection, &partial,
+            )
+            .await,
+            receipt,
+        )),
         Err(e) => {
             if !keeps_store(&e) {
                 storage::discard_apart(&partial).await;
@@ -172,11 +222,13 @@ async fn run(
     }
 }
 
-/// Fetches every content blob and then writes the checked tree.
+/// Fetches every content blob, writes the checked tree, and asks for a receipt before it says the
+/// transfer is whole.
 #[allow(clippy::too_many_arguments)]
 async fn exchange(
     receiver: &Receiver,
     ticket: &Ticket,
+    root: [u8; 32],
     manifest: &Manifest,
     plan: Plan,
     store: &FsStore,
@@ -186,7 +238,7 @@ async fn exchange(
     conn: iroh::endpoint::Connection,
     events: &UnboundedSender<Event>,
     selection: &Selection,
-) -> Result<(Received, f64), Error> {
+) -> Result<(Received, f64, Option<Receipt>), Error> {
     announce(manifest, &plan, options, selection, events)?;
     let started = Instant::now();
     let session = Session {
@@ -201,6 +253,14 @@ async fn exchange(
     };
     let conn = content::ensure_content(&session, conn).await?;
     write::write(manifest, &plan, store, options, partial, resume, events).await?;
+    // The receipt is asked for before the completion code: a one-download sender stops serving when
+    // it sees that code, and the ask travels on a connection of its own.
+    let receipt = match (&options.receipt, ticket.body()) {
+        (Some(_), Body::Static { size, .. }) => {
+            receipts::ask(receiver, ticket, root, *size, events).await
+        }
+        _ => None,
+    };
     close_content(conn, plan.chosen.len() == manifest.entries().len());
     Ok((
         Received {
@@ -209,6 +269,7 @@ async fn exchange(
             files: plan.files,
         },
         started.elapsed().as_secs_f64(),
+        receipt,
     ))
 }
 
@@ -288,4 +349,9 @@ pub(super) fn relay_of(ticket: &Ticket) -> RelayModeChoice {
     ticket.relay_url().map_or(RelayModeChoice::Disabled, |url| {
         RelayModeChoice::Url(url.to_string())
     })
+}
+
+/// A path as a line prints it, through the same boundary as every other name a receive reports.
+fn taken(path: &std::path::Path) -> String {
+    crate::manifest::path::shown(&path.display().to_string())
 }

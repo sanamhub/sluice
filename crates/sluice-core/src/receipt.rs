@@ -24,6 +24,8 @@ const PREFIX: &str = "sluicereceipt1";
 const SIGNED: usize = 80;
 /// The whole receipt: the signed bytes and the signature.
 const LEN: usize = SIGNED + 64;
+/// The bytes of the record section 10 puts a receipt in, which is the whole receipt.
+pub(crate) const RECORD_LEN: usize = LEN;
 /// The label the signature covers, which is what keeps it from being good for a live record.
 const LABEL: &[u8] = b"sluice/receipt/1";
 /// The context a root is committed under. A commitment made under another context is a different
@@ -220,7 +222,7 @@ impl Receipt {
     }
 
     /// The 144 bytes, in the order of `SPEC.md` section 10.
-    fn to_bytes(&self) -> [u8; LEN] {
+    pub(crate) fn to_bytes(&self) -> [u8; LEN] {
         let mut out = [0; LEN];
         out[..32].copy_from_slice(&self.commit);
         out[32..40].copy_from_slice(&self.total_len.to_le_bytes());

@@ -115,8 +115,10 @@ impl Gate {
         if msg.tx.send(answer(ok)).await.is_err() || !ok {
             return;
         }
-        if connection != 0 {
-            lock(&self.asked).remember(connection, hash);
+        if connection != 0
+            && let Some(peer) = peer
+        {
+            lock(&self.asked).remember(connection, peer, hash);
         }
         let done = self.done.clone();
         let store = self.store.clone();
