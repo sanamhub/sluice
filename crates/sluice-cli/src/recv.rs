@@ -1,4 +1,5 @@
-//! `sluice recv <ticket>`: decode, fetch, verify, write, and never ask.
+//! `sluice recv <ticket>`: decode, fetch, verify, and write, asking for a receipt only when the
+//! command names the file to put one in.
 
 mod options;
 
