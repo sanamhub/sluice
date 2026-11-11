@@ -94,7 +94,11 @@ fn wrong_boundaries(params: &Params, data: &[u8]) -> Vec<usize> {
 }
 
 fn wrong_cut(params: &Params, bytes: &[u8]) -> usize {
-    let (min, avg, max) = (params.min() as usize, params.avg() as usize, params.max() as usize);
+    let (min, avg, max) = (
+        params.min() as usize,
+        params.avg() as usize,
+        params.max() as usize,
+    );
     if bytes.len() <= min {
         return bytes.len();
     }

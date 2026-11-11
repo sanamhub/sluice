@@ -15,26 +15,24 @@
 
 use std::time::Duration;
 
+mod fetch;
+
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMap, RelayMode, RelayUrl,
     address_lookup::MemoryLookup, endpoint::presets,
 };
-use iroh_blobs::{
-    Hash, api::downloader::Shuffled, api::proto::BlobStatus, protocol::ChunkRanges,
-    protocol::ChunkRangesExt, protocol::GetRequest, store::mem::MemStore,
-};
-use n0_future::time::timeout;
+use iroh_blobs::{Hash, store::mem::MemStore};
 use wasm_bindgen::prelude::*;
 
 /// How long a tab waits for its relay before it gives up. A relay that has not answered in this
 /// time is not going to carry the transfer, and a page should show a failure rather than wait.
 const RELAY_WAIT: Duration = Duration::from_secs(20);
 
-/// How long a whole fetch has, from the request to the last byte of the file. A peer that answers
-/// the relay and then stops sending would otherwise leave the promise pending and the endpoint open
-/// for as long as the tab lives, and a file of a few hundred megabytes over a slow relay is worth
-/// waiting longer for than a relay's own answer.
-const FETCH_WAIT: Duration = Duration::from_secs(120);
+/// How long a fetch goes without the store growing before it gives up. A peer that answers the relay
+/// and then stops sending would otherwise leave the promise pending and the endpoint open for as
+/// long as the tab lives, while a file of a few hundred megabytes over a slow relay is worth waiting
+/// for as long as it keeps arriving: the limit is the progress, not the whole fetch.
+const IDLE_WAIT: Duration = Duration::from_secs(20);
 
 /// The error of a relay URL or a hash a ticket names that this build cannot read.
 ///
@@ -143,7 +141,7 @@ mod tests {
         use iroh_blobs::BlobsProtocol;
         use iroh_blobs::store::mem::MemStore;
 
-        use super::fetch_direct;
+        use super::fetch::fetch_direct;
 
         let content = vec![7u8; 1 << 20];
         let store = MemStore::new();
@@ -233,8 +231,8 @@ pub fn relay_reads(text: &str) -> bool {
 /// download requests the bytes below that length and no others, so a ticket that names a kilobyte
 /// for a root of ten gigabytes costs the tab a kilobyte of transfer and of memory, and the content
 /// is refused afterwards because it is not the length the ticket names. The relay has
-/// [`RELAY_WAIT`] to answer and the fetch has [`FETCH_WAIT`] in all, and the endpoint is closed on
-/// every way out, including a refusal and a timeout.
+/// [`RELAY_WAIT`] to answer, and the fetch then has [`IDLE_WAIT`] without the store growing before
+/// it gives up; the endpoint is closed on every way out, including a refusal and a timeout.
 ///
 /// It has fetched from a native `sluice send` through a relay, in a headless browser: a 2 MiB file
 /// whose SHA-256 matched the sender's. The address it needs is the ticket's relay, which names where
@@ -261,9 +259,9 @@ pub async fn fetch_blob(
     // the check is the whole fetch, and it still refuses a root that is not that one.
     if size == 0 {
         if hash != Hash::new(b"") {
-            return Err(to_js(Bad(format!(
-                "the content is 0 bytes, and the ticket names {size}"
-            ))));
+            return Err(to_js(Bad(
+                "the content is 0 bytes, and the root is not the empty content's".to_string(),
+            )));
         }
         return Ok(Vec::new());
     }
@@ -280,89 +278,16 @@ pub async fn fetch_blob(
         .map_err(|e| to_js(Bad(format!("cannot open an endpoint: {e}"))))?;
     // The whole fetch is bounded, not only the relay's answer: a peer that stops sending fails the
     // promise instead of leaving the endpoint open for the life of the tab.
-    let outcome = match timeout(FETCH_WAIT, fetch(&endpoint, sender, hash, size)).await {
-        Ok(Ok(bytes)) => Ok(bytes),
-        Ok(Err(missing)) => Err(to_js(missing)),
-        Err(_) => Err(to_js(Bad(format!(
-            "the fetch did not finish in {} s",
-            FETCH_WAIT.as_secs()
-        )))),
+    // The fetch is bounded by its progress rather than by a total, so a large file on a slow relay
+    // finishes; the endpoint is closed on every way out, a timeout included.
+    let outcome = match fetch::fetch(&endpoint, sender, hash, size).await {
+        Ok(bytes) => Ok(bytes),
+        Err(missing) => Err(to_js(missing)),
     };
     // Closed on every way out: a page that keeps an endpoint open holds a socket and a relay
     // registration for as long as it lives.
     endpoint.close().await;
     outcome
-}
-
-/// One fetch through an endpoint that is already bound: the relay's answer first, and then the
-/// download.
-async fn fetch(
-    endpoint: &Endpoint,
-    sender: EndpointId,
-    hash: Hash,
-    size: u64,
-) -> Result<Vec<u8>, Bad> {
-    // The relay connection has to be up before a peer can be found through it: a browser has no
-    // direct path, so the relay is the only way to the sender.
-    timeout(RELAY_WAIT, endpoint.online()).await.map_err(|_| {
-        Bad(format!(
-            "the relay did not answer in {} s",
-            RELAY_WAIT.as_secs()
-        ))
-    })?;
-    fetch_direct(endpoint, sender, hash, size).await
-}
-
-/// The download itself, through an endpoint that can already reach the sender. The store is this
-/// call's and is dropped with it, so the bytes exist in the page only as the value returned here,
-/// and only the bytes the ticket names are ever asked for.
-async fn fetch_direct(
-    endpoint: &Endpoint,
-    sender: EndpointId,
-    hash: Hash,
-    size: u64,
-) -> Result<Vec<u8>, Bad> {
-    let store = MemStore::new();
-    // The downloader takes the peers that may have the content; the endpoint id is enough, because
-    // a relayed connection is the only kind a browser makes and the relay knows where it lives.
-    // The request names the byte range the ticket promises, so a peer cannot make the tab hold more
-    // than that: content of another length leaves the store incomplete and is refused below.
-    store
-        .downloader(endpoint)
-        .download(
-            GetRequest::blob_ranges(hash, ChunkRanges::bytes(..size)),
-            Shuffled::new(vec![sender]),
-        )
-        .await
-        .map_err(|e| Bad(format!("the fetch stopped: {e}")))?;
-    let bytes = match store.blobs().status(hash).await {
-        Ok(BlobStatus::Complete { size: stored }) => {
-            if stored != size {
-                return Err(Bad(format!(
-                    "the content is {stored} bytes, and the ticket names {size}"
-                )));
-            }
-            store
-                .blobs()
-                .get_bytes(hash)
-                .await
-                .map_err(|e| Bad(format!("the blob cannot be read: {e}")))?
-        }
-        // The request asked for the bytes the ticket names and no others, so a blob that is only
-        // partly there is content that is longer than the ticket says.
-        Ok(BlobStatus::Partial { .. }) => {
-            return Err(Bad(format!(
-                "the content is longer than the {size} bytes the ticket names"
-            )));
-        }
-        Ok(BlobStatus::NotFound) => {
-            return Err(Bad("the fetch left no content in the store".to_string()));
-        }
-        Err(error) => {
-            return Err(Bad(format!("the stored blob cannot be read: {error}")));
-        }
-    };
-    Ok(bytes.to_vec())
 }
 
 /// A byte count a page passes as a number. A count that is not a whole number of bytes in the range
