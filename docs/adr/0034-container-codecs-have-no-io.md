@@ -4,7 +4,7 @@
 
 ## Context
 
-Part F's first proof is made: a headless browser fetched a 2 MiB file from a native `sluice send`
+The first proof is made: a headless browser fetched a 2 MiB file from a native `sluice send`
 through a local relay, and the bytes matched the sender's. The next step is a tab that receives
 properly, which means the manifest limits and the path rules applied inside the page, and a write
 stream that starts while the transfer is still arriving.
