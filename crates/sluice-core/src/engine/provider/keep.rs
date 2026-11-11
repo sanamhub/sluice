@@ -140,7 +140,7 @@ impl Held {
             endpoint::Receiver::Closed { connection, .. } => {
                 self.open.remove(connection);
             }
-            endpoint::Receiver::Refused { .. } => {}
+            endpoint::Receiver::Refused { .. } | endpoint::Receiver::RefusedGroup { .. } => {}
         }
     }
 

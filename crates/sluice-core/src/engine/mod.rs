@@ -63,6 +63,12 @@ pub use receiver::Receiver;
 /// says what left this machine, not what arrived. SPEC section 3 defines it.
 pub const COMPLETE_CLOSE: u32 = 0x534c_0001;
 
+/// The QUIC application close code a side uses when it refuses a connection by rule. A connection
+/// whose handshake did not settle on `X25519MLKEM768` is closed with it before any request is
+/// served or sent, so a peer learns that the refusal is policy and not a network fault. SPEC
+/// section 3 defines it.
+pub const POLICY_CLOSE: u32 = 0x534c_0002;
+
 /// The one wall clock a compare reads: UTC milliseconds since the Unix epoch. A ticket's boundary
 /// and a sender's deadline are the same instant, so they are read the same way.
 pub fn now_ms() -> u64 {

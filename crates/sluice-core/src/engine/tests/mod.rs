@@ -31,6 +31,7 @@ mod cancel;
 mod checks;
 mod done;
 mod inspect;
+mod key_exchange;
 mod lifecycle;
 mod live;
 mod names;

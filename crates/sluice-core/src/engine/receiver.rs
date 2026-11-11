@@ -97,6 +97,9 @@ impl Receiver {
         let conn = self.endpoint.connect(addr, alpn).await.map_err(|e| {
             Error::Network(format!("cannot reach the provider: {}", crate::plain(&e)))
         })?;
+        // Every connection this process dials is checked here, before its first request: a
+        // provider that offered only classical groups has answered nothing of ours.
+        endpoint::require_post_quantum(&conn)?;
         let _watch = events::watch_path(conn.clone(), events);
         Ok(conn)
     }
