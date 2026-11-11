@@ -474,6 +474,14 @@ A `RangeSet` is the count followed by that many ranges, each a start and a lengt
 be ascending, MUST NOT touch or overlap, and MUST NOT be empty, and `start + len` MUST fit in a
 `u64`. One set of needed bytes therefore has one encoding.
 
+A match is a chunk of the candidate whose `len` and `strong` are both equal to an entry's, so a
+hint keys on the pair and not on the strong hash alone: two chunks of the same length can share no
+strong hash without a collision, and two chunks of different lengths have different lengths
+whatever their hashes say. The vectors below pin the boundaries the two masks make between them: an
+input of exactly `min` bytes is one chunk and one of `min + 1` bytes may be cut at index `min`, and
+a cut at index `avg_bytes - 1` is the first region's last chance and one at index `avg_bytes` the
+second region's first.
+
 **Stream.** When both peers set `DELTA` in `Hello`, a requester asks on a `sluice/1` connection it
 dials itself. After the greeting it writes the 32 bytes of the content root it is asking about, and
 the provider answers with one `SigList` frame and nothing else on that stream. A frame travels as a
@@ -921,20 +929,51 @@ the transfer's: it says that a watcher could not keep up, and how many events of
 get. A watcher MUST treat the gap as unknown rather than as nothing having happened, and a server
 MUST never grow a buffer without a bound to avoid one.
 
-**Roots.** A server is started with zero or more root folders, and every path a client names lives
-inside one of them: the paths of a send, the output folder of a receive, and the file a receipt is
-written to. A server started with no roots refuses every send and every receive, and its refusal
-says how to allow one. It refuses rather than serving from wherever the caller points, because the
-socket or pipe is reachable by everything that runs as the same user.
+**Roots.** A server is started with zero or more root folders (`sluice daemon --root DIR`,
+repeatable), and every path a client names lives inside one of them: the path of a send, the output
+folder of a receive, and the file a receipt is written to. A server started with no roots refuses
+every send and every receive, and its refusal says how to allow one. It refuses rather than serving
+from wherever the caller points, because the socket or pipe is reachable by everything that runs as
+the same user.
 
-A path from a client MUST be absolute, and it is normalised before the check: the normal form has no
-`.` component, no `..` component that can be folded, and one spelling of every name a file system
-folds. The normal form MUST then be inside a root, which is the root itself or a name under it. A
-path whose normal form leaves a root is refused, even when a later component would come back:
-`../root/x` is not `root/x`. A link is never followed out of a root: every folder from the root down
-to the target is opened without following a link, and a link that leads outside a root is refused
-rather than resolved. The check and the use name the same folder, so a folder renamed between them
-is refused, as the writer of a receive refuses one.
+Each root is made absolute and resolved once, when the server starts, and the folder it resolves to
+is the root for the life of that server. The name a root was given is not resolved again, so a root
+whose folder is replaced under the same name is not served.
+
+A path from a client MUST be absolute, and a path with a `..` component is refused, not folded:
+`out/../root/x` is refused whether or not it comes back inside a root. The normal form is the root's
+resolved spelling followed by the path's components below it, with no `.` component and no repeated
+separator, and it MUST be the root itself or a name under it.
+
+A link is never followed anywhere in a path under a root. A link is a symbolic link, a junction, a
+mount point, and any other object a file system marks as a reparse point; a path with a link in any
+component below the root, the last one included, is refused rather than resolved. A path that names
+a stream (an alternate data stream, `name:stream`) or a device (`CON`, `NUL`, `COM1` and the others
+Windows reserves) is refused outright: neither is a file under a root.
+
+Containment is decided by opening, and never by comparing strings. The server opens the root, then
+opens each component of the path relative to the handle of the folder before it, without following a
+link and asserting that the object it opened is a folder, until the last component, which is the
+file. On Unix this is `openat` with `O_NOFOLLOW`, or `openat2` with `RESOLVE_BENEATH` where the
+kernel has it; on Windows it is `NtCreateFile` with `FILE_OPEN_REPARSE_POINT` relative to the
+folder's handle. The handle the check ends with is the handle the transfer uses, so a folder renamed
+between the check and the use is not read, and a name that case folding, a `\\?\` or `\\?\UNC\`
+prefix, an 8.3 short name, a trailing dot or space, or a `:stream` suffix spells another way is
+refused, because the name it resolves is not a component of a path under the root. An
+implementation that cannot open a component relative to the folder before it MUST refuse the path.
+
+The last component is created through that handle, without following a link and with an exclusive
+create, or as a temporary file in the folder the handle names that is renamed over the destination
+once it is written. An existing file is replaced only when the request carries an explicit overwrite
+flag, and an output file and a receipt are never written through a name that was not opened this
+way.
+
+A hard link is not a link in the sense above: it is a second name for the file itself, so a file
+inside a root that has more than one name can have its other name outside the root, and no check of
+the path can see it. A server refuses to send a file whose link count is above one, because a root is
+the promise that a client cannot make the server read anything outside it. A one-shot `sluice send`
+names its file on the command line and makes no such promise, so it sends a file that has more than
+one name.
 
 Store access is single-writer. A client MUST take an exclusive lock on the store directory, and if
 the lock is held by a live process it MUST connect to that process instead of opening the store.
