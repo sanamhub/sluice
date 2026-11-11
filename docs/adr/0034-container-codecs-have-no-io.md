@@ -38,8 +38,7 @@ crates with no IO for that reason (ADR 0008).
 4. **`sluice-core` keeps the IO**: the home, the store, the repair, the sweep, the platform file mode
    mapping and the writer that touches the disk. A rule that needs to know how one platform spells a
    file name stays in the core and consults the format crate for the verdict.
-5. **The browser crate depends on `sluice-format`** for these rules. It already depends on
-   sluice-delta, for the chunker and the matcher a tab uses as a hint, and on nothing else of ours.
+5. **The browser crate depends on `sluice-format`** for these rules, and on nothing else of ours.
    The limits a tab applies are the same numbers, read from the same place, that a native receive
    applies.
 6. **The move is a refactor with no wire change.** `cargo xtask conformance`, the vectors and the

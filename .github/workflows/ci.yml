@@ -111,7 +111,9 @@ jobs:
           echo "SLUICE_ROOT_OWNED_DIR=$dir" >> "$GITHUB_ENV"
       # nextest does not run doctests, and one failing test must not hide the rest.
       - run: cargo nextest run --no-fail-fast
-      - run: cargo test --doc --workspace
+      # The wasm crate is not built here: only its own workflow builds it, with the provider it
+      # needs, so tls-ring never joins a native build.
+      - run: cargo test --doc --workspace --exclude sluice-wasm
 
   msrv:
     runs-on: ubuntu-latest
@@ -124,7 +126,7 @@ jobs:
       - run: rustup toolchain install 1.91 --profile minimal
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # The probe is not a product crate, so it may need a newer Rust than the one users build with.
-      - run: cargo +1.91 check --all-targets --workspace --exclude sluice-probe
+      - run: cargo +1.91 check --all-targets --workspace --exclude sluice-probe --exclude sluice-wasm
 
   # The browser build of the live log (ADR 0014). Nothing else builds sluice-live for wasm32, so
   # without this job a change that breaks the browser would pass every other check.
