@@ -107,6 +107,36 @@ fn hold_with_delete_access(path: &std::path::Path) -> std::fs::File {
         .unwrap()
 }
 
+/// A name in the store that is not a root is skipped, never parsed: the upstream parser asserts on
+/// a length that is not 64, so one stray file in the store's data folder would stop every repair of
+/// that store.
+#[tokio::test]
+async fn a_stray_name_in_the_store_is_not_parsed_as_a_root() {
+    use std::time::Duration;
+
+    let dir = tempfile::tempdir().unwrap();
+    let store = dir.path().join("store");
+    let data = store.join("data");
+    fs::create_dir_all(&data).unwrap();
+    let short = data.join("aaaaaaaa.data");
+    let long = data.join(format!("{}.data", "a".repeat(65)));
+    let not_hex = data.join(format!("{}.data", "z".repeat(64)));
+    for path in [&short, &long, &not_hex] {
+        fs::write(path, b"a name nobody was given").unwrap();
+    }
+
+    let repaired = tokio::time::timeout(
+        Duration::from_secs(10),
+        repair(&store, identify(&store).unwrap()),
+    )
+    .await
+    .expect("the repair stopped on a name that is not a root");
+    repaired.unwrap();
+    for path in [&short, &long, &not_hex] {
+        assert!(path.exists(), "{} was removed", path.display());
+    }
+}
+
 /// A store folder another program holds for a moment is opened once it lets go: a scanner that has
 /// a file open with delete access makes the repair's own open fail with a sharing violation, and the
 /// receive must not fail over a hold that a moment clears.
