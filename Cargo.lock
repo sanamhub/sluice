@@ -3906,6 +3906,7 @@ version = "0.1.1"
 dependencies = [
  "iroh",
  "iroh-blobs",
+ "n0-future",
  "wasm-bindgen",
  "wasm-bindgen-futures",
 ]
