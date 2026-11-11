@@ -314,3 +314,23 @@ fn qr_without_a_terminal_is_refused_before_anything_is_sent() {
     assert!(stderr.contains("not a terminal"), "{stderr:?}");
     assert!(stderr.contains("--qr"), "{stderr:?}");
 }
+
+/// `--qr` takes no value of its own, so the path written after it is the file to send, and each of
+/// the three spellings reaches the terminal check rather than a usage error.
+#[test]
+fn a_path_written_before_or_after_the_qr_flag_is_sent() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("report.pdf");
+    fs::write(&file, b"bytes").unwrap();
+    let path = file.to_string_lossy().to_string();
+    for args in [
+        ["send", "--qr", path.as_str()],
+        ["send", path.as_str(), "--qr"],
+        ["send", "--qr=inverted", path.as_str()],
+    ] {
+        let assert = sluice(dir.path()).args(args).assert().code(6);
+        let stderr = stderr_text(&assert);
+        assert!(stderr.contains("not a terminal"), "{args:?}: {stderr:?}");
+        assert!(!stderr.contains("Usage"), "{args:?}: {stderr:?}");
+    }
+}

@@ -131,6 +131,37 @@ mod tests {
         assert_eq!(args.congestion, CongestionArg::Bbr3);
     }
 
+    /// `--qr` takes no value of its own, so the path after it is still the thing to send, and the
+    /// two spellings of the flag that name a value keep working.
+    #[test]
+    fn a_path_before_or_after_the_qr_flag_is_the_path() {
+        use crate::qr::Ask;
+        use std::path::PathBuf;
+
+        for (args, qr) in [
+            (
+                vec!["sluice", "send", "--qr", "report.pdf"],
+                Some(Ask::Auto),
+            ),
+            (
+                vec!["sluice", "send", "report.pdf", "--qr"],
+                Some(Ask::Auto),
+            ),
+            (
+                vec!["sluice", "send", "--qr=inverted", "report.pdf"],
+                Some(Ask::Inverted),
+            ),
+            (vec!["sluice", "send", "report.pdf"], None),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Command::Send(send) = cli.command else {
+                panic!("send");
+            };
+            assert_eq!(send.paths, [PathBuf::from("report.pdf")]);
+            assert_eq!(send.qr, qr);
+        }
+    }
+
     #[test]
     fn an_unknown_controller_is_refused() {
         assert!(Cli::try_parse_from(["sluice", "send", "--congestion", "vegas", "a.bin"]).is_err());
