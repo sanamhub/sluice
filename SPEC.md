@@ -97,7 +97,9 @@ stops by counting bytes, as **Static content** and the provider implementation d
 group, MUST close the connection with the application close code `0x534C0002` before it serves or
 sends anything, MUST put the group it got and the group it requires in the close reason, and MUST
 print one line saying the same. A listener that refuses a connection MUST keep serving its other
-peers. A dialer that refuses one MUST fail the command with the `Policy` error. A build whose TLS
+peers. Any peer can open a connection without a ticket, so a listener MAY stop printing these lines
+once it has named a few peers, each once; it still closes every such connection. Sluice names
+three. A dialer that refuses one MUST fail the command with the `Policy` error. A build whose TLS
 provider offers no ML-KEM group cannot talk to a peer that applies this rule, which is the intended
 result.
 
