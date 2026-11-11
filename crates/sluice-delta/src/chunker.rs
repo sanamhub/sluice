@@ -1,5 +1,5 @@
-//! Content-defined chunking with FastCDC v2020 and a 64-bit gear hash, as `SPEC.md` section 7
-//! states it.
+//! Content-defined chunking with a normalized gear hash in the FastCDC style, as `SPEC.md` section
+//! 7 states it: not the FastCDC v2020 tool's cut, and the section is what an implementation follows.
 //!
 //! A chunk boundary depends on the bytes just before it and on nothing else, so inserting a byte at
 //! the front of a file moves one boundary's worth of data instead of all of it. That is the whole
