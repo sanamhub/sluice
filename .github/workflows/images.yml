@@ -57,7 +57,7 @@ jobs:
             package: sluice
             dockerfile: docker/cli/Dockerfile
             context: .
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Compiling iroh-relay is most of the relay, and the tool compiles the workspace. As in
     # release.yml's image builds, 60 minutes leaves room without letting a hung build run for
     # GitHub's default of 6 hours.
@@ -133,7 +133,10 @@ jobs:
             package: sluice-relay
           - image: cli
             package: sluice
-    runs-on: ubuntu-latest
+    # The release pushes from ubuntu-24.04, and this job tests that push, so it runs where the
+    # release does. A runner whose Docker keeps images in containerd pushes an index where the
+    # release pushes one image manifest, so the test would check a push the release never makes.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
       # The distribution registry, by digest of its 3.1.2 index. Plain HTTP on localhost, which
