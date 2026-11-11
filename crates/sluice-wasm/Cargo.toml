@@ -23,6 +23,9 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 iroh = { version = "1.4", default-features = false, features = ["tls-ring"] }
 iroh-blobs = { version = "0.103.1", default-features = false }
+# The timeout a fetch waits for its relay, which is the same one the native build uses and works on
+# the target as well as on the host.
+n0-future.workspace = true
 # The JS side of the module. Pinned exactly, like the hashing crate, to the version `cargo xtask
 # wasm-hash` installs.
 wasm-bindgen = { workspace = true }
