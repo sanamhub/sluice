@@ -419,16 +419,39 @@ Flow:
 Delta is a hint layer. No verification outcome may ever depend on it.
 
 **Chunking.** Content is cut by a normalized gear hash in the FastCDC style: a 64-bit gear hash, the
-low-bit masks below, and a gear table derived from this paragraph. It is not the FastCDC v2020
+two low-bit masks below, and a gear table derived from this paragraph. It is not the FastCDC v2020
 algorithm, and a cut is where this section says rather than where that tool would cut, so an
-implementation must follow the rules here and not a library's defaults. `avg_bytes` is a power of two
-from 256 to 4,194,304 (4 MiB), and the other sizes follow from it: `min` is `avg_bytes / 4` and
-`max` is `avg_bytes * 8`. A sender writes 8192 unless it is told another. The gear table has 256
-entries, and entry `i` is the first eight bytes, little-endian, of `BLAKE3("sluice/delta/gear/1" ||
-[i])`, so the table is derived from this paragraph rather than transcribed. The scan starts at `min`
-with the hash at zero, cuts on `hash & ((1 << (log2(avg_bytes) + 2)) - 1) == 0` before `avg_bytes`,
-cuts on `hash & ((1 << (log2(avg_bytes) - 2)) - 1) == 0` after it, and stops at `max` or the end of
-the input. Those two masks are what pull boundaries towards the average.
+implementation follows the rules here and not a library's defaults.
+
+`avg_bytes` is a power of two from 256 to 4,194,304 (4 MiB), both included. The other sizes follow
+from it: `min` is `avg_bytes / 4` and `max` is `avg_bytes * 8`. A sender writes 8192 unless it is
+told another.
+
+The gear table has 256 entries. Entry `i`, for `i` from 0 to 255, is the first eight bytes read
+little-endian, of `BLAKE3("sluice/delta/gear/1" || [i])`, where `[i]` is one byte and the label is
+its ASCII bytes. `BLAKE3` here and below is the plain hash, with no key and no derive-key context,
+so `BLAKE3` of a chunk is the digest the `blake3` tool prints.
+
+A chunk is cut as follows. The index is counted from the chunk's own first byte, and `n` is how many
+bytes of the input are left from its start:
+
+1. If `n <= min`, the chunk is those `n` bytes. An input shorter than `min` has one chunk, and an
+   input of no bytes has none.
+2. Otherwise the hash is 0 and no byte before index `min` is read: the scan starts at index `min`.
+3. The center is `min(avg_bytes, n)`. For each index `i` from `min` to the center minus one, in
+   order, the hash becomes `(hash << 1) + gear[byte[i]]`, wrapping modulo 2 to the 64th, and if
+   `hash & ((1 << (log2(avg_bytes) + 2)) - 1) == 0` the chunk ends after byte `i`, so its length is
+   `i + 1`.
+4. If nothing cut, the scan goes on with the hash it has, from the center to `min(max, n)` minus one.
+   At each index the hash is updated the same way, and if
+   `hash & ((1 << (log2(avg_bytes) - 2)) - 1) == 0` the chunk ends after that byte.
+5. If nothing cut, the chunk is the `min(max, n)` bytes from its start.
+6. The next chunk starts at the byte after this one, with the hash at zero again.
+
+The masks are counted from the chunk's start: the first covers indices `min` to `avg_bytes - 1` and
+the second `avg_bytes` to `max - 1`, and the center is where one region ends and the other begins.
+No chunk is shorter than `min` except the last one, which is that short only because the input ends
+inside it. A scan that reaches `max` is cut there whatever the hash says.
 
 **Bytes.** The little-endian rule of section 2 applies, and each count is a varint.
 
@@ -931,6 +954,7 @@ the lock is held by a live process it MUST connect to that process instead of op
 | `live/` | A ticket's `stream_id` and `sender_key`, the records of section 6 in the order a receiver gets them, the receiver's answer to each, and the state of the stream at the end, including streams that MUST be refused or aborted |
 | `delta/` | File pairs with expected chunk boundaries and resulting need-ranges |
 | `need-ranges/` | Encoded need-ranges messages with the root and the ranges they name, including sets that MUST be refused |
+| `gear/` | The chunker's gear table, entry by entry, as the derivation in section 7 gives it |
 | `paths/` | Hostile paths that MUST be rejected by a receiver |
 | `writer/` | Top-level names a receiver must accept, refuse as hidden, or refuse as a clash, with the flags and the output state that decide it |
 

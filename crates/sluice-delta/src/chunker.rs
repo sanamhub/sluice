@@ -143,6 +143,13 @@ impl<'a> Iterator for Chunks<'a> {
     }
 }
 
+/// The gear table's entry for `byte`, which is the value `SPEC.md` section 7 derives: the first
+/// eight bytes, little-endian, of `BLAKE3("sluice/delta/gear/1" || [byte])`. A test vector pins the
+/// derivation, which is why this is public.
+pub fn gear_entry(byte: u8) -> u64 {
+    gear(byte)
+}
+
 /// The gear table of `SPEC.md` section 7: entry `i` is the first eight bytes, little-endian, of
 /// `BLAKE3("sluice/delta/gear/1" || [i])`. Stating the table as a hash instead of 256 constants
 /// means an implementation cannot transcribe it wrongly, and the table is the same on every machine

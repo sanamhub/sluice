@@ -12,7 +12,7 @@ mod chunker;
 mod codec;
 mod matcher;
 
-pub use chunker::{Params, SMALLEST};
+pub use chunker::{Params, SMALLEST, gear_entry};
 pub use codec::{Entry, MAX_ENTRIES, NeedRanges, Range, SigList};
 pub use matcher::{Candidate, Plan, Span, plan};
 

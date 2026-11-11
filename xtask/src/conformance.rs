@@ -2,6 +2,7 @@
 //! and exits non-zero if one disagrees. The format is in `tests/vectors/README.md`.
 
 mod delta;
+mod gear;
 mod live;
 #[cfg(test)]
 mod live_tests;
@@ -89,6 +90,7 @@ pub fn check(root: &Path) -> Result<Report> {
             .unwrap_or_default();
         match kind.as_str() {
             "delta" => delta::run(&dir, &mut report)?,
+            "gear" => gear::run(&dir, &mut report)?,
             "live" => live::run(&dir, &mut report)?,
             "manifests" => manifests::run(&dir, &mut report)?,
             "need-ranges" => need_ranges::run(&dir, &mut report)?,
