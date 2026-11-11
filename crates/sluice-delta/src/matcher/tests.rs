@@ -33,6 +33,21 @@ fn params() -> Params {
     Params::default()
 }
 
+/// A candidate cut with one average and signatures cut with another are refused: nothing would
+/// match, and a caller has to know its hint is not about this candidate rather than pay for every
+/// byte.
+#[test]
+fn signatures_for_another_average_are_refused() {
+    let data = content(70_000, 2);
+    let candidate = Candidate::new(&params(), &data).unwrap();
+    let other = Params::new(512).unwrap();
+    assert!(plan(&signatures(&params(), &data), &candidate, data.len() as u64).is_ok());
+    assert_eq!(
+        plan(&signatures(&other, &data), &candidate, data.len() as u64),
+        Err(Error::Parameters)
+    );
+}
+
 /// A requester that already has the content fetches nothing.
 #[test]
 fn an_identical_candidate_is_entirely_local() {
