@@ -166,6 +166,23 @@ impl Output {
         let _ = io::stderr().lock().write_all(text.as_bytes());
     }
 
+    /// Whether stderr is drawn with colour, and with the escape codes that carry it.
+    pub fn colours_stderr(&self) -> bool {
+        self.colour.stderr
+    }
+
+    /// Writes text that may hold escape codes to stderr. With escapes, the text goes through
+    /// `AutoStream`, which turns them on in a Windows console that has them off; without, it is
+    /// written as it is, so a caller that draws without colour adds none.
+    pub fn write_stderr_ink(&self, text: &str, escapes: bool) {
+        let written = if escapes {
+            AutoStream::new(io::stderr().lock(), ColorChoice::Always).write_all(text.as_bytes())
+        } else {
+            io::stderr().lock().write_all(text.as_bytes())
+        };
+        let _ = written;
+    }
+
     /// Writes a failure to stderr and returns the exit code for it. In text it is
     /// `sluice: <message>`. In JSON it is one line, `{"error":{"kind":"policy","message":"..."}}`,
     /// and stdout stays empty because nothing was printed there.
