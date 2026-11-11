@@ -1,16 +1,16 @@
 //! `sluice recv <ticket>`: decode, fetch, verify, write, and never ask.
 
+mod options;
+
+use options::{options, refuse_receipt_without_a_whole_transfer};
+
 use std::{io::BufRead, path::PathBuf};
 
 use clap::Args;
 use sluice_core::{
     Error,
-    engine::{
-        Rate, ReceiveOptions, Selection, receive, receive_live, receive_range, receive_stdout,
-    },
-    manifest::Limits,
+    engine::{Rate, Selection, receive, receive_live, receive_range, receive_stdout},
     range::ByteRange,
-    range::ByteSize,
     ticket::{Body, Format, Ticket},
 };
 use tokio::sync::mpsc::unbounded_channel;
@@ -67,6 +67,10 @@ pub struct RecvArgs {
     /// `*` matches inside one name and `**` crosses a `/`
     #[arg(long, value_name = "PATTERN")]
     pub include: Vec<String>,
+    /// Write the sender's signed receipt for the ticket to this file, after the whole transfer
+    /// arrived. The file is not replaced unless `--force` is given
+    #[arg(long, value_name = "FILE")]
+    pub receipt: Option<PathBuf>,
 }
 
 pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
@@ -81,11 +85,18 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
                 "--max-size bounds one live stream, not a queue of transfers".to_string(),
             ));
         }
+        if args.receipt.is_some() {
+            return Err(Error::Policy(
+                "--receipt writes one receipt for one ticket, so receive them one at a time"
+                    .to_string(),
+            ));
+        }
         return run_many(args, output, &tickets, rate, include);
     }
     let ticket = tickets.into_iter().next().unwrap_or_default();
     let decoded = Ticket::decode(&ticket)?;
     let range = args.range.as_deref().map(ByteRange::parse).transpose()?;
+    refuse_receipt_without_a_whole_transfer(args, &decoded, range.is_some(), &include)?;
     refuse_include_without_entries(&decoded, args, &include)?;
     if args.max_size.is_some() && !matches!(decoded.body(), Body::Live { .. }) {
         return Err(Error::Policy(
@@ -331,34 +342,6 @@ fn run_range(
         let bytes = until_interrupted(receive_range(ticket, range, &options, &store, &tx)).await?;
         output.write_stderr(&format!("wrote {bytes} bytes from the range\n"));
         Ok(0)
-    })
-}
-fn options(
-    args: &RecvArgs,
-    out: PathBuf,
-    rate: Option<std::sync::Arc<Rate>>,
-    include: Option<Selection>,
-) -> Result<ReceiveOptions, Error> {
-    let max_size = args
-        .max_size
-        .as_deref()
-        .map(ByteSize::parse)
-        .transpose()?
-        .map(ByteSize::bytes);
-    Ok(ReceiveOptions {
-        out,
-        force: args.force,
-        no_times: args.no_times,
-        links: args.links,
-        allow_hidden: args.allow_hidden,
-        limits: Limits::default(),
-        free_bytes: None,
-        max_size,
-        congestion: args.congestion.into(),
-        rate,
-        write_limit: None,
-        max_network_failures: sluice_core::queue::MAX_NETWORK_FAILURES,
-        include,
     })
 }
 

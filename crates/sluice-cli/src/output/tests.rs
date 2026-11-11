@@ -215,6 +215,7 @@ async fn closed_by_a_peer(
         write_limit: None,
         max_network_failures: 1,
         include: None,
+        receipt: None,
     };
     (router, ticket.encode(), store, options)
 }

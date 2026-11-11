@@ -11,6 +11,7 @@ use iroh::{Endpoint, EndpointAddr, protocol::Router};
 use iroh_blobs::{Hash, store::fs::FsStore};
 
 use super::{endpoint, live::LiveLog, now_ms, policy, storage};
+mod hold;
 mod keep;
 mod report;
 mod start;
@@ -34,6 +35,10 @@ pub struct Provider {
     endpoint: Endpoint,
     store: FsStore,
     policy: policy::Policy,
+    /// The receipts this send offers, and the answers it gives. The endpoint accepts connections
+    /// before a ticket exists, so the state exists from the start and is filled in before the
+    /// ticket is printed.
+    receipts: Arc<super::receipts::Receipts>,
     done: tokio::sync::mpsc::UnboundedReceiver<policy::ServeEvent>,
     /// Every content connection a receiver opened or closed, and every place taken or refused, in
     /// the order it happened. The sender is cloned into the endpoint's hook and into the gate, so
@@ -85,6 +90,12 @@ impl Provider {
         self.policy.served(hash)
     }
 
+    /// The receipt state, for a test that puts a record in place of the signed one.
+    #[cfg(test)]
+    pub(crate) fn receipts(&self) -> &Arc<super::receipts::Receipts> {
+        &self.receipts
+    }
+
     /// The store, for an import before or a check after serving.
     pub fn store(&self) -> &FsStore {
         &self.store
@@ -99,6 +110,23 @@ impl Provider {
     /// printed.
     pub(super) fn set_limit(&mut self, limit: Option<u32>) {
         lock_places(&self.places).set_limit(limit);
+    }
+
+    /// Offers a receipt for `root` and `total_len` bytes, signed with the identity key `seed`
+    /// names, and answers requests for it as the policy admits them.
+    pub(crate) fn offer_receipts(
+        &self,
+        root: [u8; 32],
+        total_len: u64,
+        seed: [u8; 32],
+        expiry_ms: Option<u64>,
+    ) {
+        self.receipts.offer(root, total_len, seed, expiry_ms);
+    }
+
+    /// Clears `RECEIPTS` before the ticket is printed, so no receipt is signed for it.
+    pub(crate) fn no_receipt(&self) {
+        self.receipts.disable();
     }
 
     /// Lets the requests of a send that offers no places in. A caller that never reserved has to
@@ -274,6 +302,7 @@ impl Provider {
                 // The bytes are out. A receiver's close report can still be on its way, and the
                 // sender's last line about it is worth waiting a moment for, but not a second.
                 self.settle(&mut opened, &wait.wanted, events).await;
+                self.hold_receipts(&mut opened, &wait.wanted, events).await;
                 return Ok(ServeEnd::Downloaded);
             }
         }

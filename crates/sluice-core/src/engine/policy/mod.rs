@@ -15,15 +15,14 @@ mod delivery;
 mod gate;
 mod places;
 
-use asked::Asked;
+use super::endpoint::Receiver;
+pub(crate) use asked::Asked;
 use gate::{Gate, mask};
 #[cfg(test)]
 pub(crate) use places::Admission;
 #[cfg(test)]
 pub(crate) use places::REFUSAL_LINES;
 pub(crate) use places::{Lines, Places};
-
-use super::endpoint::Receiver;
 
 /// The provider's policy and the task that answers its request events.
 pub struct Policy {
@@ -52,6 +51,12 @@ impl Policy {
     /// The roots `connection` asked for and was allowed to read.
     pub fn asked_by(&self, connection: u64) -> BTreeSet<Hash> {
         lock(&self.asked).of(connection)
+    }
+
+    /// The record of what every connection asked for, so the receipt handler can tell whether an
+    /// endpoint asked for the root it is asking a receipt for.
+    pub(crate) fn asked_handle(&self) -> Arc<Mutex<Asked>> {
+        Arc::clone(&self.asked)
     }
 }
 

@@ -84,6 +84,12 @@ impl Outgoing {
         });
     }
 
+    /// Clears `RECEIPTS` before the ticket is printed, so no receipt is signed for this send and a
+    /// receiver that asks is answered with nothing.
+    pub fn no_receipt(&mut self) {
+        self.provider.no_receipt();
+    }
+
     /// Serves until `keep` says to stop. Emits `started` and a line for every receiver; a progress
     /// line is the provider's business, and the sender does not count bytes.
     pub async fn serve(

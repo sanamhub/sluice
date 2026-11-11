@@ -105,6 +105,11 @@ pipe, a file or a log.
   verify` prints those fields and makes no claim beyond them. A receipt file names the sender's key
   and a commitment to the content's root; the commitment reveals the root only to a reader who
   already knows it, so reading a receipt does not hand out a ticket.
+- **A receipt request from a peer that never fetched.** The request names the root, and a sender
+  answers only an endpoint its policy admitted for that root, with a place on a send that counts
+  them, so a peer that knows the endpoint id and has no ticket is closed out with nothing written. A
+  refusal is silence rather than an error, so a peer cannot tell an unknown root from one the sender
+  does not serve.
 
 ## Known weaknesses
 

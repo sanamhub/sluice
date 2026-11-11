@@ -38,6 +38,7 @@ mod names;
 mod pack;
 mod places;
 mod provider;
+mod receipts;
 mod receivers;
 mod refusal;
 mod reports;
@@ -95,6 +96,7 @@ fn options(out: &Path) -> super::ReceiveOptions {
         write_limit: None,
         max_network_failures: crate::queue::MAX_NETWORK_FAILURES,
         include: None,
+        receipt: None,
     }
 }
 

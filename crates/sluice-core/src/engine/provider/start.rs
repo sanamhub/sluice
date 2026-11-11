@@ -184,10 +184,9 @@ impl Provider {
             receivers,
         );
         let blobs = BlobsProtocol::new(store.deref(), Some(policy.events.clone()));
-        let sluice = match live {
-            Some(log) => SluiceProtocol::live(log),
-            None => SluiceProtocol::default(),
-        };
+        let receipts =
+            crate::engine::receipts::Receipts::new(policy.asked_handle(), Arc::clone(&places));
+        let sluice = SluiceProtocol::serving(live, Arc::clone(&receipts));
         let router = Router::builder(endpoint.clone())
             .accept(iroh_blobs::ALPN, blobs)
             .accept(ALPN, sluice)
@@ -197,6 +196,7 @@ impl Provider {
             endpoint,
             store,
             policy,
+            receipts,
             done: done_rx,
             receivers: receivers_rx,
             places,

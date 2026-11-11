@@ -36,6 +36,7 @@ fn options(out: &std::path::Path) -> ReceiveOptions {
         write_limit: None,
         max_network_failures: crate::queue::MAX_NETWORK_FAILURES,
         include: None,
+        receipt: None,
     }
 }
 
