@@ -1,6 +1,6 @@
 # 0034. The container codecs move into a crate with no IO, for the browser to share
 
-**Status:** Proposed **Date:** 2026-11-11 **Relates to:** ADR 0008, ADR 0009, ADR 0014
+**Status:** Accepted **Date:** 2026-11-11 **Approved by:** @sanamhub **Relates to:** ADR 0008, ADR 0009, ADR 0014
 
 ## Context
 
@@ -26,7 +26,8 @@ crates with no IO for that reason (ADR 0008).
 1. **A new crate, `crates/sluice-format`, holds every rule that turns bytes into values and back with
    no IO**: the directory manifest and its root, the path rules and their comparison key, the ticket,
    the receipt, the pack table, the limits, and the hash sequence. It depends on `blake3`,
-   `ed25519-dalek`, `serde` and the URL parser, and on nothing that opens a file or a socket.
+   `ed25519-dalek`, `serde`, `thiserror` for the error's display and the URL parser, and on nothing
+   that opens a file or a socket.
 2. **`Error` moves with them.** Every codec answers with `sluice_core::Error`, and that type is six
    variants carrying a string or nothing, with no `io::Error` inside it, so it is a value like the
    rest and not an IO dependency. It is defined once in the format crate and re-exported by the core
@@ -37,8 +38,10 @@ crates with no IO for that reason (ADR 0008).
 4. **`sluice-core` keeps the IO**: the home, the store, the repair, the sweep, the platform file mode
    mapping and the writer that touches the disk. A rule that needs to know how one platform spells a
    file name stays in the core and consults the format crate for the verdict.
-5. **The browser crate depends on `sluice-format`** and on nothing else of ours, so the limits a tab
-   applies are the same numbers, read from the same place, that a native receive applies.
+5. **The browser crate depends on `sluice-format`** for these rules. It already depends on
+   sluice-delta, for the chunker and the matcher a tab uses as a hint, and on nothing else of ours.
+   The limits a tab applies are the same numbers, read from the same place, that a native receive
+   applies.
 6. **The move is a refactor with no wire change.** `cargo xtask conformance`, the vectors and the
    existing tests are the check that nothing moved but the code.
 

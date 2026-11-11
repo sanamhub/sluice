@@ -42,4 +42,4 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0031](0031-a-shared-ticket-counts-its-receivers.md) | A shared ticket counts the receivers it serves, and the sender says who connected | Accepted |
 | [0032](0032-the-rendezvous-image-is-gone.md) | The rendezvous image is no longer built or released | Accepted, supersedes 0020's rendezvous mode |
 | [0033](0033-the-tool-ships-as-an-image.md) | The tool ships as a container image beside the relay | Accepted |
-| [0034](0034-container-codecs-have-no-io.md) | The container codecs move into a crate with no IO, for the browser to share | Proposed |
+| [0034](0034-container-codecs-have-no-io.md) | The container codecs move into a crate with no IO, for the browser to share | Accepted |
