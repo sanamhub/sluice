@@ -39,11 +39,12 @@ pack:
 sluice send payload.bin --relay http://127.0.0.1:3340/
 ```
 
-The page reads `relay`, `sender` and `root` from its query string, so the ticket's parts have to be
-extracted, and `sluice` has no command that prints them:
+The page reads `relay`, `sender`, `root` and `size` from its query string, so the ticket's parts have
+to be extracted, and `sluice` has no command that prints them. Write the ticket to a file and pipe it
+in, because what the command prints is the ticket by another spelling:
 
 ```sh
-cargo xtask ticket-parts "$TICKET"
+cargo xtask ticket-parts < ticket.txt
 # sender 7605eeacd2f6bc4abeea76b3e928974cd463e0e9e6af7a283719d6fb00656615
 # relay http://127.0.0.1:3340/
 # root 6fa9106fef96e35f2ab07a303638db7c48ade9840f7336acf37384795b189adc

@@ -55,12 +55,10 @@ enum Command {
         #[arg(long, value_name = "DIR", default_value = "packaging")]
         out: PathBuf,
     },
-    /// Print the fields a ticket names: its sender, its relay, its root and its size
-    TicketParts {
-        /// The ticket, as text
-        #[arg(value_name = "TICKET")]
-        ticket: String,
-    },
+    /// Print the fields a ticket names, read from standard input: its sender, its relay, its root
+    /// and its size. Its output is as secret as the ticket, because these are the parts a ticket is
+    /// made of, so keep it out of a log, a shell history and a process list.
+    TicketParts,
     /// Fail if the tree holds a file a build writes or a top-level entry that does not belong
     Tree,
     /// Write one Unicode property's ranges from the character database as Rust source
@@ -80,7 +78,7 @@ fn main() -> anyhow::Result<()> {
         Command::FuzzSeeds { target, dir } => fuzz_seeds::run(target, &dir),
         Command::Man { dir } => man::run(&dir),
         Command::Package { version, from, out } => package::run(&version, &from, &out),
-        Command::TicketParts { ticket } => ticket::run(&ticket),
+        Command::TicketParts => ticket::run_stdin(),
         Command::Tree => tree::run(),
         Command::UnicodeIgnorable { source, out } => unicode_ignorable::run(&source, &out),
     }
