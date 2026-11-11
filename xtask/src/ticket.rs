@@ -42,7 +42,10 @@ pub fn run_stdin() -> anyhow::Result<()> {
 /// neither is part of the text, and the decoder refuses a byte after the ticket, so both are removed
 /// before the decode. Whitespace at either end is removed for the same reason.
 fn from_input(text: &str) -> &str {
-    text.trim_start_matches('\u{feff}').trim()
+    // A byte-order mark can stand before the whitespace as well as after it: an editor writes it
+    // first, and a stream can put a line ending in front of it. Both are removed, with the
+    // whitespace on either side of them.
+    text.trim().trim_start_matches('\u{feff}').trim()
 }
 
 /// The bytes as lower-case hex, two characters each: 64 for a root, a sender or a key, and 32 for a
@@ -105,6 +108,9 @@ mod tests {
         assert_eq!(from_input(&format!("{text}\n")), text);
         assert_eq!(from_input(&text), text);
         assert_eq!(from_input(&format!("\u{feff}{text}\r\n")), text);
+        // An editor writes the mark first, and a stream can put a line ending before it.
+        assert_eq!(from_input(&format!("\r\n\u{feff}{text}\r\n")), text);
+        assert_eq!(from_input(&format!(" \u{feff} {text} ")), text);
         assert_eq!(from_input(&format!("  {text}  ")), text);
     }
 }

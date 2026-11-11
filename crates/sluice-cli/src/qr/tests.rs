@@ -232,7 +232,8 @@ fn a_dark_background_draws_the_field_in_ink() {
 }
 
 /// `COLORFGBG` is `foreground;background`, and the background decides. A terminal that does not set
-/// it says nothing, which is different from saying it is light.
+/// it says nothing, which is different from saying it is light, and so does a value whose last
+/// field is not a number: `default;default` is not a light background.
 #[test]
 fn a_dark_background_is_read_from_the_last_number() {
     assert_eq!(parse_background(OsStr::new("15;0")), Some(true));
@@ -240,6 +241,8 @@ fn a_dark_background_is_read_from_the_last_number() {
     assert_eq!(parse_background(OsStr::new("0;15")), Some(false));
     assert_eq!(parse_background(OsStr::new("0;7")), Some(false));
     assert_eq!(parse_background(OsStr::new("15")), Some(false));
+    assert_eq!(parse_background(OsStr::new("default;default")), None);
+    assert_eq!(parse_background(OsStr::new("")), None);
 }
 
 /// With escapes, the field is set and the terminal's background does not matter; without them, the

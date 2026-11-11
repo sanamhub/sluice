@@ -209,11 +209,17 @@ fn background() -> Option<bool> {
     parse_background(&value)
 }
 
-/// [`background`] for one value of the variable, which is what a test has.
+/// [`background`] for one value of the variable, which is what a test has. The background is the
+/// last number, and a terminal that writes anything else there says nothing this code can read: an
+/// unknown value is `None`, which is drawn for a light background with the line that names
+/// `--qr=inverted`.
 fn parse_background(value: &std::ffi::OsStr) -> Option<bool> {
     let text = value.to_string_lossy();
     let last = text.rsplit(';').next()?;
-    Some(matches!(last.parse::<u8>(), Ok(0..=6 | 8)))
+    match last.parse::<u8>() {
+        Ok(code) => Some(matches!(code, 0..=6 | 8)),
+        Err(_) => None,
+    }
 }
 
 /// The terminal's width in columns: the width of the terminal standard error is attached to, which
