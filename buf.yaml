@@ -1,4 +1,6 @@
-# The control API's schema, linted and checked for breaking changes against `main`.
+# The control API's schema, linted by `buf lint`. A breaking-change check compares against a version
+# on `main`, and the directory is not there yet: `buf breaking --against '.git#branch=main'` fails
+# with "no .proto files" until it is.
 #
 # `SPEC.md` section 11 makes `proto/sluice/v1` the definition of the local interface, governed by
 # buf. The STANDARD rules keep the style of every message the same, and FILE breaking changes keep

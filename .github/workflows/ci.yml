@@ -38,6 +38,29 @@ jobs:
       # accepts are listed in it.
       - run: cargo xtask tree
 
+  # The control API's schema, which SPEC.md section 11 makes the definition of the local interface.
+  buf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Fetched from its release and checked against the digest that release publishes, rather than
+      # installed through an action, so the version and the bytes are both named here and neither is
+      # a moving tag. `tests/vectors/README.md` and `buf.yaml` say what the rules are for.
+      - name: Install buf
+        run: |
+          version=1.75.0
+          curl --fail --silent --show-error --location --output buf \
+            "https://github.com/bufbuild/buf/releases/download/v${version}/buf-Linux-x86_64"
+          echo "fad1e38d6909bbb583a4da81d8c02a01046e2cd663bde7e337dd24277393764b  buf" \
+            | sha256sum --check --strict
+          chmod +x buf
+          sudo install buf /usr/local/bin/buf
+      - run: buf --version
+      - run: buf lint
+
   clippy:
     strategy:
       fail-fast: false
