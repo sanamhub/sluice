@@ -19,24 +19,27 @@ wasm-bindgen --target web --out-dir web \
   target/wasm32-unknown-unknown/debug/sluice_wasm.wasm
 ```
 
+Put the relay's config and the file a send serves in a folder outside this repository, so a run leaves
+nothing in the tree. This recipe calls that folder `$SCRATCH`.
+
 The relay. `--dev` fills in a bind address only when the config has none, and its own default is
 IPv6-only on Windows, so the config names IPv4:
 
 ```toml
-# relay.toml
+# $SCRATCH/relay.toml
 http_bind_addr = "0.0.0.0:3340"
 enable_metrics = false
 ```
 
 ```sh
-iroh-relay --dev -c relay.toml
+iroh-relay --dev -c "$SCRATCH/relay.toml"
 ```
 
 The sender, with a file of at least a megabyte so the ticket names the file's own blob rather than a
 pack:
 
 ```sh
-sluice send payload.bin --relay http://127.0.0.1:3340/
+sluice send "$SCRATCH/payload.bin" --relay http://127.0.0.1:3340/
 ```
 
 The page reads `relay`, `sender`, `root` and `size` from its query string, so the ticket's parts have
@@ -44,19 +47,21 @@ to be extracted, and `sluice` has no command that prints them. Write the ticket 
 in, because what the command prints is the ticket by another spelling:
 
 ```sh
-cargo xtask ticket-parts < ticket.txt
-# sender 7605eeacd2f6bc4abeea76b3e928974cd463e0e9e6af7a283719d6fb00656615
+cargo xtask ticket-parts < "$SCRATCH/ticket.txt"
+# the values below are examples, not the ones a run makes
+# sender 1111111111111111111111111111111111111111111111111111111111111111
 # relay http://127.0.0.1:3340/
-# root 6fa9106fef96e35f2ab07a303638db7c48ade9840f7336acf37384795b189adc
+# root 2222222222222222222222222222222222222222222222222222222222222222
 # size 2097152
 ```
 
-Serve the page, with the glue written to `web/` as above:
+Serve the page, from `web/` alone so nothing else in the tree is reachable:
 
 ```sh
+cd web
 python -m http.server 8099 --bind 127.0.0.1
 chrome --headless=new --no-sandbox --remote-debugging-port=9222 \
-  "http://127.0.0.1:8099/proof/index.html?relay=http://127.0.0.1:3340/&sender=<64 hex>&root=<64 hex>"
+  "http://127.0.0.1:8099/proof/index.html?relay=http://127.0.0.1:3340/&sender=<64 hex>&root=<64 hex>&size=<the ticket's size>"
 ```
 
 `--dump-dom` returns before a fetch of two megabytes finishes, so the result is read from the live
