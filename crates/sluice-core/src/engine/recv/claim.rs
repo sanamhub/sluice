@@ -166,6 +166,20 @@ async fn decide(partial: &std::path::Path, owner: &str) -> Result<Found, Error> 
 /// refused and left alone: it could have been planted where the store was, or be another
 /// transfer's, and resuming from it would trust bytes nobody in this home wrote.
 fn resumable_store(partial: &std::path::Path, owner: &str) -> Result<Found, Error> {
+    // A removal gave up on this folder: its record went with the attempt and a note stands for it.
+    // Removing it here is what the note is for, so this run starts a store of its own instead of
+    // refusing a folder this home has already given up on.
+    if storage::discarded(partial) {
+        storage::discard_here(partial);
+        if std::fs::symlink_metadata(partial).is_ok() {
+            return Err(Error::Storage(format!(
+                "cannot remove {}, a partial store a file in it is holding; try the receive again \
+                 when that file is free",
+                partial.display()
+            )));
+        }
+        return Ok(Found::Nothing);
+    }
     let record = storage::find_record(partial, owner)?;
     let exists = std::fs::symlink_metadata(partial).is_ok();
     match (record, exists) {

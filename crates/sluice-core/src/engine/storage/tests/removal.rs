@@ -138,7 +138,7 @@ fn the_end_of_a_command_tries_a_removal_that_gave_up() {
         time::{Duration, Instant},
     };
 
-    use super::super::{remove_quietly, wait_for_removals};
+    use super::super::wait_for_removals_at;
 
     let _alone = crate::engine::storage::exclusive_removals();
     let dir = tempfile::tempdir().unwrap();
@@ -156,27 +156,20 @@ fn the_end_of_a_command_tries_a_removal_that_gave_up() {
         let _ = released.recv();
         drop(held);
     });
-    remove_quietly(&folder);
+    super::super::remove_quietly(&folder);
     assert!(folder.exists(), "the removal was expected to give up");
     release.send(()).unwrap();
     holder.join().unwrap();
+    // The path went on the first pass, which makes one attempt and has no retry of its own, so the
+    // wait cannot spend its budget: a budget that is used is a budget a folder did not go on.
     let budget = Duration::from_secs(2);
     let began = Instant::now();
-    wait_for_removals(budget);
+    wait_for_removals_at(budget, None);
+    let elapsed = began.elapsed();
     assert!(!folder.exists(), "the folder was left for the sweep");
-    // What the product promises is the budget plus the pass it is in, and this asserts that, with a
-    // margin for the pass. One pass costs one folder check, one read of the records folder, and one
-    // removal attempt, whose own retry limit is 1.27 s; fifteen seconds is that pass when the
-    // process is one of a thousand tests and the disk and the scheduler are both busy, which is
-    // what this test met: a full run once took 16.7 s for the test. The assertion used to be the
-    // budget itself, which the pass is allowed to overrun. The bound that does not depend on the
-    // clock is `the_end_of_a_command_does_not_wait_for_a_removal_that_is_still_running`, which
-    // proves the pass waits for nothing.
-    let pass = Duration::from_secs(15);
     assert!(
-        began.elapsed() < budget + pass,
-        "the wait ran past its budget and one pass in {:?}",
-        began.elapsed()
+        elapsed < budget,
+        "a folder that went on the first pass took {elapsed:?} of a {budget:?} budget"
     );
 }
 
@@ -214,187 +207,4 @@ fn a_folder_held_for_a_moment_is_still_removed() {
         "the removal waited for {:?}",
         started.elapsed()
     );
-}
-
-/// A removal queued on a runtime that is shut down before the task starts is kept, not lost: a
-/// blocking task the runtime drops takes a plain count with it, so the path is recorded as left and
-/// the end of the command removes the folder itself.
-#[test]
-fn a_removal_that_never_ran_is_kept_for_the_end_of_the_command() {
-    use std::time::Duration;
-
-    use super::super::{removals::Queued, wait_for_removals};
-
-    let _alone = crate::engine::storage::exclusive_removals();
-    let dir = tempfile::tempdir().unwrap();
-    let folder = dir.path().join("folder");
-    std::fs::create_dir(&folder).unwrap();
-    std::fs::write(folder.join("file"), b"bytes").unwrap();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    // A runtime that has stopped accepts no blocking task: the task is dropped where it is spawned,
-    // which is what happens to a task still queued when a command's runtime ends.
-    let handle = runtime.handle().clone();
-    runtime.shutdown_background();
-    let queued = Queued::begin(folder.clone());
-    drop(handle.spawn_blocking(move || queued.run()));
-
-    assert!(folder.exists(), "the removal ran on a stopped runtime");
-    wait_for_removals(Duration::from_secs(2));
-    assert!(!folder.exists(), "the kept folder was left for the sweep");
-}
-
-/// A removal that was already kept is tried once more even when the budget is gone: a command whose
-/// own removals were still parked when it began to end used the whole wait, and the folder would
-/// otherwise sit until the sweep, which removes one only a day old.
-#[test]
-fn a_path_kept_before_the_budget_ran_out_is_still_tried() {
-    use std::time::Duration;
-
-    use super::super::{removals::left, wait_for_removals};
-
-    let _alone = crate::engine::storage::exclusive_removals();
-    let dir = tempfile::tempdir().unwrap();
-    let folder = dir.path().join("folder");
-    std::fs::create_dir(&folder).unwrap();
-    std::fs::write(folder.join("file"), b"bytes").unwrap();
-    // What a removal that gave up leaves, and what the retry is for.
-    left(&folder);
-
-    wait_for_removals(Duration::ZERO);
-    assert!(
-        !folder.exists(),
-        "a kept folder was left for the sweep because the budget had gone"
-    );
-}
-
-/// The paths a removal keeps are keyed by the one form the hold uses, so a later removal that
-/// spells the folder another way clears the entry: nothing retries a folder that is gone or that a
-/// claim now owns.
-#[test]
-fn a_kept_path_is_the_one_the_hold_is_keyed_by() {
-    use std::time::Duration;
-
-    use super::super::{
-        removals::{gone, left},
-        wait_for_removals,
-    };
-
-    let _alone = crate::engine::storage::exclusive_removals();
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("out");
-    std::fs::create_dir_all(&out).unwrap();
-    let store = out.join(".sluice-partial-x");
-    std::fs::create_dir(&store).unwrap();
-    std::fs::write(store.join("file"), b"bytes").unwrap();
-    let spelled_differently = out.join("..").join("out").join(".sluice-partial-x");
-
-    left(&spelled_differently);
-    gone(&store);
-    wait_for_removals(Duration::from_secs(1));
-    assert!(
-        store.exists(),
-        "a kept path was retried under another spelling"
-    );
-}
-
-/// The end of a command does not remove a kept path that a record names: a claim may have made it a
-/// live store since the removal gave up, under another spelling of the same folder, and the folder
-/// is that claim's.
-#[test]
-fn the_end_of_a_command_leaves_a_kept_store_a_record_names() {
-    use std::time::Duration;
-
-    use super::super::{forget_record, remember_record, removals::left, wait_for_removals};
-
-    let _alone = crate::engine::storage::exclusive_removals();
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("out");
-    std::fs::create_dir_all(&out).unwrap();
-    let store = out.join(".sluice-partial-x");
-    std::fs::create_dir(&store).unwrap();
-    std::fs::write(store.join("file"), b"bytes").unwrap();
-    remember_record(&store, "root-one").unwrap();
-    left(&out.join("..").join("out").join(".sluice-partial-x"));
-
-    wait_for_removals(Duration::from_secs(1));
-    assert!(
-        store.exists(),
-        "the end of the command removed a store a record names"
-    );
-    forget_record(&store);
-}
-
-/// A path another removal keeps while a retry pass runs is still in the list once the pass puts its
-/// own survivors back: the pass appends to what is there instead of replacing it.
-#[test]
-fn a_path_kept_while_a_retry_runs_is_not_lost() {
-    use std::{
-        sync::{Arc, Mutex},
-        time::Duration,
-    };
-
-    use super::super::{
-        registry::canonical,
-        removals::{kept_paths, left, seam},
-        wait_for_removals,
-    };
-
-    let _alone = crate::engine::storage::exclusive_removals();
-    let dir = tempfile::tempdir().unwrap();
-    // A path that is gone gives the pass something to take and nothing to put back.
-    left(&dir.path().join("gone"));
-    // The path kept while the pass runs is the one that must survive it.
-    let kept = dir.path().join("kept");
-    std::fs::create_dir(&kept).unwrap();
-    let wanted = canonical(&kept).unwrap();
-    let seen = Arc::new(Mutex::new(false));
-    let flag = Arc::clone(&seen);
-    seam::arm(
-        move || left(&kept),
-        move || *flag.lock().unwrap() = kept_paths().contains(&wanted),
-    );
-    wait_for_removals(Duration::from_secs(1));
-    assert!(
-        *seen.lock().unwrap(),
-        "a path kept during a retry pass was dropped by it"
-    );
-}
-
-/// Only an error a moment can clear is worth another try: a name that is gone or a path that cannot
-/// be removed at all is not, so the command is not delayed for it.
-#[cfg(windows)]
-#[test]
-fn only_a_held_name_is_tried_again() {
-    for code in [5, 32, 33, 145] {
-        assert!(
-            super::super::retryable(&std::io::Error::from_raw_os_error(code)),
-            "{code}"
-        );
-    }
-    for code in [2, 3, 267] {
-        assert!(
-            !super::super::retryable(&std::io::Error::from_raw_os_error(code)),
-            "{code}"
-        );
-    }
-}
-
-#[cfg(unix)]
-#[test]
-fn only_a_busy_name_is_tried_again() {
-    for code in [
-        rustix::io::Errno::BUSY.raw_os_error(),
-        rustix::io::Errno::NOTEMPTY.raw_os_error(),
-    ] {
-        assert!(
-            super::super::retryable(&std::io::Error::from_raw_os_error(code)),
-            "{code}"
-        );
-    }
-    assert!(!super::super::retryable(
-        &std::io::Error::from_raw_os_error(2)
-    ));
 }

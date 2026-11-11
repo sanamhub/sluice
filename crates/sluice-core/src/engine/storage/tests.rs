@@ -5,6 +5,7 @@ use super::{install, needed_bytes, partial_dir, temp_dir};
 mod keys;
 mod records;
 mod removal;
+mod retry;
 mod store;
 
 use std::path::Path;
