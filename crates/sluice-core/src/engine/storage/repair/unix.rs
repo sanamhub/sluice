@@ -81,7 +81,7 @@ impl Dir {
             let Some(hex) = text.strip_suffix(".data") else {
                 continue;
             };
-            let Some(hash) = super::super::store::hash_from_hex(text) else {
+            let Some(hash) = super::super::store::hash_from_hex(hex) else {
                 continue;
             };
             if let Some(size) = shared_size(&data, &name) {
