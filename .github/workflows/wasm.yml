@@ -43,7 +43,9 @@ jobs:
         with:
           tool: nextest
       # The crate is not a default member, so the native test run does not cover it: its tests run
-      # here, and the target build proves the other half. `ring` compiles C for the target, which is
-      # what the runner's clang is for.
+      # here, its lints run here on both targets, and the target build proves the other half. `ring`
+      # compiles C for the target, which is what the runner's clang is for.
+      - run: cargo clippy -p sluice-wasm --all-targets -- -D warnings
+      - run: cargo clippy -p sluice-wasm --all-targets --target wasm32-unknown-unknown -- -D warnings
       - run: cargo nextest run -p sluice-wasm
       - run: cargo build -p sluice-wasm --target wasm32-unknown-unknown
