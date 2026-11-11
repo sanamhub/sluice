@@ -225,6 +225,31 @@ fn a_changed_file_does_not_match() {
     assert!(text.contains("and its send root is"), "{text}");
 }
 
+/// A file of another length is not hashed: the length is read from the metadata first, and the
+/// command says the file was not read rather than naming a root it never computed.
+#[test]
+fn a_file_of_the_wrong_length_is_not_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let source = dir.path().join("note.txt");
+    fs::write(&source, CONTENT).unwrap();
+    let (_sender, ticket) = start(&home, &source, "1h");
+    let (root, size) = of_ticket(&ticket);
+    let path = write_receipt(dir.path(), &receipt_for(root, size));
+    let longer = dir.path().join("longer.txt");
+    fs::write(&longer, [CONTENT, b" and more"].concat()).unwrap();
+    let assert = bare()
+        .args(["receipt", "verify"])
+        .arg(&path)
+        .args(["--file"])
+        .arg(&longer)
+        .assert()
+        .code(4);
+    let text = stdout_text(&assert);
+    assert!(text.contains("so it was not read"), "{text}");
+    assert!(!text.contains("send root is"), "{text}");
+}
+
 /// A folder send names a root the same way, and the check rebuilds it from the folder.
 #[test]
 fn a_folder_from_a_real_send_matches() {

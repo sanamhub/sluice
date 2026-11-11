@@ -212,8 +212,17 @@ pub async fn greet(conn: &Connection) -> std::io::Result<Hello> {
 /// The dialer's half of the greeting, with both streams still open. A live transfer reads the
 /// records the listener writes after the greeting on the same stream, so the caller keeps both.
 pub async fn greet_stream(conn: &Connection) -> std::io::Result<(Hello, SendStream, RecvStream)> {
+    greet_stream_with(conn, Hello::ours()).await
+}
+
+/// [`greet_stream`] with the greeting the dialer writes, for a caller that offers a capability the
+/// listener does not set by default.
+pub async fn greet_stream_with(
+    conn: &Connection,
+    ours: Hello,
+) -> std::io::Result<(Hello, SendStream, RecvStream)> {
     let (mut send, mut recv) = conn.open_bi().await.map_err(std::io::Error::other)?;
-    write_hello(&mut send, Hello::ours()).await?;
+    write_hello(&mut send, ours).await?;
     let theirs = read_hello(&mut recv).await?;
     Ok((theirs, send, recv))
 }
