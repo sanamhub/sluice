@@ -1,15 +1,23 @@
 {
-  "description": "Receipts an implementation MUST verify: the 144 bytes of section 10 in the ticket's base32 behind the prefix, signed under sluice/receipt/1",
+  "description": "Receipts an implementation MUST verify: the 144 bytes of section 10 in the ticket's base32 behind the prefix, signed under sluice/receipt/1 over a commitment to the content's root, and whether the receipt is about a content root it is given",
   "cases": [
+    {
+      "receipt": "sluicereceipt1hgc82rd2nhhqcz0mannykmwq2z4z0vb828b51j4f5mv0zg29rqyg010000000000x956rrz2kh90nfqna1xh6bp5z6amexneqtz7q4j23vn6j526t8p00m2w32hg2000apn5dc8ft3qwaeg5hvvae2bfn02cxnzdt8q7vx4aeeapnefha5xqcby921nmd3355j18vq2wwam9bfsstbeazsjhxwv7jjrjc86kc18",
+      "valid": true,
+      "fields": { "commit": "8c188161a2ac63767c14556be9d39717c9f06d68121650c88f2d360fc049c5fd", "total_len": "1024", "sender_key": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c", "utc_ms": "1800000000000" },
+      "content": { "root": "0909090909090909090909090909090909090909090909090909090909090909", "matches": true }
+    },
+    {
+      "receipt": "sluicereceipt16zdnk9z52xnkg2kt0dnhefff7tw4fnspds7jk4evyf039gtt5nf0000000000000x956rrz2kh90nfqna1xh6bp5z6amexneqtz7q4j23vn6j526t8p0000000000000hdsafyn88fqqd3z5jgkkrp5dmy5wsrzechshb11e1h6xhsgwvbma40a76pe09d21jg0h5h8qka2rfnbrj3j53wwqzckhavgjbnr5w08",
+      "valid": true,
+      "fields": { "commit": "37db59a7e5176b380a7a036b173def3eb847d7366e4f2991dbf3c034c35a2d5e", "total_len": "0", "sender_key": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c", "utc_ms": "0" },
+      "content": { "root": "0000000000000000000000000000000000000000000000000000000000000000", "matches": true }
+    },
     {
       "receipt": "sluicereceipt1144gj289144gj289144gj289144gj289144gj289144gj289144g010000000000x956rrz2kh90nfqna1xh6bp5z6amexneqtz7q4j23vn6j526t8p00m2w32hg2000py5sh016n4t7vq2fnzgk34jnaz8qgf97jk6xa92kwgfx2yhs2rdshvjzb811rmmwxyyxzhcfk8710ja0pghbsagv5htb0vn3kcb9r0g",
       "valid": true,
-      "fields": { "root": "0909090909090909090909090909090909090909090909090909090909090909", "total_len": "1024", "sender_key": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c", "utc_ms": "1800000000000" }
-    },
-    {
-      "receipt": "sluicereceipt10000000000000000000000000000000000000000000000000000000000000000x956rrz2kh90nfqna1xh6bp5z6amexneqtz7q4j23vn6j526t8p0000000000000d4drmgsk1ygxdqt00dx0cetczg74xz3vt75rcvnh2m7pssj4ek250ya5f0sd2m8xw6q0vwc5940hye9xqf24kmem51spkr6q2wa4w20",
-      "valid": true,
-      "fields": { "root": "0000000000000000000000000000000000000000000000000000000000000000", "total_len": "0", "sender_key": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c", "utc_ms": "0" }
+      "fields": { "commit": "0909090909090909090909090909090909090909090909090909090909090909", "total_len": "1024", "sender_key": "ea4a6c63e29c520abef5507b132ec5f9954776aebebe7b92421eea691446d22c", "utc_ms": "1800000000000" },
+      "content": { "root": "0909090909090909090909090909090909090909090909090909090909090909", "matches": false }
     }
   ]
 }

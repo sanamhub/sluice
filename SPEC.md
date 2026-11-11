@@ -852,7 +852,7 @@ receiver knows from the manifest which file each byte goes to.
 Capability `RECEIPTS`. A sender-signed statement that specific content was offered.
 
 ```
-Receipt = { root: [u8;32], total_len: u64, sender_key: [u8;32], utc_ms: u64, sig: [u8;64] }
+Receipt = { commit: [u8;32], total_len: u64, sender_key: [u8;32], utc_ms: u64, sig: [u8;64] }
 ```
 
 The fields come in this order with no padding, and the little-endian rule of section 2 applies, so
@@ -862,6 +862,12 @@ the four fields before `sig` are the first 80 bytes. `sig` is an Ed25519 signatu
 1. the label `sluice/receipt/1`, in ASCII
 2. one byte `0x00`
 3. the first 80 bytes of the receipt
+
+`commit` is the content's root under a commitment: BLAKE3 in its key-derivation mode, under the ASCII
+context `sluice/receipt/commit/1`, applied to the 32 bytes of the root a ticket names. It is not the
+root, so a receipt cannot be read as the body of a ticket: it names the content to a reader who
+already knows the root and to nobody else. A receipt whose `commit` is the root itself commits to no
+content, and a verifier that compares it with content refuses it.
 
 This is the scheme of **Signatures** in section 6 without a `stream_id`, because a receipt names no
 stream. A verifier verifies strictly, as section 6 says after **Signatures**. The label keeps a
@@ -893,7 +899,7 @@ A receiver MUST treat the receipt as absent, and MUST NOT fail the transfer over
 
 1. the record's length is not 144
 2. `sender_key` is not the endpoint id of the connection the content came from
-3. `root` and `total_len` are not the ones its ticket names and it verified
+3. `commit` and `total_len` are not the ones its ticket's root and size give
 4. `utc_ms` is more than 300000 milliseconds before or after its own clock when the record arrives
 5. `sig` does not verify under `sender_key`, as **Signatures** of section 6 says
 6. no record arrives within 10 seconds of the `sluice/1` connection coming up
@@ -902,9 +908,10 @@ The content was verified against its root before any of this, so a receipt canno
 wrong: it can only be missing. A receiver that asked for one and did not get one that passes every
 rule has none.
 
-A sender that sets `RECEIPTS` MUST sign a receipt for the root and the length of the ticket it is
-serving, with the identity key that ticket names, at a time within the window above, and MUST write
-it to every receiver that asks. A sender that clears the bit MUST NOT write one.
+A sender that sets `RECEIPTS` MUST sign a receipt whose `commit` is the commitment of the root of
+the ticket it is serving, and whose `total_len` is that ticket's size, with the identity key that
+ticket names, at a time within the window above, and MUST write it to every receiver that asks. A
+sender that clears the bit MUST NOT write one.
 
 A receipt proves the sender offered that content at that time. It does not prove delivery, and
 implementations MUST NOT describe it as proof of delivery.

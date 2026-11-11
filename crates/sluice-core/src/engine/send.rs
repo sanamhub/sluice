@@ -2,9 +2,11 @@
 //! prepare the ticket. The bytes are never copied into the home.
 
 mod folder;
+mod root;
 mod scratch;
 mod single;
 
+pub use root::{PathRoot, root_of_path};
 pub(crate) use scratch::Scratch;
 
 pub use folder::{prepare_paths, prepare_paths_with_rate};

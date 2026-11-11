@@ -19,7 +19,9 @@ use crate::{
 };
 
 /// The name, path and metadata of the one file a single-file send carries.
-pub(super) fn checked_file(path: &Path) -> Result<(String, String, ManifestPath, Stamp), Error> {
+pub(in crate::engine) fn checked_file(
+    path: &Path,
+) -> Result<(String, String, ManifestPath, Stamp), Error> {
     let shown = path.display().to_string();
     let meta = fs::symlink_metadata(path).map_err(|e| storage::policy_path("read", path, e))?;
     if meta.file_type().is_symlink() {
@@ -55,7 +57,7 @@ pub(super) async fn import(path: &Path, shown: &str, store: &FsStore) -> Result<
 
 /// A file of 1 byte to under `PACK_THRESHOLD` is a pack of its own, so the receiver reads it the
 /// same way it reads a file inside a folder. Any other file is a blob with its BLAKE3 root.
-pub(super) fn one_entry_manifest(
+pub(in crate::engine) fn one_entry_manifest(
     entry_path: ManifestPath,
     before: &Stamp,
     hash: Hash,

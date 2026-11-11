@@ -405,11 +405,15 @@ bytes of `SPEC.md` section 10 behind `sluicereceipt1`, in the same lower-case ba
 |---|---|---|
 | `receipt` | string | The receipt exactly as a file holds it, without a line ending |
 | `valid` | boolean | `true` if a verifier MUST accept it, `false` if it MUST refuse it |
-| `fields` | object | Present when `valid` is `true`. `root` and `sender_key` as 64 lower-case hex characters, `total_len` and `utc_ms` as decimal strings |
+| `fields` | object | Present when `valid` is `true`. `commit` and `sender_key` as 64 lower-case hex characters, `total_len` and `utc_ms` as decimal strings |
+| `content` | object | Present when the case is about content. `root` is 64 lower-case hex characters, and `matches` is whether the receipt is about content with that root |
 | `refused` | string | Present when `valid` is `false`. `text` for a text that does not decode, `signature` for one that decodes and whose signature does not verify under the key it names |
 
 A valid case also checks the encoder: the text an implementation writes for those fields must be
-the one the case holds, in lower case, so one receipt has one spelling.
+the one the case holds, in lower case, so one receipt has one spelling. A case with `content` checks
+the commitment: `matches` is true only when the receipt's `commit` is the commitment of `content.root`
+under the context of section 10. A receipt whose `commit` is the root itself is not about that
+content, and a case holds one.
 
 ## `delta/`
 
