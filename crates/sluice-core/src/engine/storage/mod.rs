@@ -18,13 +18,16 @@ pub(crate) use open::hand_on;
 pub use open::{Collector, Store};
 #[cfg(test)]
 pub(super) use open::{GC_INTERVAL, open_store_after};
+pub(crate) use registry::NOTE_PREFIX;
+#[cfg(test)]
+pub(crate) use registry::note_discarded;
 #[cfg(test)]
 pub(crate) use registry::remember_as;
 pub use registry::{
     clash as registry_clash, discard_apart, discard_apart_keeping_names, find as find_record,
     forget as forget_record, with_hold,
 };
-pub(crate) use registry::{discard_here, discarded};
+pub(crate) use registry::{discard_here, forget_note, noted};
 #[cfg(test)]
 pub(crate) use removals::exclusive as exclusive_removals;
 pub use removals::wait_for_removals;
@@ -182,6 +185,9 @@ pub fn remove_quietly(path: &Path) {
     parked::wait(path);
     if quiet_attempts(path) {
         removals::gone(path);
+        // A note stands for one folder, and that folder is gone. A note left behind would let the
+        // next claim of the output take away whatever has the name by then.
+        registry::forget_note(crate::Home::partial_records_for_read().as_deref(), path);
     } else {
         removals::left(path);
     }
@@ -267,4 +273,4 @@ mod imp {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

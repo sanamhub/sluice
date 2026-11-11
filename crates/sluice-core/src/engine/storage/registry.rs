@@ -1,7 +1,6 @@
 //! The home's record of the partial stores a receive made. A folder named `.sluice-partial-*` beside
-//! an output folder belongs to a transfer only when a record here names it, its absolute path and
-//! the ticket root. A folder with that name and no record is someone else's: it is refused unread
-//! and never removed.
+//! an output belongs to a transfer only when a record here names it, its absolute path and the
+//! ticket root. A folder with that name and no record is someone else's: refused unread, never removed.
 
 use std::{
     collections::BTreeSet,
@@ -15,7 +14,9 @@ use crate::{Error, Home};
 
 mod notes;
 
-pub(crate) use notes::{discarded, forget_discarded, note_discarded};
+pub(crate) use notes::{
+    PREFIX as NOTE_PREFIX, forget as forget_note, note as note_discarded, noted,
+};
 
 /// A record of one partial store.
 pub struct Record {
@@ -101,20 +102,19 @@ pub fn forget(path: &Path) {
 }
 
 /// Whether any record of this home names `path`, whatever root it carries. The end of a command
-/// asks before it removes a kept partial store: a claim may have made that path a live store again,
-/// under another spelling of the same folder, after the removal gave up. The records are read from
-/// the folder [`Home::partial_records_for_read`] names, so the question makes nothing and rewrites
-/// no access list.
-pub(super) fn named(path: &Path) -> bool {
+/// asks before it removes a kept partial store: a claim may have made that path a live store again
+/// under another spelling of the same folder after the removal gave up. The records are read from
+/// the folder the caller resolved once, so the question makes nothing and rewrites no access list.
+pub(super) fn named_in(records: Option<&Path>, path: &Path) -> bool {
     let Ok(wanted) = canonical(path) else {
         // A path with no resolved form cannot be proved to be nobody's, and leaving a folder is
         // better than removing a store that a record names.
         return true;
     };
-    let Some(dir) = Home::partial_records_for_read() else {
+    let Some(dir) = records else {
         return false;
     };
-    let Ok(entries) = fs::read_dir(&dir) else {
+    let Ok(entries) = fs::read_dir(dir) else {
         return false;
     };
     entries.flatten().any(|entry| {
@@ -146,18 +146,18 @@ pub(super) fn recorded_in(dir: &Path) -> Vec<PathBuf> {
 
 /// Removes a partial store and the home's record of it, which are both this receive's.
 pub fn discard(path: &Path) {
-    match with_hold(path, || discard_here(path)) {
+    let records = Home::partial_records().ok();
+    match with_hold(path, || discard_here(records.as_deref(), path)) {
         Ok(()) => {}
         // A path with no resolved form has no hold either, so no other caller is using one.
-        Err(_) => discard_here(path),
+        Err(_) => discard_here(records.as_deref(), path),
     }
 }
 
 /// [`discard`] for a store whose run finished but which took only part of the ticket: the folder
 /// goes, and the record stays when the folder is really gone, so the next claim of this ticket into
 /// this output can carry the top-level names the run made. A folder that survived the removal keeps
-/// nothing: its record goes as it always did, so a leftover folder is refused unread rather than
-/// taken for a store.
+/// nothing: its record goes, so a leftover folder is refused unread rather than taken for a store.
 pub async fn discard_apart_keeping_names(path: &Path) {
     let dir = path.to_owned();
     let _ = tokio::task::spawn_blocking(move || {
@@ -176,15 +176,15 @@ pub async fn discard_apart_keeping_names(path: &Path) {
 /// then could not write its marker.
 ///
 /// The record goes even when the folder stays, so nothing trusts the name as a store; a folder that
-/// survives a file another process holds is noted instead, and the note goes with a folder that did
-/// not, so one never stands for a name a later claim made its own store.
-pub(crate) fn discard_here(path: &Path) {
+/// survives a file another process holds is noted, with the identity it has now, so a later claim
+/// takes away that folder and not one that took its name.
+pub(crate) fn discard_here(records: Option<&Path>, path: &Path) {
     remove_quietly(path);
     forget(path);
     if fs::symlink_metadata(path).is_ok() {
-        note_discarded(path);
+        note_discarded(records, path);
     } else {
-        forget_discarded(path);
+        forget_note(records, path);
     }
 }
 

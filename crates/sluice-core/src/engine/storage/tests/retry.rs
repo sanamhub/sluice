@@ -2,6 +2,8 @@
 //! removal it could not finish is tried again when the command ends, a path a claim has made its
 //! own is left, and a partial store whose removal gave up is noted so the next claim of the output
 //! removes it.
+use super::Held;
+
 /// A removal queued on a runtime that is shut down before the task starts is kept, not lost: a
 /// blocking task the runtime drops takes a plain count with it, so the path is recorded as left and
 /// the end of the command removes the folder itself.
@@ -231,91 +233,73 @@ fn the_end_of_a_command_removes_a_kept_partial_store_no_record_names() {
     );
 }
 
-/// A partial store whose removal gave up is noted, and the next claim of that output removes it
-/// rather than refusing a name no record explains. The note is made through the record the store
-/// had and stands for the folder alone, so it cannot outlive it.
+/// A removal that gave up on a partial store leaves a note holding the identity that folder had,
+/// so the next claim of that output takes away that folder and not one that took its name since.
+/// The note goes when the folder goes, so it never stands for a name a later run made its own.
 #[test]
-fn a_partial_store_a_removal_gave_up_on_is_noted_for_the_next_claim() {
-    use super::super::{discard_here, discarded, forget_record, remember_record};
+fn a_partial_store_a_removal_gave_up_on_is_noted_with_its_identity() {
+    use super::super::{discard_here, identify, noted};
 
     let _alone = crate::engine::storage::exclusive_removals();
     let dir = tempfile::tempdir().unwrap();
-    let out = dir.path().join("out");
-    std::fs::create_dir_all(&out).unwrap();
-    let store = out.join(".sluice-partial-x");
+    let records = tempfile::tempdir().unwrap();
+    let store = dir.path().join(".sluice-partial-x");
     std::fs::create_dir(&store).unwrap();
     std::fs::write(store.join("file"), b"bytes").unwrap();
-    remember_record(&store, "root-one").unwrap();
 
-    let held = Held::in_folder(&store);
-    discard_here(&store);
+    let Some(held) = Held::in_folder(&store) else {
+        eprintln!(
+            "this user cannot be held out of a folder, so the removal runs as it would; skipped"
+        );
+        return;
+    };
+    discard_here(Some(records.path()), &store);
     assert!(store.exists(), "the removal was expected to give up");
-    forget_record(&store);
-    assert!(
-        discarded(&store),
-        "a folder a removal gave up on is not noted"
+    assert_eq!(
+        noted(Some(records.path()), &store),
+        identify(&store).unwrap(),
+        "the note does not hold the identity of the folder it stands for"
     );
 
     drop(held);
-    // The next claim of the output asks `discarded`, removes the folder and starts its own store.
-    assert!(
-        discarded(&store),
-        "a note does not survive until it is honoured"
-    );
-    discard_here(&store);
+    discard_here(Some(records.path()), &store);
     assert!(!store.exists(), "the noted folder was left for the user");
-    assert!(!discarded(&store), "the note outlived its folder");
+    assert_eq!(
+        noted(Some(records.path()), &store),
+        None,
+        "the note outlived its folder"
+    );
 }
 
-/// A folder a removal of a test cannot take, released when it is dropped: no write permission on
-/// the folder itself on Unix, and a file in it that another handle does not share on Windows.
-struct Held {
-    #[cfg(unix)]
-    folder: std::path::PathBuf,
-    #[cfg(windows)]
-    _file: std::fs::File,
-}
+/// A note whose folder the end of a command removes is forgotten with it: a later claim must not be
+/// told about a name nothing holds, or it would look for an identity that is no longer there.
+#[test]
+fn the_end_of_a_command_forgets_the_note_of_a_folder_it_removed() {
+    use super::super::{note_discarded, noted, removals::left, wait_for_removals_at};
 
-impl Held {
-    #[cfg(unix)]
-    fn in_folder(folder: &std::path::Path) -> Self {
-        use std::os::unix::fs::PermissionsExt;
+    let _alone = crate::engine::storage::exclusive_removals();
+    let dir = tempfile::tempdir().unwrap();
+    let records = tempfile::tempdir().unwrap();
+    let store = dir.path().join(".sluice-partial-x");
+    std::fs::create_dir(&store).unwrap();
+    std::fs::write(store.join("file"), b"bytes").unwrap();
 
-        let mut mode = std::fs::metadata(folder).unwrap().permissions();
-        mode.set_mode(0o500);
-        std::fs::set_permissions(folder, mode).unwrap();
-        Self {
-            folder: folder.to_path_buf(),
-        }
-    }
-
-    #[cfg(windows)]
-    fn in_folder(folder: &std::path::Path) -> Self {
-        use std::os::windows::fs::OpenOptionsExt;
-
-        let path = folder.join("held");
-        std::fs::write(&path, b"held").unwrap();
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .share_mode(0)
-            .open(&path)
-            .unwrap();
-        Self { _file: file }
-    }
-}
-
-impl Drop for Held {
-    #[cfg(unix)]
-    fn drop(&mut self) {
-        use std::os::unix::fs::PermissionsExt;
-
-        let mut mode = std::fs::metadata(&self.folder).unwrap().permissions();
-        mode.set_mode(0o700);
-        let _ = std::fs::set_permissions(&self.folder, mode);
-    }
-
-    #[cfg(windows)]
-    fn drop(&mut self) {}
+    note_discarded(Some(records.path()), &store);
+    assert!(
+        noted(Some(records.path()), &store).is_some(),
+        "the note was not written"
+    );
+    left(&store);
+    wait_for_removals_at(
+        std::time::Duration::from_secs(1),
+        Some(records.path().to_path_buf()),
+    );
+    assert!(!store.exists(), "the kept folder was left for the sweep");
+    assert_eq!(
+        noted(Some(records.path()), &store),
+        None,
+        "a note outlived the folder the end of the command removed"
+    );
 }
 
 /// Only an error a moment can clear is worth another try: a name that is gone or a path that cannot

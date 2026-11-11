@@ -41,8 +41,13 @@ pub(super) async fn claim_store(
     // holds a different set of finished files, and resuming into it would write a tree no run asked
     // for. The store and its record go, and this run claims its own.
     let key = selection.key();
-    let (resumed, checked, carried, consume) =
-        resumable(decide(partial, owner).await?, partial, &key).await;
+    let records = crate::Home::partial_records().ok();
+    let (resumed, checked, carried, consume) = resumable(
+        decide(partial, owner, records.as_deref()).await?,
+        partial,
+        &key,
+    )
+    .await;
 
     let resume = resumed.is_some();
     check_forced(resumed.as_ref(), options)?;
@@ -148,14 +153,21 @@ fn check_forced(resumed: Option<&storage::Owner>, options: &ReceiveOptions) -> R
 /// to a blocking task that outlives the future which asked for it. Taking the hold here means this
 /// decision is made about the folder that is there once that removal is over, so a store this run
 /// resumes cannot be taken away under it.
-async fn decide(partial: &std::path::Path, owner: &str) -> Result<Found, Error> {
+async fn decide(
+    partial: &std::path::Path,
+    owner: &str,
+    records: Option<&std::path::Path>,
+) -> Result<Found, Error> {
     let dir = partial.to_owned();
     let root = owner.to_owned();
+    let records = records.map(std::path::Path::to_path_buf);
     // The task's own failure is wrapped once, with the folder it was about; the storage error the
     // work returns already names that folder and its cause, so it is passed through as it is.
-    tokio::task::spawn_blocking(move || storage::with_hold(&dir, || resumable_store(&dir, &root)))
-        .await
-        .map_err(|error| Error::Storage(format!("cannot read {}: {error}", partial.display())))??
+    tokio::task::spawn_blocking(move || {
+        storage::with_hold(&dir, || resumable_store(&dir, &root, records.as_deref()))
+    })
+    .await
+    .map_err(|error| Error::Storage(format!("cannot read {}: {error}", partial.display())))??
 }
 
 /// The marker of the store this transfer may resume and the identity of the folder it was read
@@ -165,20 +177,29 @@ async fn decide(partial: &std::path::Path, owner: &str) -> Result<Found, Error> 
 /// the one that record was written with, and that marker names this ticket's root. Anything else is
 /// refused and left alone: it could have been planted where the store was, or be another
 /// transfer's, and resuming from it would trust bytes nobody in this home wrote.
-fn resumable_store(partial: &std::path::Path, owner: &str) -> Result<Found, Error> {
-    // A removal gave up on this folder: its record went with the attempt and a note stands for it.
-    // Removing it here is what the note is for, so this run starts a store of its own instead of
-    // refusing a folder this home has already given up on.
-    if storage::discarded(partial) {
-        storage::discard_here(partial);
-        if std::fs::symlink_metadata(partial).is_ok() {
-            return Err(Error::Storage(format!(
-                "cannot remove {}, a partial store a file in it is holding; try the receive again \
-                 when that file is free",
-                partial.display()
-            )));
+fn resumable_store(
+    partial: &std::path::Path,
+    owner: &str,
+    records: Option<&std::path::Path>,
+) -> Result<Found, Error> {
+    // A removal gave up on a folder here, and the note says which folder that was. The folder at
+    // the name now is taken away only when it is that one: a folder that replaced it, or another
+    // receive's store that took the name after the note was written, has its own identity and is
+    // refused rather than removed.
+    if let Some(noted) = storage::noted(records, partial) {
+        if std::fs::symlink_metadata(partial).is_err() {
+            storage::forget_note(records, partial);
+        } else if storage::identify(partial)? == Some(noted) {
+            storage::discard_here(records, partial);
+            if std::fs::symlink_metadata(partial).is_ok() {
+                return Err(Error::Storage(format!(
+                    "cannot remove {}, a partial store a file in it is holding; try the receive again \
+                     when that file is free",
+                    partial.display()
+                )));
+            }
+            return Ok(Found::Nothing);
         }
-        return Ok(Found::Nothing);
     }
     let record = storage::find_record(partial, owner)?;
     let exists = std::fs::symlink_metadata(partial).is_ok();
@@ -242,6 +263,77 @@ pub(super) fn hex(bytes: &[u8; 32]) -> String {
 #[cfg(test)]
 mod tests {
     use super::decide;
+    use crate::engine::storage;
+
+    /// A folder the decision sees and then does not take is left exactly as it is: it is not this
+    /// transfer's, so reading it, emptying it or starting a store in it would be doing a stranger's
+    /// folder over. The note is not honoured for a folder that merely has the name the note was
+    /// made for.
+    #[tokio::test]
+    async fn a_folder_that_replaced_a_noted_one_is_refused_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let records = tempfile::tempdir().unwrap();
+        let partial = dir.path().join(".sluice-partial-x");
+        std::fs::create_dir(&partial).unwrap();
+        std::fs::write(partial.join("file"), b"the one the removal gave up on").unwrap();
+        storage::note_discarded(Some(records.path()), &partial);
+        // The noted folder moves away and another folder takes its name, which is what a second
+        // receive into the same output can do while the note stands.
+        std::fs::rename(&partial, dir.path().join("moved")).unwrap();
+        std::fs::create_dir(&partial).unwrap();
+        std::fs::write(partial.join("file"), b"someone else's").unwrap();
+
+        let error = match decide(&partial, "root", Some(records.path())).await {
+            Ok(_) => panic!("a folder no record names was taken for a store"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("no record"), "{error}");
+        assert_eq!(
+            std::fs::read(partial.join("file")).unwrap(),
+            b"someone else's",
+            "the folder at the noted name was changed"
+        );
+    }
+
+    /// A noted folder that cannot be removed is reported, and the note stays, so the next claim of
+    /// the output tries again rather than refusing the name for good.
+    #[tokio::test]
+    async fn a_noted_folder_a_file_holds_is_reported_and_stays_noted() {
+        use super::Found;
+        use crate::engine::storage::tests::Held;
+
+        let dir = tempfile::tempdir().unwrap();
+        let records = tempfile::tempdir().unwrap();
+        let partial = dir.path().join(".sluice-partial-x");
+        std::fs::create_dir(&partial).unwrap();
+        std::fs::write(partial.join("file"), b"bytes").unwrap();
+        storage::note_discarded(Some(records.path()), &partial);
+
+        let Some(held) = Held::in_folder(&partial) else {
+            eprintln!(
+                "this user is not held out of a folder by a mode, so the claim cannot give up"
+            );
+            return;
+        };
+        let error = match decide(&partial, "root", Some(records.path())).await {
+            Ok(_) => panic!("a noted folder was claimed while a file in it was held"),
+            Err(error) => error.to_string(),
+        };
+        assert!(error.contains("a file in it is holding"), "{error}");
+        assert!(partial.exists(), "the noted folder was removed");
+        assert!(
+            storage::noted(Some(records.path()), &partial).is_some(),
+            "the note went with a folder that is still there"
+        );
+
+        drop(held);
+        match decide(&partial, "root", Some(records.path())).await {
+            Ok(Found::Nothing) => {}
+            Ok(_) => panic!("a noted folder that is free was not taken away"),
+            Err(error) => panic!("a noted folder that is free was refused: {error}"),
+        }
+        assert!(!partial.exists(), "the noted folder was left for the user");
+    }
 
     /// A folder that cannot be resolved is named once, with its cause, not wrapped in the same
     /// message twice.
@@ -249,7 +341,7 @@ mod tests {
     async fn a_store_decision_that_cannot_resolve_its_folder_says_so_once() {
         let dir = tempfile::tempdir().unwrap();
         let partial = dir.path().join("missing").join(".sluice-partial-x");
-        let error = match decide(&partial, "root").await {
+        let error = match decide(&partial, "root", None).await {
             Ok(_) => panic!("a store decision under a folder that is not there succeeded"),
             Err(error) => error.to_string(),
         };
