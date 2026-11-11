@@ -1,5 +1,5 @@
 {
-  "description": "Cuts at the largest chunk, at a second average size, and the exact bytes of the signature list one cut makes",
+  "description": "Cuts at the largest chunk, at a second average size, at both sides of the center, at an output of exactly the smallest chunk and one byte past it, and the exact bytes of the signature list one cut makes",
   "cases": [
     {
       "avg_bytes": 256,
@@ -47,6 +47,68 @@
         [
           0,
           3000
+        ]
+      ],
+      "candidate": ""
+    },
+    {
+      "avg_bytes": 256,
+      "name": "a cut at the last index of the first mask",
+      "boundaries": [
+        256,
+        356
+      ],
+      "target": "4405d67c7ccf40a115a7969fc69ef8c253143e82c8d0c2ea65be5dc6375af1c071f87fe4886829c1360cf71925dc06e9dc3ce8d4346a2d186d136035dfb8e9f0bb0ac57e036e668beabf7c2100ab5880286b9727da83ddac1436356114de75622c29ad15a9915ec859f475ac7a702280cafb6fa4b13606193252c4c543826c5594d7c77dbba25693224ba8aed8279706e4a8eadd4e9ca2fda5824870dc3130c6efbc18eeb8cb07e70a5127ca99de5954f5833a94d2bed1ed2021383cec78755bbb3665f91451e74cf14902561b376d52934170b1e18948d7e25f09f9267d8f8b02a84eaa657c0aa45886703585b20c2b522e5995c0c00508881a0ea8cc89cf8907f95927f81f66de5339e1a1d12b6256ffc2a627b3e1414bf145202f0ac609edf28e627bc5f09aedc9d41e5178b434811f0c7680ddab3c0212555a9f32e01f6c659e684a7d94ed9020d0ea462316313be89a512bc16f181aa9ebf42cba34fab0f4194c84",
+      "fetch": [
+        [
+          0,
+          356
+        ]
+      ],
+      "candidate": ""
+    },
+    {
+      "avg_bytes": 256,
+      "name": "a cut at the first index of the second mask",
+      "boundaries": [
+        257,
+        357
+      ],
+      "target": "dea0a50d9d4fab8592d5637da851367948418046f35a40e67a30028d9c25e789638be917ecaebbd17f067d725954b4dfad4f32ba10148b8dd75a7835ac3cda9ca872541cb51b24316451a93252cb358fa80c66a4bbf9fd92d243d1f90f370403702ce9e6ec3e284e3db57720b2dfd7bd373139325056a7122f519e24597ec803dc21674a4d11c3faf73777cc66329160bf8450527b521ea7344a9ca1c13f18a80bf7fd767e71bf4998d5c33090887a0f52271fc5378de4734a2a67314947181902be2ea1b51c3801d5ba5780ae6f951f4b64ad6e3d6b57d94b215aa3edc04ce353bf6e7864f27a5dad59911f1b8b5121042de9d76a4cfcd999dac57fe74b2d620c76b93a17212fce3b61326b6820728ef0024a5765c619eeb32179c601bdc99c2c2c3aab2cf135448d8e363a2b1d54c298ecee90a1f1cb483aed6495f5d1f432694336bff7e28a19190046bebe02cb1599c7222e62798a87d5fed8506b18ae8a8fcb365971",
+      "fetch": [
+        [
+          0,
+          357
+        ]
+      ],
+      "candidate": ""
+    },
+    {
+      "avg_bytes": 256,
+      "name": "an output of exactly the smallest chunk",
+      "boundaries": [
+        64
+      ],
+      "target": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "fetch": [
+        [
+          0,
+          64
+        ]
+      ],
+      "candidate": ""
+    },
+    {
+      "avg_bytes": 256,
+      "name": "an output one byte past the smallest chunk",
+      "boundaries": [
+        65
+      ],
+      "target": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "fetch": [
+        [
+          0,
+          65
         ]
       ],
       "candidate": ""
