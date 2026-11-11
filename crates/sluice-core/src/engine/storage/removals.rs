@@ -101,7 +101,8 @@ pub(super) fn gone(path: &Path) {
 }
 
 /// Waits until no removal is running, then tries again for the paths a hold kept, and returns after
-/// `budget` at the latest plus the pass it is in. Anything still there is left to the sweep of
+/// `budget`, plus one tick of [`RETRY_EVERY`], plus one pass, where a pass is one removal attempt at
+/// each kept path and an attempt costs one removal. Anything still there is left to the sweep of
 /// temporary folders.
 ///
 /// A command calls this on every way out, after its runtime is gone; an embedder calls the same
@@ -112,8 +113,8 @@ pub(super) fn gone(path: &Path) {
 /// there.
 ///
 /// A pass that begins before the budget is gone retries every kept path once, and a pass that
-/// begins after it makes one attempt and then ends the wait: nothing it does can take longer than
-/// one removal, and none of it waits on a hold.
+/// begins after it makes one attempt at each and then ends the wait: none of it waits on a hold, and
+/// the pass is the last one either way.
 ///
 /// [`Home::partial_records_for_read`]: crate::Home::partial_records_for_read
 ///
