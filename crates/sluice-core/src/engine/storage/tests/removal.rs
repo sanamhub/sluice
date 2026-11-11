@@ -166,11 +166,13 @@ fn the_end_of_a_command_tries_a_removal_that_gave_up() {
     assert!(!folder.exists(), "the folder was left for the sweep");
     // What the product promises is the budget plus the pass it is in, and this asserts that, with a
     // margin for the pass. One pass costs one folder check, one read of the records folder, and one
-    // removal attempt, whose own retry limit is 1.27 s; five seconds is that pass on a machine whose
-    // disk and scheduler both answer slowly. The assertion used to be the budget itself, which the
-    // pass is allowed to overrun, and under a full test run the pass was measured ten times slower
-    // than on an idle one.
-    let pass = Duration::from_secs(5);
+    // removal attempt, whose own retry limit is 1.27 s; fifteen seconds is that pass when the
+    // process is one of a thousand tests and the disk and the scheduler are both busy, which is
+    // what this test met: a full run once took 16.7 s for the test. The assertion used to be the
+    // budget itself, which the pass is allowed to overrun. The bound that does not depend on the
+    // clock is `the_end_of_a_command_does_not_wait_for_a_removal_that_is_still_running`, which
+    // proves the pass waits for nothing.
+    let pass = Duration::from_secs(15);
     assert!(
         began.elapsed() < budget + pass,
         "the wait ran past its budget and one pass in {:?}",
