@@ -8,9 +8,11 @@ matches strong hashes, and fetches what is left (ADR 0005, ADR 0008).
 
 - `Params`: the chunking parameters of `SPEC.md` section 7. An average that is a power of two from
   256 bytes to 4 MiB, a minimum of a quarter of it and a maximum of eight times it.
-- `Params::chunks`: FastCDC v2020 with a 64-bit gear hash. The gear table is the first eight bytes,
-  little-endian, of `BLAKE3("sluice/delta/gear/1" || [i])` for entry `i`, so every implementation
-  computes the same table from the same sentence.
+- `Params::chunks`: a normalized gear CDC in the FastCDC style, with a 64-bit gear hash, a minimum
+  and a maximum size, and the two low-bit masks of `SPEC.md` section 7. It is not the FastCDC v2020
+  tool's cut. The gear table is the first eight bytes, little-endian, of
+  `BLAKE3("sluice/delta/gear/1" || [i])` for entry `i`, so every implementation computes the same
+  table from the same sentence.
 - `SigList`, `Entry`: the chunk lengths and the first 16 bytes of each chunk's BLAKE3 hash, as the
   provider sends them.
 - `NeedRanges`, `Range`: the target ranges a requester still needs, ascending and apart.

@@ -400,7 +400,7 @@ Optional, capability `DELTA`. Purpose: resending a large file that changed sligh
 the whole file.
 
 ```
-SigList = { algo: u8, avg_bytes: u32, entries: [SigEntry] }   // algo 1 = FastCDC v2020, 64-bit
+SigList = { algo: u8, avg_bytes: u32, entries: [SigEntry] }   // algo 1 = normalized gear CDC
 SigEntry = { len: u32, strong: [u8; 16] }                     // BLAKE3-128 of the chunk
 NeedRanges = { root: [u8;32], ranges: RangeSet }
 ```
@@ -418,7 +418,10 @@ Flow:
 
 Delta is a hint layer. No verification outcome may ever depend on it.
 
-**Chunking.** Content is cut by FastCDC v2020 with a 64-bit gear hash. `avg_bytes` is a power of two
+**Chunking.** Content is cut by a normalized gear hash in the FastCDC style: a 64-bit gear hash, the
+low-bit masks below, and a gear table derived from this paragraph. It is not the FastCDC v2020
+algorithm, and a cut is where this section says rather than where that tool would cut, so an
+implementation must follow the rules here and not a library's defaults. `avg_bytes` is a power of two
 from 256 to 4,194,304 (4 MiB), and the other sizes follow from it: `min` is `avg_bytes / 4` and
 `max` is `avg_bytes * 8`. A sender writes 8192 unless it is told another. The gear table has 256
 entries, and entry `i` is the first eight bytes, little-endian, of `BLAKE3("sluice/delta/gear/1" ||
@@ -431,7 +434,7 @@ the input. Those two masks are what pull boundaries towards the average.
 
 | Field | Bytes |
 |---|---|
-| `SigList.algo` | 1, and 1 is FastCDC v2020 with a 64-bit gear hash |
+| `SigList.algo` | 1, and 1 is the normalized gear CDC of this section |
 | `SigList.avg_bytes` | 4 |
 | `SigList.entries` count | a varint |
 | `SigEntry` | `len` in 4, `strong` 16 |

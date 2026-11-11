@@ -70,7 +70,9 @@ pub struct SigList {
 }
 
 impl SigList {
-    /// The only algorithm this release reads and writes: FastCDC v2020 with a 64-bit gear hash.
+    /// The only algorithm this release reads and writes: a normalized gear CDC in the FastCDC
+    /// style, with a 64-bit gear hash and the two masks `SPEC.md` section 7 gives. It is not the
+    /// FastCDC v2020 tool's cut, and the numbers here are the ones that tool's name would blur.
     pub const ALGO: u8 = 1;
 
     /// A list for these parameters. The average MUST be one [`Params`] accepts, every chunk MUST be

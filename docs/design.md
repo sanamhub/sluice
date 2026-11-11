@@ -64,7 +64,7 @@ would put the parts where transfer tools corrupt data into new code. ADR 0001.
 | Content-addressed store, partial files, resume, multi-provider download | `iroh-blobs` |
 | Relay server | `iroh-relay`, packaged as one container |
 | TLS 1.3, hybrid post-quantum key exchange | `rustls` with `aws-lc-rs` |
-| Content-defined chunking, compression, PAKE, FUSE, WinFsp, MCP, gRPC | `fastcdc`, `zstd`, `spake2`, `fuse3`, `winfsp`, `rmcp`, `tonic` |
+| Compression, PAKE, FUSE, WinFsp, MCP, gRPC | `zstd`, `spake2`, `fuse3`, `winfsp`, `rmcp`, `tonic` |
 | Live transfer of a growing file | **ours** |
 | Delta hints over a verified tree | **ours** |
 | Directory manifest, small-file packing, transfer queue | **ours** |
@@ -121,10 +121,10 @@ static content. ADR 0004, and `SPEC.md` section 6 for the exact rules.
 
 ### Delta
 
-A FastCDC index used only as a hint. The provider sends chunk signatures for content the requester
-may already read; the requester matches locally and fetches the rest. The result is verified against
-the real root, so a wrong match costs a refetch. The requester discloses nothing about its disk. ADR
-0005.
+A content-defined chunk index, in the FastCDC style and cut by our own gear hash, used only as a
+hint. The provider sends chunk signatures for content the requester may already read; the requester
+matches locally and fetches the rest. The result is verified against the real root, so a wrong match
+costs a refetch. The requester discloses nothing about its disk. ADR 0005.
 
 ### Directory manifest
 
