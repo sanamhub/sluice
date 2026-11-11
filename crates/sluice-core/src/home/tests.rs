@@ -39,6 +39,27 @@ fn no_data_folder_and_no_sluice_home_is_a_storage_error_that_says_what_to_do() {
     assert!(message.contains("SLUICE_HOME"), "{message}");
 }
 
+/// The home a test asks for is a folder of its own, not the one the environment names: a test that
+/// read or wrote the user's home would change a home it never meant to touch, and would hide a bug
+/// that only a real home shows.
+#[test]
+fn a_test_home_is_not_the_one_the_environment_names() {
+    use std::env;
+
+    let asked = super::Home::locate().unwrap();
+    let user = locate_from(env::var_os("SLUICE_HOME"), super::folder::data_folder()).unwrap();
+    assert_ne!(asked, user, "a test would use the user's home");
+    let base = match env::var_os("CARGO_TARGET_DIR") {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => env::temp_dir(),
+    };
+    assert!(
+        asked.starts_with(base.join("sluice-tests")),
+        "a test home is not under the build output: {}",
+        asked.display()
+    );
+}
+
 mod resolve {
     use std::cell::RefCell;
     use std::fs;
