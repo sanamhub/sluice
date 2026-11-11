@@ -90,13 +90,21 @@ fn a_sig_list_refuses_a_message_that_ends_early_or_late() {
     assert_eq!(SigList::decode(&[]), Err(Error::Truncated));
 }
 
-/// A count written in more bytes than it needs would give one list two spellings.
+/// A count written in more bytes than it needs would give one list two spellings, and a varint past
+/// ten bytes is not a count at all. Neither is a truncated message: both have the bytes, and neither
+/// is something an encoder writes.
 #[test]
 fn a_count_that_is_not_the_shortest_spelling_is_refused() {
     let mut bytes = vec![SigList::ALGO];
     bytes.extend_from_slice(&8192u32.to_le_bytes());
     bytes.extend_from_slice(&[0x81, 0x00]);
-    assert_eq!(SigList::decode(&bytes), Err(Error::Truncated));
+    assert_eq!(SigList::decode(&bytes), Err(Error::Varint));
+
+    let mut long = vec![SigList::ALGO];
+    long.extend_from_slice(&8192u32.to_le_bytes());
+    long.extend_from_slice(&[0x80; 9]);
+    long.push(0x02);
+    assert_eq!(SigList::decode(&long), Err(Error::Varint));
 }
 
 fn need() -> NeedRanges {

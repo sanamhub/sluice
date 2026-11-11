@@ -32,6 +32,8 @@ pub enum Error {
     TooManyEntries,
     /// A field the message does not have enough bytes for.
     Truncated,
+    /// A varint that is not in its shortest form, or that runs past ten bytes.
+    Varint,
     /// Bytes after the message.
     Trailing,
     /// An algorithm this release does not read.
@@ -42,6 +44,8 @@ pub enum Error {
     Overflow,
     /// A signature list whose lengths are not the length of the content it claims to be about.
     Length,
+    /// A signature list cut with a different average from the one the candidate was cut with.
+    Parameters,
     /// A plan that copies past the end of the candidate, which no honest list produces.
     Candidate,
     /// A plan that does not cover the target exactly once.
@@ -57,11 +61,17 @@ impl std::fmt::Display for Error {
             Self::ChunkLength => f.write_str("a chunk length is zero or past the largest chunk"),
             Self::TooManyEntries => f.write_str("more entries than one message may carry"),
             Self::Truncated => f.write_str("the message ends early"),
+            Self::Varint => {
+                f.write_str("a varint is not in its shortest form or runs past ten bytes")
+            }
             Self::Trailing => f.write_str("bytes follow the message"),
             Self::Algorithm(algo) => write!(f, "algorithm {algo} is not one this release reads"),
             Self::Ranges => f.write_str("ranges are empty, not ascending, or overlap"),
             Self::Overflow => f.write_str("a range ends past the largest offset"),
             Self::Length => f.write_str("the chunk lengths are not the length of the content"),
+            Self::Parameters => f.write_str(
+                "the signatures and the candidate were cut with different average sizes",
+            ),
             Self::Candidate => f.write_str("a matched chunk runs past the end of the candidate"),
             Self::Plan => f.write_str("the plan does not cover the target once"),
         }

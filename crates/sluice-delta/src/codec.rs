@@ -324,17 +324,17 @@ fn take_varint(bytes: &[u8], at: &mut usize) -> Result<u64, Error> {
         let byte = take(bytes, at, 1)?[0];
         let bits = u64::from(byte & 0x7f);
         if count == 10 && bits > 1 {
-            return Err(Error::Truncated);
+            return Err(Error::Varint);
         }
         value |= bits << (7 * (count - 1));
         if byte & 0x80 == 0 {
             if count > 1 && bits == 0 {
-                return Err(Error::Truncated);
+                return Err(Error::Varint);
             }
             return Ok(value);
         }
     }
-    Err(Error::Truncated)
+    Err(Error::Varint)
 }
 
 #[cfg(test)]

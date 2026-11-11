@@ -7,10 +7,12 @@ use std::collections::HashMap;
 
 use crate::{Entry, Error, NeedRanges, Range, SigList, chunker::Params};
 
-/// The chunks of a file the requester already has, in order, with where each one starts in it.
+/// The chunks of a file the requester already has, in order, with where each one starts in it, and
+/// the average they were cut at, so a plan can refuse signatures cut with another.
 pub struct Candidate {
     chunks: Vec<(u64, Entry)>,
     len: u64,
+    avg: u32,
 }
 
 /// An empty candidate has no chunks and no bytes, so there is no is_empty beside len.
@@ -27,7 +29,11 @@ impl Candidate {
             chunks.push((at, entry));
             at += len;
         }
-        Ok(Self { chunks, len: at })
+        Ok(Self {
+            chunks,
+            len: at,
+            avg: params.avg(),
+        })
     }
 
     /// How long the candidate is.
@@ -119,13 +125,15 @@ impl Plan {
                     candidate: from,
                 } => {
                     let at = usize::try_from(*from).map_err(|_| Error::Candidate)?;
-                    let end = at + range.len() as usize;
+                    let len = usize::try_from(range.len()).map_err(|_| Error::Candidate)?;
+                    let end = at.checked_add(len).ok_or(Error::Candidate)?;
                     let bytes = candidate.get(at..end).ok_or(Error::Candidate)?;
                     out.extend_from_slice(bytes);
                 }
                 Span::Fetch(range) => {
                     let at = usize::try_from(range.start()).map_err(|_| Error::Plan)?;
-                    let end = at + usize::try_from(range.len()).map_err(|_| Error::Plan)?;
+                    let len = usize::try_from(range.len()).map_err(|_| Error::Plan)?;
+                    let end = at.checked_add(len).ok_or(Error::Plan)?;
                     let bytes = target.get(at..end).ok_or(Error::Truncated)?;
                     out.extend_from_slice(bytes);
                 }
@@ -149,12 +157,16 @@ impl Plan {
 /// Matches the provider's signatures against the requester's candidate and returns the plan.
 ///
 /// The sum of the signature lengths MUST be the target's length, because a list cut from other
-/// content describes content that is not there. A signature that matches nothing, or whose chunk
-/// would run past the end of the candidate, is fetched: a hint is a peer's word, and the only thing
-/// it may cost is time.
+/// content describes content that is not there, and the list and the candidate MUST have been cut
+/// with the same average: a mismatch would fetch every byte and call it a hint. A signature that
+/// matches nothing, or whose chunk would run past the end of the candidate, is fetched: a hint is a
+/// peer's word, and the only thing it may cost is time.
 pub fn plan(signatures: &SigList, candidate: &Candidate, target_len: u64) -> Result<Plan, Error> {
     if signatures.total_len() != target_len {
         return Err(Error::Length);
+    }
+    if signatures.avg_bytes() != candidate.avg {
+        return Err(Error::Parameters);
     }
     let index = candidate.index();
     let mut runs = Runs::default();
