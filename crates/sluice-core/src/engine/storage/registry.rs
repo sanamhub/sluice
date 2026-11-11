@@ -176,6 +176,19 @@ pub fn with_hold<T>(path: &Path, work: impl FnOnce() -> T) -> Result<T, Error> {
     Ok(work())
 }
 
+/// [`with_hold`] for a caller that must not wait for a removal that is still running: `None` when
+/// the hold is held. A path with no resolved form is an error, as it is for [`with_hold`], and a
+/// hold whose previous user panicked is taken, because no removal is coming for it.
+pub fn try_with_hold<T>(path: &Path, work: impl FnOnce() -> T) -> Result<Option<T>, Error> {
+    let slot = hold(path)?;
+    let _held = match slot.try_lock() {
+        Ok(held) => held,
+        Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+    };
+    Ok(Some(work()))
+}
+
 fn hold(path: &Path) -> Result<Arc<Mutex<()>>, Error> {
     let key = canonical(path)?;
     let mut holds = HOLDS

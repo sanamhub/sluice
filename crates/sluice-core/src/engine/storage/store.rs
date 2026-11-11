@@ -16,11 +16,23 @@ use crate::Error;
 /// would trust bytes nobody checked.
 pub const MARKER: &str = "ticket";
 
+/// The first characters of the name of the folder a transfer keeps its partial store in, so a
+/// caller can tell a name a record could belong to from one it could not without reading records.
+pub const PARTIAL_PREFIX: &str = ".sluice-partial-";
+
+/// Whether `path` has the name a partial store has, which is the only name a record of this home
+/// can carry.
+pub fn is_partial(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with(PARTIAL_PREFIX))
+}
+
 /// The hidden store beside the destination. A per-transfer store keeps partial data on the same
 /// filesystem as the file it will become, so a finished blob can be moved into place. The name is
 /// the whole root, so two transfers cannot share one by a prefix of their root.
 pub fn partial_dir(out: &Path, root: &str) -> PathBuf {
-    out.join(format!(".sluice-partial-{root}"))
+    out.join(format!("{PARTIAL_PREFIX}{root}"))
 }
 
 /// What a partial store's marker says: the transfer that made the folder, the top-level names that
