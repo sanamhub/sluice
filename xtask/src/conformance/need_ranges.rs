@@ -15,6 +15,8 @@ struct Case {
     /// The message as lower-case hex.
     bytes: String,
     valid: bool,
+    /// Refused cases. The rule the message breaks, as one of the words [`Error`] names below.
+    error: Option<String>,
     /// Valid cases. The root, as 64 lower-case hex characters.
     root: Option<String>,
     /// Valid cases. Each range as a start and a length, decimal strings, ascending and never
@@ -26,6 +28,25 @@ pub fn run(dir: &Path, report: &mut Report) -> Result<()> {
     run_kind("need-ranges", dir, report, disagreement)
 }
 
+/// The category a refusal falls in, as a vector names it. A message that breaks two rules at once
+/// can be refused for either, so a vector names the one its bytes isolate.
+fn category(error: &sluice_delta::Error) -> &'static str {
+    use sluice_delta::Error;
+    match error {
+        Error::Ranges => "ranges",
+        Error::Overflow => "overflow",
+        Error::Trailing => "trailing",
+        Error::Varint => "varint",
+        Error::Truncated => "truncated",
+        Error::Average | Error::ChunkLength | Error::TooManyEntries => "parameters",
+        Error::Algorithm(_) => "algorithm",
+        Error::Length => "length",
+        Error::Parameters => "parameters",
+        Error::Candidate => "candidate",
+        Error::Plan => "plan",
+    }
+}
+
 fn disagreement(case: &Case) -> Option<String> {
     let name = &case.name;
     let bytes = match hex_bytes(&case.bytes) {
@@ -34,10 +55,20 @@ fn disagreement(case: &Case) -> Option<String> {
     };
     let decoded = NeedRanges::decode(&bytes);
     if !case.valid {
-        return match decoded {
-            Ok(_) => Some(format!("{name}: a message the spec refuses was read")),
-            Err(_) => None,
+        let error = match decoded {
+            Ok(_) => return Some(format!("{name}: a message the spec refuses was read")),
+            Err(error) => error,
         };
+        let Some(wanted) = case.error.as_deref() else {
+            return Some(format!("{name}: a refused case names no rule"));
+        };
+        let found = category(&error);
+        if found != wanted {
+            return Some(format!(
+                "{name}: the message was refused as {found}, and the vector says {wanted}"
+            ));
+        }
+        return None;
     }
     let decoded = match decoded {
         Ok(decoded) => decoded,
