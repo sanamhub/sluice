@@ -24,6 +24,7 @@ tests/vectors/
   receipts/     a sender's signed statement that it offered content, SPEC.md section 10
   delta/        file pairs and what a delta must plan
   need-ranges/  the message that asks for the bytes a delta needs, SPEC.md section 7
+  gear/         the chunker's gear table, SPEC.md section 7
 ```
 
 One directory per row of the table in section 12. A directory holds one or more `.json` files. The
@@ -423,13 +424,15 @@ the pair. Both files are hex, and the average chunk size is the one the case nam
 | `target` | string | The file it wants, as lower-case hex, possibly empty |
 | `boundaries` | array | Where every chunk of the target ends, in order. Empty for an empty target |
 | `fetch` | array | The target ranges that have to be fetched, each a start and a length, in ascending order |
+| `signatures` | string | Optional. The signature list the target cuts to, as lower-case hex. A case with it checks the encoder as well as the cut |
 
 To check an implementation: cut the target where `boundaries` says, plan the pair against the
 candidate with the signatures of those chunks, and compare the ranges it would fetch with `fetch`.
 A plan that covers the target with other ranges, or cuts the target elsewhere, is not compatible.
-The case files were written from `SPEC.md` section 7 by the implementation in this tree, so they
-check that the cut, the matching and the fetch agree with each other and with the rule; a bug that
-the chunker and the vectors share would not show.
+A case with `signatures` also compares the encoded list with that hex, because one list of chunks has
+one spelling. The case files were written from `SPEC.md` section 7 by the implementation in this
+tree, so they check that the cut, the matching and the fetch agree with each other and with the rule;
+a bug that the chunker and the vectors share would not show.
 ## `need-ranges/`
 
 A case is one `NeedRanges` message of `SPEC.md` section 7 as lower-case hex and a verdict:
@@ -454,3 +457,22 @@ To check an implementation: decode `bytes`. For a valid case, compare the result
 `ranges` and encode it again, which must give the same bytes, because one set of ranges has one
 spelling. For a rejected case, decoding must fail. A range that ends where the next one starts is a
 refusal: the sets are disjoint as well as ascending, so a message has one form.
+
+## `gear/`
+
+A case is one entry of the gear table the chunker's hash reads, and the value `SPEC.md` section 7
+derives for it:
+
+```json
+{ "index": 0, "value": "25d74c4e4d6057d3" }
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `index` | integer | The byte, 0 to 255 |
+| `value` | string | The entry as 16 lower-case hex characters, the value as a little-endian `u64` |
+
+To check an implementation: compute `BLAKE3("sluice/delta/gear/1" || [index])`, take the first eight
+bytes little-endian, and compare. The table is derived rather than transcribed, so a reader that
+follows the sentence computes the same 256 values; the cases pin the derivation, including that
+`[index]` is one byte and not its decimal text.

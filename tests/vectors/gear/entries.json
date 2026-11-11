@@ -1,0 +1,22 @@
+{
+  "description": "The chunker's gear table, which SPEC.md section 7 derives: entry i is the first eight bytes, little-endian, of BLAKE3(\"sluice/delta/gear/1\" || [i])",
+  "cases": [
+    { "index": 0, "value": "25d74c4e4d6057d3" },
+    { "index": 1, "value": "136d28474b0e78d2" },
+    { "index": 2, "value": "e273060c4de9e9b3" },
+    { "index": 3, "value": "d653e68a870ffae4" },
+    { "index": 4, "value": "a04a5e41b549e7fa" },
+    { "index": 5, "value": "36f7dca5a26372c7" },
+    { "index": 6, "value": "3a4e1e21f54f8a8e" },
+    { "index": 7, "value": "790c21d0375a5dca" },
+    { "index": 8, "value": "da6d73f3b9a7b97b" },
+    { "index": 9, "value": "bb82175206ff6137" },
+    { "index": 10, "value": "f8e0a4cc748baa66" },
+    { "index": 11, "value": "ab285fc86c2c6d4b" },
+    { "index": 12, "value": "4227f37dadb611c8" },
+    { "index": 13, "value": "f1cfee95b9b9a04c" },
+    { "index": 14, "value": "33c28e9f174f5f69" },
+    { "index": 15, "value": "346a030811428bb5" },
+    { "index": 255, "value": "9c15987237489697" }
+  ]
+}

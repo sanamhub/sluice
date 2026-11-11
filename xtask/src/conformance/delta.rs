@@ -25,6 +25,9 @@ struct Case {
     boundaries: Vec<usize>,
     /// The target ranges that have to be fetched, as a start and a length each.
     fetch: Vec<(u64, u64)>,
+    /// Optional. The signature list the target cuts to, as lower-case hex. A case with this field
+    /// checks the encoder as well as the cut: one list has one spelling.
+    signatures: Option<String>,
 }
 
 pub fn run(dir: &Path, report: &mut Report) -> Result<()> {
@@ -60,6 +63,15 @@ fn disagreement(case: &Case) -> Option<String> {
         Ok(signatures) => signatures,
         Err(error) => return Some(format!("{name}: the target has no signature list: {error}")),
     };
+    if let Some(expected) = &case.signatures {
+        let bytes = signatures.encode();
+        let got: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        if got != *expected {
+            return Some(format!(
+                "{name}: the signature list encodes to {got}, and the case says {expected}"
+            ));
+        }
+    }
     let plan = match plan(&signatures, &candidate, target.len() as u64) {
         Ok(plan) => plan,
         Err(error) => return Some(format!("{name}: the pair cannot be planned: {error}")),
