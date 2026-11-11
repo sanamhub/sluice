@@ -84,6 +84,9 @@ impl Home {
     /// }
     /// ```
     pub fn locate() -> Result<PathBuf, Error> {
+        #[cfg(test)]
+        return Ok(tests_home());
+        #[cfg(not(test))]
         locate_from(env::var_os("SLUICE_HOME"), folder::data_folder())
     }
 
@@ -303,6 +306,29 @@ fn locate_from(
             )
         }),
     }
+}
+
+/// The home a test binary uses: a folder of its own under the build output, so a test that needs a
+/// home reads and writes one it made and the user's home is never touched. One folder serves every
+/// test process of one binary: its name is a hash of the binary's path, so two tests of one run
+/// meet in the same folder as they would in a home one process made, and the folder goes with the
+/// build output it sits in. `SLUICE_HOME` is not set for the tests because setting a variable of the
+/// whole process is not safe while other tests run in it.
+#[cfg(test)]
+fn tests_home() -> PathBuf {
+    use std::sync::OnceLock;
+
+    static HOME: OnceLock<PathBuf> = OnceLock::new();
+    HOME.get_or_init(|| {
+        let base = match env::var_os("CARGO_TARGET_DIR") {
+            Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+            _ => env::temp_dir(),
+        };
+        let exe = env::current_exe().unwrap_or_default();
+        let digest = blake3::hash(exe.to_string_lossy().as_bytes()).to_hex();
+        base.join("sluice-tests").join(&digest.as_str()[..16])
+    })
+    .clone()
 }
 
 /// `Error::Storage` for a failed filesystem call, with what was being done and where.
