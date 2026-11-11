@@ -27,14 +27,19 @@ crates with no IO for that reason (ADR 0008).
    no IO**: the directory manifest and its root, the path rules and their comparison key, the ticket,
    the receipt, the pack table, the limits, and the hash sequence. It depends on `blake3`,
    `ed25519-dalek`, `serde` and the URL parser, and on nothing that opens a file or a socket.
-2. **`sluice-core` re-exports it**, so `sluice_core::manifest`, `sluice_core::ticket` and the rest keep
+2. **`Error` moves with them.** Every codec answers with `sluice_core::Error`, and that type is six
+   variants carrying a string or nothing, with no `io::Error` inside it, so it is a value like the
+   rest and not an IO dependency. It is defined once in the format crate and re-exported by the core
+   as `sluice_core::Error`, so no caller changes and the six kinds stay one list. The IO paths in the
+   core keep using it and map their failures into it as they do now.
+3. **`sluice-core` re-exports it**, so `sluice_core::manifest`, `sluice_core::ticket` and the rest keep
    their paths and their documentation, and no caller changes.
-3. **`sluice-core` keeps the IO**: the home, the store, the repair, the sweep, the platform file mode
+4. **`sluice-core` keeps the IO**: the home, the store, the repair, the sweep, the platform file mode
    mapping and the writer that touches the disk. A rule that needs to know how one platform spells a
    file name stays in the core and consults the format crate for the verdict.
-4. **The browser crate depends on `sluice-format`** and on nothing else of ours, so the limits a tab
+5. **The browser crate depends on `sluice-format`** and on nothing else of ours, so the limits a tab
    applies are the same numbers, read from the same place, that a native receive applies.
-5. **The move is a refactor with no wire change.** `cargo xtask conformance`, the vectors and the
+6. **The move is a refactor with no wire change.** `cargo xtask conformance`, the vectors and the
    existing tests are the check that nothing moved but the code.
 
 ## Consequences
@@ -43,7 +48,7 @@ crates with no IO for that reason (ADR 0008).
   function call and compiled for a tab.
 - A new workspace member to keep under the size and documentation rules, excluded from `dist` like
   `sluice-live`, `sluice-delta` and the wasm crate.
-- A large move: every `use` path inside the core changes, and the public re-exports have to keep
+- A large move: every `use` path inside the core changes, the error type changes home, and the public re-exports have to keep
   their docs and their examples. The conformance run and the doc tests are what says the move was
   faithful, and it lands as its own commit so the diff can be read as a move rather than a rewrite.
 - The core's manifest module becomes a thin re-export, which is one more hop for a reader to follow;
