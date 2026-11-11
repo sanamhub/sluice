@@ -12,28 +12,28 @@ package sluice.v1;
 // One Sluice engine, in this user's home.
 service ControlService {
   // Starts a send of files or folders, and returns the ticket it will serve.
-  rpc StartSend(StartSendRequest) returns (StartSendReply);
+  rpc StartSend(StartSendRequest) returns (StartSendResponse);
 
   // Starts a receive of what a ticket names, into a folder the daemon was started with.
-  rpc StartReceive(StartReceiveRequest) returns (StartReceiveReply);
+  rpc StartReceive(StartReceiveRequest) returns (StartReceiveResponse);
 
   // Reads a ticket's manifest and says what it offers, without fetching content.
-  rpc InspectTicket(InspectTicketRequest) returns (InspectTicketReply);
+  rpc InspectTicket(InspectTicketRequest) returns (InspectTicketResponse);
 
   // The jobs this daemon knows about, newest last. A ticket is never in this answer.
-  rpc ListJobs(ListJobsRequest) returns (ListJobsReply);
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
 
   // One job's events, from the moment the call is made, as a stream that ends when the job does.
-  rpc WatchEvents(WatchEventsRequest) returns (stream Event);
+  rpc WatchEvents(WatchEventsRequest) returns (stream WatchEventsResponse);
 
   // Stops a job. A receive keeps its partial store, so the next receive of the same ticket resumes.
-  rpc CancelJob(CancelJobRequest) returns (CancelJobReply);
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
 
   // The daemon's version, and the version of the protocol it serves.
-  rpc Version(VersionRequest) returns (VersionReply);
+  rpc Version(VersionRequest) returns (VersionResponse);
 
   // The same checks `sluice doctor` makes, with the exit code that report would have.
-  rpc Doctor(DoctorRequest) returns (DoctorReply);
+  rpc Doctor(DoctorRequest) returns (DoctorResponse);
 }
 
 // A ticket, in its text form. A ticket is a read capability and a secret: a daemon must not log
@@ -78,7 +78,7 @@ message StartSendRequest {
   bool keep = 4;
 }
 
-message StartSendReply {
+message StartSendResponse {
   // The ticket the job serves. A secret, and the only answer that carries one.
   Ticket ticket = 1;
   string job_id = 2;
@@ -97,7 +97,7 @@ message StartReceiveRequest {
   LocalPath receipt = 4;
 }
 
-message StartReceiveReply {
+message StartReceiveResponse {
   string job_id = 1;
 }
 
@@ -105,7 +105,7 @@ message InspectTicketRequest {
   Ticket ticket = 1;
 }
 
-message InspectTicketReply {
+message InspectTicketResponse {
   uint64 files = 1;
   uint64 folders = 2;
   uint64 links = 3;
@@ -123,7 +123,7 @@ message ListJobsRequest {
   JobState state = 1;
 }
 
-message ListJobsReply {
+message ListJobsResponse {
   repeated JobSummary jobs = 1;
 }
 
@@ -158,6 +158,12 @@ enum JobState {
 
 message WatchEventsRequest {
   string job_id = 1;
+}
+
+// One message of the stream `WatchEvents` returns: the event, and nothing else, so the stream's
+// element stands on its own rather than being an event type borrowed from the job model.
+message WatchEventsResponse {
+  Event event = 1;
 }
 
 // One thing that happened to a job. The set is the one `SPEC.md` section 11 names, in the order a
@@ -254,14 +260,14 @@ message CancelJobRequest {
   string job_id = 1;
 }
 
-message CancelJobReply {
+message CancelJobResponse {
   // Whether the job was still running when the call arrived.
   bool was_running = 1;
 }
 
 message VersionRequest {}
 
-message VersionReply {
+message VersionResponse {
   string version = 1;
   // The protocol version of the control interface, which is 1.
   uint32 protocol = 2;
@@ -269,7 +275,7 @@ message VersionReply {
 
 message DoctorRequest {}
 
-message DoctorReply {
+message DoctorResponse {
   repeated Check checks = 1;
   // What `sluice doctor` would exit with: 0, 5 for storage or 6 for policy.
   uint32 exit_code = 2;
