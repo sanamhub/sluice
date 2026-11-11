@@ -32,6 +32,12 @@ wasm-bindgen = { workspace = true }
 # The version the lock resolves beside that `wasm-bindgen`, which is what an async export needs.
 wasm-bindgen-futures = "=0.4.79"
 
+# Runs the loopback test on the host, where the browser transport is not compiled in. The crate
+# itself has no async runtime of its own: a page's promise is the whole of its concurrency. It is
+# not a dependency of the wasm32 build at all, which is why the test that uses it is a host test.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
 
 [lints]
 workspace = true
