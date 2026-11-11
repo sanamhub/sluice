@@ -34,11 +34,13 @@ CFLAGS_wasm32_unknown_unknown="-DRING_CORE_NOSTDLIBINC=1" \
 `-O2` has to come last: the debug profile's `-O0` would re-enable the checks whose runtime the link
 does not have.
 
-**The build command.** The workspace is built for the host by the gates, and this crate is built for
-the target by hand:
+**The build command.** This crate is not a default member of the workspace: its `tls-ring` feature
+would otherwise join the native build, and `iroh` prefers `ring` when both providers are on, which
+takes the post-quantum group out of every native test peer. Its own tests run on the host, and the
+target build runs in the `wasm` workflow:
 
 ```sh
-cargo check -p sluice-wasm                                     # the host, as the gates do
+cargo nextest run -p sluice-wasm                               # the crate's own tests, on the host
 rustup target add wasm32-unknown-unknown
 cargo build -p sluice-wasm --target wasm32-unknown-unknown     # a tab
 ```

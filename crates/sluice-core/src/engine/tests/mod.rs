@@ -37,6 +37,7 @@ mod live;
 mod names;
 mod pack;
 mod places;
+mod provider;
 mod receivers;
 mod refusal;
 mod reports;

@@ -1,0 +1,49 @@
+name: wasm
+
+# Only the crate, the workspace manifest, the lockfile, the toolchain and this file can break the
+# browser build, so only a change to them runs it. A workflow of its own because `paths` filters a
+# whole workflow and not a job, and ci.yml has to run on every change.
+on:
+  push:
+    branches: [main]
+    paths:
+      - crates/sluice-wasm/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/wasm.yml
+  pull_request:
+    paths:
+      - crates/sluice-wasm/**
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - .github/workflows/wasm.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wasm-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  crate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install --profile minimal
+      # Not in rust-toolchain.toml: the rest of the workspace never builds for wasm32.
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: nextest
+      # The crate is not a default member, so the native test run does not cover it: its tests run
+      # here, and the target build proves the other half. `ring` compiles C for the target, which is
+      # what the runner's clang is for.
+      - run: cargo nextest run -p sluice-wasm
+      - run: cargo build -p sluice-wasm --target wasm32-unknown-unknown

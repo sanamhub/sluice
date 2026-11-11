@@ -75,11 +75,14 @@ opened from the wasm module in Node. What it has not done is fetch anything.
 
 ## What the crate establishes
 
-`crates/sluice-wasm` is a workspace member with its own `iroh` and `iroh-blobs` dependency specs, and
-it builds for the target and for the host:
+`crates/sluice-wasm` has its own `iroh` and `iroh-blobs` dependency specs, and it builds for the
+target and for the host. It is not a default member of the workspace, because its `tls-ring` feature
+would join the native build and take the post-quantum group out of every native test peer; its tests
+run with `cargo nextest run -p sluice-wasm`, and the `wasm` workflow runs them beside the target
+build:
 
 ```sh
-cargo check -p sluice-wasm                                     # the host, as the gates do
+cargo nextest run -p sluice-wasm                               # the crate's tests, on the host
 cargo build -p sluice-wasm --target wasm32-unknown-unknown     # a tab
 wasm-bindgen --target nodejs --out-dir out \
   target/wasm32-unknown-unknown/debug/sluice_wasm.wasm          # the JS side
