@@ -61,7 +61,7 @@ const LONGEST: usize = 400;
 /// The extensions of the source files the length rule covers: the languages this repository writes
 /// by hand. A file a tool generates, or one vendored from somewhere else, goes in [`EXEMPT`] with a
 /// reason; it is not a seam anyone can move.
-const SOURCES: [&str; 6] = ["astro", "css", "js", "rs", "svelte", "ts"];
+const SOURCES: [&str; 8] = ["astro", "css", "html", "js", "mjs", "rs", "svelte", "ts"];
 
 /// The source files that are longer than the rule allows, and why each is. A reason is a sentence
 /// about that one file: what it holds that a reader needs in one place.

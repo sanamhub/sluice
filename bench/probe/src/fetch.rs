@@ -294,6 +294,17 @@ fn output(
     }
 }
 
+/// A root from the 64 hex characters a blobs ticket names it with, when the text is one. The
+/// upstream parser asserts on any other length, so the length and the alphabet are checked here
+/// before it is called: a malformed ticket must be an error and not the end of the probe.
+fn checked_hash(text: &str) -> Result<Hash> {
+    ensure!(
+        text.len() == 64 && text.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "the ticket hash is malformed"
+    );
+    Hash::from_str(text).context("the ticket hash is malformed")
+}
+
 /// The root both ends can compute without a data file. A mismatch means the provider imported
 /// something other than what the seed and size describe, and nothing measured would mean anything.
 fn expected_root(ticket: &Ticket) -> Result<Hash> {
@@ -302,7 +313,7 @@ fn expected_root(ticket: &Ticket) -> Result<Hash> {
         .hash
         .as_deref()
         .context("the blobs ticket carries no hash")?;
-    let advertised = Hash::from_str(advertised).context("the ticket hash is malformed")?;
+    let advertised = checked_hash(advertised)?;
     ensure!(
         expected == advertised,
         "the provider imported data that does not match seed {} and size {}",

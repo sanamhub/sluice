@@ -37,10 +37,12 @@ pub fn run_stdin() -> anyhow::Result<()> {
     run(from_input(&text))
 }
 
-/// The text of one ticket read from a stream. A shell's line ending is not part of the ticket, and
-/// the decoder refuses text with a byte after it, so it is trimmed before the decode.
+/// The text of one ticket read from a stream. A shell's line ending is not part of the ticket, and a
+/// byte-order mark is what an editor that saves a file as UTF-8 with one writes in front of it;
+/// neither is part of the text, and the decoder refuses a byte after the ticket, so both are removed
+/// before the decode. Whitespace at either end is removed for the same reason.
 fn from_input(text: &str) -> &str {
-    text.trim_end()
+    text.trim_start_matches('\u{feff}').trim()
 }
 
 /// The bytes as lower-case hex, two characters each: 64 for a root, a sender or a key, and 32 for a
@@ -94,12 +96,15 @@ mod tests {
     }
 
     /// A ticket piped in ends with a line ending that is not part of it, and the decoder refuses a
-    /// byte after the ticket, so the input is trimmed first.
+    /// byte after the ticket, so the input is trimmed first. A byte-order mark from an editor is
+    /// not part of it either.
     #[test]
     fn a_line_ending_from_a_pipe_is_not_part_of_the_ticket() {
         let text = static_ticket().encode();
         assert_eq!(from_input(&format!("{text}\r\n")), text);
         assert_eq!(from_input(&format!("{text}\n")), text);
         assert_eq!(from_input(&text), text);
+        assert_eq!(from_input(&format!("\u{feff}{text}\r\n")), text);
+        assert_eq!(from_input(&format!("  {text}  ")), text);
     }
 }
