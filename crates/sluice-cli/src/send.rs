@@ -57,13 +57,15 @@ pub struct SendArgs {
     #[arg(long, value_name = "RATE")]
     pub limit_rate: Option<String>,
     /// Also print the ticket as a QR code on standard error, for a phone or a second screen. The
-    /// code is the ticket, so a camera that can see this screen can take the file
-    #[arg(long)]
-    pub qr: bool,
+    /// code is the ticket, so a camera that can see this screen can take the file. `--qr=inverted`
+    /// draws it for a dark terminal, which is what the line under the code suggests when the
+    /// terminal does not say which background it has
+    #[arg(long, value_name = "HOW", num_args = 0..=1, default_missing_value = "auto", value_enum)]
+    pub qr: Option<crate::qr::Ask>,
 }
 
 pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
-    if args.qr {
+    if args.qr.is_some() {
         crate::qr::check_terminal(std::io::stderr().is_terminal())?;
     }
     let relay = RelayModeChoice::from_flags(args.relay.as_deref(), args.n0_relays)?;
@@ -160,8 +162,8 @@ fn serve(
         let ticket = outgoing.ticket.encode();
         // The code goes first and to standard error: the line below is what a script reads, and a
         // ticket that no code holds stops the command before either is written.
-        if args.qr {
-            crate::qr::write(output, &ticket)?;
+        if let Some(asked) = args.qr {
+            crate::qr::write(output, &ticket, asked)?;
         }
         events::ticket(*output, &ticket)?;
         let (tx, rx) = unbounded_channel();
