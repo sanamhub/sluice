@@ -200,6 +200,7 @@ impl Provider {
             done: done_rx,
             receivers: receivers_rx,
             places,
+            group_lines: Mutex::new(policy::Lines::default()),
             expiry,
             _dir: None,
         })

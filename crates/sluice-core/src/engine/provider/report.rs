@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 use iroh_blobs::Hash;
 
-use super::{Provider, lock_places};
+use super::{Provider, lock_lines, lock_places};
 use crate::engine::{Event, emit, endpoint};
 
 impl Provider {
@@ -36,9 +36,14 @@ impl Provider {
                 relayed,
                 places,
             },
-            endpoint::Receiver::RefusedGroup { endpoint, group } => Event::Warning {
-                message: refused_group(&Self::hex(&endpoint), group.as_deref()),
-            },
+            endpoint::Receiver::RefusedGroup { endpoint, group } => {
+                if !lock_lines(&self.group_lines).owes(endpoint) {
+                    return;
+                }
+                Event::Warning {
+                    message: refused_group(&Self::hex(&endpoint), group.as_deref()),
+                }
+            }
             endpoint::Receiver::Closed {
                 connection,
                 endpoint,

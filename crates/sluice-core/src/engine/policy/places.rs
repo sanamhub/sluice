@@ -5,11 +5,37 @@
 
 use std::collections::BTreeSet;
 
-/// How many refused endpoint ids a send names. A ticket holder who is refused can open as many
-/// connections as it likes, and the terminal belongs to the user: after this many lines the sender
-/// refuses in silence. The cap counts distinct endpoints, not requests, and the same endpoint is
-/// never named twice, so a flood of connections from one host costs one line.
-const REFUSAL_LINES: usize = 3;
+/// How many refused endpoint ids a send names. A peer that is refused can open as many connections
+/// as it likes, and the terminal belongs to the user: after this many lines the sender refuses in
+/// silence. The cap counts distinct endpoints, not requests, and the same endpoint is never named
+/// twice, so a flood of connections from one host costs one line.
+pub(crate) const REFUSAL_LINES: usize = 3;
+
+/// The endpoint ids a capped set of refusal lines has named. A refusal line is owed once per
+/// endpoint and never after the cap, and no id is added once the cap is reached, so a peer that
+/// makes fresh endpoint ids cannot grow the set past the lines it pays for.
+#[derive(Debug, Default)]
+pub(crate) struct Lines {
+    /// The endpoint ids a line has been made for.
+    named: BTreeSet<[u8; 32]>,
+}
+
+impl Lines {
+    /// Whether a line about `endpoint` is owed now: the first time it is asked about, while fewer
+    /// than [`REFUSAL_LINES`] have been named.
+    pub(crate) fn owes(&mut self, endpoint: [u8; 32]) -> bool {
+        if self.named.len() >= REFUSAL_LINES {
+            return false;
+        }
+        self.named.insert(endpoint)
+    }
+
+    /// How many endpoints have been named.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.named.len()
+    }
+}
 
 /// What admitting one request did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,11 +62,8 @@ pub(crate) struct Places {
     limit: Option<usize>,
     /// The endpoint ids that hold a place, in the order they took one.
     holders: BTreeSet<[u8; 32]>,
-    /// The endpoint ids a refusal line has been made for. No id is added once the cap is reached,
-    /// so a ticket holder that makes fresh endpoint ids cannot grow this set past the lines.
-    refused: BTreeSet<[u8; 32]>,
-    /// How many refusal lines have been made.
-    lines: usize,
+    /// The endpoint ids a refusal line has been made for, capped by [`Lines`].
+    refused: Lines,
     /// When a holder last asked for or received something, in the clock [`super::now_ms`] reads.
     last_active_ms: u64,
 }
@@ -103,14 +126,11 @@ impl Places {
             self.last_active_ms = now;
             return Admission::Took;
         }
-        if self.lines >= REFUSAL_LINES {
-            return Admission::Unreported;
+        if self.refused.owes(endpoint) {
+            Admission::Refused
+        } else {
+            Admission::Unreported
         }
-        if !self.refused.insert(endpoint) {
-            return Admission::Unreported;
-        }
-        self.lines += 1;
-        Admission::Refused
     }
 
     /// Notes that a holder asked for or received something, so a transfer that is still moving is
@@ -129,7 +149,7 @@ impl Places {
 
 #[cfg(test)]
 mod tests {
-    use super::{Admission, Places, REFUSAL_LINES};
+    use super::{Admission, Lines, Places, REFUSAL_LINES};
 
     fn places(limit: u32) -> Places {
         let mut places = Places::default();
@@ -230,5 +250,21 @@ mod tests {
         unarmed.arm();
         assert!(unarmed.admits_unknown());
         assert!(!places(2).admits_unknown());
+    }
+
+    /// A thousand fresh endpoints are named at most the cap, and the set that remembers them stays
+    /// at the cap's size however many more ask.
+    #[test]
+    fn a_thousand_fresh_endpoints_cost_the_cap() {
+        let mut lines = Lines::default();
+        let owed = (0..1000u32)
+            .filter(|index| {
+                let mut endpoint = [0u8; 32];
+                endpoint[..4].copy_from_slice(&index.to_be_bytes());
+                lines.owes(endpoint)
+            })
+            .count();
+        assert_eq!(owed, REFUSAL_LINES);
+        assert_eq!(lines.len(), REFUSAL_LINES);
     }
 }
