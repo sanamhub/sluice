@@ -36,6 +36,9 @@ impl Provider {
                 relayed,
                 places,
             },
+            endpoint::Receiver::RefusedGroup { endpoint, group } => Event::Warning {
+                message: refused_group(&Self::hex(&endpoint), group.as_deref()),
+            },
             endpoint::Receiver::Closed {
                 connection,
                 endpoint,
@@ -71,5 +74,22 @@ impl Provider {
     /// An endpoint id as the 64 lower-case hex characters a ticket and `sluice id` spell it with.
     fn hex(bytes: &[u8; 32]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+}
+
+/// The line about a peer whose connection was closed by rule: the group it negotiated and the one
+/// Sluice requires. The endpoint id is peer-chosen, so it is shortened through the same function
+/// every receiver line uses, which turns the bytes into its own alphabet and no display text.
+fn refused_group(endpoint: &str, group: Option<&str>) -> String {
+    let who = crate::ticket::fingerprint(endpoint);
+    match group {
+        Some(group) => format!(
+            "receiver {who} negotiated {group}, and Sluice requires X25519MLKEM768, so the \
+             connection was closed"
+        ),
+        None => format!(
+            "receiver {who} reported no key exchange group, and Sluice requires X25519MLKEM768, \
+             so the connection was closed"
+        ),
     }
 }

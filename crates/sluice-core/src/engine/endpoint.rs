@@ -10,7 +10,7 @@ use iroh::{
     Endpoint, NET_REPORT_TIMEOUT, RelayMap, RelayMode, SecretKey, Watcher,
     endpoint::{
         AfterHandshakeOutcome, Connection, EndpointHooks, PortmapperConfig, QuicTransportConfig,
-        presets,
+        Side, VarInt, presets,
     },
 };
 use iroh_mdns_address_lookup::MdnsAddressLookup;
@@ -161,6 +161,12 @@ pub(super) enum Receiver {
         relayed: bool,
         places: u32,
     },
+    /// A connection was closed by rule because its handshake did not settle on the post-quantum
+    /// group. `group` is the one it negotiated, or `None` when the handshake reported none.
+    RefusedGroup {
+        endpoint: [u8; 32],
+        group: Option<String>,
+    },
     /// A receiver's content connection closed. `claimed_whole` is only what the peer said; it is
     /// believed only by a provider that saw the connection ask for every root.
     Closed {
@@ -243,6 +249,79 @@ fn relayed(conn: &Connection) -> bool {
     !paths.iter().any(|path| !path.is_relay())
 }
 
+/// The key exchange group every connection has to negotiate (ADR 0018).
+const REQUIRED_GROUP: rustls::NamedGroup = rustls::NamedGroup::X25519MLKEM768;
+
+/// The group the handshake settled on, when this build's TLS recorded one.
+pub(super) fn negotiated_group(conn: &Connection) -> Option<rustls::NamedGroup> {
+    let data = conn.handshake_data()?;
+    let data = data.downcast_ref::<noq::crypto::rustls::HandshakeData>()?;
+    data.negotiated_key_exchange_group
+}
+
+/// What a peer is told, and what the listener prints, when its handshake is not post-quantum.
+fn not_post_quantum(group: Option<rustls::NamedGroup>) -> String {
+    match group {
+        Some(group) => format!(
+            "the connection negotiated {group:?}, and Sluice requires X25519MLKEM768, so it was \
+             closed"
+        ),
+        None => "the connection reported no key exchange group, and Sluice requires \
+                 X25519MLKEM768, so it was closed"
+            .to_string(),
+    }
+}
+
+/// Refuses a connection this process dialled whose handshake is not post-quantum. The dialling
+/// side holds the connection, so it can name the group in the error its user reads and send the
+/// peer the policy close.
+pub(super) fn require_post_quantum(conn: &Connection) -> Result<(), Error> {
+    let group = negotiated_group(conn);
+    if group == Some(REQUIRED_GROUP) {
+        return Ok(());
+    }
+    let reason = not_post_quantum(group);
+    conn.close(VarInt::from(super::POLICY_CLOSE), reason.as_bytes());
+    Err(Error::Policy(reason))
+}
+
+/// Refuses a connection whose handshake is not post-quantum, on the side that accepts it.
+///
+/// A listener's protocol handlers are not ours to wrap: the blob protocol belongs to
+/// `iroh-blobs`, and it answers a request as soon as it holds the connection. The endpoint's hook
+/// is the one place every accepted connection passes before any protocol can answer, so the check
+/// lives here, and no path through the router can miss it. A dialled connection is checked by
+/// [`super::Receiver`], which holds the connection and can name the group in the error its user
+/// reads.
+#[derive(Debug)]
+struct PostQuantum {
+    /// Where the serve loop of a provider collects the line about a refused peer, when this
+    /// endpoint belongs to one.
+    report: Option<UnboundedSender<Receiver>>,
+}
+
+impl EndpointHooks for PostQuantum {
+    async fn after_handshake<'a>(&'a self, conn: &'a Connection) -> AfterHandshakeOutcome {
+        if conn.side() != Side::Server {
+            return AfterHandshakeOutcome::accept();
+        }
+        let group = negotiated_group(conn);
+        if group == Some(REQUIRED_GROUP) {
+            return AfterHandshakeOutcome::accept();
+        }
+        if let Some(report) = &self.report {
+            let _ = report.send(Receiver::RefusedGroup {
+                endpoint: *conn.remote_id().as_bytes(),
+                group: group.map(|group| format!("{group:?}")),
+            });
+        }
+        AfterHandshakeOutcome::Reject {
+            error_code: VarInt::from(super::POLICY_CLOSE),
+            reason: not_post_quantum(group).into_bytes(),
+        }
+    }
+}
+
 async fn bind_inner(
     secret: Option<[u8; 32]>,
     relay: &RelayModeChoice,
@@ -250,12 +329,16 @@ async fn bind_inner(
     port: Option<u16>,
     complete: Option<Completion>,
 ) -> Result<Endpoint, Error> {
+    // A provider's serve loop prints a line for every peer it refuses, so it has to hear about the
+    // ones this hook refuses before the protocol sees them.
+    let report = complete.as_ref().map(|complete| complete.sender.clone());
     let mut builder = Endpoint::builder(presets::Empty)
         .crypto_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
         .relay_mode(relay.iroh()?)
         .portmapper_config(PortmapperConfig::default())
         .transport_config(congestion.transport())
-        .address_lookup(MdnsAddressLookup::builder());
+        .address_lookup(MdnsAddressLookup::builder())
+        .hooks(PostQuantum { report });
     if let Some(complete) = complete {
         builder = builder.hooks(CompletionSignal(complete));
     }
