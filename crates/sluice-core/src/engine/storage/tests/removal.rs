@@ -160,12 +160,20 @@ fn the_end_of_a_command_tries_a_removal_that_gave_up() {
     assert!(folder.exists(), "the removal was expected to give up");
     release.send(()).unwrap();
     holder.join().unwrap();
+    let budget = Duration::from_secs(2);
     let began = Instant::now();
-    wait_for_removals(Duration::from_secs(2));
+    wait_for_removals(budget);
     assert!(!folder.exists(), "the folder was left for the sweep");
+    // What the product promises is the budget plus the pass it is in, and this asserts that, with a
+    // margin for the pass. One pass costs one folder check, one read of the records folder, and one
+    // removal attempt, whose own retry limit is 1.27 s; five seconds is that pass on a machine whose
+    // disk and scheduler both answer slowly. The assertion used to be the budget itself, which the
+    // pass is allowed to overrun, and under a full test run the pass was measured ten times slower
+    // than on an idle one.
+    let pass = Duration::from_secs(5);
     assert!(
-        began.elapsed() < Duration::from_secs(2),
-        "the wait ran past its budget in {:?}",
+        began.elapsed() < budget + pass,
+        "the wait ran past its budget and one pass in {:?}",
         began.elapsed()
     );
 }
