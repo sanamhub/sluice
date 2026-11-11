@@ -1,36 +1,13 @@
 <!doctype html>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src http://127.0.0.1:3340/ ws://127.0.0.1:3340/">
+<!-- Everything the page needs is on this origin, and the relay it fetches through is named here.
+     The script is a file rather than a block in this document, because `script-src 'self'` allows
+     no inline script, and `connect-src 'self'` is what lets the module fetch the wasm file beside
+     it. `'wasm-unsafe-eval'` is what a browser needs to compile that file. -->
+<meta
+  http-equiv="Content-Security-Policy"
+  content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' http://127.0.0.1:3340/ ws://127.0.0.1:3340/; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+>
 <title>sluice in a tab: fetch one file from a native send</title>
 <body><pre id="out">starting</pre>
-<script type="module">
-  // The parts come from the query string, so the page is the same for every run:
-  //   index.html?relay=http://127.0.0.1:3340/&sender=<64 hex>&root=<64 hex>&size=2097152
-  const out = document.getElementById('out');
-  const parts = new URLSearchParams(location.search);
-  const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
-  const line = (text) => { out.textContent += text + '\n'; };
-  const started = Date.now();
-  try {
-    if (!parts.get('relay') || !parts.get('sender') || !parts.get('root') || !parts.get('size')) {
-      throw new Error('relay, sender, root and size are query parameters');
-    }
-    const module = await import('../sluice_wasm.js');
-    await module.default();
-    // The ticket's root is the hash sequence: the manifest root, then each file's root. This page
-    // reads the one after the manifest, so it is the single-file case; a folder ticket needs the
-    // manifest read to know which roots are files and what they are called.
-    // The hash sequence of a one-file manifest is the manifest root and the file's root: 64 bytes.
-    const sequence = new Uint8Array(await module.fetch_blob(parts.get('relay'), parts.get('sender'), parts.get('root'), 64));
-    line('sequence ' + sequence.length + ' bytes');
-    const root = hex(sequence.slice(32));
-    line('file root ' + root);
-    // Every block of this one is verified against that root before it arrives here.
-    const file = new Uint8Array(await module.fetch_blob(parts.get('relay'), parts.get('sender'), root, Number(parts.get('size'))));
-    line('file ' + file.length + ' bytes, sha256 ' + hex(await crypto.subtle.digest('SHA-256', file)) + ', ' + (Date.now() - started) + ' ms');
-    document.title = 'done';
-  } catch (e) {
-    out.textContent = 'ERROR ' + String(e);
-    document.title = 'failed';
-  }
-</script>
+<script type="module" src="main.js"></script>
