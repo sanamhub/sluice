@@ -477,11 +477,13 @@ be ascending, MUST NOT touch or overlap, and MUST NOT be empty, and `start + len
 A match is a chunk of the candidate whose `len` and `strong` are both equal to an entry's, so a
 hint keys on the pair and not on the strong hash alone: two chunks of the same length can share no
 strong hash without a collision, and two chunks of different lengths have different lengths
-whatever their hashes say. The vectors pin the boundaries the two masks make between them: an input
-of exactly `min` bytes is one chunk and one of `min + 1` bytes is one chunk too, a cut at index
+whatever their hashes say. An input of exactly `min` bytes is one chunk, and one of `min + 1` bytes
+is one chunk too: a chunk ends at `min + 1` only when the input ends there, which is the last-chunk
+rule and not a cut. The vectors pin the boundaries the two masks make between them: a cut at index
 `avg_bytes - 1` is the first mask's last chance and one at index `avg_bytes` the second mask's first,
-and no chunk ends at `min + 1` bytes, because the hash at index `min` is one gear entry and no entry
-of the table has its low `log2(avg_bytes) + 2` bits zero for any average this section allows.
+a hash match below `min` is no cut, and a hash cut is never at index `min`, because the hash at
+index `min` is one gear entry and no entry of the table has its low `log2(avg_bytes) + 2` bits zero
+for any average this section allows.
 
 **Stream.** When both peers set `DELTA` in `Hello`, a requester asks on a `sluice/1` connection it
 dials itself. After the greeting it writes the 32 bytes of the content root it is asking about, and
