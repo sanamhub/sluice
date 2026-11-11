@@ -938,43 +938,67 @@ from wherever the caller points, because the socket or pipe is reachable by ever
 the same user.
 
 Each root is made absolute and resolved once, when the server starts, and the folder it resolves to
-is the root for the life of that server. The name a root was given is not resolved again, so a root
-whose folder is replaced under the same name is not served.
+is the root for the life of that server. The server holds an open handle to each root from that
+moment, and it detects a root replaced under its name by comparing the identity of the folder the
+name resolves to with the identity of the folder the handle names: a server whose root is not the
+folder it opened refuses every request until it is started again. A root whose folder is gone is
+refused the same way.
 
-A path from a client MUST be absolute, and a path with a `..` component is refused, not folded:
-`out/../root/x` is refused whether or not it comes back inside a root. The normal form is the root's
-resolved spelling followed by the path's components below it, with no `.` component and no repeated
-separator, and it MUST be the root itself or a name under it.
+A client names a root and a path relative to it, never one absolute path: the request carries the
+name a root was given and the path below it, and the server joins the two itself. A client never
+sends a path the server would have to split into a root and a remainder by comparing text, because
+that comparison is decided by spelling, which two folders can share. A path with a `..` or a `.`
+component is refused, not folded: `out/../root/x` is refused whether or not it comes back inside a
+root. A path that is absolute is refused, and so is one with an empty component other than the empty
+path, which names the root itself. The normal form is the root's resolved spelling followed by the
+path's components below it, and it MUST be the root itself or a name under it.
 
-A link is never followed anywhere in a path under a root. A link is a symbolic link, a junction, a
-mount point, and any other object a file system marks as a reparse point; a path with a link in any
-component below the root, the last one included, is refused rather than resolved. A path that names
-a stream (an alternate data stream, `name:stream`) or a device (`CON`, `NUL`, `COM1` and the others
-Windows reserves) is refused outright: neither is a file under a root.
+Every name is checked before anything is opened, on every platform, by the rule section 6 states
+for a manifest path: a component that ends with `.` or a space, a component that is a reserved
+device name, and a name that holds a `:`, a `\`, a control character or any other character that
+rule refuses are refused here as well. A name that is a stream (`name:stream`) or a device (`CON`,
+`NUL`, `COM1` and the others) is refused by that check, and never by asking the file system what it
+meant.
+
+A name a platform's own folding accepts is accepted when it opens the same object. A case variant,
+an 8.3 short name, or another spelling that resolves to the object the path names is that object
+under the root, so the open succeeds, and the server reports the stored name it reads back from the
+handle rather than the name the client typed.
+
+A link is never followed anywhere in a path under a root. A link is a symbolic link, a magic link, a
+junction, a mount point, and any other object a file system marks as a name surrogate; a path with a
+link in any component below the root, the last one included, is refused rather than resolved.
 
 Containment is decided by opening, and never by comparing strings. The server opens the root, then
 opens each component of the path relative to the handle of the folder before it, without following a
 link and asserting that the object it opened is a folder, until the last component, which is the
-file. On Unix this is `openat` with `O_NOFOLLOW`, or `openat2` with `RESOLVE_BENEATH` where the
-kernel has it; on Windows it is `NtCreateFile` with `FILE_OPEN_REPARSE_POINT` relative to the
-folder's handle. The handle the check ends with is the handle the transfer uses, so a folder renamed
-between the check and the use is not read, and a name that case folding, a `\\?\` or `\\?\UNC\`
-prefix, an 8.3 short name, a trailing dot or space, or a `:stream` suffix spells another way is
-refused, because the name it resolves is not a component of a path under the root. An
-implementation that cannot open a component relative to the folder before it MUST refuse the path.
+file. On Linux this is `openat2` with
+`RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_XDEV`: `RESOLVE_BENEATH`
+alone follows a link that stays inside the root and crosses a mount point, so it is not enough. On a
+Unix without `openat2`, macOS among them, each component is opened with `openat` and `O_NOFOLLOW`,
+and a component whose `st_dev` differs from the folder before it is refused, which is how a system
+whose kernel cannot refuse a mount point still meets the rule. On Windows it is `NtCreateFile` with
+`FILE_OPEN_REPARSE_POINT` relative to the folder's handle, and a reparse point is refused when its
+tag is a name surrogate (`IsReparseTagNameSurrogate`); a placeholder a file service keeps and a
+deduplicated file are not name surrogates, so they are read as the files they stand for. The handle
+the check ends with is the handle the transfer uses, so a folder renamed between the check and the
+use is not read. An implementation that cannot open a component relative to the folder before it
+MUST refuse the path.
 
-The last component is created through that handle, without following a link and with an exclusive
-create, or as a temporary file in the folder the handle names that is renamed over the destination
-once it is written. An existing file is replaced only when the request carries an explicit overwrite
-flag, and an output file and a receipt are never written through a name that was not opened this
-way.
+The last component is created through that handle, as a temporary file in the folder the handle
+names, and renamed into place once it is written. Without an explicit overwrite flag the rename is
+one that cannot replace what is there (`renameat2` with `RENAME_NOREPLACE`, `renameatx_np` with
+`RENAME_EXCL`, `FileRenameInformation` with `ReplaceIfExists` false), so a file that appears while
+the transfer runs is not replaced. With the flag the file is replaced by a rename as well, and never
+by opening it and truncating it, so a reader that already has the old file keeps the bytes it
+opened. An output file and a receipt are never written through a name that was not opened this way.
 
 A hard link is not a link in the sense above: it is a second name for the file itself, so a file
 inside a root that has more than one name can have its other name outside the root, and no check of
-the path can see it. A server refuses to send a file whose link count is above one, because a root is
-the promise that a client cannot make the server read anything outside it. A one-shot `sluice send`
-names its file on the command line and makes no such promise, so it sends a file that has more than
-one name.
+the path can see it. A server refuses to send a file whose link count is above one, read from the
+handle it opened for that file, because a root is the promise that a client cannot make the server
+read anything outside it. A one-shot `sluice send` names its file on the command line and makes no
+such promise, so it sends a file that has more than one name.
 
 Store access is single-writer. A client MUST take an exclusive lock on the store directory, and if
 the lock is held by a live process it MUST connect to that process instead of opening the store.
