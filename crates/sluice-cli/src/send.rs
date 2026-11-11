@@ -59,8 +59,16 @@ pub struct SendArgs {
     /// Also print the ticket as a QR code on standard error, for a phone or a second screen. The
     /// code is the ticket, so a camera that can see this screen can take the file. `--qr=inverted`
     /// draws it for a dark terminal, which is what the line under the code suggests when the
-    /// terminal does not say which background it has
-    #[arg(long, value_name = "HOW", num_args = 0..=1, default_missing_value = "auto", value_enum)]
+    /// terminal does not say which background it has. The value needs `--qr=VALUE`: a space after
+    /// `--qr` would make the path to send the flag's value
+    #[arg(
+        long,
+        value_name = "HOW",
+        num_args = 0..=1,
+        default_missing_value = "auto",
+        require_equals = true,
+        value_enum
+    )]
     pub qr: Option<crate::qr::Ask>,
 }
 
