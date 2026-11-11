@@ -1,0 +1,12 @@
+{
+  "description": "A need-ranges message of SPEC.md section 7: the root, the count as a varint, then one start and one length as u64s for every range",
+  "cases": [
+    {
+      "name": "three ranges apart",
+      "bytes": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0300000000000000000a00000000000000140000000000000005000000000000001e000000000000000100000000000000",
+      "valid": true,
+      "root": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ranges": [["0", "10"], ["20", "5"], ["30", "1"]]
+    }
+  ]
+}

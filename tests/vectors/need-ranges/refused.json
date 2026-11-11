@@ -1,0 +1,47 @@
+{
+  "description": "Sets of need-ranges a requester MUST refuse: ranges that touch or overlap, ranges out of order, an empty range, bytes after the message, a count that is not its shortest varint, a varint that runs past ten bytes, and a count the message does not hold",
+  "cases": [
+    {
+      "name": "the second range starts where the first ends",
+      "bytes": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0200000000000000000a000000000000000a000000000000000500000000000000",
+      "valid": false,
+      "reason": "the ranges touch, and one set of needed bytes has one form"
+    },
+    {
+      "name": "the ranges are not ascending",
+      "bytes": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa020a00000000000000050000000000000000000000000000000500000000000000",
+      "valid": false,
+      "reason": "a later range starts before an earlier one"
+    },
+    {
+      "name": "a range of no bytes",
+      "bytes": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0200000000000000000a0000000000000014000000000000000000000000000000",
+      "valid": false,
+      "reason": "a range that asks for nothing"
+    },
+    {
+      "name": "one byte after the message",
+      "bytes": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0300000000000000000a00000000000000140000000000000005000000000000001e000000000000000100000000000000ff",
+      "valid": false,
+      "reason": "bytes follow the count the message declares"
+    },
+    {
+      "name": "a count that is not its shortest varint",
+      "bytes": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa810000000000000000000100000000000000",
+      "valid": false,
+      "reason": "the count 1 is written in two bytes, so the message has two spellings"
+    },
+    {
+      "name": "a varint that runs past ten bytes",
+      "bytes": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa80808080808080808002",
+      "valid": false,
+      "reason": "a varint of a u64 is at most ten bytes long"
+    },
+    {
+      "name": "a count the message does not hold",
+      "bytes": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0200000000000000000a00000000000000",
+      "valid": false,
+      "reason": "the message ends before the second range"
+    }
+  ]
+}

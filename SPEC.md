@@ -909,6 +909,7 @@ the lock is held by a live process it MUST connect to that process instead of op
 | `sequences/` | A manifest and the hash sequence a ticket for it must name |
 | `live/` | A ticket's `stream_id` and `sender_key`, the records of section 6 in the order a receiver gets them, the receiver's answer to each, and the state of the stream at the end, including streams that MUST be refused or aborted |
 | `delta/` | File pairs with expected chunk boundaries and resulting need-ranges |
+| `need-ranges/` | Encoded need-ranges messages with the root and the ranges they name, including sets that MUST be refused |
 | `paths/` | Hostile paths that MUST be rejected by a receiver |
 | `writer/` | Top-level names a receiver must accept, refuse as hidden, or refuse as a clash, with the flags and the output state that decide it |
 

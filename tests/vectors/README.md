@@ -22,7 +22,8 @@ tests/vectors/
   writer/       the top-level rules a receiver applies before it writes, SPEC.md section 8
   live/         the signed segment log, SPEC.md section 6
   receipts/     a sender's signed statement that it offered content, SPEC.md section 10
-  delta/        not written yet
+  delta/        file pairs and what a delta must plan
+  need-ranges/  the message that asks for the bytes a delta needs, SPEC.md section 7
 ```
 
 One directory per row of the table in section 12. A directory holds one or more `.json` files. The
@@ -429,3 +430,27 @@ A plan that covers the target with other ranges, or cuts the target elsewhere, i
 The case files were written from `SPEC.md` section 7 by the implementation in this tree, so they
 check that the cut, the matching and the fetch agree with each other and with the rule; a bug that
 the chunker and the vectors share would not show.
+## `need-ranges/`
+
+A case is one `NeedRanges` message of `SPEC.md` section 7 as lower-case hex and a verdict:
+
+```json
+{ "name": "three ranges apart", "bytes": "aaaa...0300...", "valid": true,
+  "root": "aaaa...", "ranges": [["0", "10"], ["20", "5"], ["30", "1"]] }
+{ "name": "the ranges touch", "bytes": "aaaa...0200...", "valid": false,
+  "reason": "the ranges touch" }
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | What the case is. A runner prints it next to a failure and does not compare it |
+| `bytes` | string | The message as lower-case hex |
+| `valid` | boolean | `true` if a decoder MUST accept it, `false` if it MUST reject it |
+| `root` | string | Valid cases. The root, as 64 lower-case hex characters |
+| `ranges` | array | Valid cases. Each range as a start and a length, decimal strings, ascending and never touching |
+| `reason` | string | Rejected cases. What is wrong with it, for people |
+
+To check an implementation: decode `bytes`. For a valid case, compare the result with `root` and
+`ranges` and encode it again, which must give the same bytes, because one set of ranges has one
+spelling. For a rejected case, decoding must fail. A range that ends where the next one starts is a
+refusal: the sets are disjoint as well as ascending, so a message has one form.
