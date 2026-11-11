@@ -20,9 +20,9 @@ use crate::{
     manifest::Manifest,
     ticket::{Body, Format, Ticket},
 };
-use entry::{allowed_roots, checked_file, import, keep_metadata, one_entry_manifest};
+use entry::{allowed_roots, import, keep_metadata};
 
-pub(in crate::engine) use entry::content_roots;
+pub(in crate::engine) use entry::{checked_file, content_roots, one_entry_manifest};
 
 /// Imports `path` in place and starts a provider for it. `expiry` is UTC milliseconds or none.
 ///

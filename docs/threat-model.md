@@ -99,11 +99,12 @@ pipe, a file or a log.
   user access, and neither `open` nor `doctor` reads the ACL. A home that came from somewhere else
   should be looked at with `ls -le` before it is used.
 - **A receipt as a record of delivery.** A receipt proves that the key a ticket names offered content
-  with that root and length at about the time it carries, within the clock window of `SPEC.md`
-  section 10. It does not say who received the content, whether anyone kept it, or who holds that
-  key, and a sender can sign one for content nobody fetched. `sluice receipt verify` prints those
-  fields and makes no claim beyond them, and a receipt file names the sender's key and the content's
-  root to anyone who reads it.
+  with that commitment to its root and that length at about the time it carries, within the clock
+  window of `SPEC.md` section 10. It does not say who received the content, whether anyone kept it,
+  or who holds that key, and a sender can sign one for content nobody fetched. `sluice receipt
+  verify` prints those fields and makes no claim beyond them. A receipt file names the sender's key
+  and a commitment to the content's root; the commitment reveals the root only to a reader who
+  already knows it, so reading a receipt does not hand out a ticket.
 
 ## Known weaknesses
 

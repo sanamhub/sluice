@@ -163,19 +163,27 @@ is not a terminal, so it never reaches a pipe or a log.
 
 ### Receipts
 
-A receipt is 144 bytes: the content's root and length, the sender's key, the time it was signed, and
-an Ed25519 signature over the first 80 of them under the label `sluice/receipt/1`. The label is what
-keeps a receipt's signature from being good for a live record, and a record's from being good for a
-receipt. The verifier checks the signature strictly and refuses a key that breaks the rule every
-other key in Sluice follows, so no two implementations disagree on whether one receipt is signed.
+A receipt is 144 bytes: a commitment to the content's root, its length, the sender's key, the time
+it was signed, and an Ed25519 signature over the first 80 of them under the label `sluice/receipt/1`.
+The label is what keeps a receipt's signature from being good for a live record, and a record's from
+being good for a receipt. The verifier checks the signature strictly and refuses a key that breaks
+the rule every other key in Sluice follows, so no two implementations disagree on whether one
+receipt is signed.
+
+The commitment is BLAKE3 in its key-derivation mode, under the context `sluice/receipt/commit/1`,
+over the root a ticket names. A receipt therefore names the content to a reader who already knows
+the root, and to nobody else. The sender's key, the length and the time are what a receipt proves;
+the root is not in it, so a receipt cannot be turned into a ticket while the send runs.
 
 A receipt is text: those 144 bytes in the ticket's base32 behind `sluicereceipt1`. It is not a
 capability, so it can be written in a file, pasted into a message and mailed. `sluice receipt verify
-FILE` checks one and prints what it names, and with `--file` it hashes a file and compares the result
-with the root and the length, which is how a receiver shows that the content it holds is the content
-the receipt is about. A receive does not write one yet: section 10 of `SPEC.md` states how a sender
-delivers one on the `sluice/1` connection when both sides set `RECEIPTS`, and the flag that asks for
-one is not in this build.
+FILE` checks one and prints what it names, and with `--file` it rebuilds the root a send of that file
+or folder would name, through the manifest code the send uses, and compares the result with the
+commitment and the length. That is how a receiver shows that the content it holds is the content the
+receipt is about. A receipt whose commitment is the root itself commits to no content, and the check
+refuses it. A receive does not write one yet: section 10 of `SPEC.md` states how a sender delivers
+one on the `sluice/1` connection when both sides set `RECEIPTS`, and the flag that asks for one is
+not in this build.
 
 ### Transfer queue
 

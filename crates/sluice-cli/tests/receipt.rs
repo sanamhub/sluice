@@ -4,60 +4,76 @@ mod common;
 
 use std::fs;
 
-use common::{bare, stderr_text, stdout_text};
+use common::{bare, start, start_in, stderr_text, stdout_text};
 use ed25519_dalek::SigningKey;
 use serde_json::Value;
-use sluice_core::receipt::Receipt;
+use sluice_core::{
+    receipt::{Receipt, commitment},
+    ticket::{Body, Ticket},
+};
 
 const CONTENT: &[u8] = b"the content a receipt names";
 
-fn root() -> [u8; 32] {
-    *blake3::hash(CONTENT).as_bytes()
+fn key() -> SigningKey {
+    SigningKey::from_bytes(&[7; 32])
 }
 
-/// A receipt file for `CONTENT`, and the content beside it.
-fn fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
-    let dir = tempfile::tempdir().unwrap();
-    let receipt = Receipt::sign(
-        &SigningKey::from_bytes(&[7; 32]),
-        root(),
-        CONTENT.len() as u64,
-        1_800_000_000_000,
-    );
-    let receipt_path = dir.path().join("receipt.txt");
-    fs::write(&receipt_path, format!("{}\n", receipt.encode())).unwrap();
-    let content_path = dir.path().join("content.bin");
-    fs::write(&content_path, CONTENT).unwrap();
-    (dir, receipt_path, content_path)
+/// A receipt for content whose root a send names. The signing key is the test's: a receipt's
+/// signature is checked under the key the receipt itself names.
+fn receipt_for(root: [u8; 32], len: u64) -> Receipt {
+    Receipt::sign(&key(), commitment(&root), len, 1_800_000_000_000)
+}
+
+fn write_receipt(dir: &std::path::Path, receipt: &Receipt) -> std::path::PathBuf {
+    let path = dir.join("receipt.txt");
+    fs::write(&path, format!("{}\n", receipt.encode())).unwrap();
+    path
+}
+
+/// A ticket's static root and size, which is what a receipt for that content names.
+fn of_ticket(text: &str) -> ([u8; 32], u64) {
+    let ticket = Ticket::decode(text).unwrap();
+    match ticket.body() {
+        Body::Static { root, size, .. } => (*root, *size),
+        Body::Live { .. } => panic!("a live ticket names no manifest"),
+    }
 }
 
 #[test]
-fn a_signed_receipt_verifies_and_prints_its_fields() {
-    let (_dir, receipt, _content) = fixture();
+fn a_signed_receipt_verifies_and_prints_its_commitment() {
+    let dir = tempfile::tempdir().unwrap();
+    let receipt = receipt_for([9; 32], 1024);
+    let path = write_receipt(dir.path(), &receipt);
     let assert = bare()
         .args(["receipt", "verify"])
-        .arg(&receipt)
+        .arg(&path)
         .assert()
         .success();
     let text = stdout_text(&assert);
     assert!(text.starts_with("receipt ok: "), "{text}");
-    assert!(text.contains(&*hex(&root())), "{text}");
+    assert!(
+        text.contains(&hex(&commitment(&[9; 32]))),
+        "the commitment is printed: {text}"
+    );
     assert!(text.contains("1800000000000 UTC ms"), "{text}");
+    assert!(!text.contains(&hex(&[9; 32])), "{text}");
 }
 
 /// The same receipt in JSON is one object, with a length no JSON number has to hold.
 #[test]
 fn json_names_the_same_fields() {
-    let (_dir, receipt, _content) = fixture();
+    let dir = tempfile::tempdir().unwrap();
+    let receipt = receipt_for([9; 32], 1024);
+    let path = write_receipt(dir.path(), &receipt);
     let assert = bare()
         .args(["receipt", "verify", "--json"])
-        .arg(&receipt)
+        .arg(&path)
         .assert()
         .success();
     let text = stdout_text(&assert);
     let parsed: Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(parsed["root"], hex(&root()));
-    assert_eq!(parsed["total_len"], CONTENT.len().to_string());
+    assert_eq!(parsed["commit"], hex(&commitment(&[9; 32])));
+    assert_eq!(parsed["total_len"], "1024");
     assert_eq!(parsed["utc_ms"], "1800000000000");
     assert_eq!(parsed["file"], Value::Null);
 }
@@ -65,8 +81,10 @@ fn json_names_the_same_fields() {
 /// A receipt names the sender's key, and a tampered one names a signature that does not hold.
 #[test]
 fn a_tampered_receipt_is_refused_with_nothing_on_stdout() {
-    let (_dir, receipt, _content) = fixture();
-    let text = fs::read_to_string(&receipt).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let receipt = receipt_for([9; 32], 1024);
+    let path = write_receipt(dir.path(), &receipt);
+    let text = fs::read_to_string(&path).unwrap();
     let mut bytes = text.trim().to_string();
     // A character in the signature, not in the padding of the last one: a change there is a
     // signature that does not hold rather than a body that does not decode.
@@ -75,10 +93,10 @@ fn a_tampered_receipt_is_refused_with_nothing_on_stdout() {
         at..at + 1,
         if &bytes[at..at + 1] == "a" { "b" } else { "a" },
     );
-    fs::write(&receipt, format!("{bytes}\n")).unwrap();
+    fs::write(&path, format!("{bytes}\n")).unwrap();
     let assert = bare()
         .args(["receipt", "verify"])
-        .arg(&receipt)
+        .arg(&path)
         .assert()
         .code(4);
     assert_eq!(stdout_text(&assert), "");
@@ -103,44 +121,133 @@ fn a_file_that_is_not_a_receipt_is_refused() {
     assert!(!stderr.contains("not-a-receipt"), "{stderr:?}");
 }
 
-/// With the content, the file's root and length are checked, and a match is said.
+/// A receipt is text. Bytes that are not UTF-8 are a policy error rather than a read failure or a
+/// panic, and the message names the file and not its bytes.
 #[test]
-fn a_file_that_is_the_content_matches() {
-    let (_dir, receipt, content) = fixture();
+fn a_file_that_is_not_text_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("receipt.bin");
+    fs::write(&path, [0xff, 0xfe, 0x00, 0x81]).unwrap();
     let assert = bare()
         .args(["receipt", "verify"])
-        .arg(&receipt)
-        .args(["--file"])
-        .arg(&content)
+        .arg(&path)
         .assert()
-        .success();
-    assert!(
-        stdout_text(&assert).contains("matches the root and the length"),
-        "{:?}",
-        stdout_text(&assert)
-    );
+        .code(6);
+    let stderr = stderr_text(&assert);
+    assert!(stderr.contains("not UTF-8 text"), "{stderr:?}");
+    assert!(stderr.contains("receipt.bin"), "{stderr:?}");
 }
 
-/// Another file is not this content: the receipt still verifies, and the command fails with the
-/// verification code after saying what the file really is.
+/// One line ending is allowed, and a `\r` is one only together with the `\n` after it.
 #[test]
-fn a_file_that_is_other_content_does_not_match() {
-    let (dir, receipt, _content) = fixture();
-    let other = dir.path().join("other.bin");
-    fs::write(&other, b"other bytes").unwrap();
+fn a_lone_carriage_return_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let receipt = receipt_for([9; 32], 1024);
+    let path = write_receipt(dir.path(), &receipt);
+    let text = fs::read_to_string(&path).unwrap();
+    fs::write(&path, text.trim_end().to_string() + "\r").unwrap();
     let assert = bare()
         .args(["receipt", "verify"])
-        .arg(&receipt)
+        .arg(&path)
+        .assert()
+        .code(6);
+    let stderr = stderr_text(&assert);
+    assert!(stderr.contains("no `\\n` follows"), "{stderr:?}");
+}
+
+/// A receipt from a real send, checked against the file that send named: the root the verify
+/// command rebuilds is the root the ticket carries.
+#[test]
+fn a_receipt_from_a_real_send_matches_its_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let source = dir.path().join("note.txt");
+    fs::write(&source, CONTENT).unwrap();
+    let (_sender, ticket) = start(&home, &source, "1h");
+    let (root, size) = of_ticket(&ticket);
+    let path = write_receipt(dir.path(), &receipt_for(root, size));
+    let assert = bare()
+        .args(["receipt", "verify"])
+        .arg(&path)
         .args(["--file"])
-        .arg(&other)
+        .arg(&source)
+        .assert()
+        .success();
+    let text = stdout_text(&assert);
+    assert!(text.contains("matches: its send root is"), "{text}");
+    assert!(text.contains(&hex(&root)), "{text}");
+}
+
+/// A receipt whose commit is the raw root of the content is not the receipt a send makes, and a
+/// file check refuses it: the send root is a hash-sequence root, not the bytes' root.
+#[test]
+fn a_commit_that_is_the_raw_root_does_not_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let source = dir.path().join("note.txt");
+    fs::write(&source, CONTENT).unwrap();
+    let (_sender, ticket) = start(&home, &source, "1h");
+    let (root, _size) = of_ticket(&ticket);
+    let raw = *blake3::hash(CONTENT).as_bytes();
+    assert_ne!(raw, root);
+    let path = write_receipt(dir.path(), &receipt_for(raw, CONTENT.len() as u64));
+    let assert = bare()
+        .args(["receipt", "verify"])
+        .arg(&path)
+        .args(["--file"])
+        .arg(&source)
         .assert()
         .code(4);
     let text = stdout_text(&assert);
     assert!(text.starts_with("receipt ok, but "), "{text}");
-    assert!(text.contains("is 11 bytes"), "{text}");
+    assert!(text.contains("and its send root is"), "{text}");
+}
+
+/// The same file after an edit is other content, and the check says what it found.
+#[test]
+fn a_changed_file_does_not_match() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let source = dir.path().join("note.txt");
+    fs::write(&source, CONTENT).unwrap();
+    let (_sender, ticket) = start(&home, &source, "1h");
+    let (root, size) = of_ticket(&ticket);
+    let path = write_receipt(dir.path(), &receipt_for(root, size));
+    fs::write(&source, b"the content a receipt nameZ").unwrap();
+    let assert = bare()
+        .args(["receipt", "verify"])
+        .arg(&path)
+        .args(["--file"])
+        .arg(&source)
+        .assert()
+        .code(4);
+    let text = stdout_text(&assert);
+    assert!(text.contains("and its send root is"), "{text}");
+}
+
+/// A folder send names a root the same way, and the check rebuilds it from the folder.
+#[test]
+fn a_folder_from_a_real_send_matches() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let folder = dir.path().join("tree");
+    fs::create_dir_all(folder.join("sub")).unwrap();
+    fs::write(folder.join("a.txt"), b"aaaa").unwrap();
+    fs::write(folder.join("sub").join("b.txt"), b"bb").unwrap();
+    let (_sender, ticket) = start_in(dir.path(), &home, &["tree", "--expires", "1h"]);
+    let (root, size) = of_ticket(&ticket);
+    let path = write_receipt(dir.path(), &receipt_for(root, size));
+    let assert = bare()
+        .args(["receipt", "verify"])
+        .arg(&path)
+        .args(["--file"])
+        .arg(&folder)
+        .assert()
+        .success();
     assert!(
-        text.contains(&*hex(blake3::hash(b"other bytes").as_bytes())),
-        "{text}"
+        stdout_text(&assert).contains("matches: its send root is"),
+        "{}",
+        stdout_text(&assert)
     );
 }
 

@@ -1,6 +1,6 @@
-//! The `receipts` vectors. A valid case gives the text, the fields it decodes to and a signature
-//! that verifies. A refused case says which part of it is wrong: the text, or the signature under
-//! the key it names.
+//! The `receipts` vectors. A valid case gives the text, the fields it decodes to, a signature that
+//! verifies and, when it gives a content root, whether the receipt is about that content. A refused
+//! case says which part of it is wrong: the text, or the signature under the key it names.
 
 use std::path::Path;
 
@@ -8,6 +8,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use sluice_core::receipt::Receipt;
 
+use super::manifests::hex_array;
 use super::{Report, run_kind, shown};
 
 #[derive(Deserialize)]
@@ -16,6 +17,8 @@ struct Case {
     valid: bool,
     /// What the text decodes to. Present when `valid` is true.
     fields: Option<Fields>,
+    /// A content root the receipt is checked against, and whether it is about that content.
+    content: Option<Content>,
     /// What is wrong with a refused case: `text` or `signature`.
     refused: Option<String>,
 }
@@ -24,10 +27,17 @@ struct Case {
 /// every language.
 #[derive(Deserialize)]
 struct Fields {
-    root: String,
+    commit: String,
     total_len: String,
     sender_key: String,
     utc_ms: String,
+}
+
+/// A root and whether the receipt commits to it.
+#[derive(Deserialize)]
+struct Content {
+    root: String,
+    matches: bool,
 }
 
 pub fn run(dir: &Path, report: &mut Report) -> Result<()> {
@@ -67,13 +77,13 @@ fn disagreement(case: &Case) -> Option<String> {
         return Some(format!("{what}: the encoder writes another text"));
     }
     let got = Fields {
-        root: hex(receipt.root()),
+        commit: hex(receipt.commit()),
         total_len: receipt.total_len().to_string(),
         sender_key: hex(receipt.sender_key()),
         utc_ms: receipt.utc_ms().to_string(),
     };
     for (name, they, ours) in [
-        ("root", &fields.root, &got.root),
+        ("commit", &fields.commit, &got.commit),
         ("total_len", &fields.total_len, &got.total_len),
         ("sender_key", &fields.sender_key, &got.sender_key),
         ("utc_ms", &fields.utc_ms, &got.utc_ms),
@@ -81,6 +91,18 @@ fn disagreement(case: &Case) -> Option<String> {
         if they != ours {
             return Some(format!(
                 "{what}: {name} is {they}, and the receipt says {ours}"
+            ));
+        }
+    }
+    if let Some(content) = &case.content {
+        let root = match hex_array(&content.root) {
+            Ok(root) => root,
+            Err(error) => return Some(format!("{what}: content root: {error}")),
+        };
+        if receipt.is_of(&root) != content.matches {
+            return Some(format!(
+                "{what}: the receipt is {} about the content with that root",
+                if content.matches { "not" } else { "" }
             ));
         }
     }

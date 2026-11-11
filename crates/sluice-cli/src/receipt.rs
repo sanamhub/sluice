@@ -1,9 +1,13 @@
 //! `sluice receipt verify FILE [--file PATH]`: checks that a receipt is what its sender signed,
-//! and optionally that a file is the content it names.
+//! and optionally that a file or folder is the content it names.
 //!
 //! A receipt is only a statement. It proves that the sender offered that content at about that
 //! time. It does not prove that anyone received it, that the receiver kept it, or who holds the
 //! key that signed it.
+//!
+//! The receipt holds a commitment to the content's root, never the root, so it cannot be turned
+//! into a ticket. A file is checked by rebuilding the root a send of it would name, through the
+//! same manifest code the send uses, and committing that root.
 
 use std::{
     fs::File,
@@ -13,7 +17,12 @@ use std::{
 
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
-use sluice_core::{Error, manifest::path::shown, receipt::Receipt};
+use sluice_core::{
+    Error,
+    engine::{PathRoot, root_of_path},
+    manifest::path::shown,
+    receipt::Receipt,
+};
 
 use crate::output::{Outcome, bytes_text};
 
@@ -29,7 +38,7 @@ pub struct ReceiptArgs {
 
 #[derive(Subcommand)]
 pub enum ReceiptCommand {
-    /// Check a receipt's signature, and with --file that a file is the content it names
+    /// Check a receipt, and with --file that a file or folder is the content it names
     ///
     /// A receipt says the sender offered this content at about this time. It does not say that
     /// anyone received it, that it is still held anywhere, or who holds the key that signed it.
@@ -41,7 +50,7 @@ pub struct VerifyArgs {
     /// A file holding the receipt
     #[arg(value_name = "FILE")]
     pub receipt: PathBuf,
-    /// A file to hash and check against the root and the length the receipt names
+    /// A file or folder to hash and compare with the receipt's commitment and length
     #[arg(long, value_name = "PATH")]
     pub file: Option<PathBuf>,
 }
@@ -54,7 +63,7 @@ pub fn run(args: &ReceiptArgs) -> Result<Outcome, Error> {
 
 /// What a verified receipt says, and what a file had to say about it.
 pub struct Report {
-    pub root: String,
+    pub commit: String,
     pub total_len: u64,
     pub sender_key: String,
     pub utc_ms: u64,
@@ -63,12 +72,14 @@ pub struct Report {
     pub code: u8,
 }
 
-/// One file, hashed and compared with the receipt.
+/// One file or folder, checked against the receipt.
 pub struct Check {
     pub path: String,
     pub matched: bool,
     pub found_len: u64,
-    pub found_root: String,
+    /// The root a send of the path names, or `None` when the length was already wrong and the path
+    /// was not read.
+    pub found_root: Option<String>,
 }
 
 fn verify_one(args: &VerifyArgs) -> Result<Outcome, Error> {
@@ -85,7 +96,7 @@ fn verify_one(args: &VerifyArgs) -> Result<Outcome, Error> {
         _ => 0,
     };
     Ok(Outcome::Receipt(Report {
-        root: hex(receipt.root()),
+        commit: hex(receipt.commit()),
         total_len: receipt.total_len(),
         sender_key: hex(receipt.sender_key()),
         utc_ms: receipt.utc_ms(),
@@ -95,63 +106,60 @@ fn verify_one(args: &VerifyArgs) -> Result<Outcome, Error> {
 }
 
 /// Reads the receipt as text. A receipt is not a capability, so a link is followed, and only the
-/// first [`MOST`] bytes are read: whether a file is one is decided by its first characters.
+/// first [`MOST`] bytes are read: whether a file is one is decided by its first characters. A file
+/// that is not UTF-8 text, or whose text is not a receipt, is refused as a policy error, and the
+/// message names the path and never what the file holds.
 fn read(path: &Path) -> Result<String, Error> {
-    let mut text = String::new();
+    let shown = shown(&path.display().to_string());
+    let mut bytes = Vec::new();
     File::open(path)
-        .and_then(|file| file.take(MOST).read_to_string(&mut text))
-        .map_err(|e| Error::Storage(format!("cannot read {}: {e}", path.display())))?;
-    Ok(text)
+        .and_then(|file| file.take(MOST).read_to_end(&mut bytes))
+        .map_err(|e| Error::Storage(format!("cannot read {shown}: {e}")))?;
+    String::from_utf8(bytes)
+        .map_err(|_| Error::Policy(format!("{shown} is not UTF-8 text, so it is not a receipt")))
 }
 
-/// Hashes the file and compares it with the receipt. A file that is not the right length is not
-/// hashed to the end: the length alone decides it.
+/// Rebuilds the root a send of `path` names and compares it with the receipt. The length is read
+/// from the metadata first, so a file of the wrong length is not hashed at all.
 fn check(path: &Path, receipt: &Receipt) -> Result<Check, Error> {
-    if path.is_dir() {
-        return Err(Error::Policy(format!(
-            "{} is a folder, and a receipt names one file of content",
-            path.display()
-        )));
+    let shown = shown(&path.display().to_string());
+    let meta =
+        std::fs::metadata(path).map_err(|e| Error::Storage(format!("cannot read {shown}: {e}")))?;
+    if meta.is_file() && meta.len() != receipt.total_len() {
+        return Ok(Check {
+            path: shown,
+            matched: false,
+            found_len: meta.len(),
+            found_root: None,
+        });
     }
-    let mut file = File::open(path)
-        .map_err(|e| Error::Storage(format!("cannot open {}: {e}", path.display())))?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buffer = vec![0u8; 64 * 1024];
-    let mut len = 0u64;
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|e| Error::Storage(format!("cannot read {}: {e}", path.display())))?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-        len += read as u64;
-    }
-    let found = hasher.finalize();
-    let matched = len == receipt.total_len() && found.as_bytes() == receipt.root();
+    let PathRoot {
+        root, total_len, ..
+    } = root_of_path(path)?;
     Ok(Check {
-        path: shown(&path.display().to_string()),
-        matched,
-        found_len: len,
-        found_root: hex(found.as_bytes()),
+        path: shown,
+        matched: receipt.total_len() == total_len && receipt.is_of(&root),
+        found_len: total_len,
+        found_root: Some(hex(&root)),
     })
 }
 
 /// The report as a person reads it: the size and the time first, then the two keys.
 pub fn text(report: &Report) -> String {
     let mut out = match &report.file {
-        Some(check) if !check.matched => format!(
-            "receipt ok, but {} is not the content it names\n",
-            check.path
-        ),
+        Some(check) if !check.matched => {
+            format!(
+                "receipt ok, but {} is not the content it names\n",
+                check.path
+            )
+        }
         _ => format!(
             "receipt ok: {}, signed at {} UTC ms\n",
             bytes_text(report.total_len),
             report.utc_ms
         ),
     };
-    out.push_str(&format!("root      {}\n", report.root));
+    out.push_str(&format!("commit    {}\n", report.commit));
     out.push_str(&format!("sender    {}\n", report.sender_key));
     out.push_str(&format!(
         "length    {} bytes ({})\n",
@@ -159,19 +167,30 @@ pub fn text(report: &Report) -> String {
         bytes_text(report.total_len)
     ));
     if let Some(check) = &report.file {
-        if check.matched {
-            out.push_str(&format!(
-                "file      {} matches the root and the length\n",
-                check.path
-            ));
-        } else {
-            out.push_str(&format!(
-                "file      {} is {} bytes and hashes to {}\n",
-                check.path, check.found_len, check.found_root
-            ));
-        }
+        out.push_str(&describe(check));
     }
     out
+}
+
+/// The line about the named file, which differs by how far the check got.
+fn describe(check: &Check) -> String {
+    if check.matched {
+        return format!(
+            "file      {} matches: its send root is {}\n",
+            check.path,
+            check.found_root.as_deref().unwrap_or_default()
+        );
+    }
+    match &check.found_root {
+        Some(root) => format!(
+            "file      {} is {} bytes and its send root is {}\n",
+            check.path, check.found_len, root
+        ),
+        None => format!(
+            "file      {} is {} bytes, so it was not read\n",
+            check.path, check.found_len
+        ),
+    }
 }
 
 /// The report as one JSON object. A length is a decimal string, as the ticket's own fields are,
@@ -189,7 +208,7 @@ pub fn json(report: &Report) -> String {
     format!(
         "{}\n",
         json!({
-            "root": report.root,
+            "commit": report.commit,
             "total_len": report.total_len.to_string(),
             "sender_key": report.sender_key,
             "utc_ms": report.utc_ms.to_string(),
