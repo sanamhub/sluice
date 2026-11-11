@@ -66,7 +66,7 @@ impl std::fmt::Display for Error {
             }
             Self::Trailing => f.write_str("bytes follow the message"),
             Self::Algorithm(algo) => write!(f, "algorithm {algo} is not one this release reads"),
-            Self::Ranges => f.write_str("ranges are empty, not ascending, or overlap"),
+            Self::Ranges => f.write_str("ranges are empty, not ascending, overlap, or touch"),
             Self::Overflow => f.write_str("a range ends past the largest offset"),
             Self::Length => f.write_str("the chunk lengths are not the length of the content"),
             Self::Parameters => f.write_str(
