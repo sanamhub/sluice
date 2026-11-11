@@ -211,7 +211,7 @@ impl NeedRanges {
         if ranges.len() > MAX_ENTRIES as usize {
             return Err(Error::TooManyEntries);
         }
-        if ranges.windows(2).any(|pair| pair[1].start < pair[0].end()) {
+        if ranges.windows(2).any(|pair| pair[1].start <= pair[0].end()) {
             return Err(Error::Ranges);
         }
         Ok(Self { root, ranges })

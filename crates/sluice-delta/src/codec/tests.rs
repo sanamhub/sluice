@@ -128,13 +128,14 @@ fn ranges_must_be_ascending_and_apart() {
         vec![Range::new(10, 10).unwrap(), Range::new(15, 5).unwrap()],
         vec![Range::new(10, 10).unwrap(), Range::new(10, 5).unwrap()],
         vec![Range::new(10, 10).unwrap(), Range::new(19, 1).unwrap()],
+        vec![Range::new(10, 10).unwrap(), Range::new(20, 5).unwrap()],
     ] {
         assert_eq!(NeedRanges::new(root, ranges), Err(Error::Ranges));
     }
     assert!(
         NeedRanges::new(
             root,
-            vec![Range::new(10, 10).unwrap(), Range::new(20, 1).unwrap()]
+            vec![Range::new(10, 10).unwrap(), Range::new(21, 1).unwrap()]
         )
         .is_ok()
     );

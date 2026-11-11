@@ -6,6 +6,7 @@ mod live;
 #[cfg(test)]
 mod live_tests;
 mod manifests;
+mod need_ranges;
 mod packs;
 mod paths;
 mod receipts;
@@ -90,6 +91,7 @@ pub fn check(root: &Path) -> Result<Report> {
             "delta" => delta::run(&dir, &mut report)?,
             "live" => live::run(&dir, &mut report)?,
             "manifests" => manifests::run(&dir, &mut report)?,
+            "need-ranges" => need_ranges::run(&dir, &mut report)?,
             "packs" => packs::run(&dir, &mut report)?,
             "paths" => paths::run(&dir, &mut report)?,
             "receipts" => receipts::run(&dir, &mut report)?,
