@@ -888,12 +888,30 @@ bytes and observes progress; it never carries them.
 
 The progress events an implementation reports are named here, in the order a transfer may report
 them: `started`, `connected`, `path_changed`, `relayed`, `progress`, `retrying`, `warning`,
-`verified`, `done`. `--json` writes one object per line with the name in `event`. `connected` names
-the chosen path and, when it is relayed, the relay; `path_changed` reports every later move. Both are
-taken back as soon as a direct path is in use. `relayed` is said at most once per connection, ten
-seconds after it came up and only if the path is still relayed then, and names the relay and the
-seconds waited; it is information and not a failure, and a path that goes direct after it is reported
-by `path_changed` like any other move.
+`verified`, `done`, `dropped`. `--json` writes one object per line with the name in `event`.
+`connected` names the chosen path and, when it is relayed, the relay; `path_changed` reports every
+later move. Both are taken back as soon as a direct path is in use. `relayed` is said at most once
+per connection, ten seconds after it came up and only if the path is still relayed then, and names
+the relay and the seconds waited; it is information and not a failure, and a path that goes direct
+after it is reported by `path_changed` like any other move. `dropped` is the one event that is not
+the transfer's: it says that a watcher could not keep up, and how many events of the job it did not
+get. A watcher MUST treat the gap as unknown rather than as nothing having happened, and a server
+MUST never grow a buffer without a bound to avoid one.
+
+**Roots.** A server is started with zero or more root folders, and every path a client names lives
+inside one of them: the paths of a send, the output folder of a receive, and the file a receipt is
+written to. A server started with no roots refuses every send and every receive, and its refusal
+says how to allow one. It refuses rather than serving from wherever the caller points, because the
+socket or pipe is reachable by everything that runs as the same user.
+
+A path from a client MUST be absolute, and it is normalised before the check: the normal form has no
+`.` component, no `..` component that can be folded, and one spelling of every name a file system
+folds. The normal form MUST then be inside a root, which is the root itself or a name under it. A
+path whose normal form leaves a root is refused, even when a later component would come back:
+`../root/x` is not `root/x`. A link is never followed out of a root: every folder from the root down
+to the target is opened without following a link, and a link that leads outside a root is refused
+rather than resolved. The check and the use name the same folder, so a folder renamed between them
+is refused, as the writer of a receive refuses one.
 
 Store access is single-writer. A client MUST take an exclusive lock on the store directory, and if
 the lock is held by a live process it MUST connect to that process instead of opening the store.

@@ -92,7 +92,8 @@ message StartReceiveRequest {
   LocalPath out = 2;
   // Replace a file that is already there.
   bool force = 3;
-  // Write a receipt here when the transfer completes, if the sender offers one.
+  // Write a receipt here when the transfer completes, if the sender offers one. Inside a root and
+  // checked like `out`, so a receipt can never be written outside one.
   LocalPath receipt = 4;
 }
 
