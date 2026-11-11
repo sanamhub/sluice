@@ -3,6 +3,12 @@
 //! The browser proof in `web/proof/` needs a ticket's sender, relay and root, and `sluice` has no
 //! command that prints them: `inspect` describes what a ticket offers, not what it points at. This
 //! is developer tooling and not a product command, so it lives here.
+//!
+//! The ticket is read from standard input rather than taken as an argument, so it is never a command
+//! line that a process list or a shell history keeps. Its parts are the ticket by another spelling,
+//! so the output is as secret as the ticket itself.
+
+use std::io::Read;
 
 use sluice_core::ticket::{Body, Ticket};
 
@@ -24,7 +30,21 @@ pub fn run(text: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 64 lower-case hex characters, as a ticket and its parts are written.
+/// Reads one ticket from standard input and prints its parts.
+pub fn run_stdin() -> anyhow::Result<()> {
+    let mut text = String::new();
+    std::io::stdin().read_to_string(&mut text)?;
+    run(from_input(&text))
+}
+
+/// The text of one ticket read from a stream. A shell's line ending is not part of the ticket, and
+/// the decoder refuses text with a byte after it, so it is trimmed before the decode.
+fn from_input(text: &str) -> &str {
+    text.trim_end()
+}
+
+/// The bytes as lower-case hex, two characters each: 64 for a root, a sender or a key, and 32 for a
+/// stream id.
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -35,12 +55,11 @@ mod tests {
 
     use sluice_core::ticket::{Body, Format, Ticket};
 
-    use super::run;
+    use super::{from_input, run};
 
-    /// The fields printed are the ones a ticket carries, and a live ticket says so.
-    #[test]
-    fn the_parts_are_the_ones_the_ticket_names() {
-        let static_ticket = Ticket::new(
+    /// A static ticket with one address and a relay, for the tests below.
+    fn static_ticket() -> Ticket {
+        Ticket::new(
             [1; 32],
             vec![SocketAddr::from(([127, 0, 0, 1], 41641))],
             Some("http://127.0.0.1:3340/".to_string()),
@@ -51,8 +70,13 @@ mod tests {
                 format: Format::HashSequence,
             },
         )
-        .unwrap();
-        assert!(run(&static_ticket.encode()).is_ok());
+        .unwrap()
+    }
+
+    /// The fields printed are the ones a ticket carries, and a live ticket says so.
+    #[test]
+    fn the_parts_are_the_ones_the_ticket_names() {
+        assert!(run(&static_ticket().encode()).is_ok());
 
         let live = Ticket::new(
             [1; 32],
@@ -67,5 +91,15 @@ mod tests {
         .unwrap();
         assert!(run(&live.encode()).is_ok());
         assert!(run("sluice1not-a-ticket").is_err());
+    }
+
+    /// A ticket piped in ends with a line ending that is not part of it, and the decoder refuses a
+    /// byte after the ticket, so the input is trimmed first.
+    #[test]
+    fn a_line_ending_from_a_pipe_is_not_part_of_the_ticket() {
+        let text = static_ticket().encode();
+        assert_eq!(from_input(&format!("{text}\r\n")), text);
+        assert_eq!(from_input(&format!("{text}\n")), text);
+        assert_eq!(from_input(&text), text);
     }
 }
