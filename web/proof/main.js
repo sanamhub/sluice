@@ -2,7 +2,9 @@
 // from where it came from, so a script written into the document would not run.
 //
 // The parts a run names are in the fragment, after the `#`. A fragment is not part of a request, so
-// a server's log, a proxy and a browser's history do not get the sender or the root:
+// a server, a proxy and a log between them never see the sender or the root. The browser's address
+// bar and its history do hold the fragment until it is cleared, which is what the `replaceState`
+// call below does once the parts are read.
 //
 //   index.html#relay=http://127.0.0.1:3340/&sender=<64 hex>&root=<64 hex>&size=2097152
 
@@ -19,6 +21,10 @@ try {
   if (!parts.get('relay') || !parts.get('sender') || !parts.get('root') || !parts.get('size')) {
     throw new Error('relay, sender, root and size are in the fragment, after the #');
   }
+  // The parts are read, so the address bar and the history entry need them no longer. Replacing the
+  // entry leaves the page where it is, and a window that is shown, shared or looked at later no
+  // longer carries the sender or the root.
+  history.replaceState(null, '', location.pathname + location.search);
   const module = await import('../sluice_wasm.js');
   await module.default();
   // The ticket's root is the hash sequence: the manifest root, then each file's root. This page

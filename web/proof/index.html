@@ -3,10 +3,12 @@
 <!-- Everything the page needs is on this origin, and the relay it fetches through is named here.
      The script is a file rather than a block in this document, because `script-src 'self'` allows
      no inline script, and `connect-src 'self'` is what lets the module fetch the wasm file beside
-     it. `'wasm-unsafe-eval'` is what a browser needs to compile that file. -->
+     it. `'wasm-unsafe-eval'` is what a browser needs to compile that file. There is no
+     `frame-ancestors` here: a meta tag cannot set one, so this page makes no promise about being
+     framed. -->
 <meta
   http-equiv="Content-Security-Policy"
-  content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' http://127.0.0.1:3340/ ws://127.0.0.1:3340/; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' http://127.0.0.1:3340/ ws://127.0.0.1:3340/; base-uri 'none'; form-action 'none'"
 >
 <title>sluice in a tab: fetch one file from a native send</title>
 <body><pre id="out">starting</pre>

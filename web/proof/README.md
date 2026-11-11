@@ -42,7 +42,7 @@ pack:
 sluice send "$SCRATCH/payload.bin" --relay http://127.0.0.1:3340/
 ```
 
-The page reads `relay`, `sender`, `root` and `size` from its query string, so the ticket's parts have
+The page reads `relay`, `sender`, `root` and `size` from its fragment, so the ticket's parts have
 to be extracted, and `sluice` has no command that prints them. Write the ticket to a file and pipe it
 in, because what the command prints is the ticket by another spelling:
 
@@ -66,7 +66,9 @@ chrome --headless=new --no-sandbox --remote-debugging-port=9222 \
 
 The parts are in the fragment, after the `#`, and not in the query string. A fragment is not part of
 a request, so the server the page came from, and any proxy or log between them, never sees the
-sender or the root.
+sender or the root. The browser's command line holds the parts, though, so anything that lists the
+processes of the host reads them for as long as the run lasts, and the page clears the fragment from
+its own address bar and history entry once it has read them.
 
 `--dump-dom` returns before a fetch of two megabytes finishes, so the result is read from the live
 page over the DevTools protocol rather than from a dump. The body says `sequence 64 bytes`, then the
