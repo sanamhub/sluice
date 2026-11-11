@@ -13,6 +13,10 @@ use std::{
 use super::remove_quietly;
 use crate::{Error, Home};
 
+mod notes;
+
+pub(crate) use notes::{discarded, forget_discarded, note_discarded};
+
 /// A record of one partial store.
 pub struct Record {
     /// The random id, which is the record's file name and a line in the store's marker.
@@ -98,15 +102,17 @@ pub fn forget(path: &Path) {
 
 /// Whether any record of this home names `path`, whatever root it carries. The end of a command
 /// asks before it removes a kept partial store: a claim may have made that path a live store again,
-/// under another spelling of the same folder, after the removal gave up.
+/// under another spelling of the same folder, after the removal gave up. The records are read from
+/// the folder [`Home::partial_records_for_read`] names, so the question makes nothing and rewrites
+/// no access list.
 pub(super) fn named(path: &Path) -> bool {
     let Ok(wanted) = canonical(path) else {
         // A path with no resolved form cannot be proved to be nobody's, and leaving a folder is
         // better than removing a store that a record names.
         return true;
     };
-    let Ok(dir) = Home::partial_records() else {
-        return true;
+    let Some(dir) = Home::partial_records_for_read() else {
+        return false;
     };
     let Ok(entries) = fs::read_dir(&dir) else {
         return false;
@@ -120,6 +126,22 @@ pub(super) fn named(path: &Path) -> bool {
         };
         parse(&id, &text).is_some_and(|record| record.path == wanted)
     })
+}
+
+/// The folders this home has a record for, in the one form [`canonical`] returns, read from `dir`.
+/// The end of a command asks once for a pass and removes nothing a record names.
+pub(super) fn recorded_in(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let id = entry.file_name().to_str()?.to_string();
+            let text = fs::read_to_string(entry.path()).ok()?;
+            parse(&id, &text).map(|record| record.path)
+        })
+        .collect()
 }
 
 /// Removes a partial store and the home's record of it, which are both this receive's.
@@ -152,9 +174,18 @@ pub async fn discard_apart_keeping_names(path: &Path) {
 
 /// [`discard`] for a caller that already holds the path, such as a claim that made a folder and
 /// then could not write its marker.
-pub(super) fn discard_here(path: &Path) {
+///
+/// The record goes even when the folder stays, so nothing trusts the name as a store; a folder that
+/// survives a file another process holds is noted instead, and the note goes with a folder that did
+/// not, so one never stands for a name a later claim made its own store.
+pub(crate) fn discard_here(path: &Path) {
     remove_quietly(path);
     forget(path);
+    if fs::symlink_metadata(path).is_ok() {
+        note_discarded(path);
+    } else {
+        forget_discarded(path);
+    }
 }
 
 /// One hold per partial folder this process is claiming or removing, by resolved path. The hold is

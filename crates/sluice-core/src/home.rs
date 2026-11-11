@@ -261,6 +261,20 @@ impl Home {
         let root = setup::create_folders(&given)?;
         setup::create_private_folder(&root, "partials")
     }
+
+    /// The folder [`Home::partial_records`] would use, for a caller that only reads it, and `None`
+    /// when this home has no records: the home is not made, its access list is not written and no
+    /// lock is taken. The end of a command reads it before it removes a folder a record could name,
+    /// and it must cost the home nothing: a command that only receives bytes never makes a records
+    /// folder, and one that ends must not create the folders of a home it never used.
+    pub fn partial_records_for_read() -> Option<PathBuf> {
+        let root = Self::locate().ok()?;
+        let dir = root.join("partials");
+        // The name is asked about without following it: a link named like the folder is not the
+        // folder, and a record cannot be read through it.
+        let meta = std::fs::symlink_metadata(&dir).ok()?;
+        meta.file_type().is_dir().then_some(dir)
+    }
 }
 
 /// Removes `lock.pid` while the lock is still held, before the file that holds it closes. A

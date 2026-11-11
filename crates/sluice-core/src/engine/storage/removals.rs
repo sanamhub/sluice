@@ -105,11 +105,17 @@ pub(super) fn gone(path: &Path) {
 /// temporary folders.
 ///
 /// A command calls this on every way out, after its runtime is gone; an embedder calls the same
-/// function. A retry before the budget takes the path's hold, which waits for a removal that is
-/// still running, and asks whether a record of this home names it: a claim may have made it a live
-/// store again, under another spelling of the same folder, since the removal gave up. A retry after
-/// the budget takes the hold only when it is free and touches only a name a record cannot carry, so
-/// the pass costs one removal call per path and waits for nothing.
+/// function. No pass waits for anything: a path's hold is taken only when it is free, and a path
+/// whose hold is held, or which a record of this home names, is kept for the next tick. The records
+/// are read from the folder [`Home::partial_records_for_read`] names, which is resolved once and
+/// never made, so a command that never used this home learns nothing about it and writes nothing
+/// there.
+///
+/// A pass that begins before the budget is gone retries every kept path once, and a pass that
+/// begins after it makes one attempt and then ends the wait: nothing it does can take longer than
+/// one removal, and none of it waits on a hold.
+///
+/// [`Home::partial_records_for_read`]: crate::Home::partial_records_for_read
 ///
 /// # Examples
 ///
@@ -120,6 +126,18 @@ pub(super) fn gone(path: &Path) {
 /// sluice_core::engine::wait_for_removals(Duration::from_secs(1));
 /// ```
 pub fn wait_for_removals(budget: Duration) {
+    passes(budget, crate::Home::partial_records_for_read());
+}
+
+/// [`wait_for_removals`] with the records folder named by the caller, so a test's passes read a
+/// folder of its own and never the user's home.
+#[cfg(test)]
+pub(crate) fn wait_for_removals_at(budget: Duration, records: Option<PathBuf>) {
+    passes(budget, records);
+}
+
+/// [`wait_for_removals`] with the folder the records are read from, which is resolved once here.
+fn passes(budget: Duration, records: Option<PathBuf>) {
     let deadline = Instant::now() + budget;
     // A pass is made for what is already kept even when waiting for the running removals used the
     // whole budget. A path that was kept before the wait would otherwise be left for the sweep
@@ -131,17 +149,21 @@ pub fn wait_for_removals(budget: Duration) {
         if paths.is_empty() {
             return;
         }
-        // A pass made once the budget is gone may not wait for anything. A removal another thread is
-        // still trying holds its path across retries that outlast what is left of the budget, and a
-        // partial store's records cannot be read without asking the disk. Such a pass takes a free
-        // path only, and leaves the rest for the next command's wait or for the sweep.
         let spent = Instant::now() >= deadline;
+        // The folders this home has a record for, read once for the pass: a folder a record names
+        // is a claim's, and removing it would take a store out from under a receive.
+        let named = records
+            .as_deref()
+            .map(super::registry::recorded_in)
+            .unwrap_or_default();
+        #[cfg(test)]
+        seam::begin(spent);
         let mut still = Vec::new();
         for path in paths {
             let survives = if spent {
-                try_still_there(&path) != Some(false)
+                try_still_there(&path, &named) != Some(false)
             } else {
-                still_there(&path)
+                retry(&path, &named)
             };
             if survives {
                 still.push(path);
@@ -160,22 +182,44 @@ pub fn wait_for_removals(budget: Duration) {
         drop(kept);
         #[cfg(test)]
         seam::after_merge();
-        if Instant::now() >= deadline {
+        if spent || Instant::now() >= deadline {
             return;
         }
         std::thread::sleep(RETRY_EVERY);
     }
 }
 
-/// One more try at a kept path, for a pass whose budget is gone: the hold is taken without waiting,
-/// and a name a partial store could have is left alone. `true` means the path is still there, `None`
-/// means it was not touched. A path another removal holds, or one a record could name, is kept for
-/// the next wait rather than waited on or removed under a claim.
-fn try_still_there(path: &Path) -> Option<bool> {
-    if super::store::is_partial(path) {
-        return None;
-    }
-    match super::registry::try_with_hold(path, || super::remove_once(path).is_err()) {
+/// One more try at a kept path, for a pass whose budget is gone. `true` means the path is still
+/// there and `None` means it was not touched: either another removal holds it, or a record of this
+/// home names it, and the next wait or the sweep is what tries it again.
+fn try_still_there(path: &Path, named: &[PathBuf]) -> Option<bool> {
+    attempt(path, named)
+}
+
+/// One more try at a kept path, for a pass inside the budget. It waits for nothing either: a path
+/// another removal holds is kept for the next tick rather than waited on, so no pass can outlast
+/// the budget by a hold.
+fn retry(path: &Path, named: &[PathBuf]) -> bool {
+    attempt(path, named) != Some(false)
+}
+
+/// One try at removing `path`, under its hold when the hold is free.
+///
+/// A path a record names is a claim's and is left alone. A partial store is the one folder a claim
+/// can make between the records being read and the hold being taken, so it is asked about again
+/// under the hold: that read is what makes removing it safe, and it is cheap because only a folder
+/// named like a store is asked about twice.
+fn attempt(path: &Path, named: &[PathBuf]) -> Option<bool> {
+    let outcome = super::registry::try_with_hold(path, || {
+        if names(path, named) {
+            return false;
+        }
+        if super::store::is_partial(path) && super::registry::named(path) {
+            return false;
+        }
+        super::remove_once(path).is_err()
+    });
+    match outcome {
         Ok(Some(still)) => Some(still),
         Ok(None) => None,
         // A path whose folder cannot be resolved has no folder to remove.
@@ -183,20 +227,9 @@ fn try_still_there(path: &Path) -> Option<bool> {
     }
 }
 
-/// One more try at a kept path, under its hold, unless a record names it as a store this home still
-/// has. `true` means it is still there.
-fn still_there(path: &Path) -> bool {
-    super::registry::with_hold(path, || {
-        if super::registry::named(path) {
-            // A claim has made this a live store since the removal gave up; its folder is the
-            // claim's, and the record it wrote says so.
-            return false;
-        }
-        super::remove_once(path).is_err()
-    })
-    // A path whose folder cannot be resolved has no folder to remove: the folder that held it is
-    // gone, and retrying it would hold the end of the command for nothing.
-    .unwrap_or(false)
+/// Whether `path` is one of `named`, the folders this home had a record for when the pass began.
+fn names(path: &Path, named: &[PathBuf]) -> bool {
+    super::registry::canonical(path).is_ok_and(|wanted| named.contains(&wanted))
 }
 
 /// Waits for the removals that are running, or until `deadline` passes.
@@ -241,16 +274,22 @@ pub(crate) fn exclusive() -> MutexGuard<'static, ()> {
     ONE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// The two moments of one retry pass a test can act at, so it can watch a path arrive while a pass
-/// runs without a sleep. One test uses them at a time, under [`exclusive`].
+/// The moments of one retry pass a test can act at, so it can watch a path arrive while a pass
+/// runs, or count the passes a spent budget allows, without a sleep. One test uses them at a time,
+/// under [`exclusive`].
 #[cfg(test)]
 pub(super) mod seam {
-    use std::sync::Mutex;
+    use std::{
+        sync::MutexGuard,
+        sync::{Arc, Mutex},
+    };
 
     type Run = Box<dyn FnOnce() + Send>;
+    type Watcher = Arc<dyn Fn(bool) + Send + Sync>;
 
     static BEFORE: Mutex<Option<Run>> = Mutex::new(None);
     static AFTER: Mutex<Option<Run>> = Mutex::new(None);
+    static WATCHED: Mutex<Option<Watcher>> = Mutex::new(None);
 
     /// Arms the next pass: `before` runs after every path is retried and before the survivors go
     /// back, and `after` runs once they are.
@@ -266,12 +305,43 @@ pub(super) mod seam {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(after));
     }
 
+    /// Watches every pass that begins from now on. The returned value stops the watch when it is
+    /// dropped, whether the test ended or panicked, so a watcher of one test never sees another's
+    /// passes.
+    pub(crate) fn watch(observer: impl Fn(bool) + Send + Sync + 'static) -> Watched {
+        *watched() = Some(Arc::new(observer));
+        Watched(())
+    }
+
+    /// Tells the watcher that a pass began, and whether the budget was gone when it did.
+    pub(super) fn begin(spent: bool) {
+        let observer = watched().as_ref().map(Arc::clone);
+        if let Some(observer) = observer {
+            observer(spent);
+        }
+    }
+
     pub(super) fn before_merge() {
         take(&BEFORE)();
     }
 
     pub(super) fn after_merge() {
         take(&AFTER)();
+    }
+
+    /// Ends the watch of [`watch`] when it is dropped.
+    pub(crate) struct Watched(());
+
+    impl Drop for Watched {
+        fn drop(&mut self) {
+            *watched() = None;
+        }
+    }
+
+    fn watched() -> MutexGuard<'static, Option<Watcher>> {
+        WATCHED
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn take(slot: &Mutex<Option<Run>>) -> Run {

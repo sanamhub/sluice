@@ -24,9 +24,12 @@ pub use registry::{
     clash as registry_clash, discard_apart, discard_apart_keeping_names, find as find_record,
     forget as forget_record, with_hold,
 };
+pub(crate) use registry::{discard_here, discarded};
 #[cfg(test)]
 pub(crate) use removals::exclusive as exclusive_removals;
 pub use removals::wait_for_removals;
+#[cfg(test)]
+pub(crate) use removals::wait_for_removals_at;
 pub use repair::repair;
 pub(crate) use repair::{changed, data_path, name_count};
 pub use store::{FolderId, Owner, begin, identify, partial_dir, recorded};
