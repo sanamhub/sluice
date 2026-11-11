@@ -5,12 +5,13 @@
 //! uses it. Both are here, and they are the same on the guest and on the host, which is what lets
 //! this crate be checked by the gates and built for `wasm32-unknown-unknown`.
 //!
-//! This crate is the first step of the browser build and not the browser build: there is no
-//! wasm-bindgen export, no page and no fetch of a blob yet. What it establishes is the dependency
-//! set. The native binary asks `iroh` for `tls-aws-lc-rs`, which cannot build for the target; a
-//! tab reaches its relay over the WebSocket the browser already has, so the wasm build needs no TLS
-//! provider, and with `default-features = false` and no TLS feature the pinned `iroh` and
-//! `iroh-blobs` build for `wasm32-unknown-unknown` here. `docs/browser.md` records the measurements.
+//! This crate is the first step of the browser build and not the browser build: it exports a probe
+//! of the transport and one blob fetch, and there is no app, no page of its own and no write to a
+//! tab's storage. The native binary asks `iroh` for `tls-aws-lc-rs`, which has no build for the
+//! target, so the wasm build takes `ring` and compiles its C for the target. `ring` has no ML-KEM
+//! group, so a tab negotiates classical `X25519`, and a native peer that applies the post-quantum
+//! rule refuses it; the browser side stays a proof until the browser has a post-quantum provider.
+//! `docs/browser.md` records the measurements and the rule.
 
 use std::time::Duration;
 
