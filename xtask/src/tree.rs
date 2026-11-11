@@ -54,15 +54,20 @@ const TOP_LEVEL: [&str; 34] = [
 /// How many reasons an error lists before it counts the rest.
 const SHOWN: usize = 20;
 
-/// The longest a Rust source file may be. A file of this length carries more than one thing, and
-/// what is asked for is the seam between them: a module of its own, or a file beside it.
+/// The longest a source file may be. A file of this length carries more than one thing, and what is
+/// asked for is the seam between them: a module of its own, or a file beside it.
 const LONGEST: usize = 400;
 
-/// The Rust files that are longer than the rule allows, and why each is. A reason is a sentence
+/// The extensions of the source files the length rule covers: the languages this repository writes
+/// by hand. A file a tool generates, or one vendored from somewhere else, goes in [`EXEMPT`] with a
+/// reason; it is not a seam anyone can move.
+const SOURCES: [&str; 6] = ["astro", "css", "js", "rs", "svelte", "ts"];
+
+/// The source files that are longer than the rule allows, and why each is. A reason is a sentence
 /// about that one file: what it holds that a reader needs in one place.
 const EXEMPT: &[(&str, &str)] = &[];
 
-/// Checks every path git tracks in this repository, and every Rust file's length, and says what
+/// Checks every path git tracks in this repository, and every source file's length, and says what
 /// does not belong.
 pub fn run() -> anyhow::Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -70,8 +75,9 @@ pub fn run() -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("the xtask manifest is in the repository's root"))?;
     let tracked = tracked(root)?;
     let mut found = problems(&tracked);
-    let lengths = rust_lengths(root, &tracked)?;
+    let lengths = source_lengths(root, &tracked)?;
     found.extend(over_long(&lengths, EXEMPT));
+    found.extend(stale_exemptions(&tracked, &lengths, EXEMPT));
     if !found.is_empty() {
         let mut text = found
             .iter()
@@ -85,13 +91,13 @@ pub fn run() -> anyhow::Result<()> {
         anyhow::bail!("the tree breaks its rules:\n  {text}");
     }
     println!(
-        "{} tracked paths, none of them a build's, and every Rust source within {LONGEST} lines",
+        "{} tracked paths, none of them a build's, and every source file within {LONGEST} lines",
         tracked.len()
     );
     Ok(())
 }
 
-/// The Rust files that are over [`LONGEST`], each named with its length. A path in `exempt` is let
+/// The source files that are over [`LONGEST`], each named with its length. A path in `exempt` is let
 /// through, and its reason is checked by a test.
 fn over_long(files: &[(String, usize)], exempt: &[(&str, &str)]) -> Vec<String> {
     let mut found: Vec<String> = files
@@ -107,15 +113,53 @@ fn over_long(files: &[(String, usize)], exempt: &[(&str, &str)]) -> Vec<String> 
     found
 }
 
-/// The length of every Rust file git tracks, with the path git gives it.
-fn rust_lengths(root: &Path, tracked: &[String]) -> anyhow::Result<Vec<(String, usize)>> {
+/// The exemptions that no longer say anything true: a path git does not track, a source file under
+/// the limit, or a path the rule does not read. A stale entry would hide the next file that grows
+/// there, and a reader of the list cannot tell one that still applies from one that never did.
+fn stale_exemptions(
+    tracked: &[String],
+    files: &[(String, usize)],
+    exempt: &[(&str, &str)],
+) -> Vec<String> {
+    let mut found = Vec::new();
+    for (path, _) in exempt {
+        if !tracked.iter().any(|tracked| tracked == path) {
+            found.push(format!(
+                "{path} is exempt from the length rule and git does not track it"
+            ));
+            continue;
+        }
+        match files.iter().find(|(file, _)| file == path) {
+            Some((_, length)) if *length > LONGEST => {}
+            Some((_, length)) => found.push(format!(
+                "{path} is exempt from the length rule and is {length} lines, under the {LONGEST} it allows"
+            )),
+            None => found.push(format!(
+                "{path} is exempt from the length rule and is not a source file the rule reads"
+            )),
+        }
+    }
+    found.sort();
+    found
+}
+
+/// The length of every source file git tracks, with the path git gives it.
+fn source_lengths(root: &Path, tracked: &[String]) -> anyhow::Result<Vec<(String, usize)>> {
     let mut files = Vec::new();
-    for path in tracked.iter().filter(|path| path.ends_with(".rs")) {
+    for path in tracked.iter().filter(|path| is_source(path)) {
         let text = std::fs::read_to_string(root.join(path))
             .map_err(|error| anyhow::anyhow!("cannot read {path}: {error}"))?;
         files.push((path.clone(), text.lines().count()));
     }
     Ok(files)
+}
+
+/// Whether `path` is one of the source files the length rule covers.
+fn is_source(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| SOURCES.contains(&extension))
 }
 
 /// The reasons these paths do not belong in the tree, and none when they all do. A path is written
@@ -173,7 +217,7 @@ fn tracked(root: &Path) -> anyhow::Result<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{EXEMPT, over_long, problems};
+    use super::{EXEMPT, LONGEST, is_source, over_long, problems, stale_exemptions};
 
     fn paths(list: &[&str]) -> Vec<String> {
         list.iter().map(|path| (*path).to_string()).collect()
@@ -242,10 +286,10 @@ mod tests {
             .collect()
     }
 
-    /// A Rust file one line over the length is named with its length, and the file at the length
+    /// A source file one line over the length is named with its length, and the file at the length
     /// itself is not: the rule is a bound, not a target.
     #[test]
-    fn a_rust_file_over_the_length_is_named_with_its_length() {
+    fn a_source_file_over_the_length_is_named_with_its_length() {
         let found = over_long(
             &lengths(&[
                 ("crates/sluice-core/src/short.rs", 400),
@@ -281,8 +325,57 @@ mod tests {
     #[test]
     fn every_exemption_has_a_reason() {
         for (path, reason) in EXEMPT {
-            assert!(path.ends_with(".rs"), "{path} is not a Rust source");
+            assert!(
+                is_source(path),
+                "{path} is not a source file the rule reads"
+            );
             assert!(!reason.trim().is_empty(), "{path} has no reason");
         }
+    }
+
+    /// The rule reads the languages this repository writes by hand, and not the data or the prose
+    /// beside them: a stylesheet and a script are as much ours to keep small as a Rust module.
+    #[test]
+    fn the_rule_reads_every_language_we_write() {
+        for path in [
+            "crates/sluice-core/src/lib.rs",
+            "site/src/scripts/scene.ts",
+            "site/src/styles/sections.css",
+            "site/src/layouts/Base.astro",
+            "site/src/components/Hero.svelte",
+            "site/public/theme.js",
+        ] {
+            assert!(is_source(path), "{path} is a source file");
+        }
+        for path in ["README.md", "Cargo.toml", "tests/vectors/paths/rule-1.json"] {
+            assert!(!is_source(path), "{path} is not a source file");
+        }
+    }
+
+    /// An exemption for a file that is now under the limit, or for a path git does not track, is a
+    /// line that hides the next file to grow there, and it is named.
+    #[test]
+    fn an_exemption_that_no_longer_applies_is_named() {
+        let tracked = paths(&[
+            "crates/sluice-core/src/long.rs",
+            "crates/sluice-core/src/short.rs",
+        ]);
+        let files = lengths(&[
+            ("crates/sluice-core/src/long.rs", LONGEST + 1),
+            ("crates/sluice-core/src/short.rs", LONGEST),
+        ]);
+        assert!(stale_exemptions(&tracked, &files, &[]).is_empty());
+        let kept = &[("crates/sluice-core/src/long.rs", "it is one table")];
+        assert!(stale_exemptions(&tracked, &files, kept).is_empty());
+
+        let gone = &[("crates/sluice-core/src/removed.rs", "it is one table")];
+        let found = stale_exemptions(&tracked, &files, gone);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("does not track"), "{found:?}");
+
+        let short = &[("crates/sluice-core/src/short.rs", "it is one table")];
+        let found = stale_exemptions(&tracked, &files, short);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("under the"), "{found:?}");
     }
 }

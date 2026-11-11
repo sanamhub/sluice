@@ -1,0 +1,166 @@
+/* Compare: the Sluice column sits in a band of water light. */
+
+.compare-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+}
+
+.compare-table {
+  width: 100%;
+  min-width: 58rem;
+  table-layout: fixed;
+  font-size: var(--step--1);
+  line-height: 1.45;
+}
+
+.compare-table th,
+.compare-table td {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.compare-table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.compare-table thead th {
+  color: var(--mist);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.compare-table thead th:nth-child(2) {
+  color: var(--ink);
+  font-stretch: var(--wide);
+  font-weight: 700;
+}
+
+.compare-table thead th:first-child {
+  width: 13%;
+}
+
+.compare-table thead th:nth-child(2) {
+  width: 21%;
+}
+
+/* The question column stays put while the tools scroll past it on a narrow screen. */
+.compare-table tbody th,
+.compare-table thead th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--basin);
+}
+
+.compare-table tbody th {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.compare-table td:nth-child(2),
+.compare-table thead th:nth-child(2) {
+  background: var(--water-soft);
+  color: var(--ink);
+}
+
+.compare-table td {
+  color: var(--mist);
+}
+
+.compare-table td.unstated {
+  color: color-mix(in srgb, var(--mist) 60%, transparent);
+  font-style: italic;
+}
+
+.compare-sources {
+  max-width: var(--measure);
+}
+
+/* Security: three facts and a ticket with punched notches, as a ticket has. */
+
+.security-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-4);
+}
+
+.security-grid .section-head {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+.facts {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.fact {
+  display: grid;
+  gap: 0.5rem;
+  padding-left: 1.1rem;
+  border-left: 2px solid var(--line-strong);
+}
+
+.fact p {
+  color: var(--mist);
+  font-size: var(--step--1);
+}
+
+.ticket-card {
+  --notch: 14px;
+  align-self: start;
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) var(--space-4)
+    calc(var(--space-4) + 0.5rem);
+  border-radius: var(--radius-l);
+  background:
+    linear-gradient(
+        90deg,
+        transparent calc(var(--space-4) - 1px),
+        var(--line-strong) 0 calc(var(--space-4) + 1px),
+        transparent 0
+      )
+      no-repeat,
+    linear-gradient(160deg, var(--stone-2), var(--stone));
+  background-size: 100% 100%;
+  box-shadow: var(--shadow);
+  mask:
+    radial-gradient(
+        circle var(--notch) at var(--space-4) 0,
+        transparent 98%,
+        #000
+      )
+      top / 100% 51% no-repeat,
+    radial-gradient(
+        circle var(--notch) at var(--space-4) 100%,
+        transparent 98%,
+        #000
+      )
+      bottom / 100% 51% no-repeat;
+}
+
+.ticket-card h3 {
+  color: var(--brass);
+}
+
+.ticket-card p {
+  font-size: var(--step--1);
+}
+
+/* Install sits in a band of its own, a step down like a lock chamber, so the one place a reader
+   acts stands apart from the reading around it. */
+
+.install-all {
+  border-block: 1px solid var(--line);
+  background:
+    radial-gradient(
+      ellipse 60% 80% at 80% 0%,
+      var(--water-soft),
+      transparent 70%
+    ),
+    color-mix(in srgb, var(--stone) 55%, var(--basin));
+}
