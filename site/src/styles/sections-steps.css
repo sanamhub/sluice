@@ -1,0 +1,199 @@
+/* How a file crosses: a channel line beside the steps. With scroll-driven animation the water
+   fills it as the reader goes down and each mark turns brass when the water reaches it; without,
+   the line is full and every mark is brass, which is the same picture at its end. */
+
+.how-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.how-head {
+  position: sticky;
+  top: calc(var(--header) + 2rem);
+}
+
+.how-steps {
+  --rail: 2.75rem;
+  position: relative;
+  display: grid;
+  gap: var(--space-5);
+  padding-left: calc(var(--rail) + 1.25rem);
+}
+
+.how-steps::before,
+.how-steps::after {
+  content: "";
+  position: absolute;
+  top: 0.4rem;
+  bottom: 0.4rem;
+  left: calc(var(--rail) / 2 - 2px);
+  width: 4px;
+  border-radius: 2px;
+}
+
+.how-steps::before {
+  background: var(--line);
+}
+
+.how-steps::after {
+  background: linear-gradient(180deg, var(--water), var(--water-deep));
+  box-shadow: 0 0 18px var(--water-soft);
+  transform-origin: top;
+}
+
+.how-step {
+  position: relative;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.how-mark {
+  position: absolute;
+  top: -0.3rem;
+  left: calc(-1 * (var(--rail) + 1.25rem));
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: var(--rail);
+  height: var(--rail);
+  border: 2px solid var(--brass);
+  border-radius: 50%;
+  background: var(--brass);
+  color: var(--brass-ink);
+  font-stretch: var(--wider);
+  font-weight: 700;
+}
+
+.how-step p {
+  max-width: 56ch;
+  color: var(--mist);
+}
+
+.how-step code,
+.task code {
+  justify-self: start;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .how-steps {
+      view-timeline: --how block;
+    }
+
+    .how-steps::after {
+      animation: fill linear both;
+      animation-timeline: --how;
+      animation-range: entry 40% cover 60%;
+    }
+
+    .how-mark {
+      animation: reach linear both;
+      animation-timeline: view();
+      animation-range: entry 70% contain 30%;
+    }
+  }
+}
+
+@keyframes fill {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes reach {
+  from {
+    border-color: var(--line-strong);
+    background: var(--basin);
+    color: var(--mist);
+  }
+  to {
+    border-color: var(--brass);
+    background: var(--brass);
+    color: var(--brass-ink);
+  }
+}
+
+/* The real run: two panes, no fake window chrome. Brass marks the lines that report a check. */
+
+.panes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.pane {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--basin-deep) 70%, var(--stone));
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.pane figcaption {
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--mist);
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+
+.pane pre {
+  margin: 0;
+  padding: 1rem;
+  overflow-x: auto;
+  font-size: 0.84rem;
+  line-height: 1.75;
+}
+
+.t-cmd {
+  color: var(--ink);
+}
+
+.t-cmd::before {
+  content: "$ ";
+  color: var(--water);
+}
+
+.t-out,
+.t-err {
+  color: var(--mist);
+}
+
+.t-ok {
+  color: var(--brass);
+}
+
+/* Tasks: a ruled index, not a grid of cards. */
+
+.task-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 var(--space-4);
+}
+
+.task {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 0.6rem;
+  padding-block: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.task h3 {
+  font-size: 1.1rem;
+}
+
+.task p {
+  color: var(--mist);
+  font-size: var(--step--1);
+  line-height: 1.6;
+}
