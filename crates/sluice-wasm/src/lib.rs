@@ -20,7 +20,8 @@ use iroh::{
     address_lookup::MemoryLookup, endpoint::presets,
 };
 use iroh_blobs::{
-    Hash, HashAndFormat, api::downloader::Shuffled, api::proto::BlobStatus, store::mem::MemStore,
+    Hash, api::downloader::Shuffled, api::proto::BlobStatus, protocol::ChunkRanges,
+    protocol::ChunkRangesExt, protocol::GetRequest, store::mem::MemStore,
 };
 use n0_future::time::timeout;
 use wasm_bindgen::prelude::*;
@@ -28,6 +29,12 @@ use wasm_bindgen::prelude::*;
 /// How long a tab waits for its relay before it gives up. A relay that has not answered in this
 /// time is not going to carry the transfer, and a page should show a failure rather than wait.
 const RELAY_WAIT: Duration = Duration::from_secs(20);
+
+/// How long a whole fetch has, from the request to the last byte of the file. A peer that answers
+/// the relay and then stops sending would otherwise leave the promise pending and the endpoint open
+/// for as long as the tab lives, and a file of a few hundred megabytes over a slow relay is worth
+/// waiting longer for than a relay's own answer.
+const FETCH_WAIT: Duration = Duration::from_secs(120);
 
 /// The error of a relay URL or a hash a ticket names that this build cannot read.
 ///
@@ -88,6 +95,10 @@ mod tests {
         for bad in [-1.0, 1.5, f64::NAN, f64::INFINITY, 1e30] {
             assert!(byte_count(bad).is_err(), "{bad}");
         }
+        // The largest count a `u64` holds is not a `f64`, so the bound is the first number above
+        // it: a size of `2^64` is refused rather than turned into a count of its own.
+        assert!(byte_count(u64::MAX as f64).is_err(), "2^64");
+        assert!(byte_count((u64::MAX / 2) as f64).is_ok());
     }
 
     /// A relay is read the one way `iroh` reads one, and a bad one is refused with a sentence and
@@ -112,6 +123,71 @@ mod tests {
         assert_eq!(hash(&zeros).unwrap().as_bytes(), &[0; 32]);
         assert!(hash("0").is_err());
         assert!(hash(&"g".repeat(64)).is_err());
+    }
+
+    /// A lookup that knows one address, which is what a tab gets from its relay.
+    fn lookup_of(addr: iroh::EndpointAddr) -> iroh::address_lookup::MemoryLookup {
+        let lookup = iroh::address_lookup::MemoryLookup::new();
+        lookup.add_endpoint_info(addr);
+        lookup
+    }
+
+    /// A ticket that names fewer bytes than the content holds fetches only the bytes it names and
+    /// then refuses the content, so a ticket cannot make a tab hold a file it was not told about.
+    /// This is a host test: a tab's fetch needs a relay, and only the host build carries an async
+    /// runtime to drive one.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn a_ticket_that_names_fewer_bytes_than_the_content_is_refused() {
+        use iroh::{Endpoint, protocol::Router};
+        use iroh_blobs::BlobsProtocol;
+        use iroh_blobs::store::mem::MemStore;
+
+        use super::fetch_direct;
+
+        let content = vec![7u8; 1 << 20];
+        let store = MemStore::new();
+        let hash = store.blobs().add_bytes(content.clone()).await.unwrap().hash;
+        let provider = Endpoint::builder(iroh::endpoint::presets::Empty)
+            .crypto_provider(iroh::tls::default_provider())
+            .relay_mode(iroh::RelayMode::Disabled)
+            .bind()
+            .await
+            .unwrap();
+        let router = Router::builder(provider.clone())
+            .accept(iroh_blobs::ALPN, BlobsProtocol::new(&store, None))
+            .spawn();
+        let consumer = Endpoint::builder(iroh::endpoint::presets::Empty)
+            .crypto_provider(iroh::tls::default_provider())
+            .relay_mode(iroh::RelayMode::Disabled)
+            // A tab learns the sender's address from the relay it is told about; here the provider
+            // is on this machine and says where it is.
+            .address_lookup(lookup_of(provider.addr()))
+            .bind()
+            .await
+            .unwrap();
+
+        // A thousand bytes of the megabyte: the fetch asks for that range and no more, so the store
+        // is left incomplete rather than holding the megabyte and being refused afterwards.
+        let allowed = 1024u64;
+        let error = fetch_direct(&consumer, provider.id(), hash, allowed)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            format!("the content is longer than the {allowed} bytes the ticket names")
+        );
+
+        // The whole content, asked for in full, still arrives: the bound is the ticket's length and
+        // not a smaller fetch.
+        let bytes = fetch_direct(&consumer, provider.id(), hash, content.len() as u64)
+            .await
+            .unwrap();
+        assert_eq!(bytes, content);
+
+        router.shutdown().await.unwrap();
+        consumer.close().await;
     }
 }
 
@@ -153,10 +229,12 @@ pub fn relay_reads(text: &str) -> bool {
 /// that does not match is refused before it reaches the caller. A blob that arrives is the blob the
 /// root names, so the page can write it without checking it again.
 ///
-/// `size` is the length the ticket promises, as a number. A blob of another length is refused
-/// before its bytes are copied out of the store, so a ticket cannot make a page hold content of a
-/// length it was not told about. The relay has [`RELAY_WAIT`] to answer, and the endpoint is closed
-/// on every way out, including a refusal.
+/// `size` is the length the ticket promises, as a number, and it is how much the fetch asks for: the
+/// download requests the bytes below that length and no others, so a ticket that names a kilobyte
+/// for a root of ten gigabytes costs the tab a kilobyte of transfer and of memory, and the content
+/// is refused afterwards because it is not the length the ticket names. The relay has
+/// [`RELAY_WAIT`] to answer and the fetch has [`FETCH_WAIT`] in all, and the endpoint is closed on
+/// every way out, including a refusal and a timeout.
 ///
 /// It has fetched from a native `sluice send` through a relay, in a headless browser: a 2 MiB file
 /// whose SHA-256 matched the sender's. The address it needs is the ticket's relay, which names where
@@ -165,8 +243,9 @@ pub fn relay_reads(text: &str) -> bool {
 /// # Errors
 ///
 /// A relay URL, a sender id, a root or a size that is not one, a relay that does not answer in time,
-/// an endpoint that cannot be bound, a fetch that fails, and content of another length are all
-/// strings for the caller to show. None of them quotes the ticket.
+/// a fetch that does not finish in time, an endpoint that cannot be bound, a fetch that fails, and
+/// content of another length are all strings for the caller to show. None of them quotes the
+/// ticket.
 #[wasm_bindgen]
 pub async fn fetch_blob(
     relay_url: &str,
@@ -178,6 +257,16 @@ pub async fn fetch_blob(
     let sender = sender_id(sender).map_err(to_js)?;
     let hash = hash(root).map_err(to_js)?;
     let size = byte_count(size).map_err(to_js)?;
+    // A ticket of no bytes names the root of empty content, and there is nothing to ask a peer for:
+    // the check is the whole fetch, and it still refuses a root that is not that one.
+    if size == 0 {
+        if hash != Hash::new(b"") {
+            return Err(to_js(Bad(format!(
+                "the content is 0 bytes, and the ticket names {size}"
+            ))));
+        }
+        return Ok(Vec::new());
+    }
     // The only address a tab can use is the relay, and the ticket already says which one the sender
     // is on. Without this, a browser has an id and no way to dial it: there is no discovery service
     // configured and a tab can reach nothing directly.
@@ -189,67 +278,99 @@ pub async fn fetch_blob(
         .bind()
         .await
         .map_err(|e| to_js(Bad(format!("cannot open an endpoint: {e}"))))?;
-    let outcome = fetch_one(&endpoint, sender, hash, size).await;
+    // The whole fetch is bounded, not only the relay's answer: a peer that stops sending fails the
+    // promise instead of leaving the endpoint open for the life of the tab.
+    let outcome = match timeout(FETCH_WAIT, fetch(&endpoint, sender, hash, size)).await {
+        Ok(Ok(bytes)) => Ok(bytes),
+        Ok(Err(missing)) => Err(to_js(missing)),
+        Err(_) => Err(to_js(Bad(format!(
+            "the fetch did not finish in {} s",
+            FETCH_WAIT.as_secs()
+        )))),
+    };
     // Closed on every way out: a page that keeps an endpoint open holds a socket and a relay
     // registration for as long as it lives.
     endpoint.close().await;
     outcome
 }
 
-/// One fetch through an endpoint that is already bound. The store is this call's and is dropped with
-/// it, so the bytes exist in the page only as the value returned here.
-async fn fetch_one(
+/// One fetch through an endpoint that is already bound: the relay's answer first, and then the
+/// download.
+async fn fetch(
     endpoint: &Endpoint,
     sender: EndpointId,
     hash: Hash,
     size: u64,
-) -> Result<Vec<u8>, JsValue> {
+) -> Result<Vec<u8>, Bad> {
     // The relay connection has to be up before a peer can be found through it: a browser has no
     // direct path, so the relay is the only way to the sender.
     timeout(RELAY_WAIT, endpoint.online()).await.map_err(|_| {
-        to_js(Bad(format!(
+        Bad(format!(
             "the relay did not answer in {} s",
             RELAY_WAIT.as_secs()
-        )))
+        ))
     })?;
+    fetch_direct(endpoint, sender, hash, size).await
+}
+
+/// The download itself, through an endpoint that can already reach the sender. The store is this
+/// call's and is dropped with it, so the bytes exist in the page only as the value returned here,
+/// and only the bytes the ticket names are ever asked for.
+async fn fetch_direct(
+    endpoint: &Endpoint,
+    sender: EndpointId,
+    hash: Hash,
+    size: u64,
+) -> Result<Vec<u8>, Bad> {
     let store = MemStore::new();
     // The downloader takes the peers that may have the content; the endpoint id is enough, because
     // a relayed connection is the only kind a browser makes and the relay knows where it lives.
+    // The request names the byte range the ticket promises, so a peer cannot make the tab hold more
+    // than that: content of another length leaves the store incomplete and is refused below.
     store
         .downloader(endpoint)
-        .download(HashAndFormat::raw(hash), Shuffled::new(vec![sender]))
+        .download(
+            GetRequest::blob_ranges(hash, ChunkRanges::bytes(..size)),
+            Shuffled::new(vec![sender]),
+        )
         .await
-        .map_err(|e| to_js(Bad(format!("the fetch stopped: {e}"))))?;
-    let stored = match store.blobs().status(hash).await {
-        Ok(BlobStatus::Complete { size }) => size,
-        Ok(other) => {
-            return Err(to_js(Bad(format!(
-                "the fetch left no complete blob: {other:?}"
-            ))));
+        .map_err(|e| Bad(format!("the fetch stopped: {e}")))?;
+    let bytes = match store.blobs().status(hash).await {
+        Ok(BlobStatus::Complete { size: stored }) => {
+            if stored != size {
+                return Err(Bad(format!(
+                    "the content is {stored} bytes, and the ticket names {size}"
+                )));
+            }
+            store
+                .blobs()
+                .get_bytes(hash)
+                .await
+                .map_err(|e| Bad(format!("the blob cannot be read: {e}")))?
+        }
+        // The request asked for the bytes the ticket names and no others, so a blob that is only
+        // partly there is content that is longer than the ticket says.
+        Ok(BlobStatus::Partial { .. }) => {
+            return Err(Bad(format!(
+                "the content is longer than the {size} bytes the ticket names"
+            )));
+        }
+        Ok(BlobStatus::NotFound) => {
+            return Err(Bad("the fetch left no content in the store".to_string()));
         }
         Err(error) => {
-            return Err(to_js(Bad(format!(
-                "the stored blob cannot be read: {error}"
-            ))));
+            return Err(Bad(format!("the stored blob cannot be read: {error}")));
         }
     };
-    if stored != size {
-        return Err(to_js(Bad(format!(
-            "the content is {stored} bytes, and the ticket names {size}"
-        ))));
-    }
-    let bytes = store
-        .blobs()
-        .get_bytes(hash)
-        .await
-        .map_err(|e| to_js(Bad(format!("the blob cannot be read: {e}"))))?;
     Ok(bytes.to_vec())
 }
 
 /// A byte count a page passes as a number. A count that is not a whole number of bytes in the range
-/// a `u64` holds is refused, because the size a ticket names is one.
+/// a `u64` holds is refused, because the size a ticket names is one. `2^64` is refused too: `u64`
+/// holds nothing above `2^64 - 1`, and rounding that bound up to a `f64` would turn a size of `2^64`
+/// into a count of its own.
 fn byte_count(size: f64) -> Result<u64, Bad> {
-    if !size.is_finite() || size < 0.0 || size.fract() != 0.0 || size > u64::MAX as f64 {
+    if !size.is_finite() || size < 0.0 || size.fract() != 0.0 || size >= u64::MAX as f64 {
         return Err(Bad("a ticket's size is a whole number of bytes".to_string()));
     }
     Ok(size as u64)
