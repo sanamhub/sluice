@@ -34,6 +34,13 @@ mandatory option on the endpoint builder, and its `Minimal` and `N0` presets set
 TLS feature is enabled (`iroh-1.4.1/src/endpoint/presets.rs`). So the count that builds and the count
 that runs are different counts, and a browser endpoint needs `ring` after all.
 
+**The key exchange is classical.** `ring` has no ML-KEM group, so a tab negotiates `X25519` and
+nothing else. A native peer applies the rule of `SPEC.md` section 3 and closes such a connection with
+the policy code before it serves or sends anything, so a browser session works only against a peer
+that does not apply it. That refusal is correct and is not weakened for the browser: the native build
+keeps requiring `X25519MLKEM768` of every peer, and the browser side stays a proof until a
+post-quantum provider that builds for WASM exists.
+
 `zig cc` is the stand-in for `clang` on a toolchain without LLVM, with the freestanding wasm target,
 and it first stops at the same place:
 
@@ -79,9 +86,10 @@ wasm-bindgen --target nodejs --out-dir out \
 ```
 
 That pipeline works end to end: the generated module loads in Node, `relay_reads` answers for a good
-URL and a bad one, and `endpoint_id` fails with the provider message above. The parts that need no
-endpoint are sound and tested: the relay URL in the form `iroh` dials with, the relay-only mode, the
-memory store, and the root parser.
+URL and a bad one, and `endpoint_id` returns 64 hex characters. Without a provider it failed with the
+message above; with `ring` and the flags the next section gives, it binds a real endpoint. The parts
+that need no endpoint are sound and tested: the relay URL in the form `iroh` dials with, the
+relay-only mode, the memory store, and the root parser.
 
 Building the whole workspace for the target does not work and is not meant to: the native crates ask
 for `aws-lc-rs`, which has no wasm build, and cargo unifies a package's features across one build.

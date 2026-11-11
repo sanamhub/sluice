@@ -57,8 +57,11 @@ pipe, a file or a log.
 
 - **Forged identity by a future quantum adversary.** Identity is Ed25519. Key exchange is
   post-quantum; signatures are not.
-- **The browser build's key exchange.** `aws-lc-rs` does not build for WASM, so the browser uses
-  `ring` and classical X25519. The session panel shows which group was negotiated.
+- **The browser build's key exchange.** `aws-lc-rs` does not build for WASM, and `ring` has no
+  ML-KEM group, so a tab negotiates classical X25519. A native peer applies the rule of `SPEC.md`
+  section 3 and closes such a connection with the policy code before it serves or sends anything.
+  The browser side stays a proof until a post-quantum provider that builds for WASM exists, and the
+  native build is not weakened for it.
 - **A compromised endpoint.** A stolen identity key is a stolen identity.
 - **Traffic analysis.** A relay sees that two endpoints exchanged some volume at some time. Browser
   sessions are always relayed, so this applies to every one of them.
