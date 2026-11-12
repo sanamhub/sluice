@@ -1,6 +1,7 @@
 mod big;
 mod collide;
 mod common;
+mod confined;
 mod disk;
 mod files;
 mod limits;

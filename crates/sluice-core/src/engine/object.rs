@@ -24,6 +24,11 @@ pub struct Facts {
 }
 
 impl ObjectId {
+    /// The volume the object is on.
+    pub fn volume(&self) -> u64 {
+        self.volume
+    }
+
     /// The object a path names, read from a handle opened without following a link in the last
     /// component. A folder and a file both work.
     pub fn of_path(path: &Path) -> io::Result<Self> {
