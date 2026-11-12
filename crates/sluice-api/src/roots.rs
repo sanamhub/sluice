@@ -63,6 +63,23 @@ impl Roots {
         Ok(Self { roots })
     }
 
+    /// Refuses a root that is the home, holds it, or lies inside it. A root is a folder clients may
+    /// write into and read from, and the home holds the identity key and the stores, so a root that
+    /// reaches any of it would hand them to every program that runs as this user.
+    pub fn refuse_home(&self, home: &Path) -> Result<(), ApiError> {
+        let home = plain(std::fs::canonicalize(home).map_err(|e| refuse_io("resolve", home, &e))?);
+        for root in &self.roots {
+            if overlaps(&root.path, &home) {
+                return Err(ApiError::Refused(format!(
+                    "the root {} is the daemon's home, holds it, or lies inside it, and a root \
+                     must be a folder of its own: the home keeps the identity key and the stores",
+                    shown(&root.name)
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Whether the daemon has no root.
     pub fn is_empty(&self) -> bool {
         self.roots.is_empty()
@@ -170,6 +187,21 @@ impl Root {
             _held: vec![held],
         })
     }
+}
+
+/// Whether one path is the other or is inside it, in either direction. Windows file names are
+/// compared without regard to case.
+fn overlaps(a: &Path, b: &Path) -> bool {
+    let fold = |p: &Path| {
+        let text = p.to_string_lossy();
+        PathBuf::from(if cfg!(windows) {
+            text.to_lowercase()
+        } else {
+            text.into_owned()
+        })
+    };
+    let (a, b) = (fold(a), fold(b));
+    a.starts_with(&b) || b.starts_with(&a)
 }
 
 /// The path without the verbatim prefix `canonicalize` gives on Windows, which the engine's own

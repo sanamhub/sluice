@@ -222,3 +222,19 @@ fn a_file_with_a_second_name_outside_the_root_is_not_sent() {
         "{refused}"
     );
 }
+
+#[test]
+fn a_root_that_is_the_home_holds_it_or_lies_inside_it_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    fs::create_dir_all(home.join("inner")).unwrap();
+    let beside = dir.path().join("beside");
+    fs::create_dir(&beside).unwrap();
+    for bad in [home.clone(), dir.path().to_path_buf(), home.join("inner")] {
+        let roots = Roots::open(std::slice::from_ref(&bad)).unwrap();
+        let refused = roots.refuse_home(&home).expect_err("overlap is refused");
+        assert!(refused.to_string().contains("home"), "{bad:?}: {refused}");
+    }
+    Roots::open(&[beside]).unwrap().refuse_home(&home).unwrap();
+    Roots::none().refuse_home(&home).unwrap();
+}

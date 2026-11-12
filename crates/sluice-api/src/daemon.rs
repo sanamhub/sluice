@@ -25,6 +25,7 @@ impl Daemon {
     /// Makes the listener for the home `home` holds, and builds the service over it. Nothing is
     /// served until [`Daemon::serve`].
     pub fn bind(home: Home, roots: Roots, relay: RelayModeChoice) -> Result<Self, ApiError> {
+        roots.refuse_home(home.path())?;
         let (incoming, guard, location) = platform::listen(home.path())?;
         Ok(Self {
             service: Service::new(home, roots, relay),
