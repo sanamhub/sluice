@@ -2,6 +2,7 @@
 //! events a transfer reports. Commands start a runtime; this module only provides futures.
 
 mod conn;
+mod delta;
 mod endpoint;
 mod events;
 mod expiry;
@@ -22,6 +23,7 @@ mod storage;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub use delta::{DeltaReport, parse_request as parse_delta_request};
 pub use endpoint::{Congestion, N0_WARNING, RelayModeChoice};
 pub use events::{Event, PathKind, emit, watch_path};
 pub use expiry::{DEFAULT_SECONDS, deadline, parse as parse_expiry};

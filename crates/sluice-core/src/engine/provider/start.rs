@@ -173,6 +173,7 @@ impl Provider {
         }
         endpoint::wait_for_direct_addr(&endpoint).await?;
         let (done, done_rx) = unbounded_channel();
+        let allowed_for_delta = Arc::clone(&allowed);
         let policy = policy::start_shared(
             allowed,
             expiry,
@@ -186,7 +187,16 @@ impl Provider {
         let blobs = BlobsProtocol::new(store.deref(), Some(policy.events.clone()));
         let receipts =
             crate::engine::receipts::Receipts::new(policy.asked_handle(), Arc::clone(&places));
-        let sluice = SluiceProtocol::serving(live, Arc::clone(&receipts));
+        // A live stream has no root to sign chunks of, so only a fixed send serves signatures.
+        let delta = live.is_none().then(|| {
+            crate::engine::delta::Delta::new(
+                store.clone(),
+                allowed_for_delta,
+                policy.asked_handle(),
+                Arc::clone(&places),
+            )
+        });
+        let sluice = SluiceProtocol::serving(live, Arc::clone(&receipts), delta.clone());
         let router = Router::builder(endpoint.clone())
             .accept(iroh_blobs::ALPN, blobs)
             .accept(ALPN, sluice)
@@ -201,6 +211,7 @@ impl Provider {
             receivers: receivers_rx,
             places,
             group_lines: Mutex::new(policy::Lines::default()),
+            delta,
             expiry,
             _dir: None,
         })

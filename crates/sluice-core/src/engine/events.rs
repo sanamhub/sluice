@@ -121,6 +121,16 @@ pub enum Event {
         /// What was skipped, with no path from a manifest.
         message: String,
     },
+    /// Where the bytes of a receive that was given `--delta-from` came from. It comes once, before
+    /// the receive is verified and done.
+    Delta {
+        /// Bytes copied from the local file.
+        local_bytes: u64,
+        /// Bytes fetched from the sender.
+        network_bytes: u64,
+        /// Bytes of signature lists the sender wrote.
+        signature_bytes: u64,
+    },
     /// Every byte arrived and matched its root.
     Verified {
         /// Bytes verified.

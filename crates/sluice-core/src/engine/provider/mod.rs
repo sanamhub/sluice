@@ -51,6 +51,9 @@ pub struct Provider {
     /// number of lines as a refused receiver. Any peer can make a connection, so the terminal would
     /// otherwise be at the mercy of a flood of them.
     group_lines: Mutex<policy::Lines>,
+    /// The signatures this send serves, for a fixed send. A live send has none.
+    #[cfg_attr(not(test), allow(dead_code))]
+    delta: Option<Arc<super::delta::Delta>>,
     expiry: Option<u64>,
     /// The send's own folder, removed after this provider has closed its store. A provider that is
     /// dropped without being shut down hands the folder on with the store, so the two go in the
@@ -88,6 +91,12 @@ impl Provider {
     #[cfg(test)]
     pub fn served_bytes(&self, hash: Hash) -> u64 {
         self.policy.served(hash)
+    }
+
+    /// The signature state, for a test that counts the lists served or serves its own bytes.
+    #[cfg(test)]
+    pub(crate) fn delta(&self) -> Option<&Arc<super::delta::Delta>> {
+        self.delta.as_ref()
     }
 
     /// The receipt state, for a test that puts a record in place of the signed one.

@@ -3,7 +3,7 @@
 
 mod options;
 
-use options::{options, refuse_receipt_without_a_whole_transfer};
+use options::{options, refuse_delta_without_a_transfer, refuse_receipt_without_a_whole_transfer};
 
 use std::{io::BufRead, path::PathBuf};
 
@@ -72,6 +72,12 @@ pub struct RecvArgs {
     /// arrived. The file is not replaced unless `--force` is given
     #[arg(long, value_name = "FILE")]
     pub receipt: Option<PathBuf>,
+    /// An older version of what the ticket names: a file, or a folder holding files at the paths the
+    /// ticket lists. The parts of a file that match are copied from it and only the rest is fetched.
+    /// The sender is told which ranges are still needed, which tells it what you already hold of
+    /// that file; the path is only read
+    #[arg(long, value_name = "PATH")]
+    pub delta_from: Option<PathBuf>,
 }
 
 pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
@@ -92,12 +98,19 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
                     .to_string(),
             ));
         }
+        if args.delta_from.is_some() {
+            return Err(Error::Policy(
+                "--delta-from names the older version of one ticket's content, so receive them                  one at a time"
+                    .to_string(),
+            ));
+        }
         return run_many(args, output, &tickets, rate, include);
     }
     let ticket = tickets.into_iter().next().unwrap_or_default();
     let decoded = Ticket::decode(&ticket)?;
     let range = args.range.as_deref().map(ByteRange::parse).transpose()?;
     refuse_receipt_without_a_whole_transfer(args, &decoded, range.is_some(), &include)?;
+    refuse_delta_without_a_transfer(args, &decoded, range.is_some())?;
     refuse_include_without_entries(&decoded, args, &include)?;
     if args.max_size.is_some() && !matches!(decoded.body(), Body::Live { .. }) {
         return Err(Error::Policy(

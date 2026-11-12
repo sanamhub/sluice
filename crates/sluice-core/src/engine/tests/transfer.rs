@@ -43,6 +43,7 @@ async fn one_file_goes_out_and_arrives_with_its_name() {
             max_network_failures: crate::queue::MAX_NETWORK_FAILURES,
             include: None,
             receipt: None,
+            delta_from: None,
         },
         &recv_tx,
     )

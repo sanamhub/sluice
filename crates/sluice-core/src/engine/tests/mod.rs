@@ -29,6 +29,9 @@ use crate::{
 
 mod cancel;
 mod checks;
+mod delta;
+mod delta_flows;
+mod delta_security;
 mod done;
 mod inspect;
 mod key_exchange;
@@ -99,6 +102,7 @@ fn options(out: &Path) -> super::ReceiveOptions {
         max_network_failures: crate::queue::MAX_NETWORK_FAILURES,
         include: None,
         receipt: None,
+        delta_from: None,
     }
 }
 
