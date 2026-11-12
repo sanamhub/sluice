@@ -206,11 +206,28 @@ async fn the_greeting_is_exchanged_both_ways() {
         .await
         .unwrap();
     let theirs = super::greet(&conn).await.unwrap();
-    // A send of fixed content serves signatures, so its greeting sets the delta bit.
-    assert_eq!(
-        theirs,
-        super::Hello::ours().with(crate::engine::hello::CAP_DELTA)
-    );
+    // A send of fixed content sets exactly these bits: LIVE (0), DELTA (1), PACKS (2) and
+    // MANIFEST_V1 (3). RECEIPTS (4) is set only while the send offers a receipt, which this one
+    // has not been asked to, and ZSTD (5) is not offered at all.
+    assert_eq!(theirs.proto_version, 1);
+    assert_eq!(theirs.capabilities, 0b0_1111);
+    assert_eq!(theirs.max_frame_bytes, 16 << 20);
+    conn.close(0u32.into(), b"done");
+    f.close().await;
+}
+
+/// The same greeting while the send offers a receipt: the one more bit is RECEIPTS (4).
+#[tokio::test]
+async fn the_greeting_sets_the_receipts_bit_only_while_a_receipt_is_offered() {
+    let f = fixture(None).await;
+    f.provider.receipts().offer([1; 32], 10, [2; 32], None);
+    let conn = f
+        .endpoint
+        .connect(f.provider.addr(), super::ALPN)
+        .await
+        .unwrap();
+    let theirs = super::greet(&conn).await.unwrap();
+    assert_eq!(theirs.capabilities, 0b1_1111);
     conn.close(0u32.into(), b"done");
     f.close().await;
 }
