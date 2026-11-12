@@ -9,7 +9,7 @@ mod single;
 pub use root::{PathRoot, root_of_path};
 pub(crate) use scratch::Scratch;
 
-pub use folder::{prepare_paths, prepare_paths_with_rate};
+pub use folder::{prepare_paths, prepare_paths_confined, prepare_paths_with_rate};
 pub(super) use single::content_roots;
 #[cfg(test)]
 pub(crate) use single::prepare_stdin_from;

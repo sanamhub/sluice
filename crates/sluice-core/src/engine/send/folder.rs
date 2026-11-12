@@ -42,10 +42,44 @@ pub async fn prepare_paths_with_rate(
     port: Option<u16>,
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
+    prepare_paths_inner(home, paths, relay, congestion, expiry_ms, port, rate, false).await
+}
+
+/// [`prepare_paths_with_rate`] for a caller that keeps the tree inside the folders it names: a
+/// link, a file with more than one name and an entry on another volume anywhere below them refuse
+/// the send, and the error names the entry. A daemon sends this way and a one-shot `send` does not.
+pub async fn prepare_paths_confined(
+    home: &Home,
+    paths: &[PathBuf],
+    relay: RelayModeChoice,
+    congestion: Congestion,
+    expiry_ms: Option<u64>,
+    port: Option<u16>,
+    rate: Option<std::sync::Arc<crate::engine::Rate>>,
+) -> Result<Outgoing, Error> {
+    prepare_paths_inner(home, paths, relay, congestion, expiry_ms, port, rate, true).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn prepare_paths_inner(
+    home: &Home,
+    paths: &[PathBuf],
+    relay: RelayModeChoice,
+    congestion: Congestion,
+    expiry_ms: Option<u64>,
+    port: Option<u16>,
+    rate: Option<std::sync::Arc<crate::engine::Rate>>,
+    confined: bool,
+) -> Result<Outgoing, Error> {
     // Read before the store exists, so a home whose identity cannot be read fails this send with
     // nothing of its own left behind.
     let seed = home.identity()?.secret_seed();
-    let Build::Ready(built) = Manifest::build_paths(paths)? else {
+    let built = if confined {
+        Manifest::build_paths_confined(paths)?
+    } else {
+        Manifest::build_paths(paths)?
+    };
+    let Build::Ready(built) = built else {
         return Err(Error::Policy(
             "a path cannot be sent because a receiver would reject one of its names".to_string(),
         ));

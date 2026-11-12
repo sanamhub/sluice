@@ -7,6 +7,7 @@
 
 mod assemble;
 mod collide;
+mod confine;
 mod disk;
 mod finding;
 mod hash;
@@ -205,7 +206,7 @@ impl Manifest {
                 "the path to send is not a folder".to_string(),
             ));
         }
-        build_either(&[root.to_path_buf()], limits, |_| {}, false)
+        build_either(&[root.to_path_buf()], limits, |_| {}, false, false)
     }
 
     /// Builds one manifest from several arguments, as `sluice send a.mov photos/` does.
@@ -233,7 +234,15 @@ impl Manifest {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build_paths(paths: &[PathBuf]) -> Result<Build, Error> {
-        build_either(paths, Limits::default(), |_| {}, true)
+        build_either(paths, Limits::default(), |_| {}, true, false)
+    }
+
+    /// [`Manifest::build_paths`] for a caller that must keep the tree inside the folder it was
+    /// given: a link, a file with more than one name and an entry on another volume refuse the
+    /// build with an error that names the entry. Every entry is judged from a handle opened
+    /// without following a link, so a path that was swapped for a link cannot lead out.
+    pub fn build_paths_confined(paths: &[PathBuf]) -> Result<Build, Error> {
+        build_either(paths, Limits::default(), |_| {}, true, true)
     }
 }
 
@@ -246,8 +255,9 @@ fn build_either(
     limits: Limits,
     between: impl Fn(&Path),
     name_roots: bool,
+    confined: bool,
 ) -> Result<Build, Error> {
-    let walked = walk::walk_paths(paths, name_roots)?;
+    let walked = walk::walk_paths(paths, name_roots, confined)?;
     // Before the names are compared and before any file is hashed: renaming files does not
     // bring the count down, so a list of names to fix would not help.
     check_entries(walked.items.len(), limits)?;
@@ -291,7 +301,7 @@ fn build_either(
 /// between its last byte and the second look at it. The folder itself is not an entry.
 #[cfg(test)]
 pub(super) fn build(root: &Path, limits: Limits, between: impl Fn(&Path)) -> Result<Build, Error> {
-    build_either(&[root.to_path_buf()], limits, between, false)
+    build_either(&[root.to_path_buf()], limits, between, false, false)
 }
 
 /// Decoding rule 2 at the sender. The message gives numbers and no name.
