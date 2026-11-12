@@ -29,6 +29,9 @@ pub(in crate::engine) async fn serve_request(
     recv: &mut RecvStream,
     mut send: SendStream,
 ) -> std::io::Result<()> {
+    // Open from the greeting, so a request still being read keeps the hold open, for at most the
+    // request window.
+    let mut open = receipts.begin();
     let peer = *conn.remote_id().as_bytes();
     let Ok(Ok(root)) = timeout(REQUEST_WAIT, read_request(recv)).await else {
         return send.finish().map_err(std::io::Error::other);
@@ -36,13 +39,10 @@ pub(in crate::engine) async fn serve_request(
     let Some(receipt) = receipts.answer(peer, root, now_ms()) else {
         return send.finish().map_err(std::io::Error::other);
     };
-    receipts.begin();
     let written = write_answer(receipts, &receipt, &mut send).await;
-    let delivered = match written {
-        Ok(true) if send.finish().is_ok() => taken(&send, conn).await,
-        _ => false,
-    };
-    receipts.settle(delivered);
+    if matches!(written, Ok(true)) && send.finish().is_ok() && taken(&send, conn).await {
+        open.taken();
+    }
     Ok(())
 }
 
@@ -78,13 +78,21 @@ async fn write_answer(
     Ok(true)
 }
 
-/// Waits for the asker to take what was written: the send stream is acknowledged or stopped, or the
-/// asker closes the connection, and never longer than [`HOLD`]. Returns whether it did, so a record
-/// that may still be in flight is not counted as delivered.
+/// Waits for the asker to take what was written, and never longer than [`HOLD`]. It was taken when
+/// the stream was finished and acknowledged (`stopped` answers `Ok(None)`), or when the asker closed
+/// the connection with application code 0, which is how a receiver closes once it has read. Every
+/// other result is not taken: the asker stopped reading, the connection failed or was closed with
+/// another code, or the time ran out, and a record that may not have arrived is not counted.
 async fn taken(send: &SendStream, conn: &iroh::endpoint::Connection) -> bool {
+    use iroh::endpoint::ConnectionError;
+
     tokio::select! {
-        _ = send.stopped() => true,
-        _ = conn.closed() => true,
+        biased;
+        stopped = send.stopped() => matches!(stopped, Ok(None)),
+        closed = conn.closed() => matches!(
+            closed,
+            ConnectionError::ApplicationClosed(close) if close.error_code == 0u32.into()
+        ),
         () = tokio::time::sleep(HOLD) => false,
     }
 }

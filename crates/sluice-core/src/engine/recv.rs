@@ -140,6 +140,10 @@ pub async fn receive(
                     .to_string(),
             ));
         }
+        // Before any folder is made, so a refused run leaves nothing behind, and before the
+        // check that the receipt's own folder exists, which would fail first for a folder under
+        // an `--out` that is not there yet.
+        receipts::refuse_under_out(&target.path, &options.out)?;
         receipts::ready(&target.path, options.force)?;
     }
     fs::create_dir_all(&options.out)
@@ -167,9 +171,10 @@ pub async fn receive(
     // everything, so each of those is one warning and not a failed receive.
     if let Some(target) = &options.receipt {
         let message = match receipt {
-            Some(receipt) => receipts::write_file(&target.path, &receipt, options.force)
-                .err()
-                .map(|e| format!("the receipt arrived but was not written: {e}")),
+            Some(receipt) => match receipts::write_file(&target.path, &receipt, options.force) {
+                Ok(leftover) => leftover,
+                Err(e) => Some(format!("the receipt arrived but was not written: {e}")),
+            },
             None => Some(format!(
                 "no receipt arrived, so {} was not written",
                 taken(&target.path)
@@ -197,9 +202,6 @@ async fn run(
     let partial = storage::partial_dir(&options.out, &owner);
     let conn = receiver.connect(ticket, events.clone()).await?;
     let manifest = read_manifest(&conn, ticket, options, events).await?;
-    if let Some(target) = &options.receipt {
-        receipts::refuse_output_clash(&target.path, &options.out, &manifest)?;
-    }
     let (store, resume, plan) =
         claim_store(&partial, &owner, &manifest, ticket, options, &selection).await?;
     let outcome = exchange(

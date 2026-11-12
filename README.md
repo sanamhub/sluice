@@ -136,9 +136,10 @@ It prints the commitment, the sender's key and the time. It cannot tell you that
 content or still holds it, and it says so.
 
 Ask the sender for a receipt as part of a receive. The file is written once the whole transfer is in
-place, and it is not replaced unless `--force` is given. It goes outside `--out`, because a path the
-transfer writes is refused. A receipt that arrives and cannot be written is a warning, and the
-receive still succeeds:
+place, and it is not replaced unless `--force` is given. A receipt path that is `--out` or inside it
+is refused before anything is created, however it is spelled, including through a link, a junction
+or a short name, so the receipt goes outside `--out`. A receipt that arrives and cannot be written
+is a warning, and the receive still succeeds:
 
 ```sh
 sluice recv <ticket> --out ./inbox --receipt ./receipt.txt

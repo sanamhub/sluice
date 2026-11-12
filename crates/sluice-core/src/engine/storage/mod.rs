@@ -13,6 +13,7 @@ mod temp;
 mod temp_store;
 
 pub use install::install;
+pub(super) use install::{is_unsupported, rename_exclusive};
 pub use meta::MetaStore;
 pub(crate) use open::hand_on;
 pub use open::{Collector, Store};
