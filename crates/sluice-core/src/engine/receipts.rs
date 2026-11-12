@@ -33,7 +33,7 @@ mod write;
 
 pub use serve::parse_request;
 pub(in crate::engine) use serve::serve_request;
-pub(super) use write::{ready, write_file};
+pub(super) use write::{ready, refuse_output_clash, write_file};
 
 /// How long a receiver waits for the answer, counted from the connection coming up.
 const ANSWER_WAIT: Duration = Duration::from_secs(10);

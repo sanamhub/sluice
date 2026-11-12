@@ -195,8 +195,11 @@ signs for the root and length of the ticket it serves, and a one-download sender
 ten seconds once the send settles, until every content connection has closed or a receipt has been
 delivered, so a receiver that is still installing what it received can ask. A receipt counts as
 delivered when the asker has taken it, and an answer being written is waited for within those ten
-seconds. The file is written after the whole transfer, and it is never
-written through a link or over a file that is already there without `--force`.
+seconds. The file is written after the whole transfer, to a temporary name beside it and renamed
+into place, so a failed write leaves nothing. It is never written through a link or over a file that
+is already there without `--force`, and a path the transfer writes under `--out` is refused before
+any content arrives. A receipt that cannot be written is a warning: the content is in place and the
+receive succeeds.
 
 ### Transfer queue
 
