@@ -25,11 +25,20 @@ fn is_line_separator(c: char) -> bool {
     matches!(c, '\u{2028}' | '\u{2029}')
 }
 
+/// Whether `c` is written as an escape: a display control, a line separator, or a character with
+/// the Unicode property `Default_Ignorable_Code_Point`, such as a tag character, U+200B or U+FEFF.
+/// A terminal or a model shows such a character as nothing, so a name could carry text that no
+/// reader sees, or that a reader of the raw bytes sees and a person does not.
+fn is_escaped(c: char) -> bool {
+    is_display_control(c) || is_line_separator(c) || super::path::ignorable::is_ignorable(c)
+}
+
 /// `text` with every character that could change what a terminal shows written as an escape, so a
 /// name or a message a stranger chose cannot reorder the line it is printed in or write an escape
 /// sequence into it.
 ///
-/// These are the characters of [`is_display_control`] and the two Unicode line separators. A
+/// These are the characters of [`is_display_control`], the two Unicode line separators, and the
+/// default-ignorable code points. A
 /// manifest path cannot hold any of them; a live stream's name is a file name on the sender's disk,
 /// which on Unix may hold anything.
 ///
@@ -53,6 +62,8 @@ fn is_line_separator(c: char) -> bool {
 /// assert_eq!(shown(r"a\u{202e}b"), r"a\\u{202e}b");
 /// assert_eq!(shown(r"C:\Users\me\a.txt"), r"C:\Users\me\a.txt");
 /// assert_eq!(shown("a\u{2028}b\u{2029}c"), r"a\u{2028}b\u{2029}c");
+/// // Characters that show as nothing are written out, tag characters and the byte order mark too.
+/// assert_eq!(shown("a\u{200b}b\u{feff}\u{e0041}"), r"a\u{200b}b\u{feff}\u{e0041}");
 /// ```
 pub fn shown(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -77,7 +88,7 @@ pub fn shown(text: &str) -> String {
             at = end;
             continue;
         }
-        if is_display_control(c) || is_line_separator(c) {
+        if is_escaped(c) {
             out.push_str(&format!("\\u{{{:x}}}", u32::from(c)));
         } else {
             out.push(c);
@@ -94,13 +105,22 @@ fn ends_where_an_escape_could_follow(text: &str, end: usize) -> bool {
     match rest.chars().next() {
         None => false,
         Some('u') => rest.starts_with("u{"),
-        Some(next) => is_display_control(next) || is_line_separator(next),
+        Some(next) => is_escaped(next),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::shown;
+
+    /// Characters that show as nothing are written out, so they cannot hide text in a name.
+    #[test]
+    fn default_ignorable_characters_are_escaped() {
+        assert_eq!(shown("a\u{200b}b"), r"a\u{200b}b");
+        assert_eq!(shown("\u{feff}x"), r"\u{feff}x");
+        assert_eq!(shown("\u{e0041}\u{e0042}"), r"\u{e0041}\u{e0042}");
+        assert_eq!(shown("a\u{ad}b"), r"a\u{ad}b");
+    }
 
     /// A name of ordinary text is left alone, whatever script it is written in.
     #[test]

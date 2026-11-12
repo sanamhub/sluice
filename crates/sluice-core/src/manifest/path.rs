@@ -9,7 +9,7 @@ use unicode_normalization::{UnicodeNormalization, is_nfc};
 
 use crate::Error;
 
-mod ignorable;
+pub(in crate::manifest) mod ignorable;
 
 use ignorable::is_ignorable;
 
