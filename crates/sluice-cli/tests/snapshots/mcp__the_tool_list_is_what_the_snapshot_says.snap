@@ -120,7 +120,7 @@ expression: "serde_json::to_string_pretty(&tools).unwrap()"
     "name": "receive"
   },
   {
-    "description": "Start sending files or folders that are inside a root, and return a job id and a ticket at once. The ticket is a secret: anyone who holds it can take the files.",
+    "description": "Start sending files or folders that are inside a root, and return a job id at once. The send is prepared in the background; job_status gives its ticket as secret_ticket once it is ready. The ticket is a secret: anyone who holds it can take the files.",
     "input_schema": {
       "$defs": {
         "PathInput": {

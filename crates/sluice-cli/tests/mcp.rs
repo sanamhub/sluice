@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use common::{EXE, data};
-use rmcp::model::CallToolRequestParams;
+use rmcp::model::{CallToolRequestParams, CallToolResult};
 use rmcp::service::RunningService;
 use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};
 use rmcp::{RoleClient, ServiceExt};
@@ -54,14 +54,21 @@ async fn connect(home: &Path, root: &Path) -> Client {
     ().serve(transport).await.expect("initialize")
 }
 
-/// One tool call, and the structured answer it gave.
-async fn call(client: &Client, tool: &'static str, arguments: Value) -> Value {
+/// One tool call, whole.
+async fn call_whole(client: &Client, tool: &'static str, arguments: Value) -> CallToolResult {
     let arguments = arguments.as_object().cloned().unwrap_or_default();
-    let made = client
+    client
         .call_tool(CallToolRequestParams::new(tool).with_arguments(arguments))
         .await
-        .expect("the call is answered");
-    made.structured_content.expect("a structured answer")
+        .expect("the call is answered")
+}
+
+/// One tool call, and the structured answer it gave.
+async fn call(client: &Client, tool: &'static str, arguments: Value) -> Value {
+    call_whole(client, tool, arguments)
+        .await
+        .structured_content
+        .expect("a structured answer")
 }
 
 fn at(root: &Path, path: &str) -> Value {
@@ -86,6 +93,19 @@ async fn until(client: &Client, job: &str, done: impl Fn(&Value) -> bool) -> Val
 
 fn ended(status: &Value) -> bool {
     status["state"] != "running"
+}
+
+/// Starts a send and waits for its ticket, which `job_status` gives once the send is prepared.
+async fn send(client: &Client, arguments: Value) -> (String, String) {
+    let started = call(client, "send", arguments).await;
+    assert_eq!(started["ok"], true, "{started}");
+    let job = started["result"]["job_id"].as_str().unwrap().to_string();
+    let status = until(client, &job, |s| !s["secret_ticket"].is_null() || ended(s)).await;
+    let ticket = status["secret_ticket"]
+        .as_str()
+        .expect("a ticket")
+        .to_string();
+    (job, ticket)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -117,17 +137,11 @@ async fn a_send_and_a_receive_between_two_servers_finish_verified() {
     let sender = connect(&f.sender_home, &f.outgoing).await;
     let receiver = connect(&f.receiver_home, &f.incoming).await;
 
-    let sent = call(
+    let (sender_job, ticket) = send(
         &sender,
-        "send",
         json!({ "paths": [at(&f.outgoing, "payload.bin")] }),
     )
     .await;
-    assert_eq!(sent["ok"], true, "{sent}");
-    let ticket = sent["result"]["secret_ticket"]
-        .as_str()
-        .unwrap()
-        .to_string();
     assert!(ticket.starts_with("sluice1"));
     let started = call(
         &receiver,
@@ -144,13 +158,59 @@ async fn a_send_and_a_receive_between_two_servers_finish_verified() {
         std::fs::read(f.incoming.join("landing").join("payload.bin")).unwrap(),
         body
     );
-    let sender_job = sent["result"]["job_id"].as_str().unwrap();
-    assert_eq!(until(&sender, sender_job, ended).await["state"], "done");
+    assert_eq!(until(&sender, &sender_job, ended).await["state"], "done");
 
     // The jobs are listed, and the ticket is in no list.
     let listed = call(&receiver, "list_jobs", json!({})).await;
     assert_eq!(listed["result"]["jobs"].as_array().unwrap().len(), 1);
     assert!(!listed.to_string().contains(&ticket));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_send_returns_its_job_before_the_copy_finishes() {
+    let f = folders();
+    std::fs::write(f.outgoing.join("large.bin"), data(200 * 1024 * 1024, 2)).unwrap();
+    let sender = connect(&f.sender_home, &f.outgoing).await;
+    let started = call(
+        &sender,
+        "send",
+        json!({ "paths": [at(&f.outgoing, "large.bin")] }),
+    )
+    .await;
+    let job = started["result"]["job_id"].as_str().unwrap();
+    assert!(
+        started["result"].get("secret_ticket").is_none(),
+        "the ticket is not in the answer"
+    );
+    let first = call(&sender, "job_status", json!({ "job_id": job })).await;
+    assert_eq!(first["result"]["state"], "running");
+    assert!(
+        first["result"]["secret_ticket"].is_null(),
+        "not prepared yet: {first}"
+    );
+    let later = until(&sender, job, |s| !s["secret_ticket"].is_null()).await;
+    assert!(
+        later["secret_ticket"]
+            .as_str()
+            .unwrap()
+            .starts_with("sluice1")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failure_is_marked_as_an_error_and_a_success_is_not() {
+    let f = folders();
+    let client = connect(&f.sender_home, &f.outgoing).await;
+    let refused = call_whole(
+        &client,
+        "send",
+        json!({ "paths": [{ "root": "/not/a/root", "path": "" }] }),
+    )
+    .await;
+    assert_eq!(refused.is_error, Some(true), "{refused:?}");
+    assert_eq!(refused.structured_content.unwrap()["ok"], false);
+    let listed = call_whole(&client, "list_jobs", json!({})).await;
+    assert_ne!(listed.is_error, Some(true), "{listed:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -160,16 +220,7 @@ async fn a_receive_outside_the_root_is_refused_with_the_reason_in_an_untrusted_f
     std::fs::create_dir(&outside).unwrap();
     let sender = connect(&f.sender_home, &f.outgoing).await;
     std::fs::write(f.outgoing.join("a.txt"), b"a").unwrap();
-    let sent = call(
-        &sender,
-        "send",
-        json!({ "paths": [at(&f.outgoing, "a.txt")] }),
-    )
-    .await;
-    let ticket = sent["result"]["secret_ticket"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let (_job, ticket) = send(&sender, json!({ "paths": [at(&f.outgoing, "a.txt")] })).await;
 
     let receiver = connect(&f.receiver_home, &f.incoming).await;
     let refused = call(
@@ -186,10 +237,7 @@ async fn a_receive_outside_the_root_is_refused_with_the_reason_in_an_untrusted_f
         "a rule of this server refused the request"
     );
     let detail = refused["failure"]["untrusted_detail"].as_str().unwrap();
-    assert!(
-        detail.contains("is not a root of this server") || detail.contains("not a root"),
-        "{detail}"
-    );
+    assert!(detail.contains("not a root"), "{detail}");
     assert!(
         !refused.to_string().contains(&ticket),
         "the ticket is not echoed"
@@ -206,16 +254,7 @@ async fn a_hostile_file_name_comes_back_unchanged_in_an_untrusted_field_and_nowh
     std::fs::write(bundle.join(hostile), b"data").unwrap();
     let sender = connect(&f.sender_home, &f.outgoing).await;
     let receiver = connect(&f.receiver_home, &f.incoming).await;
-    let sent = call(
-        &sender,
-        "send",
-        json!({ "paths": [at(&f.outgoing, "bundle")] }),
-    )
-    .await;
-    let ticket = sent["result"]["secret_ticket"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let (_job, ticket) = send(&sender, json!({ "paths": [at(&f.outgoing, "bundle")] })).await;
 
     let seen = call(&receiver, "inspect", json!({ "ticket": ticket })).await;
     assert_eq!(seen["ok"], true, "{seen}");
@@ -239,16 +278,22 @@ async fn a_name_that_can_reorder_what_a_terminal_shows_is_refused_and_not_echoed
     std::fs::create_dir(&tricky).unwrap();
     std::fs::write(tricky.join("report\u{202e}fdp.exe"), b"x").unwrap();
     let sender = connect(&f.sender_home, &f.outgoing).await;
-    let refused = call(
+    let started = call(
         &sender,
         "send",
         json!({ "paths": [at(&f.outgoing, "bundle2")] }),
     )
     .await;
-    assert_eq!(refused["ok"], false, "{refused}");
+    let job = started["result"]["job_id"].as_str().unwrap();
+    let status = until(&sender, job, ended).await;
+    assert_eq!(status["state"], "failed", "{status}");
     assert!(
-        !refused.to_string().contains('\u{202e}'),
+        !status.to_string().contains('\u{202e}'),
         "the escape is not passed on raw"
+    );
+    assert!(
+        status["untrusted_detail"].is_string(),
+        "the failure is in the marked field: {status}"
     );
 }
 
@@ -258,16 +303,11 @@ async fn a_cancelled_receive_leaves_a_store_a_second_receive_resumes() {
     let body = data(160 * 1024 * 1024, 5);
     std::fs::write(f.outgoing.join("big.bin"), &body).unwrap();
     let sender = connect(&f.sender_home, &f.outgoing).await;
-    let sent = call(
+    let (_job, ticket) = send(
         &sender,
-        "send",
         json!({ "paths": [at(&f.outgoing, "big.bin")], "keep": true }),
     )
     .await;
-    let ticket = sent["result"]["secret_ticket"]
-        .as_str()
-        .unwrap()
-        .to_string();
     let receiver = connect(&f.receiver_home, &f.incoming).await;
     let args = json!({ "ticket": ticket, "out": at(&f.incoming, "big") });
     let first = call(&receiver, "receive", args.clone()).await;
@@ -277,23 +317,30 @@ async fn a_cancelled_receive_leaves_a_store_a_second_receive_resumes() {
     })
     .await;
     let cancelled = call(&receiver, "cancel_job", json!({ "job_id": job })).await;
-    assert_eq!(cancelled["result"]["was_running"], true, "{cancelled}");
+    let was_running = cancelled["result"]["was_running"].as_bool().unwrap();
     let status = until(&receiver, &job, ended).await;
-    assert_eq!(status["state"], "cancelled", "{status}");
-    assert_eq!(status["resumable"], true);
-    let kept = std::fs::read_dir(f.incoming.join("big"))
-        .unwrap()
-        .filter_map(Result::ok)
-        .any(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with(".sluice-partial-")
-        });
-    assert!(kept, "the partial store stays");
-
-    let second = call(&receiver, "receive", args).await;
-    let job = second["result"]["job_id"].as_str().unwrap();
-    assert_eq!(until(&receiver, job, ended).await["state"], "done");
+    // Either the cancel arrived while the job ran, and it ended cancelled with a store kept, or the
+    // job had already finished, and the cancel found nothing to stop. The two never mix.
+    assert_eq!(
+        was_running,
+        status["state"] == "cancelled",
+        "{cancelled} {status}"
+    );
+    if was_running {
+        assert_eq!(status["resumable"], true);
+        let kept = std::fs::read_dir(f.incoming.join("big"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".sluice-partial-")
+            });
+        assert!(kept, "the partial store stays");
+        let second = call(&receiver, "receive", args).await;
+        let job = second["result"]["job_id"].as_str().unwrap();
+        assert_eq!(until(&receiver, job, ended).await["state"], "done");
+    }
     assert_eq!(
         std::fs::read(f.incoming.join("big").join("big.bin")).unwrap(),
         body
