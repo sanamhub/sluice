@@ -34,6 +34,10 @@ service ControlService {
 
   // The same checks `sluice doctor` makes, with the exit code that report would have.
   rpc Doctor(DoctorRequest) returns (DoctorResponse);
+
+  // Stops the daemon. Running jobs end as cancelled and a receive keeps its partial store, then the
+  // socket or pipe is removed. The answer is sent before the daemon stops listening.
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
 
 // A ticket, in its text form. A ticket is a read capability and a secret: a daemon must not log
@@ -306,4 +310,11 @@ enum CheckState {
   CHECK_STATE_OK = 1;
   CHECK_STATE_WARN = 2;
   CHECK_STATE_FAIL = 3;
+}
+
+message ShutdownRequest {}
+
+message ShutdownResponse {
+  // How many jobs were still running when the call arrived, and so ended as cancelled.
+  uint32 cancelled_jobs = 1;
 }
