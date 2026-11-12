@@ -35,6 +35,13 @@ pub enum Target {
     Hello,
     /// `sluice-core`: byte ranges as a person writes them.
     Range,
+    /// `sluice-delta`: the bytes of a signature list.
+    Siglist,
+    /// `sluice-delta`: the bytes of a need-ranges message.
+    #[value(name = "need_ranges")]
+    NeedRanges,
+    /// `sluice-delta`: content, and the average and block it is cut with.
+    Chunker,
     /// `sluice-relay-guard`: the text of an iroh-relay config.
     #[value(name = "relay_config")]
     RelayConfig,
@@ -53,6 +60,8 @@ impl Target {
             Target::Manifest => Some("manifests"),
             Target::ManifestPath => Some("paths"),
             Target::Log => Some("live"),
+            Target::Siglist | Target::Chunker => Some("delta"),
+            Target::NeedRanges => Some("need-ranges"),
             Target::Hello | Target::Range | Target::RelayConfig | Target::RelayDifferential => None,
         }
     }
@@ -331,8 +340,10 @@ pub fn vector_files(dir: &Path) -> anyhow::Result<Vec<(String, Vec<Value>)>> {
 }
 
 /// The inputs one vector case gives a target.
+mod delta_target;
 mod log_target;
 
+use delta_target::{chunker, siglist};
 use log_target::log;
 
 fn from_case(target: Target, case: &Value) -> anyhow::Result<Vec<Vec<u8>>> {
@@ -341,6 +352,11 @@ fn from_case(target: Target, case: &Value) -> anyhow::Result<Vec<Vec<u8>>> {
         Target::ManifestPath => vec![text(case, "path")?.into_bytes()],
         Target::Manifest => manifest(case)?,
         Target::Log => log(case)?.into_iter().collect(),
+        Target::Siglist => siglist(case)?,
+        Target::NeedRanges => {
+            vec![hex_bytes(&text(case, "bytes")?).map_err(anyhow::Error::msg)?]
+        }
+        Target::Chunker => chunker(case)?,
         Target::Hello | Target::Range | Target::RelayConfig | Target::RelayDifferential => {
             Vec::new()
         }
