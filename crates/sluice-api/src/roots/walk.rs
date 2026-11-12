@@ -8,6 +8,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use sluice_core::engine::ObjectId;
+use sluice_core::manifest::path::shown;
 
 use crate::error::ApiError;
 
@@ -52,12 +53,31 @@ pub(crate) struct Opened {
     pub links: u64,
     /// Whether the object is a regular file.
     pub is_file: bool,
+    /// The open folder the object is, or for a file the open folder it is in: the handle a confined
+    /// send lists and opens from, which is never turned back into a path.
+    pub(super) handle: File,
+    /// The name the object arrives under, which is its name below that handle for a file.
+    pub(super) name: String,
     // Every handle the walk opened, which keeps the chain it proved in place where the platform lets
     // an open handle do that.
     pub(super) _held: Vec<File>,
 }
 
 impl Opened {
+    /// The folder or file as the engine's confined walk takes it, from the handles this walk
+    /// proved.
+    pub(crate) fn confined_arg(&self) -> Result<sluice_core::manifest::ConfinedArg, ApiError> {
+        let handle = self.handle.try_clone().map_err(|e| {
+            ApiError::Refused(format!("cannot use the path: {}", shown(&e.to_string())))
+        })?;
+        let name = self.name.clone();
+        Ok(if self.is_file {
+            sluice_core::manifest::ConfinedArg::file(handle, name)
+        } else {
+            sluice_core::manifest::ConfinedArg::folder(handle, name)
+        })
+    }
+
     /// Refuses a file with more than one name: its other name may lie outside every root, and no
     /// check of this path could see that. The count is read from the handle the file was opened
     /// with.

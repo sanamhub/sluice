@@ -179,11 +179,21 @@ impl Root {
             .held
             .try_clone()
             .map_err(|e| refuse_io("look at", &self.path, &e))?;
+        let name = self
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let handle = held
+            .try_clone()
+            .map_err(|e| refuse_io("look at", &self.path, &e))?;
         Ok(Opened {
             path: self.path.clone(),
             pin: found.identity,
             links: found.links,
             is_file: false,
+            handle,
+            name,
             _held: vec![held],
         })
     }

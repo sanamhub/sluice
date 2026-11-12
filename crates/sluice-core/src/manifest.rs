@@ -20,7 +20,8 @@ mod wire;
 use crate::Error;
 use rules::{Fault, check_all, rule};
 
-pub use build::{Build, Built, DiskPaths, Finding, Reason, Refusal};
+pub(crate) use build::mtime_ms_of;
+pub use build::{Below, Build, Built, ConfinedArg, DiskPaths, Finding, Reason, Refusal};
 pub use entry::{Entry, Kind, Loc, PackRef};
 pub use sequence::parse as parse_sequence;
 

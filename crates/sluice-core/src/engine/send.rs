@@ -1,6 +1,7 @@
 //! One file from the sender's side: import it where it lives, build the one-entry manifest, and
 //! prepare the ticket. The bytes are never copied into the home.
 
+mod copy;
 mod folder;
 mod root;
 mod scratch;

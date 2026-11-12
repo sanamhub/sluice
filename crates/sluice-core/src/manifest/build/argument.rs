@@ -53,7 +53,7 @@ pub(super) fn file_item(
         shown: name.to_string(),
         what: What::File {
             disk: path.to_path_buf(),
-            id: None,
+            below: None,
         },
     })
 }

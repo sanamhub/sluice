@@ -75,6 +75,38 @@ pub(super) fn through_filter(path: &Path, held: File) -> Result<Opened, HashFaul
     })
 }
 
+/// Opens the same object again, from the handle and without the flag, so the filter gives the
+/// content: the file of a confined walk is found by handle and has no path to open a second time.
+/// The first handle is held, so the file cannot be renamed or deleted in between.
+#[allow(unsafe_code)]
+pub(super) fn through_filter_handle(held: File) -> Result<Opened, HashFault> {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+    use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::ReOpenFile;
+    const GENERIC_READ: u32 = 0x8000_0000;
+    // SAFETY: the handle is open for as long as `held` is, and the call returns a new handle that
+    // this function owns, or the invalid value.
+    let raw = unsafe { ReOpenFile(held.as_raw_handle() as HANDLE, GENERIC_READ, SHARE, 0) };
+    if raw == INVALID_HANDLE_VALUE {
+        return Err(HashFault::Unreadable(
+            std::io::Error::last_os_error().kind(),
+        ));
+    }
+    // SAFETY: `raw` is a valid handle that nothing else owns.
+    let file = unsafe { File::from_raw_handle(raw as _) };
+    let before = file
+        .metadata()
+        .map_err(|e| HashFault::Unreadable(e.kind()))?;
+    if !before.is_file() {
+        return Err(HashFault::Changed);
+    }
+    Ok(Opened {
+        file,
+        before,
+        _held: Some(held),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use windows_sys::Win32::Storage::FileSystem::{

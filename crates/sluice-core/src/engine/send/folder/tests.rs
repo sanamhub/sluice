@@ -1,17 +1,22 @@
 //! A confined send copies what it read from a handle it proved, so a file swapped after the walk is
-//! refused before any of its bytes are taken.
+//! refused before any of its bytes are taken, and no more is read than the walk saw.
 
 use std::fs;
 use std::path::Path;
 
 use iroh_blobs::{Hash, store::fs::FsStore};
+use n0_future::StreamExt;
 
 use super::import_blobs;
 use crate::Error;
-use crate::manifest::{Build, Built, Manifest};
+use crate::engine::open_folder;
+use crate::engine::send::copy::{CHANGED, chunks};
+use crate::manifest::{Build, Built, ConfinedArg, Manifest};
 
 fn confined(folder: &Path) -> Built {
-    match Manifest::build_paths_confined(&[folder.to_path_buf()]).unwrap() {
+    let name = folder.file_name().unwrap().to_string_lossy().into_owned();
+    let arg = ConfinedArg::folder(open_folder(folder).unwrap(), name);
+    match Manifest::build_confined(vec![arg]).unwrap() {
         Build::Ready(built) => built,
         Build::Refused(_) => panic!("the folder is built"),
     }
@@ -38,6 +43,21 @@ fn folder_with_a_big_file(dir: &Path) -> std::path::PathBuf {
     sent
 }
 
+/// Puts a file with other bytes under a name by renaming it over the old one, so the new file is
+/// another object whatever the file system does with freed numbers.
+fn rename_over(folder: &Path, name: &str, bytes: &[u8]) {
+    let fresh = folder.join(format!("{name}.new"));
+    fs::write(&fresh, bytes).unwrap();
+    fs::rename(&fresh, folder.join(name)).unwrap();
+}
+
+fn text_of(result: Result<(), Error>) -> String {
+    match result {
+        Err(Error::Verify(text)) => text,
+        other => panic!("expected a refusal as changed: {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn a_file_that_is_still_the_walked_object_is_imported() {
     let dir = tempfile::tempdir().unwrap();
@@ -51,18 +71,84 @@ async fn a_file_replaced_after_the_walk_is_refused_and_none_of_the_new_bytes_are
     let dir = tempfile::tempdir().unwrap();
     let sent = folder_with_a_big_file(dir.path());
     let built = confined(&sent);
-    // A different file takes the name: another object, with other bytes.
-    let outside = vec![9u8; 2 * 1024 * 1024];
-    // It is written beside the first and renamed over it, so both exist at once and the system
-    // cannot give the new file the identity of the one it replaces.
-    fs::write(sent.join("data.new"), &outside).unwrap();
-    fs::rename(sent.join("data.new"), sent.join("data.bin")).unwrap();
-    let (result, held) = import(&built, &outside).await;
-    let Err(Error::Verify(text)) = result else {
-        panic!("the send is refused as changed: {result:?}");
-    };
-    assert!(text.contains("replaced"), "{text}");
+    let other = vec![9u8; 2 * 1024 * 1024];
+    rename_over(&sent, "data.bin", &other);
+    let (result, held) = import(&built, &other).await;
+    assert!(text_of(result).contains("replaced"));
     assert!(!held, "the bytes of the replacement were not taken");
+}
+
+#[tokio::test]
+async fn a_small_packed_file_replaced_by_one_of_the_same_size_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let sent = dir.path().join("sent");
+    fs::create_dir(&sent).unwrap();
+    fs::write(sent.join("tiny.txt"), b"tiny").unwrap();
+    let built = confined(&sent);
+    rename_over(&sent, "tiny.txt", b"fake");
+    let pack = super::add_pack_for_test(&built).await;
+    assert!(text_of(pack).contains("replaced"));
+}
+
+#[tokio::test]
+async fn a_file_that_grew_or_shrank_after_the_walk_is_refused_as_changed() {
+    for resize in [3 * 1024 * 1024u64, 1024] {
+        let dir = tempfile::tempdir().unwrap();
+        let sent = folder_with_a_big_file(dir.path());
+        let built = confined(&sent);
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(sent.join("data.bin"))
+            .unwrap();
+        file.set_len(resize).unwrap();
+        drop(file);
+        let (result, _) = import(&built, b"unrelated").await;
+        assert!(text_of(result).contains("changed"), "resized to {resize}");
+    }
+}
+
+/// A sparse file grown to a terabyte after the walk costs nothing to refuse and nothing is read.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_sparse_file_grown_to_a_terabyte_is_refused_without_reading_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let sent = folder_with_a_big_file(dir.path());
+    let built = confined(&sent);
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .open(sent.join("data.bin"))
+        .unwrap();
+    file.set_len(1 << 40).unwrap();
+    drop(file);
+    let (result, _) = import(&built, b"unrelated").await;
+    assert!(text_of(result).contains("changed"));
+}
+
+/// The stream itself reads no more than the walk saw, for a file that grows after its size was
+/// checked, and says so for one that comes up short.
+#[tokio::test]
+async fn the_copy_stops_at_the_size_the_walk_saw() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("f");
+    fs::write(&path, vec![1u8; 4096]).unwrap();
+    let mut grown = Box::pin(chunks(fs::File::open(&path).unwrap(), 1000));
+    let mut seen = 0;
+    let mut failed = None;
+    while let Some(item) = grown.next().await {
+        match item {
+            Ok(bytes) => seen += bytes.len(),
+            Err(e) => failed = Some(e.to_string()),
+        }
+    }
+    assert!(seen <= 1000, "{seen} bytes passed the size the walk saw");
+    assert_eq!(failed.as_deref(), Some(CHANGED));
+
+    let mut short = Box::pin(chunks(fs::File::open(&path).unwrap(), 5000));
+    let mut ended = None;
+    while let Some(item) = short.next().await {
+        ended = item.err().map(|e| e.to_string());
+    }
+    assert_eq!(ended.as_deref(), Some(CHANGED));
 }
 
 /// The case a link makes possible: the name becomes a link to a file outside the folder.
@@ -82,19 +168,6 @@ async fn a_file_swapped_for_a_link_to_a_file_outside_is_refused_and_its_bytes_ar
     assert!(!held, "no byte of the outside file was taken");
 }
 
-#[tokio::test]
-async fn a_small_packed_file_replaced_after_the_walk_is_refused_too() {
-    let dir = tempfile::tempdir().unwrap();
-    let sent = dir.path().join("sent");
-    fs::create_dir(&sent).unwrap();
-    fs::write(sent.join("tiny.txt"), b"tiny").unwrap();
-    let built = confined(&sent);
-    fs::remove_file(sent.join("tiny.txt")).unwrap();
-    fs::write(sent.join("tiny.txt"), b"other").unwrap();
-    let pack = super::add_pack_for_test(&built).await;
-    assert!(matches!(pack, Err(Error::Verify(_))), "{pack:?}");
-}
-
 /// A single file sent by the confined path has the root a one-shot send of it has, so a receipt
 /// for it verifies against the file.
 #[test]
@@ -102,11 +175,11 @@ fn a_single_file_has_the_same_root_confined_or_not() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("one.bin");
     fs::write(&file, vec![5u8; 3000]).unwrap();
-    let confined = confined_of(&file);
+    let parent = open_folder(dir.path()).unwrap();
+    let arg = ConfinedArg::file(parent, "one.bin".to_string());
+    let Build::Ready(built) = Manifest::build_confined(vec![arg]).unwrap() else {
+        panic!("a plain file builds");
+    };
     let plain = crate::engine::root_of_path(&file).unwrap();
-    assert_eq!(confined.manifest.sequence_root(), plain.root);
-}
-
-fn confined_of(path: &Path) -> Built {
-    confined(path)
+    assert_eq!(built.manifest.sequence_root(), plain.root);
 }

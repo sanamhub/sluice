@@ -5,6 +5,7 @@ use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read};
 use std::path::Path;
 
+use super::below::Below;
 use super::meta;
 
 /// What reading a file found out about it, besides its bytes.
@@ -65,6 +66,27 @@ pub(super) fn open(path: &Path) -> Result<Opened, HashFault> {
     #[cfg(windows)]
     if let windows::Handle::ReparsePoint = windows::classify(&before) {
         return windows::through_filter(path, file);
+    }
+    if !before.is_file() {
+        return Err(HashFault::Changed);
+    }
+    Ok(Opened {
+        file,
+        before,
+        _held: None,
+    })
+}
+
+/// Opens a file a confined walk found, from its folder handle and never through a link, and takes the
+/// first look at it. The file has to be the object the walk saw there.
+pub(super) fn open_below(found: &Below) -> Result<Opened, HashFault> {
+    let file = found.open().map_err(|_| HashFault::Changed)?;
+    let before = file
+        .metadata()
+        .map_err(|e| HashFault::Unreadable(e.kind()))?;
+    #[cfg(windows)]
+    if let windows::Handle::ReparsePoint = windows::classify(&before) {
+        return windows::through_filter_handle(file);
     }
     if !before.is_file() {
         return Err(HashFault::Changed);

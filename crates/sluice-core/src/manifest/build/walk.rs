@@ -11,10 +11,9 @@ use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
 
 use super::argument::{file_item, nfc_name, unique_name};
-use super::confine::{Confine, record};
+use super::below::Below;
 use super::{Finding, Reason, meta};
 use crate::Error;
-use crate::engine::ObjectId;
 use crate::manifest::link::LinkTarget;
 use crate::manifest::path::{ManifestPath, component_rule};
 
@@ -41,9 +40,8 @@ pub(super) enum What {
     /// Hashed after the walk. Its size, time and mode come from that read.
     File {
         disk: PathBuf,
-        /// What a confined walk read from the file's handle, which the send checks the file it
-        /// opens against.
-        id: Option<ObjectId>,
+        /// Where a confined walk found it: below a folder handle, with the identity it had there.
+        below: Option<Below>,
     },
     Symlink {
         target: LinkTarget,
@@ -67,39 +65,23 @@ struct Folder {
     /// Its path in the manifest, empty for the folder that was sent. `None` when the folder has a
     /// name a receiver would reject, so nothing below it has a path to be listed under.
     path: Option<String>,
-    /// Set when the walk is confined: the volume everything below must be on.
-    confine: Option<Confine>,
 }
 
 /// Lists the arguments of one `send`. Each argument contributes its own name as a top-level entry,
 /// so `send DIR` writes `DIR/...` in the output and `send a.mov photos/` writes `a.mov` and
 /// `photos/...`. With `name_roots` false the folder is treated as a tree whose own name the caller
 /// already carries, which is what [`crate::manifest::Manifest::build`] does.
-pub(super) fn walk_paths(
-    paths: &[PathBuf],
-    name_roots: bool,
-    confined: bool,
-) -> Result<Walk, Error> {
+pub(super) fn walk_paths(paths: &[PathBuf], name_roots: bool) -> Result<Walk, Error> {
     if paths.is_empty() {
         return Err(Error::Policy("there is nothing to send".to_string()));
     }
     let mut walker = Walker::default();
     let mut names: Vec<(String, String)> = Vec::new();
     for path in paths {
-        let before = walker.stack.len();
-        add_argument(&mut walker, &mut names, path, name_roots, confined)?;
-        if confined && walker.stack.len() > before {
-            let confine = Confine::at(path)?;
-            for folder in &mut walker.stack[before..] {
-                folder.confine = Some(confine);
-            }
-        }
+        add_argument(&mut walker, &mut names, path, name_roots)?;
     }
     while let Some(folder) = walker.stack.pop() {
         walker.read_folder(&folder);
-        if let Some(why) = walker.refusal.take() {
-            return Err(why);
-        }
     }
     Ok(walker.out)
 }
@@ -111,7 +93,6 @@ fn add_argument(
     names: &mut Vec<(String, String)>,
     path: &Path,
     name_roots: bool,
-    confined: bool,
 ) -> Result<(), Error> {
     let shown = path.display().to_string();
     let before = fs::symlink_metadata(path)
@@ -135,14 +116,12 @@ fn add_argument(
             disk: path.to_path_buf(),
             shown: if name_roots { name } else { String::new() },
             path: Some(prefix),
-            confine: None,
         });
     } else {
-        let mut item = file_item(&shown, &name, &before, path)?;
-        if confined && let What::File { id, .. } = &mut item.what {
-            *id = Some(record(path, &shown)?);
-        }
-        walker.out.items.push(item);
+        walker
+            .out
+            .items
+            .push(file_item(&shown, &name, &before, path)?);
     }
     Ok(())
 }
@@ -151,8 +130,6 @@ fn add_argument(
 struct Walker {
     stack: Vec<Folder>,
     out: Walk,
-    /// The first entry a confined walk refused, which ends the walk.
-    refusal: Option<Error>,
 }
 
 impl Walker {
@@ -216,22 +193,11 @@ impl Walker {
                     disk: entry.path(),
                     shown,
                     path: None,
-                    confine: folder.confine,
                 });
             }
             return;
         };
-        let mut id = None;
-        if let Some(confine) = folder.confine {
-            match confine.check(&entry.path(), kind, &shown) {
-                Ok(found) => id = found,
-                Err(why) => {
-                    self.refusal.get_or_insert(why);
-                    return;
-                }
-            }
-        }
-        self.add(entry, kind, path, shown, (folder.confine, id));
+        self.add(entry, kind, path, shown);
     }
 
     /// The manifest path of an entry, or `None` after listing why it has none. The name is
@@ -266,14 +232,7 @@ impl Walker {
         }
     }
 
-    fn add(
-        &mut self,
-        entry: &DirEntry,
-        kind: FileType,
-        path: ManifestPath,
-        shown: String,
-        (confine, id): (Option<Confine>, Option<ObjectId>),
-    ) {
+    fn add(&mut self, entry: &DirEntry, kind: FileType, path: ManifestPath, shown: String) {
         if kind.is_symlink() {
             return self.link(entry, path, shown);
         }
@@ -288,7 +247,6 @@ impl Walker {
                 disk: entry.path(),
                 shown: shown.clone(),
                 path: Some(path.as_str().to_owned()),
-                confine,
             });
             let what = What::Dir {
                 mtime_ms: meta::mtime_ms(&meta),
@@ -299,7 +257,7 @@ impl Walker {
         if kind.is_file() {
             let what = What::File {
                 disk: entry.path(),
-                id,
+                below: None,
             };
             return self.out.items.push(Item { path, shown, what });
         }
