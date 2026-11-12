@@ -32,6 +32,17 @@ pub const STOP_WAIT: Duration = Duration::from_secs(10);
 /// The version of the control interface this daemon serves.
 const PROTOCOL: u32 = 1;
 
+/// A job with what only its starter may read.
+#[derive(Debug)]
+pub struct JobDetail {
+    /// The job as `list_jobs` shows it.
+    pub summary: proto::JobSummary,
+    /// The ticket a send serves, once prepared. A secret.
+    pub secret_ticket: Option<String>,
+    /// The sentence for a job that failed, escaped as a peer's text is.
+    pub failure: Option<String>,
+}
+
 /// One Sluice engine in one home. Cheap to clone: the clones share the jobs and the roots.
 #[derive(Clone)]
 pub struct Service {
@@ -68,6 +79,18 @@ impl Service {
         proto::ListJobsResponse {
             jobs: self.inner.jobs.list(only),
         }
+    }
+
+    /// One job, and what only a caller that started it may read: the ticket of a send once it is
+    /// prepared, and the sentence for a job that failed. The gRPC interface never gives the ticket
+    /// out; a caller in this process that started a send without waiting for it does.
+    pub fn job_detail(&self, job_id: &str) -> Result<JobDetail, ApiError> {
+        let (summary, secret_ticket, failure) = self.inner.jobs.get(job_id)?.detail();
+        Ok(JobDetail {
+            summary,
+            secret_ticket,
+            failure,
+        })
     }
 
     /// One job's events from now on.

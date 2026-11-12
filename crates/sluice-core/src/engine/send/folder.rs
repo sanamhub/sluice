@@ -62,7 +62,10 @@ pub async fn prepare_paths_confined(
     port: Option<u16>,
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
-    let built = Manifest::build_confined(args)?;
+    // The walk and the hashing read every file, which is not work for an async thread.
+    let built = tokio::task::spawn_blocking(move || Manifest::build_confined(args))
+        .await
+        .map_err(|_| Error::Bug("the walk did not finish".to_string()))??;
     prepare_built(home, built, relay, congestion, expiry_ms, port, rate).await
 }
 
@@ -87,12 +90,17 @@ async fn prepare_built(
     check_room(home, &built)?;
     let scratch = Scratch::open(home, storage::Collector::Off).await?;
     let mut tags = Vec::new();
-    import_blobs(scratch.store(), &built, manifest, &mut tags).await?;
-    for index in 0..manifest.packs().len() {
-        add_pack(scratch.store(), &built, manifest, index, &mut tags).await?;
-    }
-    add_manifest(scratch.store(), manifest, &mut tags).await?;
-    let sequence_root = add_sequence(scratch.store(), manifest, &mut tags).await?;
+    let filled = fill(&scratch, &built, &mut tags).await;
+    let sequence_root = match filled {
+        Ok(root) => root,
+        // A send that fails while it copies leaves nothing of its own: the store is closed and its
+        // folder removed here, and not handed to a later command.
+        Err(e) => {
+            drop(tags);
+            let _ = scratch.close().await;
+            return Err(e);
+        }
+    };
     let mut allowed: BTreeSet<[u8; 32]> = manifest.hash_sequence().into_iter().collect();
     allowed.insert(sequence_root);
     let provider = serving(
@@ -120,6 +128,21 @@ async fn prepare_built(
         live: None,
         _tags: tags,
     })
+}
+
+/// Puts everything a send serves into its store, and returns the root of the hash sequence.
+async fn fill(
+    scratch: &Scratch,
+    built: &Built,
+    tags: &mut Vec<TempTag>,
+) -> Result<[u8; 32], Error> {
+    let manifest = &built.manifest;
+    import_blobs(scratch.store(), built, manifest, tags).await?;
+    for index in 0..manifest.packs().len() {
+        add_pack(scratch.store(), built, manifest, index, tags).await?;
+    }
+    add_manifest(scratch.store(), manifest, tags).await?;
+    add_sequence(scratch.store(), manifest, tags).await
 }
 
 /// Imports every distinct file blob once, in place. A second file with the same content shares the

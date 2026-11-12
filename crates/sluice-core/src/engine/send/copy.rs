@@ -45,6 +45,8 @@ pub(super) fn open_for_copy(
     below: &Below,
     entry: &crate::manifest::Entry,
 ) -> Result<fs::File, Error> {
+    #[cfg(test)]
+    HOOK.with(|hook| (hook.borrow())());
     let file = below
         .open()
         .map_err(|_| Error::Verify(REPLACED.to_string()))?;
@@ -110,4 +112,18 @@ pub(super) fn read_packed(file: fs::File, size: u64) -> Result<Vec<u8>, Error> {
         return Err(Error::Verify(CHANGED.to_string()));
     }
     Ok(body)
+}
+
+#[cfg(test)]
+type Hook = Box<dyn Fn()>;
+
+#[cfg(test)]
+thread_local! {
+    static HOOK: std::cell::RefCell<Hook> = std::cell::RefCell::new(Box::new(|| {}));
+}
+
+/// Runs `hook` just before each confined file is opened for copying, where a test changes it.
+#[cfg(test)]
+pub(super) fn before_copy(hook: impl Fn() + 'static) {
+    HOOK.with(|slot| *slot.borrow_mut() = Box::new(hook));
 }

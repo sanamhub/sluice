@@ -214,3 +214,42 @@ async fn a_daemon_that_has_begun_to_stop_starts_no_job() {
         .unwrap_err();
     assert!(matches!(receive, ApiError::Unavailable(_)), "{receive}");
 }
+
+#[tokio::test]
+async fn a_failed_job_gives_its_sentence_to_its_starter_and_a_running_one_does_not() {
+    let (_dir, service) = service(&[]);
+    let running = service
+        .inner
+        .jobs
+        .start(proto::JobKind::Send, None)
+        .unwrap();
+    let failed = service
+        .inner
+        .jobs
+        .start(proto::JobKind::Send, None)
+        .unwrap();
+    failed.finish(
+        JobState::Failed,
+        "the sentence \u{1b}[2J".to_string(),
+        false,
+    );
+    running.keep_ticket("sluice1secret".to_string());
+
+    let detail = service.job_detail(&failed.id).unwrap();
+    assert_eq!(detail.failure.as_deref(), Some("the sentence \u{1b}[2J"));
+    assert!(detail.secret_ticket.is_none());
+    let detail = service.job_detail(&running.id).unwrap();
+    assert!(detail.failure.is_none(), "a job that runs has not failed");
+    assert_eq!(detail.secret_ticket.as_deref(), Some("sluice1secret"));
+    // The ticket is in no summary, and no list.
+    let text = format!(
+        "{:?}{:?}",
+        detail.summary,
+        service.list_jobs(&Default::default())
+    );
+    assert!(!text.contains("sluice1secret"), "{text}");
+    assert!(matches!(
+        service.job_detail("nope"),
+        Err(ApiError::NotFound(_))
+    ));
+}
