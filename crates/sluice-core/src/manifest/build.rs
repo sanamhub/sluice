@@ -5,6 +5,7 @@
 //! lists them all, so one run tells the user everything to fix. It returns that list as data and
 //! not as an error message: error text can reach a log, and file names stay out of logs.
 
+mod argument;
 mod assemble;
 mod collide;
 mod confine;
@@ -292,7 +293,7 @@ fn build_either(
     skipped.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(Build::Ready(Built {
         manifest,
-        disk: DiskPaths::new(assembled.disk),
+        disk: DiskPaths::new(assembled.disk, assembled.ids),
         skipped,
     }))
 }

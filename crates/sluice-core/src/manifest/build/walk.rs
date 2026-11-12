@@ -10,9 +10,11 @@ use std::path::{Path, PathBuf};
 
 use unicode_normalization::UnicodeNormalization;
 
-use super::confine::Confine;
+use super::argument::{file_item, nfc_name, unique_name};
+use super::confine::{Confine, record};
 use super::{Finding, Reason, meta};
 use crate::Error;
+use crate::engine::ObjectId;
 use crate::manifest::link::LinkTarget;
 use crate::manifest::path::{ManifestPath, component_rule};
 
@@ -39,6 +41,9 @@ pub(super) enum What {
     /// Hashed after the walk. Its size, time and mode come from that read.
     File {
         disk: PathBuf,
+        /// What a confined walk read from the file's handle, which the send checks the file it
+        /// opens against.
+        id: Option<ObjectId>,
     },
     Symlink {
         target: LinkTarget,
@@ -82,7 +87,7 @@ pub(super) fn walk_paths(
     let mut names: Vec<(String, String)> = Vec::new();
     for path in paths {
         let before = walker.stack.len();
-        add_argument(&mut walker, &mut names, path, name_roots)?;
+        add_argument(&mut walker, &mut names, path, name_roots, confined)?;
         if confined && walker.stack.len() > before {
             let confine = Confine::at(path)?;
             for folder in &mut walker.stack[before..] {
@@ -106,6 +111,7 @@ fn add_argument(
     names: &mut Vec<(String, String)>,
     path: &Path,
     name_roots: bool,
+    confined: bool,
 ) -> Result<(), Error> {
     let shown = path.display().to_string();
     let before = fs::symlink_metadata(path)
@@ -132,65 +138,13 @@ fn add_argument(
             confine: None,
         });
     } else {
-        walker
-            .out
-            .items
-            .push(file_item(&shown, &name, &before, path)?);
+        let mut item = file_item(&shown, &name, &before, path)?;
+        if confined && let What::File { id, .. } = &mut item.what {
+            *id = Some(record(path, &shown)?);
+        }
+        walker.out.items.push(item);
     }
     Ok(())
-}
-
-/// The top-level name, refused when another argument already carries it.
-fn unique_name(
-    names: &mut Vec<(String, String)>,
-    name: String,
-    shown: &str,
-) -> Result<String, Error> {
-    if let Some((_, other)) = names.iter().find(|(existing, _)| existing == &name) {
-        return Err(Error::Policy(format!(
-            "{other} and {shown} would both arrive as {name}; rename one of them or send \
-             them in separate transfers"
-        )));
-    }
-    names.push((name.clone(), shown.to_string()));
-    Ok(name)
-}
-
-/// One file argument as a top-level entry. A link is refused: its content lives somewhere else.
-fn file_item(shown: &str, name: &str, before: &fs::Metadata, path: &Path) -> Result<Item, Error> {
-    if before.file_type().is_symlink() {
-        return Err(Error::Policy(format!(
-            "{shown} is a symlink; send the file it points at by its real path"
-        )));
-    }
-    if !before.is_file() {
-        return Err(Error::Policy(format!(
-            "{shown} is not a regular file or a folder"
-        )));
-    }
-    let entry_path = ManifestPath::parse_rule(name).map_err(|rule| {
-        Error::Policy(format!(
-            "{shown} has a name a receiver would reject (rule {rule})"
-        ))
-    })?;
-    Ok(Item {
-        path: entry_path,
-        shown: name.to_string(),
-        what: What::File {
-            disk: path.to_path_buf(),
-        },
-    })
-}
-
-/// The name as the manifest carries it, after the checks a receiver applies to every component.
-fn nfc_name(name: &str) -> Result<String, Error> {
-    let nfc: String = name.nfc().collect();
-    match component_rule(&nfc) {
-        None => Ok(nfc),
-        Some(rule) => Err(Error::Policy(format!(
-            "a path to send has a name a receiver would reject (rule {rule})"
-        ))),
-    }
 }
 
 #[derive(Default)]
@@ -267,13 +221,17 @@ impl Walker {
             }
             return;
         };
-        if let Some(confine) = folder.confine
-            && let Err(why) = confine.check(&entry.path(), kind, &shown)
-        {
-            self.refusal.get_or_insert(why);
-            return;
+        let mut id = None;
+        if let Some(confine) = folder.confine {
+            match confine.check(&entry.path(), kind, &shown) {
+                Ok(found) => id = found,
+                Err(why) => {
+                    self.refusal.get_or_insert(why);
+                    return;
+                }
+            }
         }
-        self.add(entry, kind, path, shown, folder.confine);
+        self.add(entry, kind, path, shown, (folder.confine, id));
     }
 
     /// The manifest path of an entry, or `None` after listing why it has none. The name is
@@ -314,7 +272,7 @@ impl Walker {
         kind: FileType,
         path: ManifestPath,
         shown: String,
-        confine: Option<Confine>,
+        (confine, id): (Option<Confine>, Option<ObjectId>),
     ) {
         if kind.is_symlink() {
             return self.link(entry, path, shown);
@@ -339,7 +297,10 @@ impl Walker {
             return self.out.items.push(Item { path, shown, what });
         }
         if kind.is_file() {
-            let what = What::File { disk: entry.path() };
+            let what = What::File {
+                disk: entry.path(),
+                id,
+            };
             return self.out.items.push(Item { path, shown, what });
         }
         self.skip(shown, Reason::NotAFileOrFolder);

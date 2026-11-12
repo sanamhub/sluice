@@ -7,8 +7,7 @@ use std::sync::Arc;
 use sluice_core::Error;
 use sluice_core::engine::{
     Congestion, Keep, ObjectId, Outgoing, Pins, ReceiptTarget, ReceiveOptions, RelayModeChoice,
-    StopEnd, deadline, now_ms, prepare_send_paths_confined, prepare_send_with_rate,
-    receive_checked,
+    StopEnd, deadline, now_ms, prepare_send_paths_confined, receive_checked,
 };
 use sluice_core::ticket::{Body, Ticket};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -133,26 +132,20 @@ impl Service {
             .collect()
     }
 
-    /// One regular file keeps the single-file shape, as `sluice send` does; anything else is a tree.
+    /// A send of paths inside a root. Every file is copied from a handle proved to be the object the
+    /// confined walk recorded, and a single file has the same root as a one-shot send of it has.
     async fn prepare(&self, paths: &[PathBuf], expiry: Option<u64>) -> Result<Outgoing, Error> {
-        let home = &self.inner.home;
         let relay = self.inner.relay.clone();
-        let one_file = paths.len() == 1 && std::fs::metadata(&paths[0]).is_ok_and(|m| m.is_file());
-        if one_file {
-            prepare_send_with_rate(
-                home,
-                &paths[0],
-                relay,
-                Congestion::Cubic,
-                expiry,
-                None,
-                None,
-            )
-            .await
-        } else {
-            prepare_send_paths_confined(home, paths, relay, Congestion::Cubic, expiry, None, None)
-                .await
-        }
+        prepare_send_paths_confined(
+            &self.inner.home,
+            paths,
+            relay,
+            Congestion::Cubic,
+            expiry,
+            None,
+            None,
+        )
+        .await
     }
 }
 

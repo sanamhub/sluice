@@ -3,6 +3,8 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use crate::engine::ObjectId;
+
 /// The disk path of each entry of a [`Built`](super::Built) manifest, by index, so a caller reads
 /// the files the walk saw. A second walk could find a different folder.
 ///
@@ -37,11 +39,20 @@ use std::path::{Path, PathBuf};
 pub struct DiskPaths {
     /// One slot per entry, in manifest order. `Some` exactly for a `File` entry.
     paths: Vec<Option<PathBuf>>,
+    /// The identity a confined walk read from each file's handle, in the same order.
+    ids: Vec<Option<ObjectId>>,
 }
 
 impl DiskPaths {
-    pub(super) fn new(paths: Vec<Option<PathBuf>>) -> Self {
-        Self { paths }
+    pub(super) fn new(paths: Vec<Option<PathBuf>>, ids: Vec<Option<ObjectId>>) -> Self {
+        Self { paths, ids }
+    }
+
+    /// The identity a confined walk read from the handle of the file at `index`, or `None` when the
+    /// walk was not confined. A send that was confined opens the file again without following a
+    /// link and refuses it unless it is this object.
+    pub fn file_id(&self, index: usize) -> Option<ObjectId> {
+        self.ids.get(index).copied().flatten()
     }
 
     /// The file on disk for the entry at `index` of `manifest.entries()`. `None` for a folder, a
