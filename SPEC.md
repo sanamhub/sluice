@@ -892,10 +892,10 @@ ReceiptRequest = { root: [u8;32] }   // 32 bytes
 
 The request travels as a record of section 6 does: its length as a varint, which MUST be 32, then its
 bytes. Nothing is padded, so the request has one spelling. After the 32 bytes of the root the
-receiver MUST end its side of the stream, and a sender MUST read the end before it answers: a stream
-that carries a byte after the root is not a request, and a sender waits for the end for no longer than
-the request window of 10 seconds and answers nothing if it has not come. A sender answers with at most one record
-on that connection:
+receiver MUST end its side of the stream, and a sender MUST read the end before it answers. A stream
+that carries a byte after the root is not a request. A sender waits for the end for no longer than
+the request window of 10 seconds, and answers nothing if it has not come. A sender answers with at
+most one record on that connection:
 
 ```
 ReceiptRecord = { receipt: Receipt }   // 144 bytes
@@ -908,18 +908,25 @@ after refusing the request.
 A sender answers a request only when its policy admitted the endpoint that dialled for that root: the
 endpoint asked for the root on a connection the policy let in and, on a send that counts places, it
 holds one. A send that serves one download counts no places, so it answers any endpoint its policy
-admitted for the root. The root MUST be the one the ticket being served names. A sender that does not answer
-writes nothing, not even a record of another length; it closes the stream, and the close is the whole
-refusal. A connection carries one request, and a later request on another connection follows the same
-rule.
+admitted for the root. The root MUST be the one the ticket being served names. A sender that does
+not answer writes nothing, not even a record of another length; it closes the stream, and the close
+is the whole refusal. A connection carries one request, and a later request on another connection
+follows the same rule.
 
 A sender that sets `RECEIPTS` keeps answering for as long as it serves. A sender that stops after one
-download keeps answering receipt requests for up to 10 seconds from the moment the send settles, which
-is when every content root has been delivered and the content connections that took them have closed,
-so a receiver that is still installing what it received can ask. That hold ends early when every
-content connection has closed, and when a receipt has been delivered: written, finished, and taken by
-the asker or left behind by an asker that closed the connection. An answer that is being written when
-the sender would otherwise stop is waited for, within the same 10 seconds.
+download keeps answering receipt requests for a hold of at most 10 seconds, so a receiver that is
+still installing what it received can ask. The hold starts once every content root has been
+delivered and the connections that took them have closed, after a settle of at most one second.
+
+The hold ends at 10 seconds. It ends earlier when every content connection has closed, or when a
+receipt has been delivered, whichever comes first. A receipt is delivered when it has been written,
+the stream finished, and the asker has taken it: it acknowledged the stream, or closed the
+connection with application code 0. An exchange that has begun keeps the hold open until it ends
+or the 10 seconds do. It begins when a greeting that sets `RECEIPTS` is accepted, and ends when
+the request is refused or the answer has been taken.
+
+A send that ends on the completion code or on its grace period does not start a hold. It waits only
+for an exchange that has already begun, for at most 10 seconds.
 
 A receiver MUST treat the receipt as absent, and MUST NOT fail the transfer over it, when:
 

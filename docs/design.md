@@ -191,14 +191,24 @@ sender answers only when its policy admitted the endpoint that dialled for that 
 the root on a connection the policy let in and, on a send that counts places, it holds one. A send of
 one download counts no places, so it answers any endpoint its policy admitted. Every other request is
 closed with nothing written, and so is one whose stream does not end after the root. The sender
-signs for the root and length of the ticket it serves, and a one-download sender keeps answering for
-ten seconds once the send settles, until every content connection has closed or a receipt has been
-delivered, so a receiver that is still installing what it received can ask. A receipt counts as
-delivered when the asker has taken it, and an answer being written is waited for within those ten
-seconds. The file is written after the whole transfer, to a temporary name beside it and renamed
-into place, so a failed write leaves nothing. It is never written through a link or over a file that
-is already there without `--force`, and a path the transfer writes under `--out` is refused before
-any content arrives. A receipt that cannot be written is a warning: the content is in place and the
+signs for the root and length of the ticket it serves. A one-download sender keeps answering for a
+hold of at most ten seconds, which starts once every root has been delivered and the connections
+that took them have closed, after a settle of at most a second. The hold ends at ten seconds, or
+earlier when every content connection has closed or a receipt has been delivered. A receipt is
+delivered when the asker has taken it: it acknowledged the stream or closed the connection with
+code 0. An exchange that has begun, from an accepted greeting that sets the bit to a refused request
+or a taken answer, keeps the hold open for its ten seconds. A send that ends on the completion code
+or on its grace period starts no hold and waits only for such an exchange.
+
+The file is written after the whole transfer, to a temporary name beside it that is synced and then
+renamed into place, so a failed write leaves nothing. Without `--force` the rename is the kind that
+refuses a name that exists (`RENAME_NOREPLACE`, `RENAME_EXCL`, or `MoveFileExW` without the replace
+flag), and a file system that cannot do that gets an exclusive create at the final path instead.
+With `--force` it is a plain rename, which replaces a link as a link. The receipt is never written
+through a link or over a file that is already there without `--force`. A receipt path that is `--out`
+or inside it is refused before anything is created, as written and after the folders that exist are
+resolved, so a link, a junction, a short name or a `\\?\` spelling of `--out` does
+not get past it. A receipt that cannot be written is a warning: the content is in place and the
 receive succeeds.
 
 ### Transfer queue
