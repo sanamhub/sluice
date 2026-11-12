@@ -7,30 +7,69 @@ use super::receipts::{BODY, with_receipt};
 use super::*;
 use crate::engine::Event;
 
-/// A receipt path that is a file the transfer writes into `--out` is refused before any content
-/// moves, in the spelling the manifest uses and in another case, and nothing is left in `--out`.
+/// A receipt path that is `--out` or inside it is refused, whatever the manifest holds and whether
+/// or not `--out` exists, and the refusal comes before a folder is made.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_receipt_path_the_transfer_writes_is_refused_before_anything_arrives() {
-    for spelling in ["source.bin", "SOURCE.BIN", "./source.bin"] {
+async fn a_receipt_path_inside_out_is_refused_before_a_folder_is_made() {
+    for spelling in [
+        "source.bin",
+        "SOURCE.BIN",
+        "./source.bin",
+        "other/name.txt",
+        "",
+    ] {
         let dir = tempfile::tempdir().unwrap();
-        let (outgoing, text) = prepared(&dir, BODY).await;
-        let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &no_events()).await });
+        let (_outgoing, text) = prepared(&dir, BODY).await;
         let out = dir.path().join("received");
-        fs::create_dir(&out).unwrap();
-        let receipt = out.join(spelling);
+        let receipt = if spelling.is_empty() {
+            out.clone()
+        } else {
+            out.join(spelling)
+        };
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         let error = super::receive(&text, &with_receipt(&out, &receipt), &tx)
             .await
             .expect_err(spelling);
         assert_eq!(error.kind(), crate::ErrorKind::Policy, "{spelling}");
         assert!(error.to_string().contains("outside --out"), "{error}");
-        let left: Vec<_> = fs::read_dir(&out)
-            .map(|entries| entries.map(|e| e.unwrap().file_name()).collect())
-            .unwrap_or_default();
-        assert!(left.is_empty(), "{spelling}: {left:?} was left in --out");
-        serve.abort();
-        let _ = serve.await;
+        assert!(!out.exists(), "{spelling}: the refusal left --out behind");
     }
+}
+
+/// Links a folder to `out`: a symbolic link on Unix and a junction on Windows.
+fn alias_of(out: &Path, alias: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(out, alias).unwrap();
+    #[cfg(windows)]
+    {
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(alias)
+            .arg(out)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "mklink /J failed");
+    }
+}
+
+/// `--force` with a path that reaches `--out` through a link never replaces a received file: the
+/// receipt path is refused and the file keeps its bytes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn force_with_an_aliased_path_never_replaces_a_received_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_outgoing, text) = prepared(&dir, BODY).await;
+    let out = dir.path().join("received");
+    fs::create_dir(&out).unwrap();
+    fs::write(out.join("source.bin"), b"received").unwrap();
+    let alias = dir.path().join("alias");
+    alias_of(&out, &alias);
+    let mut options = with_receipt(&out, &alias.join("source.bin"));
+    options.force = true;
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let error = super::receive(&text, &options, &tx).await.unwrap_err();
+    assert_eq!(error.kind(), crate::ErrorKind::Policy);
+    assert_eq!(fs::read(out.join("source.bin")).unwrap(), b"received");
+    assert_eq!(fs::read_dir(&out).unwrap().count(), 1);
 }
 
 /// A receipt that arrived but cannot be written is a warning: the content is in place and the
@@ -65,7 +104,7 @@ async fn a_receipt_that_cannot_be_written_is_a_warning() {
     assert!(
         events.iter().any(|event| matches!(
             event,
-            Event::Warning { message } if message.contains("was not written")
+            Event::Warning { message } if message.contains("the receipt arrived but was not written")
         )),
         "no warning said the receipt was not written"
     );

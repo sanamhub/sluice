@@ -74,10 +74,13 @@ fn an_admitted_asker_gets_a_receipt_for_what_is_served() {
     assert_eq!(receipt.total_len(), 1024);
     assert!(receipt.is_of(&ROOT));
     assert_eq!(receipt.utc_ms(), NOW);
-    // Deciding to answer is not delivering: the count waits for the write.
+    // Deciding to answer is not delivering: the count waits for the asker to take the record.
     assert_eq!(receipts.answered(), 0);
-    receipts.settle(true);
-    assert_eq!(receipts.answered(), 1);
+    let mut open = receipts.begin();
+    assert_eq!(receipts.pending(), 1);
+    open.taken();
+    drop(open);
+    assert_eq!((receipts.answered(), receipts.pending()), (1, 0));
 }
 
 /// The policy decides: an endpoint that never asked for the root is answered with nothing, and so
@@ -179,4 +182,15 @@ fn a_commit_that_is_the_root_is_an_absence() {
     let naive = Receipt::sign(&signer(), ROOT, 1024, NOW);
     naive.verify().unwrap();
     assert!(accept(&record(&naive), &ROOT, 1024, &sender_key(), NOW).is_none());
+}
+
+/// An exchange that ends without the answer being taken is released and counts for nothing, and
+/// so does one dropped part way, such as a refused request or a task that was cancelled.
+#[test]
+fn an_exchange_that_was_not_taken_is_released_without_a_count() {
+    let (receipts, _) = sender(true);
+    let open = receipts.begin();
+    assert_eq!(receipts.pending(), 1);
+    drop(open);
+    assert_eq!((receipts.answered(), receipts.pending()), (0, 0));
 }

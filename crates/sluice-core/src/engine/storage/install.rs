@@ -139,6 +139,26 @@ fn replace_once(from: &Path, target: &Path) -> io::Result<()> {
     fs::rename(from, target)
 }
 
+/// A rename that fails rather than replace a name that is already there, and never falls back to a
+/// link. A platform with no such rename, and a file system that cannot do it, both answer with
+/// [`is_unsupported`], so the caller chooses what to do instead.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub(in crate::engine) fn rename_exclusive(from: &Path, target: &Path) -> io::Result<()> {
+    rename_no_replace(from, target)
+}
+
+/// The same on a platform with no rename that refuses a name.
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+pub(in crate::engine) fn rename_exclusive(_from: &Path, _target: &Path) -> io::Result<()> {
+    Err(io::ErrorKind::Unsupported.into())
+}
+
+/// Whether a failed [`rename_exclusive`] means the rename cannot refuse a name here, as opposed to
+/// the name being taken or the rename failing for another reason.
+pub(in crate::engine) fn is_unsupported(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::Unsupported || unsupported(error)
+}
+
 /// A rename that fails rather than replace a name that is already there.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn rename_no_replace(from: &Path, target: &Path) -> io::Result<()> {

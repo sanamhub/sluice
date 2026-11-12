@@ -1,21 +1,37 @@
 //! Writing the receipt a receive asked for, with the care an output file gets: a link at the name
 //! is never followed, and a file that is already there is not replaced without `--force`.
 //!
-//! The receipt is written to a temporary name beside the file and renamed into place. Without
-//! `--force` the rename refuses a name that exists; with it the rename replaces the name, a link
-//! included, as a link. A write that fails part way leaves the temporary file removed and the name
-//! as it was, so no half-written receipt is ever at the path a verifier will read.
+//! The receipt is written and synced to a temporary name beside the file, and then put in place by
+//! one rename. Without `--force` that rename is the kind that refuses a name that exists
+//! (`RENAME_NOREPLACE` on Linux, `RENAME_EXCL` on macOS, `MoveFileExW` without the replace flag on
+//! Windows), so a file that appeared since the check is never overwritten. With `--force` it is a
+//! plain rename, which replaces the name, a link included, as a link. A file system that cannot
+//! refuse a name in a rename (an old kernel, FUSE, SMB) gets the old way instead: an exclusive
+//! create at the final path, written and synced there. A write that fails leaves the temporary file
+//! removed and the name as it was, so no half-written receipt is at the path a verifier reads.
+//! Nothing here links a file.
 
 use std::{
     fs,
-    io::Write,
-    path::{Component, Path, PathBuf},
+    io::{self, Write},
+    path::{Path, PathBuf},
 };
 
 use crate::Error;
-use crate::manifest::Manifest;
+use crate::engine::storage::{is_unsupported, rename_exclusive};
 use crate::manifest::path::shown;
 use crate::receipt::Receipt;
+
+mod clash;
+#[cfg(test)]
+mod tests;
+
+pub(in crate::engine) use clash::refuse_under_out;
+
+/// The longest file name, in bytes, that every file system a receipt can go to takes.
+const NAME_MAX: usize = 255;
+/// How many random names are tried for the temporary file before giving up.
+const NAME_TRIES: usize = 8;
 
 /// Checks that the receipt can be written to `path` before a transfer starts, so a clash is
 /// reported before any byte moves. `force` allows replacing a file, never a folder.
@@ -35,7 +51,7 @@ pub(in crate::engine) fn ready(path: &Path, force: bool) -> Result<(), Error> {
             }
             Ok(())
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => parent_ready(path, &label),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => parent_ready(path, &label),
         Err(e) => Err(Error::Storage(format!("cannot read {label}: {e}"))),
     }
 }
@@ -57,221 +73,131 @@ fn parent_ready(path: &Path, label: &str) -> Result<(), Error> {
     }
 }
 
-/// Writes `receipt` to `path` as one line. The caller has already passed [`ready`] for the same
-/// `force`, so a file that appeared meanwhile is a refusal from the rename rather than a name this
-/// replaces.
+/// Writes `receipt` to `path` as one line, as the module says. The caller has already passed
+/// [`ready`] for the same `force`, so a file that appeared meanwhile is a refusal from the rename
+/// and not a name this replaces. Once the file is in place the result is `Ok`; a temporary file that
+/// could not be removed afterwards comes back as a message for the caller to show as a warning.
 pub(in crate::engine) fn write_file(
     path: &Path,
     receipt: &Receipt,
     force: bool,
-) -> Result<(), Error> {
+) -> Result<Option<String>, Error> {
     let label = shown(&path.display().to_string());
     if force && fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir()) {
         return Err(Error::Policy(format!(
             "{label} is a folder, and a receipt is one file"
         )));
     }
-    let failed = |e: std::io::Error| Error::Storage(format!("cannot write {label}: {e}"));
-    let temporary = temporary_name(path);
+    write_beside(path, receipt, force)
+        .map_err(|e| Error::Storage(format!("cannot write {label}: {e}")))
+}
+
+/// The temporary file, the rename, and the fallback for a file system that cannot refuse a name.
+fn write_beside(path: &Path, receipt: &Receipt, force: bool) -> io::Result<Option<String>> {
+    let line = format!("{}\n", receipt.encode());
+    let (temporary, mut file) = create_temporary(path)?;
+    let written = file
+        .write_all(line.as_bytes())
+        .and_then(|()| file.sync_all());
+    drop(file);
+    let placed = written.and_then(|()| {
+        if force {
+            fs::rename(&temporary, path)
+        } else {
+            rename_exclusive(&temporary, path)
+        }
+    });
+    match placed {
+        Ok(()) => {
+            sync_parent(path);
+            Ok(None)
+        }
+        Err(e) if !force && is_unsupported(&e) => {
+            let leftover = remove(&temporary);
+            write_in_place(path, &line)?;
+            Ok(leftover)
+        }
+        Err(e) => match remove(&temporary) {
+            None => Err(e),
+            Some(left) => Err(io::Error::new(e.kind(), format!("{e}; {left}"))),
+        },
+    }
+}
+
+/// The old way, for a file system that cannot refuse a name in a rename: an exclusive create at the
+/// final path, written and synced there. A file this created and could not finish is removed.
+fn write_in_place(path: &Path, line: &str) -> io::Result<()> {
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&temporary)
-        .map_err(failed)?;
+        .open(path)?;
     let written = file
-        .write_all(
-            format!(
-                "{}
-",
-                receipt.encode()
-            )
-            .as_bytes(),
-        )
+        .write_all(line.as_bytes())
         .and_then(|()| file.sync_all());
     drop(file);
-    let placed = written.and_then(|()| place(&temporary, path, force));
-    if placed.is_err() {
-        // A failed write leaves nothing: the temporary file is removed and the name is as it was.
-        let _ = fs::remove_file(&temporary);
+    if let Err(e) = written {
+        let _ = fs::remove_file(path);
+        return Err(e);
     }
-    placed.map_err(failed)
-}
-
-/// Puts the finished file at `path`. With `force` a rename replaces the name, a link included, as a
-/// link. Without it the file is linked in, which fails when the name exists, and the temporary name
-/// is removed after: a plain rename would replace a file that appeared since the check.
-fn place(temporary: &Path, path: &Path, force: bool) -> std::io::Result<()> {
-    if force {
-        return fs::rename(temporary, path);
-    }
-    fs::hard_link(temporary, path)?;
-    fs::remove_file(temporary)
-}
-
-/// A name beside `path` that is not in use: the receipt's name with the process and the time in it.
-fn temporary_name(path: &Path) -> PathBuf {
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |since| since.subsec_nanos());
-    path.with_file_name(format!(".{name}.{}.{nanos}.tmp", std::process::id()))
-}
-
-/// Refuses a receipt path that is a path the transfer writes under `out`: a file or folder of the
-/// manifest, or a folder on the way to one, or `out` itself. The receipt is written after the
-/// content, so such a path would be replaced or refused only once everything had arrived. Paths are
-/// compared as written, with `.` and `..` folded and case ignored, because a case-insensitive
-/// volume names one file by several spellings and a refusal that is too wide costs nothing.
-pub(in crate::engine) fn refuse_output_clash(
-    receipt: &Path,
-    out: &Path,
-    manifest: &Manifest,
-) -> Result<(), Error> {
-    let receipt_key = key(receipt);
-    let out_key = key(out);
-    let clash = receipt_key == out_key
-        || manifest.entries().iter().any(|entry| {
-            let destination = entry.path.under(out);
-            destination
-                .ancestors()
-                .take_while(|folder| key(folder) != out_key)
-                .any(|folder| key(folder) == receipt_key)
-        });
-    if clash {
-        return Err(Error::Policy(format!(
-            "{} is a path this transfer writes under {}, so the receipt cannot go there; choose a              path outside --out",
-            shown(&receipt.display().to_string()),
-            shown(&out.display().to_string())
-        )));
-    }
+    sync_parent(path);
     Ok(())
 }
 
-/// A path as a comparison key: absolute, `.` and `..` folded away lexically, lower case.
-fn key(path: &Path) -> PathBuf {
-    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    let mut folded = PathBuf::new();
-    for part in absolute.components() {
-        match part {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                folded.pop();
-            }
-            other => folded.push(other.as_os_str().to_string_lossy().to_lowercase()),
-        }
+/// Removes the temporary file, and says in a sentence why it is still there when that fails.
+fn remove(temporary: &Path) -> Option<String> {
+    match fs::remove_file(temporary) {
+        Ok(()) => None,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => Some(format!(
+            "the temporary file {} could not be removed: {e}",
+            shown(&temporary.display().to_string())
+        )),
     }
-    folded
 }
 
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
+/// Makes the rename durable. The receipt is already in place, so a failure here changes nothing a
+/// reader sees and is not reported.
+#[cfg(unix)]
+fn sync_parent(path: &Path) {
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let _ = fs::File::open(parent).and_then(|folder| folder.sync_all());
+}
 
-    use super::{ready, write_file};
-    use crate::receipt::{Receipt, commitment};
-    use ed25519_dalek::SigningKey;
+#[cfg(not(unix))]
+fn sync_parent(_path: &Path) {}
 
-    fn receipt() -> Receipt {
-        Receipt::sign(
-            &SigningKey::from_bytes(&[7; 32]),
-            commitment(&[9; 32]),
-            1024,
-            1_800_000_000_000,
-        )
+/// Creates a temporary file beside `path` under a random name, and tries another name when one is
+/// taken.
+fn create_temporary(path: &Path) -> io::Result<(PathBuf, fs::File)> {
+    for _ in 0..NAME_TRIES {
+        let temporary = path.with_file_name(temporary_name(path)?);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => return Ok((temporary, file)),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
     }
+    Err(io::ErrorKind::AlreadyExists.into())
+}
 
-    /// A file that is already there is a policy refusal without `--force`, and the refusal names
-    /// the path and not what the file holds.
-    #[test]
-    fn an_existing_file_is_refused_without_force() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("receipt.txt");
-        std::fs::write(&path, "kept").unwrap();
-        let error = ready(&path, false).unwrap_err();
-        assert_eq!(error.kind(), crate::ErrorKind::Policy);
-        assert!(error.to_string().contains("receipt.txt"), "{error}");
-        ready(&path, true).unwrap();
-        write_file(&path, &receipt(), true).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            format!("{}\n", receipt().encode())
-        );
+/// A name for the temporary file: a dot, the receipt's name, 16 random hex digits and `.tmp`. The
+/// receipt's name is cut at a character boundary so the whole name stays within [`NAME_MAX`] bytes.
+fn temporary_name(path: &Path) -> io::Result<String> {
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random).map_err(io::Error::other)?;
+    let digits: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+    let suffix = format!(".{digits}.tmp");
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let mut keep = name.len().min(NAME_MAX - 1 - suffix.len());
+    while !name.is_char_boundary(keep) {
+        keep -= 1;
     }
-
-    /// A link at the name is replaced as a link, and the file it pointed at keeps its bytes.
-    #[cfg(unix)]
-    #[test]
-    fn a_link_is_never_written_through() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("target.txt");
-        std::fs::write(&target, "untouched").unwrap();
-        let link = dir.path().join("receipt.txt");
-        std::os::unix::fs::symlink(&target, &link).unwrap();
-        write_file(&link, &receipt(), true).unwrap();
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "untouched");
-        assert!(!std::fs::symlink_metadata(&link).unwrap().is_symlink());
-    }
-
-    /// A folder is not replaced by a receipt, with or without `--force`.
-    #[test]
-    fn a_folder_is_refused() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("out");
-        std::fs::create_dir(&path).unwrap();
-        assert!(ready(&path, true).is_err());
-        assert!(write_file(&path, &receipt(), true).is_err());
-    }
-
-    /// The folder the receipt goes into has to exist before the transfer, or the refusal would come
-    /// after the content had already arrived.
-    #[test]
-    fn a_missing_folder_is_refused_before_the_transfer() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("absent").join("receipt.txt");
-        let error = ready(&path, false).unwrap_err();
-        assert_eq!(error.kind(), crate::ErrorKind::Storage);
-    }
-
-    /// A write that cannot take the name leaves the file that is there as it was and no temporary
-    /// file beside it.
-    #[test]
-    fn a_failed_write_leaves_nothing_behind() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("receipt.txt");
-        std::fs::write(&path, "kept").unwrap();
-        let error = write_file(&path, &receipt(), false).unwrap_err();
-        assert_eq!(error.kind(), crate::ErrorKind::Storage);
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "kept");
-        let names: Vec<_> = std::fs::read_dir(dir.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect();
-        assert_eq!(names, ["receipt.txt"]);
-    }
-
-    /// A write that succeeds leaves the receipt and nothing else in the folder.
-    #[test]
-    fn a_written_receipt_is_the_only_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("receipt.txt");
-        write_file(&path, &receipt(), false).unwrap();
-        let names: Vec<_> = std::fs::read_dir(dir.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect();
-        assert_eq!(names, ["receipt.txt"]);
-    }
-
-    /// The comparison folds what a person can spell differently: `.`, `..` and case.
-    #[test]
-    fn paths_are_compared_without_dots_or_case() {
-        assert_eq!(
-            super::key(Path::new("inbox/./Sub/../Report.TXT")),
-            super::key(Path::new("INBOX/report.txt"))
-        );
-        assert_ne!(
-            super::key(Path::new("inbox/report.txt")),
-            super::key(Path::new("inbox/report.txt.bak"))
-        );
-    }
+    Ok(format!(".{}{suffix}", &name[..keep]))
 }

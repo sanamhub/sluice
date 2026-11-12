@@ -88,28 +88,46 @@ async fn answer_to(asker: &Receiver, ticket: &Ticket, request: &[u8], end: bool)
 
 /// A serving one-download sender of [`BODY`] and an asker it has admitted for the ticket's root.
 /// The store and the folder have to outlive the exchange.
-#[allow(clippy::type_complexity)]
-async fn admitted_sender() -> (
-    tokio::task::JoinHandle<Result<super::StopEnd, crate::Error>>,
-    Receiver,
-    Ticket,
-    [u8; 32],
-    FsStore,
-    TempDir,
-) {
+struct Admitted {
+    serve: tokio::task::JoinHandle<Result<super::StopEnd, crate::Error>>,
+    asker: Receiver,
+    ticket: Ticket,
+    text: String,
+    root: [u8; 32],
+    _store: FsStore,
+    dir: TempDir,
+}
+
+/// Starts the sender and admits an asker. A positive control comes first: a valid request from
+/// that asker is answered with a receipt that passes every rule, so a refusal in a test that uses
+/// this is the refusal it names and not an asker that was never admitted.
+async fn admitted_sender() -> Admitted {
     let dir = tempfile::tempdir().unwrap();
     let (outgoing, text) = prepared(&dir, BODY).await;
     let ticket = Ticket::decode(&text).unwrap();
-    let Body::Static { root, .. } = ticket.body() else {
+    let Body::Static { root, size, .. } = ticket.body() else {
         panic!("a file ticket is static");
     };
-    let root = *root;
+    let (root, size) = (*root, *size);
     let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &no_events()).await });
     let asker = Receiver::open(RelayModeChoice::Disabled, super::Congestion::Cubic)
         .await
         .unwrap();
     let store = admit(&dir, &asker, &ticket, root).await;
-    (serve, asker, ticket, root, store, dir)
+    let control = ask_within(&asker, &ticket, root, size, WAIT, &no_events())
+        .await
+        .expect("the admitted asker got no receipt for a valid request");
+    control.verify().unwrap();
+    assert!(control.is_of(&root));
+    Admitted {
+        serve,
+        asker,
+        ticket,
+        text,
+        root,
+        _store: store,
+        dir,
+    }
 }
 
 pub(super) fn with_receipt(out: &Path, receipt: &Path) -> ReceiveOptions {
@@ -238,32 +256,24 @@ async fn a_stranger_gets_nothing_and_the_receiver_after_it_does() {
 }
 
 /// An asker the policy admitted that names another root than the ticket's gets nothing. It is
-/// admitted first, so the root in the request is the only reason to refuse it.
+/// admitted first, and answered when it asks for the right root, so the root in the request is the
+/// only reason to refuse it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_asker_with_the_wrong_root_gets_nothing() {
-    let dir = tempfile::tempdir().unwrap();
-    let (outgoing, text) = prepared(&dir, BODY).await;
-    let ticket = Ticket::decode(&text).unwrap();
-    let Body::Static { root, .. } = ticket.body() else {
-        panic!("a file ticket is static");
-    };
-    let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &no_events()).await });
-    let asker = Receiver::open(RelayModeChoice::Disabled, super::Congestion::Cubic)
-        .await
-        .unwrap();
-    let store = admit(&dir, &asker, &ticket, *root).await;
+    let sender = admitted_sender().await;
     let mut request = crate::engine::hello::varint_bytes(32);
     request.extend_from_slice(&[0; 32]);
     assert!(
-        !answer_to(&asker, &ticket, &request, true).await,
+        !answer_to(&sender.asker, &sender.ticket, &request, true).await,
         "an admitted asker was answered for a root the ticket does not name"
     );
-    drop(store);
-    asker.shutdown().await.unwrap();
-    let out = dir.path().join("received");
+    sender.asker.shutdown().await.unwrap();
+    let out = sender.dir.path().join("received");
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-    super::receive(&text, &options(&out), &tx).await.unwrap();
-    let end = tokio::time::timeout(Duration::from_secs(15), serve)
+    super::receive(&sender.text, &options(&out), &tx)
+        .await
+        .unwrap();
+    let end = tokio::time::timeout(Duration::from_secs(15), sender.serve)
         .await
         .unwrap()
         .unwrap()
@@ -276,56 +286,43 @@ async fn an_asker_with_the_wrong_root_gets_nothing() {
 /// right root, so a sender that skipped the length check would answer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_request_that_is_not_32_bytes_is_closed_with_nothing() {
-    let dir = tempfile::tempdir().unwrap();
-    let (outgoing, text) = prepared(&dir, BODY).await;
-    let ticket = Ticket::decode(&text).unwrap();
-    let Body::Static { root, .. } = ticket.body() else {
-        panic!("a file ticket is static");
-    };
-    let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &no_events()).await });
-    let asker = Receiver::open(RelayModeChoice::Disabled, super::Congestion::Cubic)
-        .await
-        .unwrap();
-    let _store = admit(&dir, &asker, &ticket, *root).await;
+    let sender = admitted_sender().await;
     let mut request = crate::engine::hello::varint_bytes(31);
-    request.extend_from_slice(root);
+    request.extend_from_slice(&sender.root);
     assert!(
-        !answer_to(&asker, &ticket, &request, true).await,
+        !answer_to(&sender.asker, &sender.ticket, &request, true).await,
         "the sender answered a request that is not 32 bytes"
     );
-    serve.abort();
-    let _ = serve.await;
+    sender.serve.abort();
 }
 
 /// A request whose stream goes on after the 32 bytes of the root is refused, from an asker the
 /// policy admitted: the request is the whole stream, so a byte after it is not a request.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_request_followed_by_more_bytes_is_closed_with_nothing() {
-    let (serve, asker, ticket, root, _store, _dir) = admitted_sender().await;
+    let sender = admitted_sender().await;
     let mut request = crate::engine::hello::varint_bytes(32);
-    request.extend_from_slice(&root);
+    request.extend_from_slice(&sender.root);
     request.push(0);
     assert!(
-        !answer_to(&asker, &ticket, &request, true).await,
+        !answer_to(&sender.asker, &sender.ticket, &request, true).await,
         "the sender answered a request with a byte after the root"
     );
-    serve.abort();
-    let _ = serve.await;
+    sender.serve.abort();
 }
 
 /// A request that never ends is not answered: the sender waits for the end within its request
 /// window and writes nothing until it comes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_request_that_never_ends_is_not_answered() {
-    let (serve, asker, ticket, root, _store, _dir) = admitted_sender().await;
+    let sender = admitted_sender().await;
     let mut request = crate::engine::hello::varint_bytes(32);
-    request.extend_from_slice(&root);
+    request.extend_from_slice(&sender.root);
     assert!(
-        !answer_to(&asker, &ticket, &request, false).await,
+        !answer_to(&sender.asker, &sender.ticket, &request, false).await,
         "the sender answered before the request ended"
     );
-    serve.abort();
-    let _ = serve.await;
+    sender.serve.abort();
 }
 
 /// Rule 6: an asker the policy admitted, answered with nothing, waits its window and finishes with

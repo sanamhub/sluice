@@ -33,7 +33,7 @@ mod write;
 
 pub use serve::parse_request;
 pub(in crate::engine) use serve::serve_request;
-pub(super) use write::{ready, refuse_output_clash, write_file};
+pub(super) use write::{ready, refuse_under_out, write_file};
 
 /// How long a receiver waits for the answer, counted from the connection coming up.
 const ANSWER_WAIT: Duration = Duration::from_secs(10);
@@ -41,6 +41,30 @@ const ANSWER_WAIT: Duration = Duration::from_secs(10);
 pub(super) const CLOCK_WINDOW_MS: u64 = 300_000;
 /// How long a one-download sender keeps answering after the last byte of what it serves.
 pub(crate) const HOLD: Duration = Duration::from_secs(10);
+
+/// One open exchange of a sender, from the greeting that sets the bit to the answer being taken or
+/// the request being refused. Dropping it ends the exchange and wakes the hold.
+pub(crate) struct Pending<'a> {
+    receipts: &'a Receipts,
+    taken: bool,
+}
+
+impl Pending<'_> {
+    /// Marks the answer as taken by the asker, so the drop counts it as delivered.
+    pub(crate) fn taken(&mut self) {
+        self.taken = true;
+    }
+}
+
+impl Drop for Pending<'_> {
+    fn drop(&mut self) {
+        if self.taken {
+            self.receipts.answered.fetch_add(1, Ordering::SeqCst);
+        }
+        self.receipts.pending.fetch_sub(1, Ordering::SeqCst);
+        self.receipts.changed.notify_one();
+    }
+}
 
 /// What a sender signs for, once its ticket exists.
 #[derive(Debug)]
@@ -144,24 +168,20 @@ impl Receipts {
         self.answered.load(Ordering::SeqCst)
     }
 
-    /// How many answers are decided and not yet settled.
+    /// How many exchanges are open: a greeting that sets the bit was accepted and its request has
+    /// not been refused, or its answer has not been taken.
     pub(crate) fn pending(&self) -> u32 {
         self.pending.load(Ordering::SeqCst)
     }
 
-    /// Notes an answer that is about to be written, so the sender keeps serving until it settles.
-    fn begin(&self) {
+    /// Opens one exchange, which the sender keeps serving for until the guard is dropped. The guard
+    /// is released on every path out of the exchange, an early return and a cancelled task included.
+    pub(crate) fn begin(&self) -> Pending<'_> {
         self.pending.fetch_add(1, Ordering::SeqCst);
-    }
-
-    /// Settles one answer. It counts as delivered only when the record is out of the send stream and
-    /// taken, because the hold ending is what lets the endpoint close the connection.
-    pub(crate) fn settle(&self, delivered: bool) {
-        if delivered {
-            self.answered.fetch_add(1, Ordering::SeqCst);
+        Pending {
+            receipts: self,
+            taken: false,
         }
-        self.pending.fetch_sub(1, Ordering::SeqCst);
-        self.changed.notify_one();
     }
 
     /// Waits until an answer settles or the bit is cleared. Whoever wakes re-reads the counts.
@@ -173,7 +193,7 @@ impl Receipts {
     /// root: it asked for the root on a connection the policy let in, and on a limited send it
     /// holds a place. `now` is the signing time, which is also what the ticket's deadline is
     /// compared with. Every other request is answered with nothing. Nothing is counted here: the
-    /// answer is counted by [`Receipts::settle`] once it has been written.
+    /// answer is counted when its [`Pending`] guard says the asker took it.
     pub(crate) fn answer(
         &self,
         peer: [u8; 32],
