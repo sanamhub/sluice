@@ -174,8 +174,41 @@ fn a_receipt_from_a_real_send_matches_its_file() {
         .assert()
         .success();
     let text = stdout_text(&assert);
-    assert!(text.contains("matches: its send root is"), "{text}");
-    assert!(text.contains(&hex(&root)), "{text}");
+    assert!(
+        text.contains("matches: its length and commitment"),
+        "{text}"
+    );
+    // The root of the content is a ticket body, so the report never carries it.
+    assert!(!text.contains(&hex(&root)), "{text}");
+}
+
+/// The JSON form of a file check carries the commitment of what it found, and never the root:
+/// the root, the length and the receipt's sender key together are a ticket body.
+#[test]
+fn json_for_a_file_check_never_carries_the_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let source = dir.path().join("note.txt");
+    fs::write(&source, CONTENT).unwrap();
+    let (_sender, ticket) = start(&home, &source, "1h");
+    let (root, size) = of_ticket(&ticket);
+    let path = write_receipt(dir.path(), &receipt_for(root, size));
+    let assert = bare()
+        .args(["receipt", "verify", "--json"])
+        .arg(&path)
+        .args(["--file"])
+        .arg(&source)
+        .assert()
+        .success();
+    let text = stdout_text(&assert);
+    assert!(!text.contains(&hex(&root)), "{text}");
+    let parsed: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(parsed["file"]["matched"], true);
+    assert_eq!(
+        parsed["file"]["commit"], parsed["commit"],
+        "a match commits to the receipt's own commitment"
+    );
+    assert!(parsed["file"].get("root").is_none(), "{text}");
 }
 
 /// A receipt whose commit is the raw root of the content is not the receipt a send makes, and a
@@ -200,7 +233,7 @@ fn a_commit_that_is_the_raw_root_does_not_match() {
         .code(4);
     let text = stdout_text(&assert);
     assert!(text.starts_with("receipt ok, but "), "{text}");
-    assert!(text.contains("and its send root is"), "{text}");
+    assert!(text.contains("and its commitment is"), "{text}");
 }
 
 /// The same file after an edit is other content, and the check says what it found.
@@ -222,7 +255,7 @@ fn a_changed_file_does_not_match() {
         .assert()
         .code(4);
     let text = stdout_text(&assert);
-    assert!(text.contains("and its send root is"), "{text}");
+    assert!(text.contains("and its commitment is"), "{text}");
 }
 
 /// A file of another length is not hashed: the length is read from the metadata first, and the
@@ -247,7 +280,7 @@ fn a_file_of_the_wrong_length_is_not_read() {
         .code(4);
     let text = stdout_text(&assert);
     assert!(text.contains("so it was not read"), "{text}");
-    assert!(!text.contains("send root is"), "{text}");
+    assert!(!text.contains("commitment is"), "{text}");
 }
 
 /// A folder send names a root the same way, and the check rebuilds it from the folder.
@@ -270,7 +303,7 @@ fn a_folder_from_a_real_send_matches() {
         .assert()
         .success();
     assert!(
-        stdout_text(&assert).contains("matches: its send root is"),
+        stdout_text(&assert).contains("matches: its length and commitment"),
         "{}",
         stdout_text(&assert)
     );

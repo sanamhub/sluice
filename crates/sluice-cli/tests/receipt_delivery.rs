@@ -56,7 +56,7 @@ fn a_receive_writes_the_receipt_and_the_file_verifies() {
         .assert()
         .success();
     assert!(
-        stdout_text(&assert).contains("matches: its send root is"),
+        stdout_text(&assert).contains("matches: its length and commitment"),
         "{}",
         stdout_text(&assert)
     );
