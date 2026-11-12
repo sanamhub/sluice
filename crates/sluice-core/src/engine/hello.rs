@@ -292,9 +292,10 @@ impl ProtocolHandler for SluiceProtocol {
             && ours.both(&theirs, CAP_RECEIPTS)
         {
             // One request and one record, and a refused request is answered with nothing: the
-            // caller finishes the stream and the connection close is the whole refusal.
-            let peer = *conn.remote_id().as_bytes();
-            let _ = super::receipts::serve_request(receipts, peer, &mut recv, &mut send).await;
+            // stream is finished inside, and the connection close is the whole refusal.
+            let _ = super::receipts::serve_request(receipts, &conn, &mut recv, send).await;
+            let _ = conn.closed().await;
+            return Ok(());
         }
         send.finish()?;
         // Returning from `accept` closes the connection, which can discard what was written

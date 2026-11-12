@@ -90,6 +90,23 @@ async fn a_receipt_arrives_after_a_one_download_send() {
     assert!(receipt.utc_ms().abs_diff(now_ms()) < 300_000);
 }
 
+/// A sender whose answer is late still delivers it: the hold lasts until the record is written and
+/// taken, not until the sender has decided to answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_late_answer_is_delivered_before_the_sender_stops() {
+    let dir = tempfile::tempdir().unwrap();
+    let sent = sent(&dir).await;
+    sent.outgoing
+        .provider
+        .receipts()
+        .delay_answers(Duration::from_millis(3000));
+    let (out, receipt_path, end) = deliver(&dir, sent, true).await;
+    assert_eq!(end, super::StopEnd::Downloaded);
+    assert_eq!(fs::read(out.join("source.bin")).unwrap(), BODY);
+    let receipt = Receipt::decode(&fs::read_to_string(&receipt_path).unwrap()).unwrap();
+    receipt.verify().unwrap();
+}
+
 /// A sender that cleared the bit writes no receipt, and the transfer still finishes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_sender_that_cleared_the_bit_answers_nothing() {

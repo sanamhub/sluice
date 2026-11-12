@@ -9,11 +9,13 @@ use super::Provider;
 
 impl Provider {
     /// Keeps answering receipt requests after the last byte, for a receiver that is still installing
-    /// what it received and asks before it closes. The hold ends when the receiver's content
-    /// connection closes, when a receipt has been written, or after ten seconds, whichever is
-    /// first: a peer that keeps its connection open cannot keep the sender alive.
+    /// what it received and asks before it closes. With `until_closed` the hold lasts while a
+    /// receiver's content connection is open and no receipt has been delivered; without it, only
+    /// while an answer already decided is being written. Either ends after ten seconds: a peer that
+    /// keeps its connection open cannot keep the sender alive.
     pub(super) async fn hold_receipts(
         &mut self,
+        until_closed: bool,
         opened: &mut BTreeSet<u64>,
         roots: &BTreeSet<Hash>,
         events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
@@ -23,10 +25,12 @@ impl Provider {
         }
         let deadline = tokio::time::sleep(crate::engine::receipts::HOLD);
         tokio::pin!(deadline);
-        while !opened.is_empty() && self.receipts.answered() == 0 {
+        while self.receipts.pending() > 0
+            || (until_closed && !opened.is_empty() && self.receipts.answered() == 0)
+        {
             tokio::select! {
                 _ = &mut deadline => break,
-                _ = self.receipts.wait_answered() => break,
+                _ = self.receipts.wait_changed() => {}
                 reported = self.receivers.recv() => {
                     let Some(reported) = reported else { break };
                     Self::track(&reported, opened);

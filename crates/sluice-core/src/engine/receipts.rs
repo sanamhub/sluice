@@ -67,8 +67,16 @@ pub(crate) struct Receipts {
     asked: Arc<Mutex<Asked>>,
     places: Arc<Mutex<Places>>,
     answered: AtomicU32,
-    /// Wakes the sender's hold when a receipt is written, or when `--no-receipt` clears the bit.
+    /// Answers decided and not yet delivered or given up, which a sender keeps serving for.
+    pending: AtomicU32,
+    /// Wakes the sender's hold when an answer settles, or when `--no-receipt` clears the bit. One
+    /// waiter reads it, and a stored permit means a wake between the hold's check and its wait is
+    /// not lost.
     changed: Notify,
+    /// How long a test makes the sender wait between deciding to answer and writing, so an answer
+    /// that is late is reached through a real transfer.
+    #[cfg(test)]
+    delay: Mutex<Duration>,
     /// A record a test puts in place of the signed one, so each rule a receiver applies can be
     /// reached through a real transfer.
     #[cfg(test)]
@@ -85,7 +93,10 @@ impl Receipts {
             asked,
             places,
             answered: AtomicU32::new(0),
+            pending: AtomicU32::new(0),
             changed: Notify::new(),
+            #[cfg(test)]
+            delay: Mutex::new(Duration::ZERO),
             #[cfg(test)]
             forced: Mutex::new(None),
         })
@@ -96,6 +107,12 @@ impl Receipts {
     #[cfg(test)]
     pub(crate) fn force_record(&self, record: Vec<u8>) {
         *lock(&self.forced) = Some(record);
+    }
+
+    /// Makes the next answers wait `by` before they are written. A test only reaches this.
+    #[cfg(test)]
+    pub(crate) fn delay_answers(&self, by: Duration) {
+        *lock(&self.delay) = by;
     }
 
     /// Offers a receipt for `root` and `total_len` bytes, signed with the key `seed` names. Called
@@ -119,7 +136,7 @@ impl Receipts {
     /// Clears the bit and stops answering. A receipt already written cannot be recalled.
     pub(crate) fn disable(&self) {
         self.enabled.store(false, Ordering::SeqCst);
-        self.changed.notify_waiters();
+        self.changed.notify_one();
     }
 
     /// Whether this sender sets the bit in its greeting.
@@ -127,30 +144,42 @@ impl Receipts {
         self.enabled.load(Ordering::SeqCst)
     }
 
-    /// How many receipts this send has written.
+    /// How many receipts this send has delivered: written, finished, and acknowledged by the asker,
+    /// or left behind by an asker that closed the connection.
     pub(crate) fn answered(&self) -> u32 {
         self.answered.load(Ordering::SeqCst)
     }
 
-    /// Waits until a receipt has been written. The count is read before the notification is armed,
-    /// so a write that happened between the two is not missed.
-    pub(crate) async fn wait_answered(&self) {
-        loop {
-            if self.answered() > 0 {
-                return;
-            }
-            let changed = self.changed.notified();
-            if self.answered() > 0 {
-                return;
-            }
-            changed.await;
+    /// How many answers are decided and not yet settled.
+    pub(crate) fn pending(&self) -> u32 {
+        self.pending.load(Ordering::SeqCst)
+    }
+
+    /// Notes an answer that is about to be written, so the sender keeps serving until it settles.
+    fn begin(&self) {
+        self.pending.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Settles one answer. It counts as delivered only when the record is out of the send stream and
+    /// taken, because the hold ending is what lets the endpoint close the connection.
+    pub(crate) fn settle(&self, delivered: bool) {
+        if delivered {
+            self.answered.fetch_add(1, Ordering::SeqCst);
         }
+        self.pending.fetch_sub(1, Ordering::SeqCst);
+        self.changed.notify_one();
+    }
+
+    /// Waits until an answer settles or the bit is cleared. Whoever wakes re-reads the counts.
+    pub(crate) async fn wait_changed(&self) {
+        self.changed.notified().await;
     }
 
     /// The receipt for `requested_root`, when `peer` is an endpoint the policy admitted for that
     /// root: it asked for the root on a connection the policy let in, and on a limited send it
     /// holds a place. `now` is the signing time, which is also what the ticket's deadline is
-    /// compared with. Every other request is answered with nothing.
+    /// compared with. Every other request is answered with nothing. Nothing is counted here: the
+    /// answer is counted by [`Receipts::settle`] once it has been written.
     pub(crate) fn answer(
         &self,
         peer: [u8; 32],
@@ -182,44 +211,79 @@ impl Receipts {
             offer.total_len,
             now,
         );
-        self.answered.fetch_add(1, Ordering::SeqCst);
-        self.changed.notify_waiters();
         Some(receipt)
     }
 }
 
-/// Answers one request on a `sluice/1` stream, after both greetings. A request that is not 32 bytes
-/// or arrives too late writes nothing, and so does a refused one. The stream is finished by the
-/// caller.
+/// Answers one request on a `sluice/1` stream, after both greetings, and finishes the stream. A
+/// request that is not 32 bytes or arrives too late writes nothing, and so does a refused one. The
+/// answer is counted once the asker has it, or has closed the connection, and never later than
+/// [`HOLD`] after it was written.
 pub(super) async fn serve_request(
     receipts: &Receipts,
-    peer: [u8; 32],
+    conn: &iroh::endpoint::Connection,
     recv: &mut RecvStream,
-    send: &mut SendStream,
+    mut send: SendStream,
 ) -> std::io::Result<()> {
+    let peer = *conn.remote_id().as_bytes();
     let Ok(Ok(root)) = timeout(REQUEST_WAIT, read_request(recv)).await else {
-        return Ok(());
+        return send.finish().map_err(std::io::Error::other);
     };
     let Some(receipt) = receipts.answer(peer, root, now_ms()) else {
-        return Ok(());
+        return send.finish().map_err(std::io::Error::other);
     };
+    receipts.begin();
+    let written = write_answer(receipts, &receipt, recv, &mut send).await;
+    let delivered = match written {
+        Ok(true) if send.finish().is_ok() => taken(&send, conn).await,
+        _ => false,
+    };
+    receipts.settle(delivered);
+    Ok(())
+}
+
+/// Writes the record, and says whether one was written.
+async fn write_answer(
+    receipts: &Receipts,
+    receipt: &Receipt,
+    recv: &mut RecvStream,
+    send: &mut SendStream,
+) -> std::io::Result<bool> {
     #[cfg(test)]
-    let forced = lock(&receipts.forced).clone();
-    #[cfg(test)]
-    if let Some(record) = forced {
-        if record.is_empty() {
-            // A sender that writes nothing: hold the stream until the dialer gives up, so the
-            // receiver's wait is what ends the exchange.
-            let _ = read_stream_varint(recv).await;
-            return Ok(());
+    {
+        let delay = *lock(&receipts.delay);
+        tokio::time::sleep(delay).await;
+        let forced = lock(&receipts.forced).clone();
+        if let Some(record) = forced {
+            if record.is_empty() {
+                // A sender that writes nothing: hold the stream until the dialer gives up, so the
+                // receiver's wait is what ends the exchange.
+                let _ = read_stream_varint(recv).await;
+                return Ok(false);
+            }
+            send.write_all(&record).await?;
+            send.flush().await?;
+            return Ok(true);
         }
-        send.write_all(&record).await?;
-        return send.flush().await;
     }
+    #[cfg(not(test))]
+    let _ = (receipts, &recv);
     let mut record = varint_bytes(crate::receipt::RECORD_LEN as u64);
     record.extend_from_slice(&receipt.to_bytes());
     send.write_all(&record).await?;
-    send.flush().await
+    send.flush().await?;
+    Ok(true)
+}
+
+/// Waits for the asker to take what was written: the send stream is acknowledged or stopped, or the
+/// asker closes the connection, and never longer than [`HOLD`]. Returns whether it did, so a record
+/// that may still be in flight is not counted as delivered.
+async fn taken(send: &SendStream, conn: &iroh::endpoint::Connection) -> bool {
+    tokio::select! {
+        _ = send.stopped() => true,
+        _ = conn.closed() => true,
+        () = tokio::time::sleep(HOLD) => false,
+    }
 }
 
 /// One request: its length as a varint, which must be 32, and then the root.
