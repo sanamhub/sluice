@@ -36,6 +36,7 @@ pub use live::{
 };
 pub use net::{NetworkReport, report as network_report};
 pub use rate::Rate;
+pub use receipts::parse_request;
 pub use recv::{ReceiptTarget, ReceiveOptions, Received, receive, top_level_rule};
 pub use recv_range::receive_range;
 pub use recv_stdout::receive_stdout;

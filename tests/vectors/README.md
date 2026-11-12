@@ -23,6 +23,7 @@ tests/vectors/
   live/         the signed segment log, SPEC.md section 6
   receipts/     a sender's signed statement that it offered content, SPEC.md section 10
   delta/        file pairs and what a delta must plan
+  receipt-requests/  the stream that asks a sender for a receipt, SPEC.md section 10
   need-ranges/  the message that asks for the bytes a delta needs, SPEC.md section 7
   gear/         the chunker's gear table, SPEC.md section 7
 ```
@@ -414,6 +415,24 @@ the one the case holds, in lower case, so one receipt has one spelling. A case w
 the commitment: `matches` is true only when the receipt's `commit` is the commitment of `content.root`
 under the context of section 10. A receipt whose `commit` is the root itself is not about that
 content, and a case holds one.
+
+## `receipt-requests/`
+
+A case is one request stream of `SPEC.md` section 10 as lower-case hex: everything the asker wrote
+after the greetings, before it ended its side of the stream.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | What the case is. A runner prints it next to a failure and does not compare it |
+| `bytes` | string | The stream as lower-case hex, possibly empty |
+| `valid` | boolean | `true` if a sender MUST read it as a request, `false` if it MUST answer it with nothing |
+| `root` | string | Valid cases. The root, as 64 lower-case hex characters |
+| `reason` | string | Refused cases. What is wrong with it, for people |
+
+To check an implementation: read `bytes` as a request. A valid case gives the root. A refused case
+gives no root: the length is not 32 in its shortest form, the stream holds fewer or more bytes than
+the root, or a byte follows it. A stream that never ends is refused too, but it has no bytes to hold
+and no case.
 
 ## `delta/`
 

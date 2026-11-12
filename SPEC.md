@@ -891,7 +891,10 @@ ReceiptRequest = { root: [u8;32] }   // 32 bytes
 ```
 
 The request travels as a record of section 6 does: its length as a varint, which MUST be 32, then its
-bytes. Nothing is padded, so the request has one spelling. A sender answers with at most one record
+bytes. Nothing is padded, so the request has one spelling. After the 32 bytes of the root the
+receiver MUST end its side of the stream, and a sender MUST read the end before it answers: a stream
+that carries a byte after the root is not a request, and a sender waits for the end for no longer than
+the request window of 10 seconds and answers nothing if it has not come. A sender answers with at most one record
 on that connection:
 
 ```
@@ -904,15 +907,19 @@ after refusing the request.
 
 A sender answers a request only when its policy admitted the endpoint that dialled for that root: the
 endpoint asked for the root on a connection the policy let in and, on a send that counts places, it
-holds one. The root MUST be the one the ticket being served names. A sender that does not answer
+holds one. A send that serves one download counts no places, so it answers any endpoint its policy
+admitted for the root. The root MUST be the one the ticket being served names. A sender that does not answer
 writes nothing, not even a record of another length; it closes the stream, and the close is the whole
 refusal. A connection carries one request, and a later request on another connection follows the same
 rule.
 
 A sender that sets `RECEIPTS` keeps answering for as long as it serves. A sender that stops after one
-download keeps answering receipt requests from the endpoint that took its place for 10 seconds after
-the last byte of the content, or until it has written one receipt, whichever comes first, so a
-receiver that is still installing what it received can ask.
+download keeps answering receipt requests for up to 10 seconds from the moment the send settles, which
+is when every content root has been delivered and the content connections that took them have closed,
+so a receiver that is still installing what it received can ask. That hold ends early when every
+content connection has closed, and when a receipt has been delivered: written, finished, and taken by
+the asker or left behind by an asker that closed the connection. An answer that is being written when
+the sender would otherwise stop is waited for, within the same 10 seconds.
 
 A receiver MUST treat the receipt as absent, and MUST NOT fail the transfer over it, when:
 
@@ -1048,6 +1055,7 @@ the lock is held by a live process it MUST connect to that process instead of op
 | `need-ranges/` | Encoded need-ranges messages with the root and the ranges they name, including sets that MUST be refused |
 | `gear/` | The chunker's gear table, entry by entry, as the derivation in section 7 gives it |
 | `paths/` | Hostile paths that MUST be rejected by a receiver |
+| `receipt-requests/` | Request streams a sender reads as a request for a receipt, and ones it MUST answer with nothing |
 | `receipts/` | Receipt texts with the fields they decode to, a signature that must verify or must not, and whether a case is about content with a given root |
 | `writer/` | Top-level names a receiver must accept, refuse as hidden, or refuse as a clash, with the flags and the output state that decide it |
 

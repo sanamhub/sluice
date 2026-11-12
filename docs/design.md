@@ -186,12 +186,16 @@ refuses it.
 A receive asks for a receipt with `recv --receipt FILE`, and a send offers one unless it is given
 `--no-receipt`. The ask is a record of its own on a fresh `sluice/1` connection, after the two
 greetings, because the content connection belongs to the blob protocol and `Hello` is released. It
-names the root the receiver verified. The sender answers only when its policy admitted the endpoint
-that dialled for that root: it asked for the root on a connection the policy let in and, on a send
-that counts places, it holds one. Every other request is closed with nothing written. The sender
+names the root the receiver verified, and the receiver ends its side of the stream after it. The
+sender answers only when its policy admitted the endpoint that dialled for that root: it asked for
+the root on a connection the policy let in and, on a send that counts places, it holds one. A send of
+one download counts no places, so it answers any endpoint its policy admitted. Every other request is
+closed with nothing written, and so is one whose stream does not end after the root. The sender
 signs for the root and length of the ticket it serves, and a one-download sender keeps answering for
-ten seconds after the last byte, or until it has written one receipt, so a receiver that is still
-installing what it received can ask. The file is written after the whole transfer, and it is never
+ten seconds once the send settles, until every content connection has closed or a receipt has been
+delivered, so a receiver that is still installing what it received can ask. A receipt counts as
+delivered when the asker has taken it, and an answer being written is waited for within those ten
+seconds. The file is written after the whole transfer, and it is never
 written through a link or over a file that is already there without `--force`.
 
 ### Transfer queue

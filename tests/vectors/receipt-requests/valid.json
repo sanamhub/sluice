@@ -1,0 +1,11 @@
+{
+  "description": "A receipt request stream of SPEC.md section 10, as everything the asker writes before it ends its side: the length 32 as a varint, then the 32 bytes of the root, then nothing",
+  "cases": [
+    {
+      "name": "a request for one root",
+      "bytes": "200707070707070707070707070707070707070707070707070707070707070707",
+      "valid": true,
+      "root": "0707070707070707070707070707070707070707070707070707070707070707"
+    }
+  ]
+}

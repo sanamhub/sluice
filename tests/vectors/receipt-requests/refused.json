@@ -1,0 +1,47 @@
+{
+  "description": "Streams a sender MUST answer with nothing: a length that is not 32, a length that is not its shortest varint, a stream shorter than its length, and bytes after the root",
+  "cases": [
+    {
+      "name": "a byte after the root",
+      "bytes": "20070707070707070707070707070707070707070707070707070707070707070700",
+      "valid": false,
+      "reason": "the request is the whole stream, so a byte after the root is not a request"
+    },
+    {
+      "name": "the root is one byte short",
+      "bytes": "2007070707070707070707070707070707070707070707070707070707070707",
+      "valid": false,
+      "reason": "the stream holds 31 bytes of root"
+    },
+    {
+      "name": "a length of 31 followed by a whole root",
+      "bytes": "1f0707070707070707070707070707070707070707070707070707070707070707",
+      "valid": false,
+      "reason": "the length is read first and must be 32"
+    },
+    {
+      "name": "a length of 33",
+      "bytes": "21070707070707070707070707070707070707070707070707070707070707070700",
+      "valid": false,
+      "reason": "the length must be 32"
+    },
+    {
+      "name": "the length 32 in two bytes",
+      "bytes": "a0000707070707070707070707070707070707070707070707070707070707070707",
+      "valid": false,
+      "reason": "a varint is in its shortest form"
+    },
+    {
+      "name": "no bytes at all",
+      "bytes": "",
+      "valid": false,
+      "reason": "there is no length"
+    },
+    {
+      "name": "a length and no root",
+      "bytes": "20",
+      "valid": false,
+      "reason": "the stream holds no root"
+    }
+  ]
+}
