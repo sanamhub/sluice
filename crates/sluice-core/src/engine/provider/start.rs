@@ -168,7 +168,7 @@ impl Provider {
         {
             home.save_port(port);
         }
-        if !matches!(relay, RelayModeChoice::Disabled) {
+        if !matches!(relay, RelayModeChoice::Disabled | RelayModeChoice::Loopback) {
             endpoint::wait_for_online(&endpoint).await?;
         }
         endpoint::wait_for_direct_addr(&endpoint).await?;

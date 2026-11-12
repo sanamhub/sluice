@@ -25,7 +25,7 @@ mod storage;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use delta::{DeltaReport, parse_request as parse_delta_request};
-pub use endpoint::{Congestion, N0_WARNING, RelayModeChoice, bind_loopback_only};
+pub use endpoint::{Congestion, N0_WARNING, RelayModeChoice};
 pub use events::{Event, PathKind, emit, watch_path};
 pub use expiry::{DEFAULT_SECONDS, deadline, parse as parse_expiry};
 pub use hello::{
@@ -33,7 +33,7 @@ pub use hello::{
     Hello, MAX_FRAME_BYTES, PROTO_VERSION, SluiceProtocol, decode as decode_hello,
     encode as encode_hello, greet,
 };
-pub use inspect::{Offered, OfferedEntry, Offering, inspect};
+pub use inspect::{Offered, OfferedEntry, Offering, inspect, inspect_with};
 pub use live::{
     CLOSE_AFTER, LiveLog, LiveSend, prepare_live, prepare_live_with_rate, receive_live,
 };

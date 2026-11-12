@@ -4,14 +4,7 @@
 //! The defaults follow ADR 0011: no relay and no n0 discovery unless the user named one. mDNS and
 //! port mapping are on, because neither leaves the local network for a service we do not run.
 
-use std::{
-    str::FromStr,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
-};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use iroh::{
     Endpoint, NET_REPORT_TIMEOUT, RelayMap, RelayMode, SecretKey, Watcher,
@@ -38,16 +31,6 @@ use crate::Error;
 
 /// The warning printed when `--n0-relays` sends traffic to n0's public services.
 pub const N0_WARNING: &str = "warning: --n0-relays uses n0's public relays and DNS discovery, which this project does not run";
-
-/// Whether every endpoint of this process listens on loopback alone.
-static LOOPBACK_ONLY: AtomicBool = AtomicBool::new(false);
-
-/// Makes every endpoint this process binds from now on listen on `127.0.0.1` only, with no mDNS and
-/// no port mapping, so no other machine and no other network interface can reach a transfer. It
-/// serves a daemon whose transfers stay on this computer, and the tests of one.
-pub fn bind_loopback_only() {
-    LOOPBACK_ONLY.store(true, Ordering::SeqCst);
-}
 
 /// The congestion controller of a transfer. Cubic is the default until a noq release carries the
 /// BBRv3 maximum-bandwidth fix (ADR 0023); BBRv3 stays selectable as ADR 0015 promised.
@@ -100,6 +83,10 @@ pub enum RelayModeChoice {
     Url(String),
     /// n0's public relays and DNS discovery, only with `--n0-relays`.
     N0,
+    /// No relay, and every endpoint listens on `127.0.0.1` only, with no mDNS, no port mapping and
+    /// no address publishing, so nothing outside this computer can reach a transfer. It is what a
+    /// daemon whose transfers stay local, and the tests of one, ask for.
+    Loopback,
 }
 
 impl RelayModeChoice {
@@ -118,7 +105,7 @@ impl RelayModeChoice {
 
     fn iroh(&self) -> Result<RelayMode, Error> {
         match self {
-            Self::Disabled => Ok(RelayMode::Disabled),
+            Self::Disabled | Self::Loopback => Ok(RelayMode::Disabled),
             Self::N0 => Ok(RelayMode::Default),
             Self::Url(url) => {
                 let url = iroh::RelayUrl::from_str(url).map_err(|_| {
@@ -297,7 +284,7 @@ async fn bind_inner(
     // A provider's serve loop prints a line for every peer it refuses, so it has to hear about the
     // ones this hook refuses before the protocol sees them.
     let report = complete.as_ref().map(|complete| complete.sender.clone());
-    let loopback = LOOPBACK_ONLY.load(Ordering::SeqCst);
+    let loopback = matches!(relay, RelayModeChoice::Loopback);
     let mut builder = Endpoint::builder(presets::Empty)
         .crypto_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
         .relay_mode(relay.iroh()?)

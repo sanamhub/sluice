@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Subcommand};
 use sluice_api::{ApiError, Daemon, NO_ROOTS, Roots};
-use sluice_core::engine::{N0_WARNING, RelayModeChoice, bind_loopback_only};
+use sluice_core::engine::{N0_WARNING, RelayModeChoice};
 use sluice_core::{Error, Home};
 
 use crate::output::Output;
@@ -28,9 +28,10 @@ pub struct DaemonArgs {
     /// Use n0's public relays and DNS discovery (not run by this project)
     #[arg(long)]
     pub n0_relays: bool,
-    /// Listen for transfers on 127.0.0.1 only, with no mDNS and no port mapping, so nothing outside
-    /// this computer can reach them
-    #[arg(long)]
+    /// Listen for transfers on 127.0.0.1 only, with no relay, no mDNS, no port mapping and no
+    /// address publishing, so nothing outside this computer can reach them. It cannot be combined
+    /// with `--relay` or `--n0-relays`
+    #[arg(long, conflicts_with_all = ["relay", "n0_relays"])]
     pub loopback: bool,
 }
 
@@ -61,12 +62,13 @@ pub fn run(args: &DaemonArgs, output: &Output) -> Result<u8, Error> {
 /// Opens the home, listens and serves until a signal or a `stop`.
 async fn serve(args: &DaemonArgs, output: &Output) -> Result<u8, Error> {
     init_logging();
-    let relay = RelayModeChoice::from_flags(args.relay.as_deref(), args.n0_relays)?;
+    let relay = if args.loopback {
+        RelayModeChoice::Loopback
+    } else {
+        RelayModeChoice::from_flags(args.relay.as_deref(), args.n0_relays)?
+    };
     if args.n0_relays {
         output.write_stderr(&format!("{N0_WARNING}\n"));
-    }
-    if args.loopback {
-        bind_loopback_only();
     }
     let home = Home::open(&Home::locate()?)?;
     let roots = Roots::open(&args.root).map_err(refused)?;

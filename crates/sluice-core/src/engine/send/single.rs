@@ -248,7 +248,7 @@ fn ticket_with_body(
 
 fn relay_text(relay: &RelayModeChoice) -> Option<String> {
     match relay {
-        RelayModeChoice::Disabled | RelayModeChoice::N0 => None,
+        RelayModeChoice::Disabled | RelayModeChoice::N0 | RelayModeChoice::Loopback => None,
         RelayModeChoice::Url(url) => Some(url.clone()),
     }
 }
