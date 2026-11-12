@@ -6,6 +6,18 @@ All notable changes to Sluice are in this file. The format follows
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/sanamhub/sluice/compare/v0.1.0...v0.1.1) - 2026-11-12
+
+### Fixed
+
+- *(core)* cap the lines a refused key exchange prints
+- *(core)* refuse a connection that did not negotiate the post-quantum group
+
+### Other
+
+- update Cargo.lock dependencies
+- *(core)* match the refused group as one phrase in the sender's line
+
 ## [0.1.0](https://github.com/sanamhub/sluice/releases/tag/v0.1.0) - 2026-10-29
 
 The first release. Sluice sends files and folders straight from one computer to another over QUIC,
