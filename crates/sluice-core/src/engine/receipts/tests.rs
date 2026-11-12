@@ -74,6 +74,9 @@ fn an_admitted_asker_gets_a_receipt_for_what_is_served() {
     assert_eq!(receipt.total_len(), 1024);
     assert!(receipt.is_of(&ROOT));
     assert_eq!(receipt.utc_ms(), NOW);
+    // Deciding to answer is not delivering: the count waits for the write.
+    assert_eq!(receipts.answered(), 0);
+    receipts.settle(true);
     assert_eq!(receipts.answered(), 1);
 }
 

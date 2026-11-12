@@ -282,6 +282,7 @@ impl Provider {
                     let whole = self.completion(&reported, &wait.wanted);
                     self.report(reported, false, &wait.wanted, events);
                     if whole {
+                        self.hold_receipts(false, &mut opened, &wait.wanted, events).await;
                         return Ok(ServeEnd::Downloaded);
                     }
                 }
@@ -291,7 +292,10 @@ impl Provider {
                 },
                 // A receiver that keeps its connection open must not keep this sender alive: every
                 // root was delivered, so stop after the grace period even without the close.
-                _ = wait_grace(&mut wait.grace) => return Ok(ServeEnd::Downloaded),
+                _ = wait_grace(&mut wait.grace) => {
+                    self.hold_receipts(false, &mut opened, &wait.wanted, events).await;
+                    return Ok(ServeEnd::Downloaded);
+                }
                 _ = deadline.as_mut() => {
                     if let Some(end) = elapsed(self.expiry, &mut deadline) {
                         return Ok(end);
@@ -302,7 +306,8 @@ impl Provider {
                 // The bytes are out. A receiver's close report can still be on its way, and the
                 // sender's last line about it is worth waiting a moment for, but not a second.
                 self.settle(&mut opened, &wait.wanted, events).await;
-                self.hold_receipts(&mut opened, &wait.wanted, events).await;
+                self.hold_receipts(true, &mut opened, &wait.wanted, events)
+                    .await;
                 return Ok(ServeEnd::Downloaded);
             }
         }
