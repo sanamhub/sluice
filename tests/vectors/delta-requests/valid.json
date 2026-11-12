@@ -1,0 +1,11 @@
+{
+  "description": "A delta request stream of SPEC.md section 7, as everything the requester wrote on the greeting's stream before it ended its side: the 32 bytes of the content root and nothing else",
+  "cases": [
+    {
+      "name": "a request for one root",
+      "bytes": "0707070707070707070707070707070707070707070707070707070707070707",
+      "valid": true,
+      "root": "0707070707070707070707070707070707070707070707070707070707070707"
+    }
+  ]
+}

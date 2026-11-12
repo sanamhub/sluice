@@ -408,11 +408,12 @@ NeedRanges = { root: [u8;32], ranges: RangeSet }
 Flow:
 
 1. The **provider** sends `SigList` for the content the requester is already authorized to read.
-   Signatures flow provider to requester, never the reverse, so the requester discloses nothing
-   about its local files.
+   Signatures flow provider to requester, never the reverse: the requester sends no signature of
+   its own and no hash of its candidate.
 2. The requester chunks its own candidate files with the same parameters, matches strong hashes, and
    computes which byte ranges of the target it can reconstruct locally.
 3. The requester sends `NeedRanges` for the remainder and fetches those with the static protocol.
+   What that tells the provider is stated under **What a requester discloses**.
 4. The requester assembles and MUST verify the whole result against `root`. On failure it MUST
    discard the assembly and fall back to a plain fetch.
 
@@ -493,6 +494,27 @@ record of section 6 does: its length as a varint, then its bytes. The requester 
 connection. The provider MUST send signatures only for content it is already serving, and MUST
 refuse a root that its allowlist does not hold. The requester MUST send nothing derived from its
 candidate files except the ranges it still needs.
+
+**Scope.** A list is about one file: the root a requester asks about is the content root of one
+file's blob, not the root of a ticket, and a requester asks once for each file it has a candidate
+for. A provider writes a list only for a root it is serving, only to an endpoint that has already
+asked for that root on a content connection its policy let in (and, on a send that counts places,
+that holds one), and only when the blob is whole and at least 65,536 bytes. Every other request is
+answered with nothing, so a requester cannot tell a root the provider does not serve from one it
+declined. The request is the 32 bytes of the root and the end of the stream: a byte after the root
+is not a request. A provider SHOULD cut a file with the smallest `avg_bytes` from 8192 up for which
+a list of the file's shortest possible chunks, `size / (avg_bytes / 4)` entries, fits the limits
+below and the requester's `max_frame_bytes`, and writes no list for a file that no average fits.
+
+**What a requester discloses.** The requester sends no signature of its own, but `NeedRanges`, and
+the ranges it then fetches, name the parts of the target it could not rebuild, and so, by
+omission, the parts it could. A provider that wrote a list of guesses can read the answer: a
+guessed chunk whose range the requester leaves out is a chunk the requester holds. This is
+disclosed to the provider the requester is fetching from, and no one else, when it sends
+`NeedRanges`, and it is about the one file the user named as a candidate and no other file. A
+requester MUST use as a candidate only a path the user named for that purpose, never a file it
+found, and MUST NOT send `NeedRanges` or ask for a list for a file it has no candidate for. A user
+who does not want a provider to learn what they hold fetches plainly. ADR 0035 records the choice.
 
 **Limits.** A `SigList` or a `NeedRanges` carries at most 1,048,576 entries, and a decoder MUST
 refuse a count above that before it reserves memory for the entries. A frame is bounded by
@@ -1059,6 +1081,7 @@ the lock is held by a live process it MUST connect to that process instead of op
 | `sequences/` | A manifest and the hash sequence a ticket for it must name |
 | `live/` | A ticket's `stream_id` and `sender_key`, the records of section 6 in the order a receiver gets them, the receiver's answer to each, and the state of the stream at the end, including streams that MUST be refused or aborted |
 | `delta/` | File pairs with expected chunk boundaries and resulting need-ranges |
+| `delta-requests/` | Request streams a provider reads as a request for signatures, and ones it MUST answer with nothing |
 | `need-ranges/` | Encoded need-ranges messages with the root and the ranges they name, including sets that MUST be refused |
 | `gear/` | The chunker's gear table, entry by entry, as the derivation in section 7 gives it |
 | `paths/` | Hostile paths that MUST be rejected by a receiver |

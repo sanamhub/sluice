@@ -43,3 +43,4 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0032](0032-the-rendezvous-image-is-gone.md) | The rendezvous image is no longer built or released | Accepted, supersedes 0020's rendezvous mode |
 | [0033](0033-the-tool-ships-as-an-image.md) | The tool ships as a container image beside the relay | Accepted |
 | [0034](0034-container-codecs-have-no-io.md) | The container codecs move into a crate with no IO, for the browser to share | Accepted |
+| [0035](0035-delta-ranges-tell-the-sender-what-you-hold.md) | A delta tells the sender which parts of the candidate you hold | Proposed, corrects a consequence of 0005 |

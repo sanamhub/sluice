@@ -1,0 +1,29 @@
+{
+  "description": "Streams a provider MUST answer with nothing: fewer or more than the 32 bytes of the root",
+  "cases": [
+    {
+      "name": "a byte after the root",
+      "bytes": "070707070707070707070707070707070707070707070707070707070707070700",
+      "valid": false,
+      "reason": "the stream is the root and nothing after it"
+    },
+    {
+      "name": "the root is one byte short",
+      "bytes": "07070707070707070707070707070707070707070707070707070707070707",
+      "valid": false,
+      "reason": "the stream holds 31 bytes"
+    },
+    {
+      "name": "a length before the root",
+      "bytes": "200707070707070707070707070707070707070707070707070707070707070707",
+      "valid": false,
+      "reason": "a delta request is the bare root, with no length"
+    },
+    {
+      "name": "no bytes at all",
+      "bytes": "",
+      "valid": false,
+      "reason": "there is no root"
+    }
+  ]
+}

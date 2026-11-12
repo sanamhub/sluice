@@ -23,6 +23,7 @@ tests/vectors/
   live/         the signed segment log, SPEC.md section 6
   receipts/     a sender's signed statement that it offered content, SPEC.md section 10
   delta/        file pairs and what a delta must plan
+  delta-requests/  the stream that asks a provider for signatures, SPEC.md section 7
   receipt-requests/  the stream that asks a sender for a receipt, SPEC.md section 10
   need-ranges/  the message that asks for the bytes a delta needs, SPEC.md section 7
   gear/         the chunker's gear table, SPEC.md section 7
@@ -456,6 +457,23 @@ A case with `signatures` also compares the encoded list with that hex, because o
 one spelling. The case files were written from `SPEC.md` section 7 by the implementation in this
 tree, so they check that the cut, the matching and the fetch agree with each other and with the rule;
 a bug that the chunker and the vectors share would not show.
+## `delta-requests/`
+
+A case is one request stream of `SPEC.md` section 7 as lower-case hex: everything the requester wrote
+on the greeting's stream before it ended its side.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | What the case is. A runner prints it next to a failure and does not compare it |
+| `bytes` | string | The stream as lower-case hex, possibly empty |
+| `valid` | boolean | `true` if a provider MUST read it as a request, `false` if it MUST answer it with nothing |
+| `root` | string | Valid cases. The root, as 64 lower-case hex characters |
+| `reason` | string | Refused cases. What is wrong with it, for people |
+
+To check an implementation: read `bytes` as a request. A valid case is exactly the 32 bytes of the
+root. A refused case gives no root: it holds fewer or more bytes, or a length before the root. A
+stream that never ends is refused too, but it has no bytes to hold and no case.
+
 ## `need-ranges/`
 
 A case is one `NeedRanges` message of `SPEC.md` section 7 as lower-case hex and a verdict:

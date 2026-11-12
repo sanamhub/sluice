@@ -124,7 +124,31 @@ static content. ADR 0004, and `SPEC.md` section 6 for the exact rules.
 A content-defined chunk index, in the FastCDC style and cut by our own gear hash, used only as a
 hint. The provider sends chunk signatures for content the requester may already read; the requester
 matches locally and fetches the rest. The result is verified against the real root, so a wrong match
-costs a refetch. The requester discloses nothing about its disk. ADR 0005.
+costs a refetch. ADR 0005.
+
+`sluice recv --delta-from PATH` uses it. For each file of at least 64 KiB that has a file at that
+path (the file itself for a one-file ticket, or the file at the ticket's own path inside a folder),
+the receiver proves the blob's size on the content connection, which is also what tells the sender's
+policy that it asked for the root, and then asks on a `sluice/1` connection of its own for the
+signatures. The sender cuts the blob with the smallest average that makes the worst-case list fit a
+frame, so a 100 GiB file is cut at 512 KiB and a 1 GiB file at 8 KiB. The receiver cuts the
+candidate with that average a block at a time, plans, and sends the ranges it still needs. It
+fetches them with the static protocol into the store, writes the file in the store's temporary area
+from the candidate's bytes and the fetched ones, and hashes it against the blob's root before it
+imports it. Anything that goes wrong on the way, including a list that lies, ends in the plain
+fetch of that file. When less than an eighth of the file would come from the candidate, the
+assembly is skipped and the file is fetched plainly.
+
+What the receiver holds is bounded whatever the target: one block and at most one largest chunk
+(64 MiB at the largest average), the list (at most 20 MiB of bytes, 24 MiB decoded), the
+candidate's chunk table (at most 2,097,152 chunks, about 64 MiB, and its index about as much), and
+at most 16,384 need-ranges. A 100 GiB target holds no more than a 1 GiB one.
+
+The candidate is the file the user named and nothing else. It is opened as a send opens an input,
+read-only and without following a link, and read only inside the length it had when it was opened. A
+requester discloses which parts of that file it holds, by the ranges it leaves out, to the sender it
+fetches from: `SPEC.md` section 7 says so, and ADR 0035 corrects ADR 0005's consequence that the
+requester reveals nothing.
 
 ### Directory manifest
 

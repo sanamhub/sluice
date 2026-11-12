@@ -105,6 +105,13 @@ pipe, a file or a log.
   verify` prints those fields and makes no claim beyond them. A receipt file names the sender's key
   and a commitment to the content's root; the commitment reveals the root only to a reader who
   already knows it, so reading a receipt does not hand out a ticket.
+- **What a delta reveals about the file you offer as a candidate.** `recv --delta-from` sends the
+  sender the ranges it still needs, and fetches them from it, so the sender can see which parts of
+  the file you did not need. A sender that wrote a list of guesses at your file's chunks learns, for
+  each guess, whether you hold that chunk. It learns this about the one file you named, from the
+  moment the ranges are sent, and only the sender you are receiving from learns it. Sluice never
+  picks a candidate: an output of the same name that already exists is not used. Fetch plainly if
+  you do not want the sender to know what you hold. `SPEC.md` section 7 and ADR 0035 give the rule.
 - **A receipt request from a peer that never fetched.** The request names the root, and a sender
   answers only an endpoint its policy admitted for that root, with a place on a send that counts
   them, so a peer that knows the endpoint id and has no ticket is closed out with nothing written. A
