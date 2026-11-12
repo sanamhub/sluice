@@ -10,6 +10,7 @@ use crate::daemon;
 use crate::doctor;
 use crate::id;
 use crate::inspect;
+use crate::mcp;
 use crate::output::Format;
 use crate::{receipt, recv, send};
 
@@ -116,6 +117,13 @@ pub enum Command {
     /// holds the home's lock, so a command that opens the same home, `send` among them, is refused
     /// while it runs. `status` and `stop` call a daemon that runs.
     Daemon(daemon::DaemonArgs),
+    /// Serve the tools of Sluice to an MCP client over standard input and output
+    ///
+    /// The tools send, receive, inspect, list jobs, report a job, cancel and run the doctor. They
+    /// work inside the folders named with `--root` and nowhere else, and with none they refuse
+    /// every send and receive. A send returns a ticket, which is a secret and which the client's
+    /// transcript then holds. The server ends when its input closes.
+    Mcp(mcp::McpArgs),
 }
 
 #[cfg(test)]

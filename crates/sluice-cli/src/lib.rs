@@ -11,6 +11,7 @@ mod events;
 mod exit;
 mod id;
 mod inspect;
+mod mcp;
 mod network;
 mod output;
 mod qr;
@@ -115,6 +116,7 @@ fn execute(command: Command, output: &Output) -> Result<u8, sluice_core::Error> 
         Command::Receipt(args) => receipt::run(&args)?,
         Command::Doctor(args) => doctor::run(&args)?,
         Command::Daemon(args) => return daemon::run(&args, output),
+        Command::Mcp(args) => return mcp::run(&args, output),
     };
     output.print(&outcome)?;
     Ok(outcome.code())

@@ -1,0 +1,178 @@
+---
+source: crates/sluice-cli/tests/mcp.rs
+expression: "serde_json::to_string_pretty(&tools).unwrap()"
+---
+[
+  {
+    "description": "Stop a job. A receive keeps its partial store, so receiving the same ticket again resumes it.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "job_id": {
+          "description": "A job id from `send`, `receive` or `list_jobs`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "type": "object"
+    },
+    "name": "cancel_job"
+  },
+  {
+    "description": "Run the local checks of the Sluice home and say what each found.",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "name": "doctor"
+  },
+  {
+    "description": "Read what a ticket offers without downloading any content: how many files and folders, how large, and the names, which are returned escaped in untrusted_names.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "ticket": {
+          "description": "The ticket a sender made. It is a secret.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ticket"
+      ],
+      "type": "object"
+    },
+    "name": "inspect"
+  },
+  {
+    "description": "Report one job: its state, how many bytes are done of how many, and for a receive whether a partial store is kept.",
+    "input_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "job_id": {
+          "description": "A job id from `send`, `receive` or `list_jobs`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "type": "object"
+    },
+    "name": "job_status"
+  },
+  {
+    "description": "List the jobs this server knows about, newest last, with their state and progress.",
+    "input_schema": {
+      "properties": {},
+      "type": "object"
+    },
+    "name": "list_jobs"
+  },
+  {
+    "description": "Start receiving what a ticket names into a folder inside a root, and return a job id at once. A cancelled receive keeps its partial store, so receiving the same ticket again resumes it.",
+    "input_schema": {
+      "$defs": {
+        "PathInput": {
+          "description": "A path below one of the roots the server was started with.",
+          "properties": {
+            "path": {
+              "description": "The path below the root, with `/` between components, no `.` or `..`. Empty for the root.",
+              "type": "string"
+            },
+            "root": {
+              "description": "The root, written the way the server was started with it (see the server instructions).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "root",
+            "path"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "force": {
+          "description": "Replace a file that is already there.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "out": {
+          "$ref": "#/$defs/PathInput",
+          "description": "The folder to write into, inside a root."
+        },
+        "ticket": {
+          "description": "The ticket a sender made. It is a secret.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ticket",
+        "out"
+      ],
+      "type": "object"
+    },
+    "name": "receive"
+  },
+  {
+    "description": "Start sending files or folders that are inside a root, and return a job id and a ticket at once. The ticket is a secret: anyone who holds it can take the files.",
+    "input_schema": {
+      "$defs": {
+        "PathInput": {
+          "description": "A path below one of the roots the server was started with.",
+          "properties": {
+            "path": {
+              "description": "The path below the root, with `/` between components, no `.` or `..`. Empty for the root.",
+              "type": "string"
+            },
+            "root": {
+              "description": "The root, written the way the server was started with it (see the server instructions).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "root",
+            "path"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "expires_seconds": {
+          "description": "How long the ticket works, in seconds. Omit or give 0 for a ticket that never expires.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "keep": {
+          "description": "Keep serving until the job is cancelled instead of stopping after one download.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "paths": {
+          "description": "Files and folders to send, each inside a root.",
+          "items": {
+            "$ref": "#/$defs/PathInput"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
+    "name": "send"
+  }
+]

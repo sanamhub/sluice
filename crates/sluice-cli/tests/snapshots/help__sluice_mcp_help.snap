@@ -1,0 +1,38 @@
+---
+source: crates/sluice-cli/tests/help.rs
+expression: "help(&[\"mcp\", \"--help\"])"
+---
+Serve the tools of Sluice to an MCP client over standard input and output
+
+The tools send, receive, inspect, list jobs, report a job, cancel and run the doctor. They work inside the folders named with `--root` and nowhere else, and with none they refuse every send and receive. A send returns a ticket, which is a secret and which the client's transcript then holds. The server ends when its input closes.
+
+Usage: sluice mcp [OPTIONS]
+
+Options:
+      --json
+          Print JSON, one object per line, instead of text. A failure is then a JSON line on stderr
+
+      --root <DIR>
+          A folder the tools may send from and receive into, written as a tool names it; repeat for more. Without one every send and receive is refused
+
+      --color <WHEN>
+          When to colour help, errors and other output. NO_COLOR set to anything turns it off
+
+          Possible values:
+          - auto:   Colour a stream only when it is a terminal
+          - always: Colour always, unless `NO_COLOR` is set
+          - never:  Never colour
+          
+          [default: auto]
+
+      --relay <URL>
+          The relay that carries a transfer when a direct path fails
+
+      --n0-relays
+          Use n0's public relays and DNS discovery (not run by this project)
+
+      --loopback
+          Use 127.0.0.1 only, with no relay, no mDNS, no port mapping and no address publishing. It cannot be combined with `--relay` or `--n0-relays`
+
+  -h, --help
+          Print help (see a summary with '-h')
