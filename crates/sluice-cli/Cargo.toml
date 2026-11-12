@@ -38,6 +38,10 @@ serde_json.workspace = true
 sluice-api = { path = "../sluice-api" }
 sluice-core = { path = "../sluice-core" }
 tokio.workspace = true
+# The official MCP SDK, for `sluice mcp`: the server over standard input and output, with the tool
+# macros and the schemas of the tools.
+rmcp.workspace = true
+serde.workspace = true
 # The status the daemon answers a call with, which `daemon status` and `daemon stop` report.
 tonic.workspace = true
 # The daemon's own log lines, written to standard error.
@@ -45,6 +49,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+# The SDK's client, which the tests of `sluice mcp` drive it with over a child process's standard
+# input and output.
+rmcp = { workspace = true, features = ["client", "transport-child-process"] }
 assert_cmd.workspace = true
 # Signs the receipts that the tests of the verify command read, from the crate the identity uses.
 ed25519-dalek.workspace = true

@@ -41,6 +41,7 @@ mod tests {
                 "sluice-doctor.1",
                 "sluice-id.1",
                 "sluice-inspect.1",
+                "sluice-mcp.1",
                 "sluice-receipt-verify.1",
                 "sluice-receipt.1",
                 "sluice-recv.1",

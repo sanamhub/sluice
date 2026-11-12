@@ -246,6 +246,32 @@ opens the same home, `send` among them, is refused until it stops, unless it use
 `SLUICE_HOME`. `--loopback` makes the daemon's transfers use `127.0.0.1` only, with no relay, which
 no other computer can reach. It cannot be combined with `--relay` or `--n0-relays`.
 
+### MCP
+
+`sluice mcp` serves the tools of Sluice to a Model Context Protocol client over standard input and
+output, in the same binary. It calls the same service the daemon does, in process: it opens no
+socket and no port, and it ends when its input closes, cancelling what still runs and keeping the
+partial stores of receives. A client config looks like this:
+
+```json
+{
+  "mcpServers": {
+    "sluice": {
+      "command": "sluice",
+      "args": ["mcp", "--root", "/home/me/Transfers"]
+    }
+  }
+}
+```
+
+The tools are `send`, `receive`, `inspect`, `list_jobs`, `job_status`, `cancel_job` and `doctor`. A
+send or receive returns a job id at once and `job_status` reports its progress. Sends and receives
+work only inside a `--root` folder, with none they are refused, and no tool changes the identity, the
+relay or the roots. Every answer is a structured value. Text a peer chose, such as file names, comes
+back only in fields whose names begin `untrusted_`, escaped, and never inside a sentence the tool
+writes. A ticket a send makes comes back in the field `secret_ticket`, so the agent's transcript then
+holds it: anyone who can read the transcript can take the files while the send runs.
+
 ## How it works
 
 Sluice uses [iroh](https://github.com/n0-computer/iroh) for QUIC, address discovery and hole

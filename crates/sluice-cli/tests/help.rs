@@ -31,6 +31,11 @@ fn sluice_doctor_help() {
 }
 
 #[test]
+fn sluice_mcp_help() {
+    insta::assert_snapshot!(help(&["mcp", "--help"]));
+}
+
+#[test]
 fn sluice_daemon_help() {
     insta::assert_snapshot!(help(&["daemon", "--help"]));
 }

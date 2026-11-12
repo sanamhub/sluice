@@ -465,6 +465,16 @@ process with no socket.
 - **Stopping.** A signal, or the `Shutdown` call, cancels running jobs, keeps a receive's partial
   store for a resume, and removes the socket.
 
+## MCP
+
+`sluice mcp` is a Model Context Protocol server over standard input and output, built with the
+official Rust SDK. Each tool calls a method of the same `Service` struct the daemon serves, in
+process, so there is no socket and no listener. The tools take their paths as a root's name and a
+path below it, and the roots are the ones given with `--root`. Tool names and descriptions are
+constants. Every answer is `{ok, result, failure}`: a failure's sentence is fixed for its kind, and
+the daemon's wording of it, and every name a peer chose, is in a field named `untrusted_*`, escaped.
+The ticket of a send is returned only in `secret_ticket`. A send or a receive returns a job at once.
+
 ## Clients and bindings
 
 | Client | Shape |

@@ -110,7 +110,7 @@ fn init_logging() {
 }
 
 /// The kind of error that goes with each kind of refusal, so the exit code says what happened.
-fn refused(error: ApiError) -> Error {
+pub(crate) fn refused(error: ApiError) -> Error {
     let text = error.to_string();
     match error {
         ApiError::Invalid(_) | ApiError::Refused(_) | ApiError::Busy(_) => Error::Policy(text),
