@@ -20,7 +20,7 @@ const PORTMAP_WAIT: Duration = Duration::from_secs(5);
 pub async fn lines(relay: &RelayModeChoice) -> Vec<Line> {
     let mut lines = vec![udp()];
     match relay {
-        RelayModeChoice::Disabled => {
+        RelayModeChoice::Disabled | RelayModeChoice::Loopback => {
             lines.push(Line {
                 name: "relay",
                 status: Status::Skipped,

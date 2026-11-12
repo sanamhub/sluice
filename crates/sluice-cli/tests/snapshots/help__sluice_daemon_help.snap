@@ -38,7 +38,7 @@ Options:
           Use n0's public relays and DNS discovery (not run by this project)
 
       --loopback
-          Listen for transfers on 127.0.0.1 only, with no mDNS and no port mapping, so nothing outside this computer can reach them
+          Listen for transfers on 127.0.0.1 only, with no relay, no mDNS, no port mapping and no address publishing, so nothing outside this computer can reach them. It cannot be combined with `--relay` or `--n0-relays`
 
   -h, --help
           Print help (see a summary with '-h')

@@ -15,14 +15,13 @@ fn no_flag_means_no_relay() {
     );
 }
 
-/// Every socket of an endpoint bound after the switch is on loopback, and none is on the
+/// Every socket of an endpoint made for the loopback choice is on loopback, and none is on the
 /// unspecified address a firewall would ask about.
 #[tokio::test]
 async fn loopback_only_binds_nothing_but_loopback() {
-    super::bind_loopback_only();
     let endpoint = super::bind(
         None,
-        &RelayModeChoice::Disabled,
+        &RelayModeChoice::Loopback,
         super::Congestion::Cubic,
         None,
     )

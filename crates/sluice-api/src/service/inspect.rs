@@ -1,6 +1,6 @@
 //! Reading what a ticket offers.
 
-use sluice_core::engine::{Offering, inspect};
+use sluice_core::engine::{Offering, RelayModeChoice, inspect_with};
 
 use super::{INSPECT_TIMEOUT, Service, decode_refusal, ticket_text};
 use crate::error::ApiError;
@@ -21,7 +21,15 @@ impl Service {
         let _place = self.inner.inspects.try_acquire().map_err(|_| {
             ApiError::Busy("this daemon inspects a few tickets at once".to_string())
         })?;
-        let read = tokio::time::timeout(INSPECT_TIMEOUT, inspect(&text, Self::limits(), None));
+        let read = tokio::time::timeout(
+            INSPECT_TIMEOUT,
+            inspect_with(
+                &text,
+                Self::limits(),
+                None,
+                matches!(self.inner.relay, RelayModeChoice::Loopback),
+            ),
+        );
         let offering = match read.await {
             Ok(Ok(offering)) => offering,
             Ok(Err(error)) => return Err(ApiError::from_core(&error, &text)),

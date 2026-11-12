@@ -108,6 +108,16 @@ pub async fn inspect(
     limits: Limits,
     include: Option<Selection>,
 ) -> Result<Offering, Error> {
+    inspect_with(text, limits, include, false).await
+}
+
+/// [`inspect`], with the endpoint on `127.0.0.1` only when `loopback` is set.
+pub async fn inspect_with(
+    text: &str,
+    limits: Limits,
+    include: Option<Selection>,
+    loopback: bool,
+) -> Result<Offering, Error> {
     let ticket = Ticket::decode(text)?;
     refuse_expired(&ticket)?;
     let selection = include.unwrap_or_default();
@@ -134,7 +144,12 @@ pub async fn inspect(
             entries: Vec::new(),
         }));
     }
-    let receiver = Receiver::open(relay_of(&ticket), Congestion::Cubic).await?;
+    let relay = if loopback {
+        RelayModeChoice::Loopback
+    } else {
+        relay_of(&ticket)
+    };
+    let receiver = Receiver::open(relay, Congestion::Cubic).await?;
     let result = offer(&receiver, &ticket, limits, &selection).await;
     let closed = receiver.shutdown().await;
     let offering = result?;

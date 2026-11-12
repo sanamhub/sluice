@@ -188,7 +188,12 @@ pub async fn receive_checked(
         };
         plan::check_space(options, size.saturating_add(extra))?;
     }
-    let receiver = Receiver::open(relay_of(&ticket), options.congestion).await?;
+    let relay = if pins.loopback {
+        RelayModeChoice::Loopback
+    } else {
+        relay_of(&ticket)
+    };
+    let receiver = Receiver::open(relay, options.congestion).await?;
     let result = run(&receiver, &ticket, root, options, events).await;
     // Closing the endpoint tells the sender that the last bytes arrived, so it can stop without
     // cutting the response off a moment after writing it.

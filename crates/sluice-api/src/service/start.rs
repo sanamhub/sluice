@@ -6,8 +6,9 @@ use std::sync::Arc;
 
 use sluice_core::Error;
 use sluice_core::engine::{
-    Congestion, Keep, ObjectId, Outgoing, Pins, ReceiptTarget, ReceiveOptions, StopEnd, deadline,
-    now_ms, prepare_send_paths_with_rate, prepare_send_with_rate, receive_checked,
+    Congestion, Keep, ObjectId, Outgoing, Pins, ReceiptTarget, ReceiveOptions, RelayModeChoice,
+    StopEnd, deadline, now_ms, prepare_send_paths_with_rate, prepare_send_with_rate,
+    receive_checked,
 };
 use sluice_core::ticket::{Body, Ticket};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -80,6 +81,7 @@ impl Service {
         let pins = Pins {
             out: Some(out.pin),
             receipt_parent: receipt.as_ref().map(|r| r.pin),
+            loopback: matches!(self.inner.relay, RelayModeChoice::Loopback),
         };
         let options = options(
             out.path.clone(),

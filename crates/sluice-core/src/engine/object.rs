@@ -45,6 +45,8 @@ pub struct Pins {
     pub out: Option<ObjectId>,
     /// The folder the receipt file is written in.
     pub receipt_parent: Option<ObjectId>,
+    /// Whether the receive's endpoint listens on `127.0.0.1` only.
+    pub loopback: bool,
 }
 
 /// Refuses a path that no longer names the object that was pinned.

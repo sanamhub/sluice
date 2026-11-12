@@ -30,7 +30,7 @@ impl Receiver {
     /// Binds a receiver. It takes no lock, so it runs beside a `send`.
     pub async fn open(relay: RelayModeChoice, congestion: Congestion) -> Result<Self, Error> {
         let endpoint = endpoint::bind(None, &relay, congestion, None).await?;
-        if !matches!(relay, RelayModeChoice::Disabled) {
+        if !matches!(relay, RelayModeChoice::Disabled | RelayModeChoice::Loopback) {
             let wait = Duration::from_secs(iroh::NET_REPORT_TIMEOUT);
             tokio::time::timeout(wait, endpoint.online())
                 .await
