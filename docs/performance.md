@@ -145,26 +145,33 @@ measurement of it, on one machine, and says nothing about a network.
 of each row on a Windows 11 PC with an NVMe disk; the table gives the median and, in brackets, the
 fastest and slowest run. Peak memory is the peak working set of each process, read from the operating
 system after it exited. Every received file was compared byte for byte with the one sent. The target
-of this page for memory, 250 MB, holds with room: 36 MiB for the receiver at most.
+of this page for memory, 250 MB, holds with room: 35 MiB for the receiver at most.
 
 | Case | Receive | Fetched (of 1 GiB) | Signature bytes | Wall time, s | Peak memory, receiver / sender, MiB |
 |---|---|---|---|---|---|
-| 10 regions of 1 MiB changed in place (0.99%) | plain | 1,073,741,824 (100%) | 0 | 10.3 (8.0 to 11.0) | 26 / 27 |
-| | delta | 10,656,413 (0.99%) | 2,276,888 | 24.9 (22.6 to 34.7) | 36 / 31 |
-| 1 MiB inserted at the start | plain | 1,074,790,400 (100%) | 0 | 10.0 (8.2 to 12.7) | 26 / 26 |
-| | delta | 1,058,975 (0.10%) | 2,278,808 | 32.7 (21.3 to 36.7) | 36 / 31 |
-| Unrelated content | plain | 1,073,741,824 (100%) | 0 | 12.7 (8.8 to 16.5) | 27 / 27 |
-| | delta | 1,073,741,824 (100%) | 0 (list read, plan dropped) | 34.5 (28.2 to 40.3) | 36 / 31 |
+| 10 regions of 1 MiB changed in place (0.99%) | plain | 1,073,741,824 (100%) | 0 | 9.1 (8.8 to 12.3) | 27 / 26 |
+| | delta | 10,656,413 (0.99%) | 2,276,888 | 8.5 (7.8 to 9.5) | 35 / 31 |
+| 1 MiB inserted at the start | plain | 1,074,790,400 (100%) | 0 | 8.7 (7.9 to 11.7) | 26 / 26 |
+| | delta | 1,058,975 (0.10%) | 2,278,808 | 6.6 (5.9 to 10.0) | 35 / 31 |
+| Unrelated content | plain | 1,073,741,824 (100%) | 0 | 9.5 (7.6 to 10.0) | 27 / 27 |
+| | delta | 1,073,741,824 (100%) | 2,275,288 (list read, plan dropped) | 13.5 (12.4 to 18.1) | 35 / 31 |
 
 **What it shows.** Both changed cases move well under 3% of the bytes: 0.99% for the edit in place,
 which is the 10 MiB that changed and no more, and 0.10% for the insertion, which is the 1 MiB
-inserted. The list for a 1 GiB file is 2.2 MB (0.21%), cut at the default 8 KiB average.
+inserted. The list for a 1 GiB file is 2.2 MB (0.21%), cut at the default 8 KiB average. On
+loopback, where a plain receive already runs at disk speed, the delta receive takes about the same
+time as a plain one for a changed file, and a few seconds more for content that shares nothing, which
+is the cost of building and reading the list and cutting the candidate before the plain fetch runs.
 
-**What it costs.** On loopback a delta receive is two to three times slower than a plain one, not
-faster: the sender hashes the whole file to build the list (about 20 s of the run), the receiver
-cuts the candidate, and the assembled file is hashed and imported into the store as well as the
-fetched ranges written. A link that moves 1 GiB in more than the 20 to 30 s of extra work gains
-from it, and a LAN that moves it in 10 s does not. When nothing matches, the attempt costs the same
-extra time and then the file is fetched plainly, which is why a candidate that is not an older
-version of the file is a loss. The harness is not part of the repository; the method above is
-enough to repeat it.
+**How the sender's list is built.** The sender reads the blob as a bao stream, a chunk group at a
+time, on one task, and hashes and cuts it on a blocking thread. Reading 240 MiB took 1.0 s, about
+230 MiB/s; the same read through the store's range export, which sends 1 KiB per message, ran at
+36 MiB/s and made a 1 GiB list take half a minute. One list is built for each root, however many
+receivers ask, and a receiver waits 60 s plus 1 s for every 64 MiB of the file for it.
+
+**Not measured.** A file of 4 GiB. The volume had 11 GB free, and the run needs about 20 GB (the
+sender's file, the receiver's older file and its output, the store's copy and the assembly). The
+fixed wait of 60 s that a list was once given was passed by any file larger than about 3 GiB, at
+the 50 MiB/s the first build ran at. The wait now grows with the size: a 4 GiB list builds in about
+18 s at the measured speed, against a wait of 124 s. The harness is not part of the repository; the method above
+is enough to repeat it.
