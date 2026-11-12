@@ -143,6 +143,48 @@ impl<'a> Iterator for Chunks<'a> {
     }
 }
 
+/// Cuts a stream that arrives in blocks, with the same cuts [`Params::chunks`] makes on the whole.
+///
+/// A chunk's end depends on the bytes from its start up to `max` and on the end of the input only
+/// when fewer than `max` bytes remain, so a chunk is final as soon as `max` bytes are buffered after
+/// its start. What is held is at most one block plus `max` bytes, whatever the length of the stream,
+/// which is how a file of any size is cut in a bounded amount of memory.
+pub struct StreamCut {
+    params: Params,
+    buffer: Vec<u8>,
+}
+
+impl StreamCut {
+    /// A cutter for `params`, with nothing buffered.
+    pub fn new(params: Params) -> Self {
+        Self {
+            params,
+            buffer: Vec::new(),
+        }
+    }
+
+    /// Adds `block`, and hands every chunk that is now final to `each`, in order.
+    pub fn feed(&mut self, block: &[u8], mut each: impl FnMut(&[u8])) {
+        self.buffer.extend_from_slice(block);
+        let max = self.params.max as usize;
+        let mut at = 0;
+        while self.buffer.len() - at >= max {
+            let len = self.params.cut(&self.buffer[at..]);
+            each(&self.buffer[at..at + len]);
+            at += len;
+        }
+        self.buffer.drain(..at);
+    }
+
+    /// Ends the stream and hands over the chunks that were waiting for more bytes.
+    pub fn finish(&mut self, mut each: impl FnMut(&[u8])) {
+        for chunk in self.params.chunks(&self.buffer) {
+            each(chunk);
+        }
+        self.buffer.clear();
+    }
+}
+
 /// The gear table's entry for `byte`, which is the value `SPEC.md` section 7 derives: the first
 /// eight bytes, little-endian, of `BLAKE3("sluice/delta/gear/1" || [byte])`. A test vector pins the
 /// derivation, which is why this is public.

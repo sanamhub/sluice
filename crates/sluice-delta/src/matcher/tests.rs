@@ -198,3 +198,29 @@ proptest! {
         }
     }
 }
+
+/// A candidate built from entries cut in blocks is the candidate built from the whole data: a plan
+/// made with either is the same plan.
+#[test]
+fn a_candidate_from_entries_plans_like_one_from_the_bytes() {
+    let params = params();
+    let target = content(200_000, 4);
+    let mut candidate_bytes = target.clone();
+    candidate_bytes[90_000] ^= 1;
+    let from_bytes = Candidate::new(&params, &candidate_bytes).unwrap();
+    let mut entries = Vec::new();
+    let mut cut = crate::StreamCut::new(params);
+    let mut each = |chunk: &[u8]| entries.push(Entry::of_bytes(chunk).unwrap());
+    for block in candidate_bytes.chunks(10_000) {
+        cut.feed(block, &mut each);
+    }
+    cut.finish(&mut each);
+    let from_entries = Candidate::from_entries(&params, entries);
+    assert_eq!(from_entries.len(), from_bytes.len());
+    let list = signatures(&params, &target);
+    let len = target.len() as u64;
+    assert_eq!(
+        plan(&list, &from_entries, len).unwrap(),
+        plan(&list, &from_bytes, len).unwrap()
+    );
+}

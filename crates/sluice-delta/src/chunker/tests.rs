@@ -84,3 +84,34 @@ fn a_change_leaves_every_boundary_before_it(
     let after: Vec<usize> = params().boundaries(&data).into_iter().filter(|end| *end <= at).collect();
     prop_assert_eq!(before, after);
 }}
+
+/// A stream cut in blocks of any size ends at the same places as the whole input cut at once, so
+/// an engine that reads a file in blocks signs and matches the chunks the spec names.
+#[test]
+fn a_stream_cut_in_blocks_matches_the_whole_cut() {
+    let params = Params::new(1024).unwrap();
+    let mut state = 7u64;
+    let data: Vec<u8> = (0..200_000)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u8
+        })
+        .collect();
+    let whole: Vec<usize> = params.boundaries(&data);
+    for block in [1usize, 17, 1000, 8192, 65_537, 200_000] {
+        let mut cut = super::StreamCut::new(params);
+        let mut ends = Vec::new();
+        let mut total = 0;
+        let mut each = |chunk: &[u8]| {
+            total += chunk.len();
+            ends.push(total);
+        };
+        for part in data.chunks(block) {
+            cut.feed(part, &mut each);
+        }
+        cut.finish(&mut each);
+        assert_eq!(ends, whole, "block of {block}");
+    }
+}
