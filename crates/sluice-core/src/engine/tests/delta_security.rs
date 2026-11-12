@@ -212,6 +212,13 @@ async fn a_hostile_list_ends_in_a_plain_fetch_that_completes() {
         let report = received.delta.unwrap();
         assert_eq!(report.network_bytes, SIZE as u64, "{name}");
         assert_eq!(report.local_bytes, 0, "{name}");
+        if name == "signatures of the old file" {
+            // A list that arrived and led to a mismatch still cost its bytes.
+            assert!(
+                report.signature_bytes > 0,
+                "{name}: the list was not counted"
+            );
+        }
         stopped(sender).await;
     }
 }
