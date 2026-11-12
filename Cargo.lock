@@ -4164,10 +4164,14 @@ dependencies = [
  "qrcodegen",
  "rqrr",
  "serde_json",
+ "sluice-api",
  "sluice-core",
  "tempfile",
  "terminal_size",
  "tokio",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

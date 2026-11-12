@@ -48,9 +48,9 @@ Four rules hold everywhere:
 2. **The browser is a peer.** No HTTP endpoint accepts file bytes.
 3. **One control contract.** `proto/sluice/v1` is the only API definition, linted and checked for
    breaking changes with `buf`.
-4. **No daemon for one-shot transfers.** `sluice send` exits. A daemon runs only for
-   receive-while-idle, paired devices and mount, and socket activation keeps it at zero cost until
-   used.
+4. **No daemon for one-shot transfers.** `sluice send` exits and `sluice recv` returns. A daemon
+   runs only for the local programs that ask it for transfers, and no command starts one to move a
+   single transfer.
 
 ## Reuse and build
 
@@ -438,6 +438,32 @@ codes from the variant alone. The message is for people and can change in any re
 
 Exit code 2 stays with argument errors, as `clap` reports them. Bindings and the control API map the
 same six variants to their own error types, one to one.
+
+## The daemon
+
+`sluice daemon` serves `proto/sluice/v1` over a socket or pipe that only the current user can reach
+(ADR 0037). The `sluice-api` crate holds the generated types, the service and the daemon, and the
+service is one struct with an async method per call, so the MCP server calls the same methods in
+process with no socket.
+
+- **Listener.** A Unix socket in a folder of mode 0700 inside the home, or a named pipe whose access
+  list names the current user, `SYSTEM` and `Administrators`. No TCP port. Each accepted
+  connection's peer is checked: `SO_PEERCRED` on Linux and `getpeereid` on macOS give the user id,
+  and on Windows the pipe's client process gives the token's user SID. Another user is refused
+  before the server sees the connection. An existing socket path is taken over only when no daemon
+  answers on it and this user made it, and a link there is refused.
+- **Roots.** Every path a client names is a root's name and a path below it. The path is checked
+  against the manifest path rules, and no link, reparse point or mount point may be in it. A
+  receive's output folder, a receipt's file and a send's paths are all under a root, and a daemon
+  with no root refuses all of them. The check is made on the path and the engine opens it
+  afterwards, which leaves the window ADR 0037 records.
+- **Jobs.** At most 16 run at once, and the last 64 finished ones stay listed. A watcher has a buffer
+  of 256 events; one that falls behind loses the newest and reads a `dropped` event with the count in
+  their place.
+- **Tickets.** A ticket is a secret. The call that makes one gets it back, and it is in no job
+  summary, event, error or log line.
+- **Stopping.** A signal, or the `Shutdown` call, cancels running jobs, keeps a receive's partial
+  store for a resume, and removes the socket.
 
 ## Clients and bindings
 

@@ -1,0 +1,44 @@
+---
+source: crates/sluice-cli/tests/help.rs
+expression: "help(&[\"daemon\", \"--help\"])"
+---
+Serve the control interface on a socket or pipe only this user can reach, or ask the one that runs
+
+The daemon runs transfers for local programs. It sends from and receives into the folders named with `--root` and nowhere else, and with none it refuses every send and receive. It holds the home's lock, so a command that opens the same home, `send` among them, is refused while it runs. `status` and `stop` call a daemon that runs.
+
+Usage: sluice daemon [OPTIONS]
+       sluice daemon <COMMAND>
+
+Commands:
+  status  Print the running daemon's version and its jobs
+  stop    Stop the running daemon: its jobs end as cancelled, a receive keeps its partial store, and the socket or pipe is removed
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+      --json
+          Print JSON, one object per line, instead of text. A failure is then a JSON line on stderr
+
+      --color <WHEN>
+          When to colour help, errors and other output. NO_COLOR set to anything turns it off
+
+          Possible values:
+          - auto:   Colour a stream only when it is a terminal
+          - always: Colour always, unless `NO_COLOR` is set
+          - never:  Never colour
+          
+          [default: auto]
+
+      --root <DIR>
+          A folder the daemon may send from and receive into, written as a client will name it; repeat for more. Without one the daemon refuses every send and every receive
+
+      --relay <URL>
+          The relay that carries a transfer when a direct path fails
+
+      --n0-relays
+          Use n0's public relays and DNS discovery (not run by this project)
+
+      --loopback
+          Listen for transfers on 127.0.0.1 only, with no mDNS and no port mapping, so nothing outside this computer can reach them
+
+  -h, --help
+          Print help (see a summary with '-h')

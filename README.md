@@ -218,6 +218,33 @@ sluice doctor --network
 The [CLI README](crates/sluice-cli/README.md) lists the exit codes, the JSON shapes and every
 `doctor` check that scripts may rely on.
 
+### The daemon
+
+`sluice daemon` runs transfers for local programs. It serves the control interface of
+[`proto/sluice/v1`](proto/sluice/v1/control.proto), a gRPC service, on a Unix socket in a folder of
+mode 0700 inside the home, or on Windows a named pipe whose access list names only the current user,
+`SYSTEM` and `Administrators`. It never listens on a TCP port, and it refuses a connection whose
+process runs as another user.
+
+```sh
+sluice daemon --root ~/Transfers --root ~/Outbox
+sluice daemon status
+sluice daemon stop
+```
+
+A client names a root and a path below it, and the daemon sends from and receives into those
+folders and nowhere else. A daemon started with no `--root` refuses every send and receive and says
+how to allow one. A path with a `..`, an absolute path or a link in it is refused. The daemon
+returns a ticket only to the call that made it, and no log line, error, event or job list holds one.
+At most 16 jobs run at once, a watcher that falls behind is told how many events it missed, and a
+message is at most 1 MiB.
+
+`SIGINT` or `SIGTERM`, `Ctrl+C` on Windows, or `sluice daemon stop` ends running jobs as cancelled.
+A receive keeps its partial store, so receiving the same ticket again resumes it. The daemon holds
+the home's lock, so a command that opens the same home, `send` among them, is refused until it
+stops, unless it uses another `SLUICE_HOME`. `--loopback` makes the daemon's transfers listen on `127.0.0.1` only, which no other
+computer can reach.
+
 ## How it works
 
 Sluice uses [iroh](https://github.com/n0-computer/iroh) for QUIC, address discovery and hole

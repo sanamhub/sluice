@@ -5,6 +5,7 @@ mod bug;
 mod cli;
 mod colour;
 mod completions;
+mod daemon;
 mod doctor;
 mod events;
 mod exit;
@@ -113,6 +114,7 @@ fn execute(command: Command, output: &Output) -> Result<u8, sluice_core::Error> 
         Command::Inspect(args) => inspect::run(&args)?,
         Command::Receipt(args) => receipt::run(&args)?,
         Command::Doctor(args) => doctor::run(&args)?,
+        Command::Daemon(args) => return daemon::run(&args, output),
     };
     output.print(&outcome)?;
     Ok(outcome.code())
