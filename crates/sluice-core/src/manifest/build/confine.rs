@@ -33,7 +33,12 @@ impl Confine {
 
     /// Refuses an entry that is a link, is on another volume, or is a file with more than one name.
     /// What it reads comes from a handle opened without following a link, never from the path.
-    pub(super) fn check(&self, path: &Path, kind: FileType, shown: &str) -> Result<(), Error> {
+    pub(super) fn check(
+        &self,
+        path: &Path,
+        kind: FileType,
+        shown: &str,
+    ) -> Result<Option<ObjectId>, Error> {
         if kind.is_symlink() {
             return Err(refused(shown, "it is a link, which a daemon never sends"));
         }
@@ -62,6 +67,25 @@ impl Confine {
                 "it has more than one name, and another may lie outside the root",
             ));
         }
-        Ok(())
+        Ok(kind.is_file().then_some(found.identity))
     }
+}
+
+/// The identity of a file argument, read from a handle opened without following a link. A link, or
+/// a file with more than one name, is refused.
+pub(super) fn record(path: &Path, shown: &str) -> Result<ObjectId, Error> {
+    let handle = open_file(path)
+        .map_err(|e| refused(shown, &format!("it cannot be opened ({})", e.kind())))?;
+    if is_link(&handle).unwrap_or(true) {
+        return Err(refused(shown, "it is a link, which a daemon never sends"));
+    }
+    let found =
+        facts(&handle).map_err(|e| refused(shown, &format!("it cannot be read ({})", e.kind())))?;
+    if found.links > 1 {
+        return Err(refused(
+            shown,
+            "it has more than one name, and another may lie outside the root",
+        ));
+    }
+    Ok(found.identity)
 }

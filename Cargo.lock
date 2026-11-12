@@ -4180,6 +4180,7 @@ name = "sluice-core"
 version = "0.1.1"
 dependencies = [
  "blake3",
+ "bytes",
  "ed25519-dalek",
  "getrandom 0.4.3",
  "globset",

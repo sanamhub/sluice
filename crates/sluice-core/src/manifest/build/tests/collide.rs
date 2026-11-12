@@ -15,6 +15,7 @@ fn item(path: &str, shown: &str) -> Item {
         shown: shown.to_string(),
         what: What::File {
             disk: PathBuf::from(path),
+            id: None,
         },
     }
 }

@@ -47,6 +47,9 @@ anyhow = "1"
 anstream = "1"
 assert_cmd = "2"
 blake3 = "1"
+# The chunks a confined send copies from an open file into its store, the type iroh-blobs takes. Already
+# in the tree through iroh-blobs.
+bytes = "1"
 # Only xtask uses it, to report the brotli size of the .wasm files.
 brotli = "9"
 clap = { version = "4", features = ["derive"] }

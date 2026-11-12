@@ -122,6 +122,42 @@ async fn prepare_paths_inner(
     })
 }
 
+/// Opens a file of a confined send without following a link and proves it is the object the walk
+/// recorded, so nothing is read from a file that was swapped after the walk.
+pub(super) fn open_recorded(
+    disk: &std::path::Path,
+    expected: crate::engine::ObjectId,
+) -> Result<fs::File, Error> {
+    let changed = || {
+        Error::Verify(
+            "a file was replaced after the folder was read, so it is not sent".to_string(),
+        )
+    };
+    let file = crate::engine::open_file(disk).map_err(|_| changed())?;
+    match crate::engine::facts(&file) {
+        Ok(found) if found.identity == expected => Ok(file),
+        _ => Err(changed()),
+    }
+}
+
+/// The bytes of an open file in chunks, for the store to copy.
+fn chunks(
+    file: fs::File,
+) -> impl n0_future::Stream<Item = std::io::Result<bytes::Bytes>> + Send + Sync + 'static {
+    let mut file = file;
+    n0_future::stream::iter(std::iter::from_fn(move || {
+        let mut buffer = vec![0u8; 1 << 20];
+        match std::io::Read::read(&mut file, &mut buffer) {
+            Ok(0) => None,
+            Ok(n) => {
+                buffer.truncate(n);
+                Some(Ok(bytes::Bytes::from(buffer)))
+            }
+            Err(e) => Some(Err(e)),
+        }
+    }))
+}
+
 /// Imports every distinct file blob once, in place. A second file with the same content shares the
 /// blob, which is why the sequence names each root once.
 async fn import_blobs(
@@ -142,15 +178,31 @@ async fn import_blobs(
             .disk
             .file(index)
             .ok_or_else(|| Error::Bug("a file entry has no disk path".to_string()))?;
-        let tag = store
-            .blobs()
-            .add_path_with_opts(AddPathOptions {
-                path: disk.to_path_buf(),
-                format: BlobFormat::Raw,
-                mode: ImportMode::TryReference,
-            })
-            .temp_tag()
-            .await
+        let added = match built.disk.file_id(index) {
+            // A confined send copies what it read from the handle it proved, so a later change to
+            // the path cannot put other bytes on the wire.
+            Some(expected) => {
+                let file = open_recorded(disk, expected)?;
+                store
+                    .blobs()
+                    .add_stream(chunks(file))
+                    .await
+                    .temp_tag()
+                    .await
+            }
+            None => {
+                store
+                    .blobs()
+                    .add_path_with_opts(AddPathOptions {
+                        path: disk.to_path_buf(),
+                        format: BlobFormat::Raw,
+                        mode: ImportMode::TryReference,
+                    })
+                    .temp_tag()
+                    .await
+            }
+        };
+        let tag = added
             .map_err(|e| Error::Storage(format!("cannot import a file: {}", crate::plain(&e))))?;
         if *tag.hash().as_bytes() != root {
             return Err(Error::Verify(
@@ -187,8 +239,18 @@ async fn add_pack(
             .disk
             .file(entry_index)
             .ok_or_else(|| Error::Bug("a packed entry has no disk path".to_string()))?;
-        let body = fs::read(disk)
-            .map_err(|e| Error::Storage(format!("cannot read a packed file: {}", e.kind())))?;
+        let body = match built.disk.file_id(entry_index) {
+            Some(expected) => {
+                let mut body = Vec::new();
+                std::io::Read::read_to_end(&mut open_recorded(disk, expected)?, &mut body)
+                    .map_err(|e| {
+                        Error::Storage(format!("cannot read a packed file: {}", e.kind()))
+                    })?;
+                body
+            }
+            None => fs::read(disk)
+                .map_err(|e| Error::Storage(format!("cannot read a packed file: {}", e.kind())))?,
+        };
         if body.len() as u64 != entry.size {
             return Err(Error::Verify(
                 "a packed file changed size after the manifest was built".to_string(),
@@ -304,3 +366,17 @@ fn total_bytes(manifest: &Manifest) -> u64 {
         .map(|entry| entry.size)
         .sum()
 }
+
+#[cfg(test)]
+async fn add_pack_for_test(built: &Built) -> Result<(), Error> {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FsStore::load(dir.path()).await.unwrap();
+    let mut tags = Vec::new();
+    let result = add_pack(&store, built, &built.manifest, 0, &mut tags).await;
+    drop(tags);
+    store.shutdown().await.unwrap();
+    result
+}
+
+#[cfg(test)]
+mod tests;

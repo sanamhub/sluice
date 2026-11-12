@@ -13,6 +13,7 @@ categories = ["network-programming", "filesystem", "cryptography"]
 
 [dependencies]
 blake3.workspace = true
+bytes.workspace = true
 ed25519-dalek.workspace = true
 getrandom.workspace = true
 # The patterns of --include, matched over a manifest's paths.

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use super::hash::{self, Facts, HashFault};
 use super::walk::{Item, What};
 use super::{Finding, Reason};
+use crate::engine::ObjectId;
 use crate::manifest::entry::{Entry, Kind, Loc, PackRef};
 use crate::manifest::pack::{Place, Planner};
 use crate::manifest::path::ManifestPath;
@@ -19,6 +20,8 @@ pub(super) struct Assembled {
     pub entries: Vec<Entry>,
     /// The disk path of each entry that is a file, at the entry's index.
     pub disk: Vec<Option<PathBuf>>,
+    /// What a confined walk recorded of each file, at the entry's index.
+    pub ids: Vec<Option<ObjectId>>,
     pub packs: Vec<PackRef>,
     /// Files that could not be read. When there is one, the rest is not a manifest to send.
     pub problems: Vec<Finding>,
@@ -34,21 +37,22 @@ pub(super) fn assemble(items: Vec<Item>, between: &impl Fn(&Path)) -> Result<Ass
     let mut out = Assembled {
         entries: Vec::with_capacity(items.len()),
         disk: Vec::with_capacity(items.len()),
+        ids: Vec::with_capacity(items.len()),
         packs: Vec::new(),
         problems: Vec::new(),
     };
     for Item { path, shown, what } in items {
-        let (entry, disk) = match what {
-            What::Dir { mtime_ms, mode } => (no_bytes(path, Kind::Dir, mtime_ms, mode), None),
+        let (entry, disk, id) = match what {
+            What::Dir { mtime_ms, mode } => (no_bytes(path, Kind::Dir, mtime_ms, mode), None, None),
             What::Symlink { target, mtime_ms } => {
                 let entry = Entry {
                     link_target: Some(target),
                     ..no_bytes(path, Kind::Symlink, mtime_ms, 0)
                 };
-                (entry, None)
+                (entry, None, None)
             }
-            What::File { disk } => match packs.read(&disk, between) {
-                Ok((facts, loc)) => (file(path, &facts, loc), Some(disk)),
+            What::File { disk, id } => match packs.read(&disk, between) {
+                Ok((facts, loc)) => (file(path, &facts, loc), Some(disk), id),
                 Err(HashFault::Unreadable(kind)) => {
                     // Listed, and the walk goes on, so every such file is found in one run.
                     let reason = Reason::Unreadable(kind);
@@ -63,6 +67,7 @@ pub(super) fn assemble(items: Vec<Item>, between: &impl Fn(&Path)) -> Result<Ass
         };
         out.entries.push(entry);
         out.disk.push(disk);
+        out.ids.push(id);
     }
     out.packs = packs.finish();
     Ok(out)
