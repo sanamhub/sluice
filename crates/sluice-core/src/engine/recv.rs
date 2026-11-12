@@ -19,7 +19,7 @@ use iroh_blobs::{Hash, store::fs::FsStore};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::{
-    Congestion, Event, Receiver, RelayModeChoice, Selection, emit, fetch, receipts, storage,
+    Congestion, Event, Pins, Receiver, RelayModeChoice, Selection, emit, fetch, receipts, storage,
 };
 use crate::{
     Error,
@@ -131,6 +131,18 @@ pub async fn receive(
     options: &ReceiveOptions,
     events: &UnboundedSender<Event>,
 ) -> Result<Received, Error> {
+    receive_checked(text, options, Pins::default(), events).await
+}
+
+/// [`receive`] for a caller that opened the output folder, and the folder of a receipt file, by a
+/// route it trusts. The folders are checked against `pins` where the receive first opens them by
+/// path, so a folder swapped for another in between is refused and nothing is written there.
+pub async fn receive_checked(
+    text: &str,
+    options: &ReceiveOptions,
+    pins: Pins,
+    events: &UnboundedSender<Event>,
+) -> Result<Received, Error> {
     let ticket = Ticket::decode(text)?;
     refuse_expired(&ticket)?;
     let root = static_root(&ticket)?;
@@ -158,6 +170,7 @@ pub async fn receive(
     }
     fs::create_dir_all(&options.out)
         .map_err(|e| storage::policy_path("create", &options.out, e))?;
+    super::object::check_pinned(&options.out, pins.out)?;
     // The ticket's size is the sum of the manifest's files, and a manifest that disagrees with it
     // is refused before any content. Checking the room here means a transfer that cannot fit never
     // opens a store, so its refusal leaves nothing behind. A selection takes part of the ticket and
@@ -189,7 +202,12 @@ pub async fn receive(
     // everything, so each of those is one warning and not a failed receive.
     if let Some(target) = &options.receipt {
         let message = match receipt {
-            Some(receipt) => match receipts::write_file(&target.path, &receipt, options.force) {
+            Some(receipt) => match super::object::check_pinned(
+                target.path.parent().unwrap_or(&target.path),
+                pins.receipt_parent,
+            )
+            .and_then(|()| receipts::write_file(&target.path, &receipt, options.force))
+            {
                 Ok(leftover) => leftover,
                 Err(e) => Some(format!("the receipt arrived but was not written: {e}")),
             },

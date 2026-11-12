@@ -11,6 +11,7 @@ mod hello;
 mod inspect;
 mod live;
 mod net;
+mod object;
 mod policy;
 mod rate;
 mod receipts;
@@ -37,9 +38,10 @@ pub use live::{
     CLOSE_AFTER, LiveLog, LiveSend, prepare_live, prepare_live_with_rate, receive_live,
 };
 pub use net::{NetworkReport, report as network_report};
+pub use object::{Facts, ObjectId, Pins, facts, open_file, open_folder, volume_of};
 pub use rate::Rate;
 pub use receipts::parse_request;
-pub use recv::{ReceiptTarget, ReceiveOptions, Received, receive, top_level_rule};
+pub use recv::{ReceiptTarget, ReceiveOptions, Received, receive, receive_checked, top_level_rule};
 pub use recv_range::receive_range;
 pub use recv_stdout::receive_stdout;
 pub use select::Selection;

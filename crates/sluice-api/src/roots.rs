@@ -1,19 +1,21 @@
-//! The folders a daemon may read from and write to, and the check that a request's path is inside
-//! one. The server holds an open handle to each root from the moment it starts, and a path is
-//! refused unless every component below the root is a name under it and none is a link.
-//!
-//! The check is made on the path and the transfer opens it afterwards, so a component swapped for
-//! a link between the two is not caught. SPEC section 11 asks for an open relative to the
-//! folder's handle, which the engine's path-taking calls cannot yet do.
+//! The folders a daemon may read from and write to, and the open of a request's path inside one.
+//! The server holds an open handle to each root from the moment it starts. A path is a root's name
+//! and the names below it, and every one of them is opened from the handle of the folder before it
+//! (`walk`), never by joining text and opening the result. What the open returns is handed on with
+//! the identity of the object it opened, which the engine checks where it opens the same path.
 
-use std::fs::{self, File};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
+use sluice_core::engine::{ObjectId, facts, open_folder, volume_of};
 use sluice_core::manifest::path::{ManifestPath, shown};
 
 use crate::error::ApiError;
-use crate::identity::{self, Identity};
 use crate::proto::RootPath;
+
+mod walk;
+
+pub(crate) use walk::{Opened, Use};
 
 /// What a refusal says when the daemon has no root at all.
 pub const NO_ROOTS: &str = "this daemon was started with no root folders, so it refuses every \
@@ -26,7 +28,7 @@ struct Root {
     path: PathBuf,
     // The proof of which folder the daemon opened: the name is compared with it on every request.
     held: File,
-    identity: Identity,
+    identity: ObjectId,
     volume: u64,
 }
 
@@ -34,15 +36,6 @@ struct Root {
 #[derive(Default)]
 pub struct Roots {
     roots: Vec<Root>,
-}
-
-/// What a path under a root is for.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Use {
-    /// A file or folder that exists and is read: the path of a send.
-    Read,
-    /// A folder or file that may not exist yet and is created: an output folder, a receipt.
-    Write,
 }
 
 impl Roots {
@@ -75,8 +68,9 @@ impl Roots {
         self.roots.is_empty()
     }
 
-    /// The path a request names, as an absolute path under a root, or the reason it is refused.
-    pub(crate) fn resolve(&self, at: Option<&RootPath>, usage: Use) -> Result<PathBuf, ApiError> {
+    /// Opens the path a request names, one component at a time from its root's handle, or says why
+    /// it is refused.
+    pub(crate) fn resolve(&self, at: Option<&RootPath>, usage: Use) -> Result<Opened, ApiError> {
         if self.roots.is_empty() {
             return Err(ApiError::Refused(NO_ROOTS.to_string()));
         }
@@ -84,22 +78,16 @@ impl Roots {
         let root = self.find(&at.root)?;
         root.still_the_same()?;
         if at.path.is_empty() {
-            return Ok(root.path.clone());
+            return root.itself(usage);
         }
         let parsed = ManifestPath::parse(&at.path).map_err(|e| ApiError::Refused(e.to_string()))?;
         let names: Vec<&str> = parsed.components().collect();
-        let mut here = root.path.clone();
-        for (index, name) in names.iter().enumerate() {
-            here.push(name);
-            match fs::symlink_metadata(&here) {
-                Ok(meta) => check_component(&meta, root.volume, index + 1 == names.len())?,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    return missing(usage, here, &names[index + 1..]);
-                }
-                Err(e) => return Err(refuse_io("look at", &here, &e)),
-            }
-        }
-        Ok(here)
+        let start = walk::Start {
+            held: &root.held,
+            path: &root.path,
+            volume: root.volume,
+        };
+        walk::walk(&start, &names, usage)
     }
 
     fn find(&self, name: &str) -> Result<&Root, ApiError> {
@@ -117,22 +105,10 @@ impl Roots {
     }
 }
 
-/// A path with a missing component is fine to write to, and the rest of it is joined as text:
-/// nothing there can be a link. It is an error to read one.
-fn missing(usage: Use, mut here: PathBuf, rest: &[&str]) -> Result<PathBuf, ApiError> {
-    if usage == Use::Read {
-        return Err(ApiError::Invalid(
-            "a path to send does not exist inside its root".to_string(),
-        ));
-    }
-    here.extend(rest);
-    Ok(here)
-}
-
 /// Resolves, opens and records one root.
 fn open_one(name: &str, dir: &Path) -> Result<Root, ApiError> {
-    let path = plain(fs::canonicalize(dir).map_err(|e| refuse_io("resolve", dir, &e))?);
-    let held = identity::open_folder(&path).map_err(|e| refuse_io("open", &path, &e))?;
+    let path = plain(std::fs::canonicalize(dir).map_err(|e| refuse_io("resolve", dir, &e))?);
+    let held = open_folder(&path).map_err(|e| refuse_io("open", &path, &e))?;
     let meta = held
         .metadata()
         .map_err(|e| refuse_io("look at", &path, &e))?;
@@ -142,13 +118,13 @@ fn open_one(name: &str, dir: &Path) -> Result<Root, ApiError> {
             shown(name)
         )));
     }
-    let facts = identity::facts(&held).map_err(|e| refuse_io("look at", &path, &e))?;
+    let found = facts(&held).map_err(|e| refuse_io("look at", &path, &e))?;
     Ok(Root {
         name: name.to_string(),
         path,
         held,
-        identity: facts.identity,
-        volume: identity::volume_of(&meta),
+        identity: found.identity,
+        volume: volume_of(&meta),
     })
 }
 
@@ -156,10 +132,10 @@ impl Root {
     /// Refuses when the folder this root's name leads to is no longer the folder that was opened:
     /// replaced, renamed away, or gone.
     fn still_the_same(&self) -> Result<(), ApiError> {
-        let by_name = identity::open_folder(&self.path)
-            .and_then(|folder| identity::facts(&folder))
+        let by_name = open_folder(&self.path)
+            .and_then(|folder| facts(&folder))
             .map_err(|_| self.replaced())?;
-        let held = identity::facts(&self.held).map_err(|_| self.replaced())?;
+        let held = facts(&self.held).map_err(|_| self.replaced())?;
         if by_name.identity == held.identity && held.identity == self.identity {
             Ok(())
         } else {
@@ -173,59 +149,26 @@ impl Root {
             shown(&self.name)
         ))
     }
-}
 
-/// Checks one component that exists.
-fn check_component(meta: &fs::Metadata, volume: u64, last: bool) -> Result<(), ApiError> {
-    if is_link(meta) {
-        return Err(ApiError::Refused(
-            "a link is never followed inside a root, and this path has one".to_string(),
-        ));
-    }
-    if identity::volume_of(meta) != volume {
-        return Err(ApiError::Refused(
-            "a path inside a root does not cross onto another volume".to_string(),
-        ));
-    }
-    if !last && !meta.is_dir() {
-        return Err(ApiError::Invalid(
-            "a component of the path is a file, not a folder".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-/// Refuses a file with more than one name: its other name may lie outside every root, and no check
-/// of this path could see that. The count is read from the handle the file is opened with.
-pub(crate) fn refuse_hard_links(path: &Path) -> Result<(), ApiError> {
-    let meta = fs::symlink_metadata(path).map_err(|e| refuse_io("look at", path, &e))?;
-    if !meta.is_file() {
-        return Ok(());
-    }
-    let file = identity::open_file(path).map_err(|e| refuse_io("open", path, &e))?;
-    let facts = identity::facts(&file).map_err(|e| refuse_io("look at", path, &e))?;
-    if facts.links > 1 {
-        return Err(ApiError::Refused(
-            "a file with more than one name may also be reachable from outside every root, so \
-             this daemon does not send it"
-                .to_string(),
-        ));
-    }
-    Ok(())
-}
-
-/// A symbolic link, and on Windows any reparse point: a junction, a mount point or a link, which
-/// a path under a root never goes through.
-fn is_link(meta: &fs::Metadata) -> bool {
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        const REPARSE_POINT: u32 = 0x400;
-        meta.file_attributes() & REPARSE_POINT != 0
-    }
-    #[cfg(not(windows))]
-    {
-        meta.file_type().is_symlink()
+    /// The root folder itself, which a request names with an empty path.
+    fn itself(&self, usage: Use) -> Result<Opened, ApiError> {
+        if usage == Use::FileName {
+            return Err(ApiError::Invalid(
+                "a file is named below a root, not as the root itself".to_string(),
+            ));
+        }
+        let found = facts(&self.held).map_err(|e| refuse_io("look at", &self.path, &e))?;
+        let held = self
+            .held
+            .try_clone()
+            .map_err(|e| refuse_io("look at", &self.path, &e))?;
+        Ok(Opened {
+            path: self.path.clone(),
+            pin: found.identity,
+            links: found.links,
+            is_file: false,
+            _held: vec![held],
+        })
     }
 }
 

@@ -44,8 +44,8 @@ async fn a_socket_a_live_daemon_answers_on_is_not_taken_over() {
     let dir = home();
     let (_incoming, _guard, _) = listen(dir.path()).unwrap();
     let again = listen(dir.path())
-        .err()
-        .expect("the second daemon is refused");
+        .map(|_| ())
+        .expect_err("the second daemon is refused");
     assert!(again.to_string().contains("already listening"), "{again}");
 }
 
@@ -58,7 +58,9 @@ fn a_socket_path_that_is_a_link_is_refused_and_what_it_names_is_left_alone() {
     let elsewhere = dir.path().join("elsewhere");
     fs::write(&elsewhere, b"keep").unwrap();
     std::os::unix::fs::symlink(&elsewhere, &path).unwrap();
-    let refused = listen(dir.path()).err().expect("a link is refused");
+    let refused = listen(dir.path())
+        .map(|_| ())
+        .expect_err("a link is refused");
     assert!(refused.to_string().contains("link"), "{refused}");
     assert_eq!(fs::read(&elsewhere).unwrap(), b"keep");
 }
@@ -80,6 +82,8 @@ fn a_folder_that_others_can_reach_is_refused() {
     let folder = dir.path().join(FOLDER);
     fs::create_dir(&folder).unwrap();
     fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
-    let refused = listen(dir.path()).err().expect("an open folder is refused");
+    let refused = listen(dir.path())
+        .map(|_| ())
+        .expect_err("an open folder is refused");
     assert!(refused.to_string().contains("0700"), "{refused}");
 }

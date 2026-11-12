@@ -45,8 +45,8 @@ async fn a_client_of_the_same_user_connects_and_the_pipe_is_not_joined_by_a_seco
     let client = open(&target(dir.path())).await.expect("this user connects");
     drop(client);
     let again = listen(dir.path())
-        .err()
-        .expect("a second daemon is refused");
+        .map(|_| ())
+        .expect_err("a second daemon is refused");
     assert!(
         again.to_string().contains("cannot make the pipe"),
         "{again}"

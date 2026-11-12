@@ -30,7 +30,7 @@ rustix.workspace = true
 [target.'cfg(windows)'.dependencies]
 # `Win32_System_Pipes` is the one module this crate adds to the workspace list: the client process
 # of a pipe connection.
-windows-sys = { workspace = true, features = ["Win32_System_Pipes", "Win32_System_IO"] }
+windows-sys = { workspace = true, features = ["Win32_System_Pipes", "Win32_System_IO", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 protox.workspace = true
