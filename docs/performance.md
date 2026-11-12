@@ -134,3 +134,37 @@ untuned competitor is not published.
 
 [kit]: https://datatracker.ietf.org/meeting/118/materials/slides-118-maprg-sustained-throughput-performance-of-quic-implementations
 [tum]: https://www.net.in.tum.de/fileadmin/bibtex/publications/papers/spaethj-noms2026.pdf
+
+## Delta receive
+
+`sluice recv --delta-from PATH` rebuilds a file from an older one and fetches the rest. This is one
+measurement of it, on one machine, and says nothing about a network.
+
+**Setup.** Loopback, one sender process and one receiver process of the release binary, a file of
+1 GiB (1,073,741,824 bytes) cut from a fixed seed, the older version held by the receiver. Five runs
+of each row on a Windows 11 PC with an NVMe disk; the table gives the median and, in brackets, the
+fastest and slowest run. Peak memory is the peak working set of each process, read from the operating
+system after it exited. Every received file was compared byte for byte with the one sent. The target
+of this page for memory, 250 MB, holds with room: 36 MiB for the receiver at most.
+
+| Case | Receive | Fetched (of 1 GiB) | Signature bytes | Wall time, s | Peak memory, receiver / sender, MiB |
+|---|---|---|---|---|---|
+| 10 regions of 1 MiB changed in place (0.99%) | plain | 1,073,741,824 (100%) | 0 | 10.3 (8.0 to 11.0) | 26 / 27 |
+| | delta | 10,656,413 (0.99%) | 2,276,888 | 24.9 (22.6 to 34.7) | 36 / 31 |
+| 1 MiB inserted at the start | plain | 1,074,790,400 (100%) | 0 | 10.0 (8.2 to 12.7) | 26 / 26 |
+| | delta | 1,058,975 (0.10%) | 2,278,808 | 32.7 (21.3 to 36.7) | 36 / 31 |
+| Unrelated content | plain | 1,073,741,824 (100%) | 0 | 12.7 (8.8 to 16.5) | 27 / 27 |
+| | delta | 1,073,741,824 (100%) | 0 (list read, plan dropped) | 34.5 (28.2 to 40.3) | 36 / 31 |
+
+**What it shows.** Both changed cases move well under 3% of the bytes: 0.99% for the edit in place,
+which is the 10 MiB that changed and no more, and 0.10% for the insertion, which is the 1 MiB
+inserted. The list for a 1 GiB file is 2.2 MB (0.21%), cut at the default 8 KiB average.
+
+**What it costs.** On loopback a delta receive is two to three times slower than a plain one, not
+faster: the sender hashes the whole file to build the list (about 20 s of the run), the receiver
+cuts the candidate, and the assembled file is hashed and imported into the store as well as the
+fetched ranges written. A link that moves 1 GiB in more than the 20 to 30 s of extra work gains
+from it, and a LAN that moves it in 10 s does not. When nothing matches, the attempt costs the same
+extra time and then the file is fetched plainly, which is why a candidate that is not an older
+version of the file is a loss. The harness is not part of the repository; the method above is
+enough to repeat it.
