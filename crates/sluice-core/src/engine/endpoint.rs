@@ -4,7 +4,14 @@
 //! The defaults follow ADR 0011: no relay and no n0 discovery unless the user named one. mDNS and
 //! port mapping are on, because neither leaves the local network for a service we do not run.
 
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{
+    str::FromStr,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use iroh::{
     Endpoint, NET_REPORT_TIMEOUT, RelayMap, RelayMode, SecretKey, Watcher,
@@ -31,6 +38,16 @@ use crate::Error;
 
 /// The warning printed when `--n0-relays` sends traffic to n0's public services.
 pub const N0_WARNING: &str = "warning: --n0-relays uses n0's public relays and DNS discovery, which this project does not run";
+
+/// Whether every endpoint of this process listens on loopback alone.
+static LOOPBACK_ONLY: AtomicBool = AtomicBool::new(false);
+
+/// Makes every endpoint this process binds from now on listen on `127.0.0.1` only, with no mDNS and
+/// no port mapping, so no other machine and no other network interface can reach a transfer. It
+/// serves a daemon whose transfers stay on this computer, and the tests of one.
+pub fn bind_loopback_only() {
+    LOOPBACK_ONLY.store(true, Ordering::SeqCst);
+}
 
 /// The congestion controller of a transfer. Cubic is the default until a noq release carries the
 /// BBRv3 maximum-bandwidth fix (ADR 0023); BBRv3 stays selectable as ADR 0015 promised.
@@ -280,13 +297,19 @@ async fn bind_inner(
     // A provider's serve loop prints a line for every peer it refuses, so it has to hear about the
     // ones this hook refuses before the protocol sees them.
     let report = complete.as_ref().map(|complete| complete.sender.clone());
+    let loopback = LOOPBACK_ONLY.load(Ordering::SeqCst);
     let mut builder = Endpoint::builder(presets::Empty)
         .crypto_provider(Arc::new(rustls::crypto::aws_lc_rs::default_provider()))
         .relay_mode(relay.iroh()?)
-        .portmapper_config(PortmapperConfig::default())
         .transport_config(congestion.transport())
-        .address_lookup(MdnsAddressLookup::builder())
         .hooks(PostQuantum { report });
+    builder = if loopback {
+        builder.portmapper_config(PortmapperConfig::Disabled)
+    } else {
+        builder
+            .portmapper_config(PortmapperConfig::default())
+            .address_lookup(MdnsAddressLookup::builder())
+    };
     if let Some(complete) = complete {
         builder = builder.hooks(CompletionSignal(complete));
     }
@@ -300,19 +323,36 @@ async fn bind_inner(
             .address_lookup(PkarrResolver::n0_dns())
             .address_lookup(DnsAddressLookup::n0_dns());
     }
-    // A saved port is tried first so a ticket printed by the last send still dials this one. If it
-    // is taken, the caller retries with `None` and any port.
-    let builder = match port {
-        Some(port) => builder
-            .bind_addr((std::net::Ipv4Addr::UNSPECIFIED, port))
-            .map_err(|e| Error::Network(format!("the saved port {port} cannot be used: {e}")))?,
-        None => builder,
-    };
+    let builder = listening_on(builder, loopback, port)?;
     builder.bind().await.map_err(|e| {
         Error::Network(format!(
             "cannot open the local UDP socket for a transfer: {e}"
         ))
     })
+}
+
+/// The addresses the endpoint listens on. A saved port is tried first so a ticket printed by the
+/// last send still dials this one. If it is taken, the caller retries with `None` and any port.
+fn listening_on(
+    builder: iroh::endpoint::Builder,
+    loopback: bool,
+    port: Option<u16>,
+) -> Result<iroh::endpoint::Builder, Error> {
+    let taken =
+        |port: u16| move |e| Error::Network(format!("the saved port {port} cannot be used: {e}"));
+    if loopback {
+        let port = port.unwrap_or(0);
+        return builder
+            .clear_ip_transports()
+            .bind_addr((std::net::Ipv4Addr::LOCALHOST, port))
+            .map_err(taken(port));
+    }
+    match port {
+        Some(port) => builder
+            .bind_addr((std::net::Ipv4Addr::UNSPECIFIED, port))
+            .map_err(taken(port)),
+        None => Ok(builder),
+    }
 }
 
 /// Waits until the endpoint knows at least one direct address. A ticket printed before that cannot
@@ -353,30 +393,4 @@ pub fn ticket_addr(endpoint: &Endpoint) -> iroh::EndpointAddr {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::RelayModeChoice;
-    use crate::Error;
-
-    #[test]
-    fn a_relay_and_n0_together_are_refused() {
-        let err = RelayModeChoice::from_flags(Some("https://relay.example/"), true).unwrap_err();
-        assert!(matches!(err, Error::Policy(_)));
-    }
-
-    #[test]
-    fn no_flag_means_no_relay() {
-        assert_eq!(
-            RelayModeChoice::from_flags(None, false).unwrap(),
-            RelayModeChoice::Disabled
-        );
-    }
-
-    #[test]
-    fn a_bad_url_names_the_form_not_the_value() {
-        let err = RelayModeChoice::from_flags(Some("relay"), false)
-            .unwrap()
-            .iroh()
-            .unwrap_err();
-        assert!(err.to_string().contains("absolute https or http URL"));
-    }
-}
+mod tests;
