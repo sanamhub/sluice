@@ -15,6 +15,8 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::server::Connected;
 
+use crate::error::ApiError;
+
 #[cfg(unix)]
 pub(crate) mod unix;
 #[cfg(unix)]
@@ -87,14 +89,31 @@ impl Drop for Accepting {
     }
 }
 
-/// Accepts connections with `accept`, which returns `None` for a peer it refused, and hands the
-/// others on. One place of [`MAX_CONNECTIONS`] is taken before each accept, so the daemon never has
-/// more connections open than that.
-pub(crate) fn accepting<S, F, Fut>(mut accept: F) -> Incoming<S>
+/// The check a connection's peer passes before the server sees the connection. It takes the
+/// accepted stream, so a test can hand the listener a check of its own.
+pub(crate) type Check<S> = Arc<dyn Fn(&S) -> Result<(), ApiError> + Send + Sync>;
+
+/// Whether an accept that failed with this kind is one connection going wrong, a client that left
+/// at once, and not the listener failing. It is skipped without a word and without a pause.
+fn is_one_connection(kind: io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::Interrupted
+    )
+}
+
+/// Accepts connections with `accept`, checks each peer with `check` and hands on those that pass.
+/// One place of [`MAX_CONNECTIONS`] is taken before each accept, so the daemon never has more
+/// connections open than that.
+pub(crate) fn accepting<S, F, Fut>(mut accept: F, check: Check<S>) -> Incoming<S>
 where
     S: Send + 'static,
     F: FnMut() -> Fut + Send + 'static,
-    Fut: Future<Output = io::Result<Option<S>>> + Send,
+    Fut: Future<Output = io::Result<S>> + Send,
 {
     let places = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     let (tx, rx) = mpsc::channel(1);
@@ -104,7 +123,11 @@ where
                 return;
             };
             match accept().await {
-                Ok(Some(stream)) => {
+                Ok(stream) => {
+                    if let Err(refused) = check(&stream) {
+                        tracing::warn!("{refused}");
+                        continue;
+                    }
                     let connection = Guarded {
                         stream,
                         _place: place,
@@ -113,7 +136,7 @@ where
                         return;
                     }
                 }
-                Ok(None) => {}
+                Err(error) if is_one_connection(error.kind()) => {}
                 Err(error) => {
                     tracing::warn!("the control listener failed: {error}");
                     tokio::time::sleep(ACCEPT_BACKOFF).await;
@@ -126,3 +149,6 @@ where
         _task: Accepting(task),
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -69,6 +69,11 @@ impl Running {
         sluice_api::connect(&self.home).await.expect("connect")
     }
 
+    /// The process id, for a test that sends a signal.
+    pub fn id(&self) -> u32 {
+        self.child.id()
+    }
+
     /// Waits for the daemon process to end and returns whether it ended well.
     pub fn wait_for_exit(&mut self) -> bool {
         self.child.wait().expect("wait").success()

@@ -10,7 +10,7 @@ use tokio::net::windows::named_pipe::{
     ClientOptions, NamedPipeClient, NamedPipeServer, PipeMode, ServerOptions,
 };
 
-use super::{Incoming, accepting};
+use super::{Check, Incoming, accepting};
 use crate::error::ApiError;
 
 mod security;
@@ -30,13 +30,17 @@ const BUSY_TRIES: u32 = 100;
 /// Where nothing is left to remove: a pipe goes with the last handle to it.
 pub(crate) struct Guard;
 
-/// The name of the pipe of the home at `home`. It is a hash of the home's path, so two homes have
-/// two pipes, and the name says nothing about the user or the folder.
+/// The name of the pipe of the home at `home`. It is a hash of this user's SID and the home's path,
+/// so two homes have two pipes and another user, who has another SID, cannot make the name of this
+/// user's pipe to be there first. The name says nothing about the user or the folder.
 pub(crate) fn target(home: &Path) -> OsString {
     let absolute = std::path::absolute(home).unwrap_or_else(|_| home.to_path_buf());
     let text = absolute.to_string_lossy().to_lowercase();
     let text = text.trim_end_matches(['\\', '/']);
-    let digest = blake3::hash(text.as_bytes()).to_hex();
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&security::own_sid().unwrap_or_default());
+    hasher.update(text.as_bytes());
+    let digest = hasher.finalize().to_hex();
     format!(r"\\.\pipe\sluice-control-{}", &digest.as_str()[..32]).into()
 }
 
@@ -66,9 +70,28 @@ fn instance(name: &str, sddl: &str, first: bool) -> io::Result<NamedPipeServer> 
     security::create(&options, name, sddl)
 }
 
-/// Makes the pipe and starts accepting. The first instance is made with `first_pipe_instance`, so a
-/// pipe of this name that another process made is an error and never one this daemon joins.
+/// The check every accepted connection passes: the user of its client, read by letting the thread
+/// act as the client for the length of the call, is this user.
+pub(crate) fn peer_is_this_user(server: &NamedPipeServer) -> Result<(), ApiError> {
+    let own = security::own_sid().map_err(|e| failed("read the user of this process", &e))?;
+    let peer = security::client_sid(server)
+        .map_err(|e| ApiError::Refused(format!("the other end could not be identified: {e}")))?;
+    check_sid(&peer, &own)
+}
+
+/// Makes the pipe and starts accepting, checking each peer with [`peer_is_this_user`].
 pub(crate) fn listen(home: &Path) -> Result<(Incoming<NamedPipeServer>, Guard, String), ApiError> {
+    listen_with(home, std::sync::Arc::new(peer_is_this_user))
+}
+
+/// [`listen`] with the check of the peer given, so a test can show that a refused peer gets no
+/// connection.
+/// The first instance is made with `first_pipe_instance`, so a
+/// pipe of this name that another process made is an error and never one this daemon joins.
+pub(crate) fn listen_with(
+    home: &Path,
+    check: Check<NamedPipeServer>,
+) -> Result<(Incoming<NamedPipeServer>, Guard, String), ApiError> {
     let name = describe(&target(home));
     let own = security::own_sid().map_err(|e| failed("read the user of this process", &e))?;
     let sddl = security::private_sddl(&own).map_err(|e| failed("build the access list", &e))?;
@@ -78,30 +101,20 @@ pub(crate) fn listen(home: &Path) -> Result<(Incoming<NamedPipeServer>, Guard, S
         ))
     })?;
     let shown = name.clone();
-    let incoming = accepting(move || {
-        // The next instance exists before this one is waited on, so there is never a moment in
-        // which no instance of the pipe is there for a client to open.
-        let listening =
-            instance(&name, &sddl, false).map(|next| std::mem::replace(&mut waiting, next));
-        let own = own.clone();
-        async move {
-            let server = listening?;
-            server.connect().await?;
-            let peer = security::client_sid(&server);
-            match peer
-                .map_err(|e| {
-                    ApiError::Refused(format!("the other end could not be identified: {e}"))
-                })
-                .and_then(|peer| check_sid(&peer, &own))
-            {
-                Ok(()) => Ok(Some(server)),
-                Err(refused) => {
-                    tracing::warn!("{refused}");
-                    Ok(None)
-                }
+    let incoming = accepting(
+        move || {
+            // The next instance exists before this one is waited on, so there is never a moment in
+            // which no instance of the pipe is there for a client to open.
+            let listening =
+                instance(&name, &sddl, false).map(|next| std::mem::replace(&mut waiting, next));
+            async move {
+                let server = listening?;
+                server.connect().await?;
+                Ok(server)
             }
-        }
-    });
+        },
+        check,
+    );
     Ok((incoming, Guard, shown))
 }
 

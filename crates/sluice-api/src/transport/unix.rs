@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use tokio::net::{UnixListener, UnixStream};
 
-use super::{Incoming, accepting};
+use super::{Check, Incoming, accepting};
 use crate::error::ApiError;
 
 /// The folder of the socket, inside the home.
@@ -25,9 +25,11 @@ const MAX_PATH_BYTES: usize = 100;
 /// The stream of an accepted connection.
 pub(crate) type Stream = UnixStream;
 
-/// Where the socket of the home at `home` is.
+/// Where the socket of the home at `home` is. The home is resolved first, so a home that is a link
+/// has its socket in the folder the link leads to and in no other.
 pub(crate) fn target(home: &Path) -> OsString {
-    home.join(FOLDER).join(SOCKET).into_os_string()
+    let resolved = fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    resolved.join(FOLDER).join(SOCKET).into_os_string()
 }
 
 /// What to show a user of where the daemon listens.
@@ -35,9 +37,15 @@ pub(crate) fn describe(target: &OsString) -> String {
     Path::new(target).display().to_string()
 }
 
-/// Connects to the daemon at `target`.
+/// Connects to the daemon at `target`, after checking that the folder the socket is in is this
+/// user's and private, and that the process that answers runs as this user, so a socket another
+/// user put there is never talked to.
 pub(crate) async fn open(target: &OsString) -> io::Result<UnixStream> {
-    UnixStream::connect(Path::new(target)).await
+    let path = Path::new(target);
+    check_folder(path.parent().unwrap_or(Path::new("."))).map_err(io::Error::other)?;
+    let stream = UnixStream::connect(path).await?;
+    check_uid(stream.peer_cred()?.uid(), own_uid()).map_err(io::Error::other)?;
+    Ok(stream)
 }
 
 /// The socket file of a running daemon. It removes the file when it drops, if the file is still the
@@ -73,9 +81,27 @@ pub(crate) fn check_uid(peer: u32, own: u32) -> Result<(), ApiError> {
     }
 }
 
-/// Binds the socket and starts accepting. The peer's id comes from the kernel: tokio reads it with
-/// `SO_PEERCRED` on Linux and `getpeereid` on macOS.
+/// The check every accepted connection passes: its peer's id, from the kernel, is this user's. tokio
+/// reads the id with `SO_PEERCRED` on Linux and `getpeereid` on macOS.
+pub(crate) fn peer_is_this_user(stream: &UnixStream) -> Result<(), ApiError> {
+    let uid = stream
+        .peer_cred()
+        .map_err(|e| ApiError::Refused(format!("the other end could not be identified: {e}")))?
+        .uid();
+    check_uid(uid, own_uid())
+}
+
+/// Binds the socket and starts accepting, checking each peer with [`peer_is_this_user`].
 pub(crate) fn listen(home: &Path) -> Result<(Incoming<UnixStream>, Guard, String), ApiError> {
+    listen_with(home, std::sync::Arc::new(peer_is_this_user))
+}
+
+/// [`listen`] with the check of the peer given, so a test can show that a refused peer gets no
+/// connection.
+pub(crate) fn listen_with(
+    home: &Path,
+    check: Check<UnixStream>,
+) -> Result<(Incoming<UnixStream>, Guard, String), ApiError> {
     let path = PathBuf::from(target(home));
     if path.as_os_str().len() >= MAX_PATH_BYTES {
         return Err(ApiError::Invalid(format!(
@@ -96,20 +122,13 @@ pub(crate) fn listen(home: &Path) -> Result<(Incoming<UnixStream>, Guard, String
     };
     // Shared with each accept, so the future an accept returns owns what it waits on.
     let listener = std::sync::Arc::new(listener);
-    let incoming = accepting(move || {
-        let listener = listener.clone();
-        async move {
-            let (stream, _) = listener.accept().await?;
-            let uid = stream.peer_cred()?.uid();
-            match check_uid(uid, own_uid()) {
-                Ok(()) => Ok(Some(stream)),
-                Err(refused) => {
-                    tracing::warn!("{refused}");
-                    Ok(None)
-                }
-            }
-        }
-    });
+    let incoming = accepting(
+        move || {
+            let listener = listener.clone();
+            async move { Ok(listener.accept().await?.0) }
+        },
+        check,
+    );
     Ok((incoming, guard, path.display().to_string()))
 }
 
@@ -121,19 +140,26 @@ fn prepare_folder(folder: &Path) -> io::Result<()> {
             fs::DirBuilder::new().mode(0o700).create(folder)
         }
         Err(e) => Err(e),
-        Ok(meta) => {
-            if !meta.is_dir() || meta.file_type().is_symlink() {
-                return Err(other("it is not a plain folder"));
-            }
-            if meta.uid() != own_uid() {
-                return Err(other("another user owns it"));
-            }
-            if meta.mode() & 0o077 != 0 {
-                return Err(other("others can reach it; its mode must be 0700"));
-            }
-            Ok(())
-        }
+        Ok(_) => check_folder(folder).map_err(io::Error::other),
     }
+}
+
+/// Refuses a folder that is not a plain folder, that another user owns, or that others can reach.
+pub(crate) fn check_folder(folder: &Path) -> Result<(), ApiError> {
+    let meta = fs::symlink_metadata(folder).map_err(|e| unusable(folder, &e))?;
+    let why = if !meta.is_dir() || meta.file_type().is_symlink() {
+        "it is not a plain folder"
+    } else if meta.uid() != own_uid() {
+        "another user owns it"
+    } else if meta.mode() & 0o077 != 0 {
+        "others can reach it; its mode must be 0700"
+    } else {
+        return Ok(());
+    };
+    Err(ApiError::Refused(format!(
+        "the folder {} is not used for the socket: {why}",
+        folder.display()
+    )))
 }
 
 /// Takes over a socket path that is left from a daemon that is gone, and refuses any other thing
@@ -166,10 +192,6 @@ fn take_over(path: &Path) -> Result<(), ApiError> {
         }
         Err(e) => Err(unusable(path, &e)),
     }
-}
-
-fn other(why: &str) -> io::Error {
-    io::Error::other(why.to_string())
 }
 
 fn refused(path: &Path, why: &str) -> ApiError {
