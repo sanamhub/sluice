@@ -1,17 +1,18 @@
 //! The walk on Windows. Each component is opened as itself, never through a reparse point, with a
 //! share mode that lets nobody rename or delete it while the walk's handles are held, and is then
 //! proved from its own handle to be a child of its parent's handle: its final path must be the
-//! parent's final path and one more name. A component that is a reparse point of any kind is
-//! refused, which is stricter than the name-surrogate rule of `SPEC.md` section 11 asks.
+//! parent's final path and one more name. A component that is a reparse point of a name surrogate (a
+//! symbolic link, a junction, a mount point) is refused, as `SPEC.md` section 11 says; a cloud-file
+//! placeholder or a deduplicated file is read as the file it stands for.
 #![allow(unsafe_code)]
 
 use std::fs::{File, OpenOptions};
 use std::io;
-use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+use std::os::windows::fs::OpenOptionsExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 
-use sluice_core::engine::facts;
+use sluice_core::engine::{facts, is_link};
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_SHARE_WRITE,
@@ -20,8 +21,6 @@ use windows_sys::Win32::Storage::FileSystem::{
 
 use super::{NOT_PLAIN, Opened, Start, Use};
 use crate::error::ApiError;
-
-const REPARSE_POINT: u32 = 0x400;
 
 fn io_error(error: &io::Error) -> ApiError {
     ApiError::Refused(format!("cannot open the path: {error}"))
@@ -101,7 +100,7 @@ fn open_child(
         Err(e) => return Err(io_error(&e)),
     };
     let meta = file.metadata().map_err(|e| io_error(&e))?;
-    if meta.file_attributes() & REPARSE_POINT != 0 || (want_dir && !meta.is_dir()) {
+    if is_link(&file).map_err(|e| io_error(&e))? || (want_dir && !meta.is_dir()) {
         return Err(refused());
     }
     let proved = final_path(&file).map_err(|e| io_error(&e))?;
@@ -159,8 +158,8 @@ fn name_only(
     mut held: Vec<File>,
 ) -> Result<Opened, ApiError> {
     let wanted = path.join(name);
-    match std::fs::symlink_metadata(&wanted) {
-        Ok(meta) if meta.file_attributes() & REPARSE_POINT != 0 => return Err(refused()),
+    match open_as_itself(&wanted) {
+        Ok(file) if is_link(&file).map_err(|e| io_error(&e))? => return Err(refused()),
         Ok(_) => {}
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
         Err(e) => return Err(io_error(&e)),
