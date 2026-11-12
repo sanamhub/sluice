@@ -34,8 +34,15 @@ qrcodegen.workspace = true
 terminal_size = "0.4.4"
 # Only for the JSON error object, whose message needs escaping.
 serde_json.workspace = true
+# The daemon and the two commands that call it.
+sluice-api = { path = "../sluice-api" }
 sluice-core = { path = "../sluice-core" }
 tokio.workspace = true
+# The status the daemon answers a call with, which `daemon status` and `daemon stop` report.
+tonic.workspace = true
+# The daemon's own log lines, written to standard error.
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

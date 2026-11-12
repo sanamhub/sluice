@@ -6,6 +6,7 @@ use sluice_core::engine::Congestion;
 
 use crate::colour::ColorWhen;
 use crate::completions;
+use crate::daemon;
 use crate::doctor;
 use crate::id;
 use crate::inspect;
@@ -107,6 +108,14 @@ pub enum Command {
     /// unless a check failed, and then that of the most serious failure: 6 for policy, 5 for
     /// storage. Warnings do not fail.
     Doctor(doctor::Args),
+    /// Serve the control interface on a socket or pipe only this user can reach, or ask the one
+    /// that runs
+    ///
+    /// The daemon runs transfers for local programs. It sends from and receives into the folders
+    /// named with `--root` and nowhere else, and with none it refuses every send and receive. It
+    /// holds the home's lock, so a command that opens the same home, `send` among them, is refused
+    /// while it runs. `status` and `stop` call a daemon that runs.
+    Daemon(daemon::DaemonArgs),
 }
 
 #[cfg(test)]

@@ -35,6 +35,9 @@ mod tests {
             names,
             [
                 "sluice-completions.1",
+                "sluice-daemon-status.1",
+                "sluice-daemon-stop.1",
+                "sluice-daemon.1",
                 "sluice-doctor.1",
                 "sluice-id.1",
                 "sluice-inspect.1",

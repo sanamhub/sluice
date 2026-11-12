@@ -30,6 +30,11 @@ fn sluice_doctor_help() {
     insta::assert_snapshot!(help(&["doctor", "--help"]));
 }
 
+#[test]
+fn sluice_daemon_help() {
+    insta::assert_snapshot!(help(&["daemon", "--help"]));
+}
+
 /// What a received file's mode becomes is a rule a user has to be able to read before they rely on
 /// it, so `recv --help` says it.
 #[test]
