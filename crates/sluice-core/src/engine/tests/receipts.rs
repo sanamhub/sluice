@@ -42,7 +42,12 @@ async fn sent(dir: &TempDir) -> Sent {
 /// Admits `asker` for the ticket's root, as a receiver is: it fetches the root over a content
 /// connection, which is what the sender's policy records. The store holds what it fetched and has
 /// to outlive the exchange.
-async fn admit(dir: &TempDir, asker: &Receiver, ticket: &Ticket, root: [u8; 32]) -> FsStore {
+pub(super) async fn admit(
+    dir: &TempDir,
+    asker: &Receiver,
+    ticket: &Ticket,
+    root: [u8; 32],
+) -> FsStore {
     let conn = asker.connect_static(ticket, no_events()).await.unwrap();
     let store = FsStore::load(dir.path().join("asker-store")).await.unwrap();
     store

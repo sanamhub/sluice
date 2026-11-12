@@ -151,8 +151,8 @@ pub enum StopEnd {
 
 /// What the sender records about a file before and after reading it.
 #[derive(Clone, Copy, Debug)]
-struct Stamp {
-    size: u64,
+pub(in crate::engine) struct Stamp {
+    pub(in crate::engine) size: u64,
     modified: Option<SystemTime>,
     id: FileId,
     mtime_ms: u64,
@@ -160,7 +160,7 @@ struct Stamp {
 }
 
 impl Stamp {
-    fn of(path: &Path) -> Result<Self, Error> {
+    pub(in crate::engine) fn of(path: &Path) -> Result<Self, Error> {
         let meta = fs::metadata(path).map_err(|e| storage::policy_path("read", path, e))?;
         let modified = meta.modified().ok();
         let mtime_ms = modified
@@ -175,7 +175,7 @@ impl Stamp {
         })
     }
 
-    fn same(&self, path: &Path) -> Result<bool, Error> {
+    pub(in crate::engine) fn same(&self, path: &Path) -> Result<bool, Error> {
         let now = Self::of(path)?;
         Ok(self.size == now.size
             && self.modified == now.modified

@@ -3848,6 +3848,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sluice-delta",
  "sluice-live",
  "tempfile",
  "thiserror 2.0.21",

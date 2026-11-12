@@ -176,6 +176,7 @@ mod tests {
             max_network_failures: crate::queue::MAX_NETWORK_FAILURES,
             include: None,
             receipt: None,
+            delta_from: None,
         };
         let bounds = Bounds::new(&options, Path::new("home/tmp/store"));
         assert_eq!(bounds.output(), Path::new("."));

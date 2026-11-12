@@ -239,6 +239,7 @@ const CLOSE_NO_LIVE: u32 = 2;
 pub struct SluiceProtocol {
     live: Option<std::sync::Arc<super::live::LiveLog>>,
     receipts: Option<std::sync::Arc<super::receipts::Receipts>>,
+    delta: Option<std::sync::Arc<super::delta::Delta>>,
 }
 
 impl SluiceProtocol {
@@ -247,10 +248,12 @@ impl SluiceProtocol {
     pub(crate) fn serving(
         live: Option<std::sync::Arc<super::live::LiveLog>>,
         receipts: std::sync::Arc<super::receipts::Receipts>,
+        delta: Option<std::sync::Arc<super::delta::Delta>>,
     ) -> Self {
         Self {
             live,
             receipts: Some(receipts),
+            delta,
         }
     }
 }
@@ -270,10 +273,13 @@ impl ProtocolHandler for SluiceProtocol {
                 return Err(AcceptError::from_err(cause));
             }
         };
-        let ours = match &self.receipts {
+        let mut ours = match &self.receipts {
             Some(receipts) if receipts.enabled() => Hello::ours().with(CAP_RECEIPTS),
             _ => Hello::ours(),
         };
+        if self.delta.is_some() {
+            ours = ours.with(CAP_DELTA);
+        }
         write_hello(&mut send, ours)
             .await
             .map_err(AcceptError::from_err)?;
@@ -288,6 +294,14 @@ impl ProtocolHandler for SluiceProtocol {
             // The records are the only thing this stream carries; a failure means the dialer
             // left, and the connection close below is the whole answer.
             let _ = log.write_to(&mut send).await;
+        } else if let Some(delta) = &self.delta
+            && ours.both(&theirs, CAP_DELTA)
+        {
+            // One root and one list, and a refusal is nothing written: the stream is finished
+            // inside, and the connection close is the whole refusal.
+            let _ = delta.serve(&conn, theirs, &mut recv, send).await;
+            let _ = conn.closed().await;
+            return Ok(());
         } else if let Some(receipts) = &self.receipts
             && ours.both(&theirs, CAP_RECEIPTS)
         {

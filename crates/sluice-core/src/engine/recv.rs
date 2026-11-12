@@ -94,6 +94,10 @@ pub struct ReceiveOptions {
     /// Where to write the sender's signed receipt once the content is in place, or `None` to not
     /// ask for one. A receiver asks only when this is set.
     pub receipt: Option<ReceiptTarget>,
+    /// A file, or a folder holding files at the paths the ticket names, to rebuild what this receive
+    /// fetches from where it can. It is only read. `None` is a receive that never asks a sender
+    /// for signatures and moves exactly the bytes it did before.
+    pub delta_from: Option<PathBuf>,
 }
 
 /// The file a receive writes the sender's receipt to.
@@ -112,6 +116,8 @@ pub struct Received {
     pub bytes: u64,
     /// How many files were written.
     pub files: u64,
+    /// Where the bytes came from, for a receive that was given `delta_from`; `None` otherwise.
+    pub delta: Option<super::DeltaReport>,
 }
 
 /// Receives what a static ticket names. A folder and a single file take the same path through the
@@ -247,6 +253,7 @@ async fn exchange(
 ) -> Result<(Received, f64, Option<Receipt>), Error> {
     announce(manifest, &plan, options, selection, events)?;
     let started = Instant::now();
+    let totals = crate::engine::delta::Totals::default();
     let session = Session {
         receiver,
         ticket,
@@ -256,6 +263,11 @@ async fn exchange(
         events,
         rate: options.rate.as_deref(),
         max_failures: options.max_network_failures,
+        delta: options.delta_from.as_deref().map(|from| content::DeltaRun {
+            from,
+            work: partial.join("delta"),
+            totals: &totals,
+        }),
     };
     let conn = content::ensure_content(&session, conn).await?;
     write::write(manifest, &plan, store, options, partial, resume, events).await?;
@@ -273,6 +285,7 @@ async fn exchange(
             path: single_path(manifest, options),
             bytes: plan.bytes,
             files: plan.files,
+            delta: options.delta_from.is_some().then(|| totals.report()),
         },
         started.elapsed().as_secs_f64(),
         receipt,

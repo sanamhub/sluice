@@ -33,6 +33,16 @@ pub(super) async fn finished(
     } else {
         storage::discard_apart_keeping_names(partial).await;
     }
+    if let Some(report) = received.delta {
+        emit(
+            events,
+            Event::Delta {
+                local_bytes: report.local_bytes,
+                network_bytes: report.network_bytes,
+                signature_bytes: report.signature_bytes,
+            },
+        );
+    }
     emit(
         events,
         Event::Verified {

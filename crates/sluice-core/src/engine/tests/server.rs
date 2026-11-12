@@ -206,7 +206,11 @@ async fn the_greeting_is_exchanged_both_ways() {
         .await
         .unwrap();
     let theirs = super::greet(&conn).await.unwrap();
-    assert_eq!(theirs, super::Hello::ours());
+    // A send of fixed content serves signatures, so its greeting sets the delta bit.
+    assert_eq!(
+        theirs,
+        super::Hello::ours().with(crate::engine::hello::CAP_DELTA)
+    );
     conn.close(0u32.into(), b"done");
     f.close().await;
 }

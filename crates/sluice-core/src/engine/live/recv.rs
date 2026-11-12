@@ -133,6 +133,7 @@ async fn finish(
         path: options.out.clone(),
         bytes,
         files: 1,
+        delta: None,
     })
 }
 

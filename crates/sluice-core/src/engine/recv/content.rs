@@ -13,6 +13,14 @@ use crate::{
     ticket::Ticket,
 };
 
+/// What a receive given `--delta-from` needs beyond a plain one: the path the user named, the store's
+/// temporary area for assemblies, and the sums of where the bytes came from.
+pub(super) struct DeltaRun<'a> {
+    pub(super) from: &'a std::path::Path,
+    pub(super) work: std::path::PathBuf,
+    pub(super) totals: &'a crate::engine::delta::Totals,
+}
+
 pub(super) struct Session<'a> {
     pub(super) receiver: &'a Receiver,
     pub(super) ticket: &'a Ticket,
@@ -22,6 +30,7 @@ pub(super) struct Session<'a> {
     pub(super) events: &'a UnboundedSender<Event>,
     pub(super) rate: Option<&'a crate::engine::Rate>,
     pub(super) max_failures: u32,
+    pub(super) delta: Option<DeltaRun<'a>>,
 }
 
 /// Fetches every content blob and pack before anything is written, retrying a dropped connection
@@ -106,6 +115,12 @@ async fn fetch_content(
         if !seen.insert(root) {
             continue;
         }
+        if by_delta(session, conn, root, entry).await {
+            progress = progress.saturating_add(shares.get(&root).copied().unwrap_or_default());
+            report(session, progress);
+            continue;
+        }
+        let new_bytes = !whole_in_store(session.store, root).await;
         fetch::content_blob(
             session.store,
             conn,
@@ -117,10 +132,56 @@ async fn fetch_content(
             session.events,
         )
         .await?;
+        if let Some(run) = &session.delta
+            && new_bytes
+        {
+            run.totals.fetched_whole(entry.size);
+        }
         progress = progress.saturating_add(shares.get(&root).copied().unwrap_or_default());
         report(session, progress);
     }
     Ok(())
+}
+
+/// Whether the store already holds the whole blob, as a resumed receive's does.
+async fn whole_in_store(store: &FsStore, root: [u8; 32]) -> bool {
+    matches!(
+        store.blobs().status(Hash::from(root)).await,
+        Ok(iroh_blobs::api::proto::BlobStatus::Complete { .. })
+    )
+}
+
+/// Tries to fetch the file by a delta, when the receive was given a path to rebuild from and this
+/// entry has a file there. `true` is a complete, verified blob in the store; every other outcome is
+/// `false` and the plain fetch runs.
+async fn by_delta(
+    session: &Session<'_>,
+    conn: &iroh::endpoint::Connection,
+    root: [u8; 32],
+    entry: &crate::manifest::Entry,
+) -> bool {
+    let Some(run) = &session.delta else {
+        return false;
+    };
+    if entry.size < sluice_delta::SMALLEST || whole_in_store(session.store, root).await {
+        return false;
+    }
+    let Some(candidate) = crate::engine::delta::candidate_path(run.from, session.manifest, entry)
+    else {
+        return false;
+    };
+    let job = crate::engine::delta::Job {
+        receiver: session.receiver,
+        ticket: session.ticket,
+        store: session.store,
+        conn,
+        rate: session.rate,
+        events: session.events,
+        totals: run.totals,
+        candidate: &candidate,
+        work: &run.work,
+    };
+    crate::engine::delta::fetch_file(&job, root, entry.size).await
 }
 
 fn report(session: &Session<'_>, progress: u64) {

@@ -45,6 +45,40 @@ pub(super) fn refuse_receipt_without_a_whole_transfer(
     }
 }
 
+/// Refuses `--delta-from` for a receive that has no file to rebuild: a live stream, standard output
+/// and a byte range each take the bytes another way, and a path that is not there names nothing.
+pub(super) fn refuse_delta_without_a_transfer(
+    args: &RecvArgs,
+    ticket: &Ticket,
+    has_range: bool,
+) -> Result<(), Error> {
+    let Some(from) = &args.delta_from else {
+        return Ok(());
+    };
+    let why = match ticket.body() {
+        Body::Live { .. } => Some("a live stream is not a file to rebuild"),
+        Body::Static { .. } if args.out.as_path() == std::path::Path::new("-") => {
+            Some("standard output carries the content, and nothing is assembled for it")
+        }
+        Body::Static { .. } if has_range => {
+            Some("a byte range takes part of a file, and a delta rebuilds whole files")
+        }
+        Body::Static { .. } => None,
+    };
+    if let Some(why) = why {
+        return Err(Error::Policy(format!(
+            "--delta-from needs a file transfer: {why}"
+        )));
+    }
+    std::fs::metadata(from).map_err(|e| {
+        Error::Policy(format!(
+            "--delta-from {} cannot be read: {e}",
+            from.display()
+        ))
+    })?;
+    Ok(())
+}
+
 /// The options of a receive, with the receipt path made absolute once.
 pub(super) fn options(
     args: &RecvArgs,
@@ -78,6 +112,14 @@ pub(super) fn options(
             .map(|path| {
                 std::path::absolute(path)
                     .map(|path| ReceiptTarget { path })
+                    .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", path.display())))
+            })
+            .transpose()?,
+        delta_from: args
+            .delta_from
+            .as_deref()
+            .map(|path| {
+                std::path::absolute(path)
                     .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", path.display())))
             })
             .transpose()?,

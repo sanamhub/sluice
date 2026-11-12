@@ -102,6 +102,16 @@ fn human(event: &Event, verb: &str) -> String {
             format!("connection lost; retrying in {seconds} s (attempt {attempt})")
         }
         Event::Warning { message } => format!("warning: {message}"),
+        Event::Delta {
+            local_bytes,
+            network_bytes,
+            signature_bytes,
+        } => format!(
+            "{} from the local file, {} from the network ({} of signatures)",
+            bytes_text(*local_bytes),
+            bytes_text(*network_bytes),
+            bytes_text(*signature_bytes)
+        ),
         Event::Verified { bytes } => format!("verified {}", bytes_text(*bytes)),
         Event::Done { bytes, seconds } => {
             format!("done, {} in {seconds:.1} s", bytes_text(*bytes))
