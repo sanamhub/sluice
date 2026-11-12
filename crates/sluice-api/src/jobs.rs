@@ -117,6 +117,7 @@ impl Job {
                 peer_close_reason: None,
             }),
         );
+        tracing::info!(job = %self.id, state = state.as_str_name(), "job ended");
         self.hub.finish(&last);
         self.ended.send_replace(true);
     }
