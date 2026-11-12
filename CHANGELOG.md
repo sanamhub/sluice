@@ -8,15 +8,23 @@ All notable changes to Sluice are in this file. The format follows
 
 ## [0.1.1](https://github.com/sanamhub/sluice/compare/v0.1.0...v0.1.1) - 2026-11-12
 
-### Fixed
+A security release. Upgrade both sides of a transfer.
 
-- *(core)* cap the lines a refused key exchange prints
-- *(core)* refuse a connection that did not negotiate the post-quantum group
+### Security
 
-### Other
+- Every connection has to negotiate the post-quantum key exchange `X25519MLKEM768`, as the
+  [threat model](https://github.com/sanamhub/sluice/blob/main/docs/threat-model.md) and ADR 0018
+  say. 0.1.0 never checked: a peer that offered only classical X25519 got a classical session, and
+  nothing said so. Someone on the path could not force this; the peer had to choose it.
+- A connection that negotiated another group is closed with the policy code `0x534C0002`. A
+  receiver that refuses one exits with code 6 and says which group it got. A sender names the
+  first three refused peers, each once, and keeps serving everyone else.
+- rustix 1.1.6, for RUSTSEC-2026-0486.
 
-- update Cargo.lock dependencies
-- *(core)* match the refused group as one phrase in the sender's line
+### Compatibility
+
+- 0.1.0 negotiates `X25519MLKEM768` already, so 0.1.0 and 0.1.1 complete every transfer they did
+  before. A build of Sluice or of iroh without an ML-KEM provider is refused.
 
 ## [0.1.0](https://github.com/sanamhub/sluice/releases/tag/v0.1.0) - 2026-10-29
 
