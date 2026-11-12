@@ -121,6 +121,18 @@ pub(super) async fn fetch_range(
     ranges: ChunkRanges,
     rate: Option<&super::Rate>,
 ) -> Result<(), Error> {
+    fetch_range_reporting(store, conn, hash, ranges, rate, |_| {}).await
+}
+
+/// [`fetch_range`] that also calls `reported` with how many bytes of the range have arrived.
+pub(super) async fn fetch_range_reporting(
+    store: &FsStore,
+    conn: &iroh::endpoint::Connection,
+    hash: Hash,
+    ranges: ChunkRanges,
+    rate: Option<&super::Rate>,
+    mut reported: impl FnMut(u64),
+) -> Result<(), Error> {
     let mut progress = pin!(
         store
             .remote()
@@ -135,6 +147,7 @@ pub(super) async fn fetch_range(
                     rate.acquire(bytes.saturating_sub(seen)).await;
                 }
                 seen = bytes;
+                reported(bytes);
             }
             GetProgressItem::Done(_) => return Ok(()),
             GetProgressItem::Error(e) => return Err(classify(e)),

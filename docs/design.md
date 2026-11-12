@@ -131,13 +131,21 @@ path (the file itself for a one-file ticket, or the file at the ticket's own pat
 the receiver proves the blob's size on the content connection, which is also what tells the sender's
 policy that it asked for the root, and then asks on a `sluice/1` connection of its own for the
 signatures. The sender cuts the blob with the smallest average that makes the worst-case list fit a
-frame, so a 100 GiB file is cut at 512 KiB and a 1 GiB file at 8 KiB. The receiver cuts the
-candidate with that average a block at a time, plans, and sends the ranges it still needs. It
-fetches them with the static protocol into the store, writes the file in the store's temporary area
-from the candidate's bytes and the fetched ones, and hashes it against the blob's root before it
-imports it. Anything that goes wrong on the way, including a list that lies, ends in the plain
-fetch of that file. When less than an eighth of the file would come from the candidate, the
-assembly is skipped and the file is fetched plainly.
+frame, so a 100 GiB file is cut at 512 KiB and a 1 GiB file at 8 KiB. The list is built once for
+each root, on a blocking thread fed through a bounded channel by the task that reads the blob, and
+written to a file in the send's own work folder, which goes with the send; every request for the
+root waits on that one build. The build stops, and gives its permit back, when every requester
+waiting for it has closed its connection, and a third build is refused while two hold the permits.
+The receiver waits for the list 60 seconds plus one second for every 64 MiB of the file, and fetches
+plainly after that. It starts cutting the candidate with the average the sender picks by default
+for the size while it asks, and cuts again only if the list's average is another. It plans, and
+sends the ranges it still needs. It fetches them with the static protocol into the store, writes
+the file in the store's temporary area from the candidate's bytes and the fetched ones, and imports
+it; the store's hash of the import is the only check, and the blob is kept only if it is the blob's
+root. The free-space check counts the assembly, as the ticket's size once more. Anything that goes
+wrong on the way, including a list that lies, ends in the plain fetch of that file. When less than
+an eighth of the file would come from the candidate, the assembly is skipped and the file is
+fetched plainly.
 
 What the receiver holds is bounded whatever the target: one block and at most one largest chunk
 (64 MiB at the largest average), the list (at most 20 MiB of bytes, 24 MiB decoded), the

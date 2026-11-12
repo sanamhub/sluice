@@ -44,6 +44,7 @@ async fn one_file_goes_out_and_arrives_with_its_name() {
             include: None,
             receipt: None,
             delta_from: None,
+            delta_wait: None,
         },
         &recv_tx,
     )

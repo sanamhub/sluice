@@ -17,12 +17,15 @@ use std::time::Duration;
 
 use sluice_delta::{AVG_BYTES, MAX_ENTRIES, Params};
 
-mod ask;
+pub(super) mod ask;
 mod candidate;
+mod list;
 mod rebuild;
 mod serve;
 
 pub(super) use candidate::{Candidate, candidate_path};
+#[cfg(test)]
+pub(super) use rebuild::worth_it;
 pub(super) use rebuild::{Job, Totals, fetch_file};
 pub(crate) use serve::Delta;
 
@@ -38,9 +41,18 @@ pub struct DeltaReport {
     pub signature_bytes: u64,
 }
 
-/// How long the control exchange of one file may take, from the connection coming up to the end of
-/// the list. A peer that stalls costs this and then the plain fetch.
-pub(super) const CONTROL_WAIT: Duration = Duration::from_secs(60);
+/// How long the control exchange of one file may take besides the list's own build: from the
+/// connection coming up to the end of the list.
+pub(super) const CONTROL_BASE: Duration = Duration::from_secs(60);
+/// The rate a sender is assumed to read and hash a blob at, which sets how long a requester waits for
+/// the list of a large one.
+pub(super) const LIST_RATE: u64 = 64 << 20;
+
+/// How long a requester waits for the list of a blob of `size` bytes: [`CONTROL_BASE`] plus the size
+/// at [`LIST_RATE`]. A peer that stalls costs this and then the plain fetch.
+pub(super) fn control_wait(size: u64) -> Duration {
+    CONTROL_BASE + Duration::from_secs(size / LIST_RATE)
+}
 /// How long a provider waits for the root after the greeting, and for the need-ranges after the
 /// list.
 pub(super) const REQUEST_WAIT: Duration = Duration::from_secs(10);
