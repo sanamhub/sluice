@@ -455,8 +455,8 @@ process with no socket.
 - **Roots.** Every path a client names is a root's name and a path below it. The path is checked
   against the manifest path rules, and no link, reparse point or mount point may be in it. A
   receive's output folder, a receipt's file and a send's paths are all under a root, and a daemon
-  with no root refuses all of them. The check is made on the path and the engine opens it
-  afterwards, which leaves the window ADR 0037 records.
+  with no root refuses all of them. Each component is opened from the handle of the one before it, and the engine
+  checks the identity of the output folder where it opens it.
 - **Jobs.** At most 16 run at once, and the last 64 finished ones stay listed. A watcher has a buffer
   of 256 events; one that falls behind loses the newest and reads a `dropped` event with the count in
   their place.

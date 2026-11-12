@@ -36,6 +36,8 @@ with `tonic` and its dependencies, with no new exception.
 ## Consequences
 
 - The binary carries `tonic`, `hyper` and `tower`, which no other command uses.
-- A path is checked against a root before it is opened, and the engine opens it afterwards, so a
-  component swapped for a link in between is not caught. `SPEC.md` section 11 asks for an open
-  relative to the folder's handle, which needs the engine to take handles.
+- A path is opened from its root's handle one component at a time (`openat2` with
+  `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_XDEV` on Linux, `openat`
+  with `O_NOFOLLOW` and a volume check elsewhere, and on Windows each component opened as itself and
+  proved from its handle to be a child of its parent's). The engine is given the path and the identity
+  of the object the walk opened, and checks that identity where it opens the path itself.

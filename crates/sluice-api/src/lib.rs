@@ -11,7 +11,6 @@ mod daemon;
 mod error;
 mod grpc;
 mod hub;
-mod identity;
 mod jobs;
 mod roots;
 mod service;

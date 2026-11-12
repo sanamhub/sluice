@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use sluice_core::Error;
 use sluice_core::engine::{
-    Congestion, Keep, Outgoing, ReceiptTarget, ReceiveOptions, StopEnd, deadline, now_ms,
-    prepare_send_paths_with_rate, prepare_send_with_rate, receive,
+    Congestion, Keep, ObjectId, Outgoing, Pins, ReceiptTarget, ReceiveOptions, StopEnd, deadline,
+    now_ms, prepare_send_paths_with_rate, prepare_send_with_rate, receive_checked,
 };
 use sluice_core::ticket::{Body, Ticket};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -16,7 +16,7 @@ use super::{Service, decode_refusal, ticket_text};
 use crate::error::{ApiError, message_of};
 use crate::jobs::Job;
 use crate::proto::{self, JobKind, JobState};
-use crate::roots::{Use, refuse_hard_links};
+use crate::roots::{Opened, Use};
 
 /// How many paths one send may name.
 const MAX_SEND_PATHS: usize = 1024;
@@ -28,7 +28,8 @@ impl Service {
         request: proto::StartSendRequest,
     ) -> Result<proto::StartSendResponse, ApiError> {
         self.refuse_without_roots()?;
-        let paths = self.send_paths(&request)?;
+        let opened = self.send_paths(&request)?;
+        let paths: Vec<PathBuf> = opened.iter().map(|o| o.path.clone()).collect();
         let keep = keep_of(&request)?;
         let expires = (request.expires_seconds > 0).then_some(request.expires_seconds);
         let job = self.inner.jobs.start(JobKind::Send, None)?;
@@ -39,6 +40,9 @@ impl Service {
                 return Err(ApiError::from_core(&error, ""));
             }
         };
+        // The engine opened the paths itself, so each is checked once more against the object the
+        // walk opened. One that was swapped in between is refused and nothing is served.
+        still_the_same(&opened)?;
         outgoing.reserve(keep);
         let response = proto::StartSendResponse {
             ticket: Some(proto::Ticket {
@@ -49,7 +53,7 @@ impl Service {
             files: outgoing.files,
         };
         tracing::info!(job = %job.id, files = response.files, bytes = response.bytes, "send started");
-        tokio::spawn(run_send(job, outgoing, keep));
+        tokio::spawn(run_send(job, outgoing, keep, opened));
         Ok(response)
     }
 
@@ -68,18 +72,27 @@ impl Service {
                     .to_string(),
             ));
         };
-        let out = self.inner.roots.resolve(request.out.as_ref(), Use::Write)?;
+        let out = self.inner.roots.resolve(request.out.as_ref(), Use::Dir)?;
         let receipt = match request.receipt.as_ref() {
-            Some(at) => Some(self.inner.roots.resolve(Some(at), Use::Write)?),
+            Some(at) => Some(self.inner.roots.resolve(Some(at), Use::FileName)?),
             None => None,
         };
-        let options = options(out, request.force, receipt);
+        let pins = Pins {
+            out: Some(out.pin),
+            receipt_parent: receipt.as_ref().map(|r| r.pin),
+        };
+        let options = options(
+            out.path.clone(),
+            request.force,
+            receipt.as_ref().map(|r| r.path.clone()),
+        );
+        let held: Vec<Opened> = std::iter::once(out).chain(receipt).collect();
         let job = self.inner.jobs.start(JobKind::Receive, Some(hex(root)))?;
         let response = proto::StartReceiveResponse {
             job_id: job.id.clone(),
         };
         tracing::info!(job = %job.id, "receive started");
-        tokio::spawn(run_receive(job, text, options));
+        tokio::spawn(run_receive(job, text, options, pins, held));
         Ok(response)
     }
 
@@ -93,7 +106,7 @@ impl Service {
 
     /// The paths of a send, each resolved inside its root and each a file that has one name or a
     /// folder.
-    fn send_paths(&self, request: &proto::StartSendRequest) -> Result<Vec<PathBuf>, ApiError> {
+    fn send_paths(&self, request: &proto::StartSendRequest) -> Result<Vec<Opened>, ApiError> {
         if request.paths.is_empty() {
             return Err(ApiError::Invalid(
                 "a send needs at least one path".to_string(),
@@ -108,9 +121,9 @@ impl Service {
             .paths
             .iter()
             .map(|at| {
-                let path = self.inner.roots.resolve(Some(at), Use::Read)?;
-                refuse_hard_links(&path)?;
-                Ok(path)
+                let opened = self.inner.roots.resolve(Some(at), Use::Read)?;
+                opened.refuse_hard_links()?;
+                Ok(opened)
             })
             .collect()
     }
@@ -136,6 +149,19 @@ impl Service {
                 .await
         }
     }
+}
+
+/// Refuses when a path no longer names the object the walk opened for it.
+fn still_the_same(opened: &[Opened]) -> Result<(), ApiError> {
+    let swapped = opened
+        .iter()
+        .any(|o| ObjectId::of_path(&o.path).ok() != Some(o.pin));
+    if swapped {
+        return Err(ApiError::Refused(
+            "a path was replaced after it was checked, so nothing is sent".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn keep_of(request: &proto::StartSendRequest) -> Result<Keep, ApiError> {
@@ -181,7 +207,7 @@ async fn pump(job: Arc<Job>, mut events: UnboundedReceiver<sluice_core::engine::
     }
 }
 
-async fn run_send(job: Arc<Job>, outgoing: Outgoing, keep: Keep) {
+async fn run_send(job: Arc<Job>, outgoing: Outgoing, keep: Keep, _opened: Vec<Opened>) {
     let (events, received) = unbounded_channel();
     let pumping = tokio::spawn(pump(job.clone(), received));
     let end = tokio::select! {
@@ -211,11 +237,17 @@ async fn run_send(job: Arc<Job>, outgoing: Outgoing, keep: Keep) {
     }
 }
 
-async fn run_receive(job: Arc<Job>, ticket: String, options: ReceiveOptions) {
+async fn run_receive(
+    job: Arc<Job>,
+    ticket: String,
+    options: ReceiveOptions,
+    pins: Pins,
+    _opened: Vec<Opened>,
+) {
     let (events, received) = unbounded_channel();
     let pumping = tokio::spawn(pump(job.clone(), received));
     let result = tokio::select! {
-        result = receive(&ticket, &options, &events) => Some(result),
+        result = receive_checked(&ticket, &options, pins, &events) => Some(result),
         () = job.cancelled() => None,
     };
     drop(events);
