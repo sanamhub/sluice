@@ -208,11 +208,19 @@ fn path_event(engine: &Engine) -> Option<Kind> {
     }
 }
 
+/// A job id: 128 random bits as 32 hex characters, so an id says nothing about how many jobs came
+/// before it and cannot be guessed by another program of the same user.
+fn random_id() -> Result<String, ApiError> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes)
+        .map_err(|_| ApiError::Failed("the system has no random bytes to give".to_string()))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
 /// The table of jobs, newest last.
 #[derive(Default)]
 pub(crate) struct Table {
     jobs: Mutex<Vec<Arc<Job>>>,
-    next: Mutex<u64>,
 }
 
 impl Table {
@@ -240,13 +248,8 @@ impl Table {
                 jobs.remove(oldest);
             }
         }
-        let mut next = self
-            .next
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        *next += 1;
         let job = Arc::new(Job {
-            id: format!("job-{next}"),
+            id: random_id()?,
             kind,
             verified_root,
             began: Instant::now(),
