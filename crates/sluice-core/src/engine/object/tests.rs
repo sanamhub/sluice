@@ -47,3 +47,40 @@ fn a_file_with_two_names_reports_both_from_its_handle() {
     std::fs::hard_link(&first, dir.path().join("two")).unwrap();
     assert_eq!(facts(&open_file(&first).unwrap()).unwrap().links, 2);
 }
+
+#[test]
+fn only_a_name_surrogate_tag_is_a_link() {
+    // The tags the system defines, by what they stand for.
+    let surrogates = [
+        0xA000_000C_u32, // IO_REPARSE_TAG_SYMLINK
+        0xA000_0003,     // IO_REPARSE_TAG_MOUNT_POINT
+    ];
+    let files = [
+        0x8000_0008_u32, // IO_REPARSE_TAG_WIM
+        0x8000_0013,     // IO_REPARSE_TAG_DEDUP
+        0x8000_0018,     // IO_REPARSE_TAG_WCI
+        0x8000_001B,     // IO_REPARSE_TAG_APPEXECLINK
+        0x8000_0023,     // IO_REPARSE_TAG_AF_UNIX
+        0x8000_101A,     // OneDrive placeholder
+        0x9000_001A,     // IO_REPARSE_TAG_CLOUD_9 placeholder
+        0x9000_001C,     // IO_REPARSE_TAG_PROJFS
+    ];
+    for tag in surrogates {
+        assert!(is_name_surrogate_tag(tag), "{tag:#x}");
+    }
+    for tag in files {
+        assert!(!is_name_surrogate_tag(tag), "{tag:#x}");
+    }
+}
+
+#[test]
+fn a_plain_file_and_folder_are_not_links_and_have_distinct_128_bit_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("f"), b"x").unwrap();
+    assert!(!is_link(&open_file(&dir.path().join("f")).unwrap()).unwrap());
+    assert!(!is_link(&open_folder(dir.path()).unwrap()).unwrap());
+    assert_ne!(
+        ObjectId::of_path(&dir.path().join("f")).unwrap(),
+        ObjectId::of_path(dir.path()).unwrap()
+    );
+}

@@ -38,7 +38,9 @@ pub use live::{
     CLOSE_AFTER, LiveLog, LiveSend, prepare_live, prepare_live_with_rate, receive_live,
 };
 pub use net::{NetworkReport, report as network_report};
-pub use object::{Facts, ObjectId, Pins, facts, open_file, open_folder, volume_of};
+pub use object::{
+    Facts, ObjectId, Pins, facts, is_link, is_name_surrogate_tag, open_file, open_folder, volume_of,
+};
 pub use rate::Rate;
 pub use receipts::parse_request;
 pub use recv::{ReceiptTarget, ReceiveOptions, Received, receive, receive_checked, top_level_rule};

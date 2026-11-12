@@ -11,7 +11,8 @@ use crate::Error;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ObjectId {
     volume: u64,
-    object: u64,
+    // 128 bits, because ReFS and a Dev Drive number their files with that many.
+    object: u128,
 }
 
 /// An object's identity and how many names it has.
@@ -67,8 +68,16 @@ pub(crate) fn check_pinned(path: &Path, pinned: Option<ObjectId>) -> Result<(), 
     }
 }
 
+/// Whether a reparse tag is one of a name surrogate: a symbolic link, a junction or a mount point,
+/// which stand for another path. A cloud-file placeholder, a deduplicated file and the other tags
+/// stand for the file itself, so they are read as files. This is `IsReparseTagNameSurrogate`: bit
+/// 29 of the tag.
+pub fn is_name_surrogate_tag(tag: u32) -> bool {
+    tag & 0x2000_0000 != 0
+}
+
 #[cfg(unix)]
-pub use unix::{facts, open_file, open_folder, volume_of};
+pub use unix::{facts, is_link, open_file, open_folder, volume_of};
 
 #[cfg(unix)]
 mod unix {
@@ -84,10 +93,16 @@ mod unix {
         Ok(Facts {
             identity: ObjectId {
                 volume: meta.dev(),
-                object: meta.ino(),
+                object: u128::from(meta.ino()),
             },
             links: meta.nlink(),
         })
+    }
+
+    /// Whether the open object stands for another path. An open without `O_NOFOLLOW`'s refusal
+    /// cannot return a link on Unix, so it is never one.
+    pub fn is_link(_file: &File) -> io::Result<bool> {
+        Ok(false)
     }
 
     /// The volume a path's metadata says the object is on, for the check that a component stays on
@@ -117,7 +132,7 @@ mod unix {
 }
 
 #[cfg(windows)]
-pub use windows::{facts, open_file, open_folder, volume_of};
+pub use windows::{facts, is_link, open_file, open_folder, volume_of};
 
 #[cfg(windows)]
 mod windows {
@@ -128,31 +143,71 @@ mod windows {
     use std::os::windows::io::AsRawHandle;
     use std::path::Path;
 
+    use std::ffi::c_void;
     use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-        GetFileInformationByHandle,
+        BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FileAttributeTagInfo, FileIdInfo,
+        GetFileInformationByHandle, GetFileInformationByHandleEx,
     };
 
-    /// The object's volume serial number, its 64-bit index and its link count, from the handle.
+    /// The object's volume serial number, its 128-bit file id (the 64-bit index where the file system
+    /// has no other) and its link count, from the handle.
     #[allow(unsafe_code)]
     pub fn facts(file: &File) -> io::Result<Facts> {
+        let handle = file.as_raw_handle() as HANDLE;
         // SAFETY: the structure is plain data that the call fills in, and the handle is open for
         // as long as `file` is borrowed.
         let info = unsafe {
             let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
-            if GetFileInformationByHandle(file.as_raw_handle() as HANDLE, &mut info) == 0 {
+            if GetFileInformationByHandle(handle, &mut info) == 0 {
                 return Err(io::Error::last_os_error());
             }
             info
         };
+        let index = (u128::from(info.nFileIndexHigh) << 32) | u128::from(info.nFileIndexLow);
+        let mut wide: FILE_ID_INFO = unsafe { std::mem::zeroed() };
+        // SAFETY: the buffer is the structure the class names, and its size is given.
+        let got = unsafe {
+            GetFileInformationByHandleEx(
+                handle,
+                FileIdInfo,
+                (&raw mut wide).cast::<c_void>(),
+                size_of::<FILE_ID_INFO>() as u32,
+            )
+        };
+        // A file system with no 128-bit id says so, and its 64-bit index is the id.
+        let (volume, object) = if got == 0 {
+            (u64::from(info.dwVolumeSerialNumber), index)
+        } else {
+            (
+                wide.VolumeSerialNumber,
+                u128::from_le_bytes(wide.FileId.Identifier),
+            )
+        };
         Ok(Facts {
-            identity: ObjectId {
-                volume: u64::from(info.dwVolumeSerialNumber),
-                object: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
-            },
+            identity: ObjectId { volume, object },
             links: u64::from(info.nNumberOfLinks),
         })
+    }
+
+    /// Whether the open object is a reparse point of a name surrogate, read from its tag.
+    #[allow(unsafe_code)]
+    pub fn is_link(file: &File) -> io::Result<bool> {
+        // SAFETY: the buffer is the structure the class names, and its size is given.
+        let mut info: FILE_ATTRIBUTE_TAG_INFO = unsafe { std::mem::zeroed() };
+        let got = unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle() as HANDLE,
+                FileAttributeTagInfo,
+                (&raw mut info).cast::<c_void>(),
+                size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+            )
+        };
+        if got == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(info.FileAttributes & 0x400 != 0 && super::is_name_surrogate_tag(info.ReparseTag))
     }
 
     /// A reparse point is opened as itself and not followed, and a folder needs backup semantics.
