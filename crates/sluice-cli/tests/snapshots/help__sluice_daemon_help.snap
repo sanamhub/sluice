@@ -29,7 +29,7 @@ Options:
           [default: auto]
 
       --root <DIR>
-          A folder the daemon may send from and receive into, written as a client will name it; repeat for more. Without one the daemon refuses every send and every receive
+          A folder the daemon may send from and receive into, written as a client names it; repeat for more. Without one the daemon refuses every send and every receive
 
       --relay <URL>
           The relay that carries a transfer when a direct path fails
