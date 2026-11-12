@@ -11,7 +11,7 @@ use crate::engine::ReceiptTarget;
 use crate::engine::receipts::ask_within;
 use crate::receipt::Receipt;
 
-const BODY: &[u8] = b"the content a receipt names";
+pub(super) const BODY: &[u8] = b"the content a receipt names";
 /// A wait of the receiver's own, short enough that rule 6 is reached without ten seconds.
 const WAIT: Duration = Duration::from_secs(2);
 
@@ -39,7 +39,45 @@ async fn sent(dir: &TempDir) -> Sent {
     }
 }
 
-fn with_receipt(out: &Path, receipt: &Path) -> ReceiveOptions {
+/// Admits `asker` for the ticket's root, as a receiver is: it fetches the root over a content
+/// connection, which is what the sender's policy records. The store holds what it fetched and has
+/// to outlive the exchange.
+async fn admit(dir: &TempDir, asker: &Receiver, ticket: &Ticket, root: [u8; 32]) -> FsStore {
+    let conn = asker.connect_static(ticket, no_events()).await.unwrap();
+    let store = FsStore::load(dir.path().join("asker-store")).await.unwrap();
+    store
+        .remote()
+        .execute_get(conn, GetRequest::blob(Hash::from(root)))
+        .complete()
+        .await
+        .unwrap();
+    store
+}
+
+/// Sends `request` on a fresh `sluice/1` connection from `asker`, after both greetings, and says
+/// whether the sender wrote anything back before it closed the stream.
+async fn answer_to(asker: &Receiver, ticket: &Ticket, request: &[u8]) -> bool {
+    let conn = asker
+        .connect_alpn(ticket, super::ALPN, no_events())
+        .await
+        .unwrap();
+    let ours = super::Hello::ours().with(crate::engine::CAP_RECEIPTS);
+    let (theirs, mut send, mut recv) = crate::engine::hello::greet_stream_with(&conn, ours)
+        .await
+        .unwrap();
+    assert!(theirs.both(&ours, crate::engine::CAP_RECEIPTS));
+    tokio::io::AsyncWriteExt::write_all(&mut send, request)
+        .await
+        .unwrap();
+    tokio::io::AsyncWriteExt::flush(&mut send).await.unwrap();
+    let mut byte = [0u8; 1];
+    let read = tokio::time::timeout(Duration::from_secs(5), recv.read_exact(&mut byte))
+        .await
+        .expect("the sender neither answered nor closed the stream");
+    read.is_ok()
+}
+
+pub(super) fn with_receipt(out: &Path, receipt: &Path) -> ReceiveOptions {
     let mut options = options(out);
     options.receipt = Some(ReceiptTarget {
         path: receipt.to_path_buf(),
@@ -164,24 +202,28 @@ async fn a_stranger_gets_nothing_and_the_receiver_after_it_does() {
     assert!(receipt_path.exists(), "the receiver got no receipt");
 }
 
-/// An asker that names another root than the one it was admitted for gets nothing.
+/// An asker the policy admitted that names another root than the ticket's gets nothing. It is
+/// admitted first, so the root in the request is the only reason to refuse it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_asker_with_the_wrong_root_gets_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let (outgoing, text) = prepared(&dir, BODY).await;
     let ticket = Ticket::decode(&text).unwrap();
-    let Body::Static { size, .. } = ticket.body() else {
+    let Body::Static { root, .. } = ticket.body() else {
         panic!("a file ticket is static");
     };
     let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &no_events()).await });
     let asker = Receiver::open(RelayModeChoice::Disabled, super::Congestion::Cubic)
         .await
         .unwrap();
+    let store = admit(&dir, &asker, &ticket, *root).await;
+    let mut request = crate::engine::hello::varint_bytes(32);
+    request.extend_from_slice(&[0; 32]);
     assert!(
-        ask_within(&asker, &ticket, [0; 32], *size, WAIT, &no_events())
-            .await
-            .is_none()
+        !answer_to(&asker, &ticket, &request).await,
+        "an admitted asker was answered for a root the ticket does not name"
     );
+    drop(store);
     asker.shutdown().await.unwrap();
     let out = dir.path().join("received");
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
@@ -194,143 +236,27 @@ async fn an_asker_with_the_wrong_root_gets_nothing() {
     assert_eq!(end, super::StopEnd::Downloaded);
 }
 
-/// A record that breaks one receiver rule is absent, and the transfer that carried it finished:
-/// one case per rule the record itself decides.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_record_that_breaks_a_rule_is_absent_and_the_transfer_finishes() {
-    let now = now_ms();
-    type Build = Box<dyn Fn([u8; 32], u64, [u8; 32]) -> Vec<u8>>;
-    let cases: Vec<(&str, Build)> = vec![
-        // Rule 1: the record's length is not 144.
-        (
-            "length",
-            Box::new(move |_root, _size, _key| {
-                let mut bytes = crate::engine::hello::varint_bytes(143);
-                bytes.extend_from_slice(&[0; 143]);
-                bytes
-            }),
-        ),
-        // Rule 2: the key is not the endpoint the content came from.
-        (
-            "sender_key",
-            Box::new(move |root, size, _key| {
-                let other = Receipt::sign(
-                    &ed25519_dalek::SigningKey::from_bytes(&[8; 32]),
-                    crate::receipt::commitment(&root),
-                    size,
-                    now,
-                );
-                record(&other)
-            }),
-        ),
-        // Rule 3: the commitment is another root's.
-        (
-            "root",
-            Box::new(move |_root, size, key| {
-                let other = Receipt::sign(
-                    &ed25519_dalek::SigningKey::from_bytes(&key),
-                    crate::receipt::commitment(&[10; 32]),
-                    size,
-                    now,
-                );
-                record(&other)
-            }),
-        ),
-        // Rule 4: the time is outside the clock window.
-        (
-            "time",
-            Box::new(move |root, size, key| {
-                let late = Receipt::sign(
-                    &ed25519_dalek::SigningKey::from_bytes(&key),
-                    crate::receipt::commitment(&root),
-                    size,
-                    now + 300_001,
-                );
-                record(&late)
-            }),
-        ),
-        // Rule 5: the signature does not hold.
-        (
-            "signature",
-            Box::new(move |root, size, key| {
-                let good = Receipt::sign(
-                    &ed25519_dalek::SigningKey::from_bytes(&key),
-                    crate::receipt::commitment(&root),
-                    size,
-                    now,
-                );
-                let mut bytes = record(&good);
-                let at = bytes.len() - 1;
-                bytes[at] ^= 1;
-                bytes
-            }),
-        ),
-    ];
-    for (name, build) in cases {
-        let dir = tempfile::tempdir().unwrap();
-        let (outgoing, text) = prepared(&dir, BODY).await;
-        let ticket = Ticket::decode(&text).unwrap();
-        let Body::Static { root, size, .. } = ticket.body() else {
-            panic!("a file ticket is static");
-        };
-        outgoing
-            .provider
-            .receipts()
-            .force_record(build(*root, *size, *ticket.endpoint_id()));
-        let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &no_events()).await });
-        let out = dir.path().join("received");
-        let receipt_path = dir.path().join("receipt.txt");
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let received = super::receive(&text, &with_receipt(&out, &receipt_path), &tx)
-            .await
-            .unwrap_or_else(|e| panic!("{name}: the transfer failed: {e}"));
-        assert_eq!(received.bytes, BODY.len() as u64, "{name}");
-        let end = tokio::time::timeout(Duration::from_secs(15), serve)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        assert_eq!(end, super::StopEnd::Downloaded, "{name}");
-        assert!(!receipt_path.exists(), "{name}: a receipt was written");
-    }
-}
-
-fn record(receipt: &Receipt) -> Vec<u8> {
-    let mut bytes = crate::engine::hello::varint_bytes(144);
-    bytes.extend_from_slice(&receipt.to_bytes());
-    bytes
-}
-
-/// A request record that is not 32 bytes is closed with nothing written. The length is the first
-/// thing the sender reads, so a request of another length names no root it could answer.
+/// A request record that is not 32 bytes is closed with nothing written, from an asker the policy
+/// admitted. The length is the first thing the sender reads: the 32 bytes that follow the 31 are the
+/// right root, so a sender that skipped the length check would answer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_request_that_is_not_32_bytes_is_closed_with_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let (outgoing, text) = prepared(&dir, BODY).await;
     let ticket = Ticket::decode(&text).unwrap();
+    let Body::Static { root, .. } = ticket.body() else {
+        panic!("a file ticket is static");
+    };
     let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &no_events()).await });
-    let socket = Receiver::open(RelayModeChoice::Disabled, super::Congestion::Cubic)
+    let asker = Receiver::open(RelayModeChoice::Disabled, super::Congestion::Cubic)
         .await
         .unwrap();
-    let conn = socket
-        .connect_alpn(&ticket, super::ALPN, no_events())
-        .await
-        .unwrap();
-    let ours = super::Hello::ours().with(crate::engine::CAP_RECEIPTS);
-    let (theirs, mut send, mut recv) = crate::engine::hello::greet_stream_with(&conn, ours)
-        .await
-        .unwrap();
-    assert!(theirs.both(&ours, crate::engine::CAP_RECEIPTS));
+    let _store = admit(&dir, &asker, &ticket, *root).await;
     let mut request = crate::engine::hello::varint_bytes(31);
-    request.extend_from_slice(&[0; 31]);
-    tokio::io::AsyncWriteExt::write_all(&mut send, &request)
-        .await
-        .unwrap();
-    tokio::io::AsyncWriteExt::flush(&mut send).await.unwrap();
-    let mut byte = [0u8; 1];
+    request.extend_from_slice(root);
     assert!(
-        recv.read_exact(&mut byte).await.is_err(),
-        "the sender answered a request that names no root"
+        !answer_to(&asker, &ticket, &request).await,
+        "the sender answered a request that is not 32 bytes"
     );
     serve.abort();
     let _ = serve.await;
@@ -352,15 +278,7 @@ async fn a_sender_that_writes_nothing_ends_the_wait() {
     let asker = Receiver::open(RelayModeChoice::Disabled, super::Congestion::Cubic)
         .await
         .unwrap();
-    // Fetch the sequence root, which is what lets the policy admit this endpoint for it.
-    let conn = asker.connect_static(&ticket, no_events()).await.unwrap();
-    let store = FsStore::load(dir.path().join("asker-store")).await.unwrap();
-    store
-        .remote()
-        .execute_get(conn.clone(), GetRequest::blob(Hash::from(*root)))
-        .complete()
-        .await
-        .unwrap();
+    let store = admit(&dir, &asker, &ticket, *root).await;
     let started = std::time::Instant::now();
     assert!(
         ask_within(&asker, &ticket, *root, *size, WAIT, &no_events())
