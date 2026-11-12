@@ -1,0 +1,37 @@
+[package]
+name = "sluice-delta-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+sluice-delta = { path = ".." }
+
+[[bin]]
+name = "siglist"
+path = "fuzz_targets/siglist.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "need_ranges"
+path = "fuzz_targets/need_ranges.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "chunker"
+path = "fuzz_targets/chunker.rs"
+test = false
+doc = false
+bench = false
+
+# Its own workspace, so `cargo build --workspace` at the repository root never builds it. It needs a
+# nightly compiler and the sanitizer flags that `cargo fuzz` sets, which no other crate here wants.
+[workspace]

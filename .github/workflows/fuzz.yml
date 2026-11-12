@@ -26,7 +26,7 @@ env:
   CARGO_FUZZ: 0.13.2
 
 jobs:
-  # Builds xtask once and writes the seeds of every target, so the eight fuzz jobs build only the
+  # Builds xtask once and writes the seeds of every target, so the eleven fuzz jobs build only the
   # target they run. Every fuzz job needs this one, so the gate here decides for all of them.
   seeds:
     # A scheduled run starts only while the repository is public, where Actions minutes are free,
@@ -48,7 +48,7 @@ jobs:
       - name: Seeds
         shell: bash
         run: |
-          for target in ticket manifest manifest_path range hello log relay_config relay_differential; do
+          for target in ticket manifest manifest_path range hello log siglist need_ranges chunker relay_config relay_differential; do
             cargo xtask fuzz-seeds "$target" "$RUNNER_TEMP/seeds/$target"
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -72,6 +72,9 @@ jobs:
           - { dir: crates/sluice-core, target: manifest_path }
           - { dir: crates/sluice-core, target: range }
           - { dir: crates/sluice-live, target: log }
+          - { dir: crates/sluice-delta, target: siglist }
+          - { dir: crates/sluice-delta, target: need_ranges }
+          - { dir: crates/sluice-delta, target: chunker }
           - { dir: docker/guard, target: relay_config }
           - { dir: docker/guard, target: relay_differential }
     runs-on: ubuntu-latest

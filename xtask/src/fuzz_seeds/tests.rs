@@ -312,3 +312,58 @@ fn the_hello_seeds_are_three_valid_greetings_and_six_broken_ones() {
     assert_eq!(seeds[0].bytes.len(), 6);
     assert_eq!(seeds[0].bytes[0], 1);
 }
+
+#[test]
+fn the_need_ranges_target_gets_each_vector_message_once() {
+    let wanted: BTreeSet<Vec<u8>> = vector_files(&vectors_dir().join("need-ranges"))
+        .unwrap()
+        .iter()
+        .flat_map(|(_, cases)| cases.iter())
+        .map(|case| hex_bytes(case["bytes"].as_str().unwrap()).unwrap())
+        .collect();
+    let got = seeds(Target::NeedRanges, &vectors_dir()).unwrap();
+    let got: BTreeSet<Vec<u8>> = got.into_iter().map(|seed| seed.bytes).collect();
+    assert_eq!(got, wanted);
+    // Both kinds are there, so the fuzzer starts on each side of the decoder's rules.
+    let accepted = got
+        .iter()
+        .filter(|bytes| sluice_delta::NeedRanges::decode(bytes).is_ok())
+        .count();
+    assert!(accepted > 0 && accepted < got.len());
+}
+
+#[test]
+fn the_signature_target_gets_each_list_and_its_two_neighbours() {
+    let seeds = seeds(Target::Siglist, &vectors_dir()).unwrap();
+    let decoded = seeds
+        .iter()
+        .filter(|seed| sluice_delta::SigList::decode(&seed.bytes).is_ok())
+        .count();
+    assert!(decoded > 0, "no seed is a list the decoder takes");
+    assert!(
+        seeds.len() >= 3 * decoded - decoded,
+        "a list has no neighbours"
+    );
+    for seed in &seeds {
+        // The list one byte short or long is refused, so each valid list is flanked by two that are
+        // not.
+        assert!(
+            seed.file
+                .as_deref()
+                .is_some_and(|file| file.ends_with(".json"))
+        );
+    }
+}
+
+#[test]
+fn the_chunker_target_reads_its_average_from_the_first_byte() {
+    let seeds = seeds(Target::Chunker, &vectors_dir()).unwrap();
+    assert!(!seeds.is_empty());
+    for seed in &seeds {
+        assert!(
+            seed.bytes.len() >= 2,
+            "the average and the block come first"
+        );
+        assert!(seed.bytes[0] < 6, "an average the target cannot name");
+    }
+}
