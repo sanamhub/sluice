@@ -264,13 +264,16 @@ partial stores of receives. A client config looks like this:
 }
 ```
 
-The tools are `send`, `receive`, `inspect`, `list_jobs`, `job_status`, `cancel_job` and `doctor`. A
-send or receive returns a job id at once and `job_status` reports its progress. Sends and receives
-work only inside a `--root` folder, with none they are refused, and no tool changes the identity, the
-relay or the roots. Every answer is a structured value. Text a peer chose, such as file names, comes
-back only in fields whose names begin `untrusted_`, escaped, and never inside a sentence the tool
-writes. A ticket a send makes comes back in the field `secret_ticket`, so the agent's transcript then
-holds it: anyone who can read the transcript can take the files while the send runs.
+The tools are `send`, `receive`, `inspect`, `list_jobs`, `job_status`, `cancel_job` and `doctor`.
+A send or receive returns a job id at once, before any file is copied, and `job_status` reports its
+progress. For a send, `job_status` gives the ticket as `secret_ticket` once the send is prepared.
+Sends and receives work only inside a `--root` folder, with none they are refused, and no tool
+changes the identity, the relay or the roots. Every answer is a structured value, and a refusal or
+failure is marked as an error. Text a peer chose, such as file names or the reason a job failed,
+comes back only in fields whose names begin `untrusted_`, escaped, and never inside a sentence the
+tool writes. The ticket is returned only in `secret_ticket`, so the client's transcript then holds
+it: anyone who can read the transcript can take the files while the send runs. A line of input over
+256 KiB is dropped.
 
 ## How it works
 

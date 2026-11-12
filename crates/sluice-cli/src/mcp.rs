@@ -35,6 +35,9 @@ pub struct McpArgs {
     pub loopback: bool,
 }
 
+/// The longest line of input the server takes.
+const MAX_LINE_BYTES: usize = 256 * 1024;
+
 pub fn run(args: &McpArgs, output: &Output) -> Result<u8, Error> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -59,8 +62,13 @@ async fn serve(args: &McpArgs, output: &Output) -> Result<u8, Error> {
         .map_err(crate::daemon::refused)?;
     let names = args.root.iter().map(|r| r.display().to_string()).collect();
     let service = Service::new(home, roots, relay);
+    // A line of input is a request, and a request is a few paths or a ticket, so a line past a quarter
+    // of a megabyte is dropped and not buffered.
+    let (input, out) = rmcp::transport::stdio();
+    let transport = rmcp::transport::async_rw::AsyncRwTransport::new_server(input, out)
+        .with_max_line_length(MAX_LINE_BYTES);
     let running = Tools::new(service.clone(), names)
-        .serve(rmcp::transport::stdio())
+        .serve(transport)
         .await
         .map_err(|e| Error::Network(format!("cannot start the MCP server: {e}")))?;
     // Ends when the client closes its end. Jobs that still run end as cancelled, with the stores of
