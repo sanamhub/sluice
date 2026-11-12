@@ -19,8 +19,11 @@ mod tests;
 
 /// Refuses a receipt `path` that is `out` or inside it, in either comparison.
 pub(in crate::engine) fn refuse_under_out(receipt: &Path, out: &Path) -> Result<(), Error> {
-    let written = key(receipt).starts_with(key(out));
-    if written || resolved_receipt(receipt).starts_with(resolved(out)) {
+    let out_real = resolved(out);
+    let clash = key(receipt).starts_with(key(out))
+        || resolved_receipt(receipt).starts_with(&out_real)
+        || resolved(receipt).starts_with(&out_real);
+    if clash {
         return Err(Error::Policy(format!(
             "{} is --out or inside it ({}), and the receive writes there, so the receipt cannot \
              go there; give a path outside --out",
@@ -31,8 +34,9 @@ pub(in crate::engine) fn refuse_under_out(receipt: &Path, out: &Path) -> Result<
     Ok(())
 }
 
-/// The receipt's own path with the folder it goes into resolved. The name itself is not followed:
-/// writing the receipt replaces a link at the name and never writes through it.
+/// The receipt's own path with the folder it goes into resolved and the name left as written. This
+/// is where the file would be created. A name that is itself a link is compared separately, by
+/// [`resolved`], so a link that reaches `--out` is refused even though writing would replace it.
 fn resolved_receipt(receipt: &Path) -> PathBuf {
     let parent = match receipt.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
