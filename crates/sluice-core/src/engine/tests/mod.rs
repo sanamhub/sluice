@@ -38,6 +38,7 @@ mod names;
 mod pack;
 mod places;
 mod provider;
+mod receipt_rules;
 mod receipts;
 mod receivers;
 mod refusal;
