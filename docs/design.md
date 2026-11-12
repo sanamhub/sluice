@@ -256,7 +256,7 @@ in every flag.
 
 ## Storage
 
-**Reference in place.** Sending hashes the file where it lives. The store keeps only the outboard
+**Reference in place.** A one-shot send hashes the file where it lives. The store keeps only the outboard
 tree and metadata, about 0.4% of file size, so a 100 GB send costs about 400 MB. `--copy` imports
 into the store for volatile or removable sources. ADR 0006.
 
@@ -265,7 +265,9 @@ files, the manifest and the hash sequence, and the segments of a live stream are
 in a private folder under the home's temporary area. The folder and its store are removed when the
 send ends, however it ends, and a folder a killed send left is removed by the sweep of temporary
 folders. So a home that sends keeps nothing of what was sent, and two sends in one home never share
-a store. Regular files are still sent where they live. ADR 0030.
+a store. A one-shot send still sends its regular files where they live; a daemon send copies them
+into its store, because a path read at serve time could be swapped for a link, and it refuses to start
+when the home's volume has less room than the copy needs. ADR 0030, ADR 0038.
 
 **Receiving uses a store beside the destination.** `iroh-blobs` keeps partial data in its own store,
 not in a sparse `.part` of ours, so a receive makes a hidden per-transfer store in the output folder,
