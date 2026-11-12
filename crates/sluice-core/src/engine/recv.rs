@@ -163,19 +163,20 @@ pub async fn receive(
         emit(events, Event::Warning { message });
     }
     // The receipt is asked for before the completion code, so the files are in place by now. A
-    // receive that asked for one and got none finishes, and says so in one line.
+    // receive that asked for one and did not get it, or could not write it, has still received
+    // everything, so each of those is one warning and not a failed receive.
     if let Some(target) = &options.receipt {
-        match receipt {
-            Some(receipt) => receipts::write_file(&target.path, &receipt, options.force)?,
-            None => emit(
-                events,
-                Event::Warning {
-                    message: format!(
-                        "no receipt arrived, so {} was not written",
-                        taken(&target.path)
-                    ),
-                },
-            ),
+        let message = match receipt {
+            Some(receipt) => receipts::write_file(&target.path, &receipt, options.force)
+                .err()
+                .map(|e| format!("the receipt arrived but was not written: {e}")),
+            None => Some(format!(
+                "no receipt arrived, so {} was not written",
+                taken(&target.path)
+            )),
+        };
+        if let Some(message) = message {
+            emit(events, Event::Warning { message });
         }
     }
     Ok(received)
@@ -196,6 +197,9 @@ async fn run(
     let partial = storage::partial_dir(&options.out, &owner);
     let conn = receiver.connect(ticket, events.clone()).await?;
     let manifest = read_manifest(&conn, ticket, options, events).await?;
+    if let Some(target) = &options.receipt {
+        receipts::refuse_output_clash(&target.path, &options.out, &manifest)?;
+    }
     let (store, resume, plan) =
         claim_store(&partial, &owner, &manifest, ticket, options, &selection).await?;
     let outcome = exchange(
