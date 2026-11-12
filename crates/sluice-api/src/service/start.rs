@@ -48,6 +48,7 @@ impl Service {
             bytes: outgoing.bytes,
             files: outgoing.files,
         };
+        tracing::info!(job = %job.id, files = response.files, bytes = response.bytes, "send started");
         tokio::spawn(run_send(job, outgoing, keep));
         Ok(response)
     }
@@ -77,6 +78,7 @@ impl Service {
         let response = proto::StartReceiveResponse {
             job_id: job.id.clone(),
         };
+        tracing::info!(job = %job.id, "receive started");
         tokio::spawn(run_receive(job, text, options));
         Ok(response)
     }

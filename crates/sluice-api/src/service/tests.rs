@@ -112,3 +112,42 @@ async fn shutdown_is_seen_by_whoever_waits_for_it_and_counts_no_jobs_when_none_r
     assert_eq!(service.shutdown().cancelled_jobs, 0);
     waiting.await.unwrap();
 }
+
+#[tokio::test]
+async fn a_watcher_that_cannot_keep_up_is_told_how_many_events_it_missed_and_its_buffer_stays_bounded()
+ {
+    let (_dir, service) = service(&[]);
+    let job = service
+        .inner
+        .jobs
+        .start(proto::JobKind::Receive, None)
+        .unwrap();
+    let mut slow = service
+        .watch_events(&proto::WatchEventsRequest {
+            job_id: job.id.clone(),
+        })
+        .unwrap();
+    let sent = 5 * crate::WATCH_BUFFER as u64;
+    for done in 0..sent {
+        job.observe(&sluice_core::engine::Event::Progress {
+            bytes: done,
+            total: sent,
+        });
+        assert!(
+            slow.waiting() <= crate::WATCH_BUFFER + 2,
+            "the buffer grew past its bound"
+        );
+    }
+    job.finish(JobState::Done, String::new(), false);
+
+    let (mut kept, mut missed) = (0u64, 0u64);
+    while let Some(next) = slow.next().await {
+        match next.event {
+            Some(proto::event::Event::Progress(_)) => kept += 1,
+            Some(proto::event::Event::Dropped(gap)) => missed += gap.count,
+            _ => {}
+        }
+    }
+    assert_eq!(kept, crate::WATCH_BUFFER as u64);
+    assert_eq!(missed, sent - kept, "every event is either read or counted");
+}
