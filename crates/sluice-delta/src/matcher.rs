@@ -36,6 +36,23 @@ impl Candidate {
         })
     }
 
+    /// A candidate from chunks that were cut elsewhere, in order, with `params`: how an engine
+    /// prepares a file it reads in blocks and never holds whole.
+    pub fn from_entries(params: &Params, entries: Vec<Entry>) -> Self {
+        let mut at = 0u64;
+        let mut chunks = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let len = u64::from(entry.len());
+            chunks.push((at, entry));
+            at += len;
+        }
+        Self {
+            chunks,
+            len: at,
+            avg: params.avg(),
+        }
+    }
+
     /// How long the candidate is.
     pub fn len(&self) -> u64 {
         self.len
