@@ -131,12 +131,20 @@ pub(in crate::roots) fn walk(
         return Err(refused());
     }
     let found = facts(&current).map_err(|e| other(errno_of(&e)))?;
+    // A file is sent from the folder it is in, and a folder from itself.
+    let handle = match held.last().filter(|_| meta.is_file()) {
+        Some(parent) => parent.try_clone(),
+        None => current.try_clone(),
+    }
+    .map_err(|e| other(errno_of(&e)))?;
     held.push(current);
     Ok(Opened {
         path,
         pin: found.identity,
         links: found.links,
         is_file: meta.is_file(),
+        handle,
+        name: names.last().map(|n| (*n).to_string()).unwrap_or_default(),
         _held: held,
     })
 }
@@ -157,12 +165,15 @@ fn name_only(
         Err(errno) => return Err(other(errno)),
     }
     let found = facts(&parent).map_err(|e| other(errno_of(&e)))?;
+    let handle = parent.try_clone().map_err(|e| other(errno_of(&e)))?;
     held.push(parent);
     Ok(Opened {
         path,
         pin: found.identity,
         links: 1,
         is_file: false,
+        handle,
+        name: name.to_string(),
         _held: held,
     })
 }

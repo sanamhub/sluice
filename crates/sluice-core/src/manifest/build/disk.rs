@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::engine::ObjectId;
+use super::below::Below;
 
 /// The disk path of each entry of a [`Built`](super::Built) manifest, by index, so a caller reads
 /// the files the walk saw. A second walk could find a different folder.
@@ -39,20 +39,20 @@ use crate::engine::ObjectId;
 pub struct DiskPaths {
     /// One slot per entry, in manifest order. `Some` exactly for a `File` entry.
     paths: Vec<Option<PathBuf>>,
-    /// The identity a confined walk read from each file's handle, in the same order.
-    ids: Vec<Option<ObjectId>>,
+    /// Where a confined walk found each file, in the same order.
+    below: Vec<Option<Below>>,
 }
 
 impl DiskPaths {
-    pub(super) fn new(paths: Vec<Option<PathBuf>>, ids: Vec<Option<ObjectId>>) -> Self {
-        Self { paths, ids }
+    pub(super) fn new(paths: Vec<Option<PathBuf>>, below: Vec<Option<Below>>) -> Self {
+        Self { paths, below }
     }
 
-    /// The identity a confined walk read from the handle of the file at `index`, or `None` when the
-    /// walk was not confined. A send that was confined opens the file again without following a
-    /// link and refuses it unless it is this object.
-    pub fn file_id(&self, index: usize) -> Option<ObjectId> {
-        self.ids.get(index).copied().flatten()
+    /// Where a confined walk found the file at `index`: the folder handle it is below, its path
+    /// below it, and the identity it had. A confined send opens the file from there and from
+    /// nowhere else.
+    pub fn below(&self, index: usize) -> Option<&Below> {
+        self.below.get(index)?.as_ref()
     }
 
     /// The file on disk for the entry at `index` of `manifest.entries()`. `None` for a folder, a

@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use sluice_core::Error;
 use sluice_core::engine::{
-    Congestion, Keep, ObjectId, Outgoing, Pins, ReceiptTarget, ReceiveOptions, RelayModeChoice,
-    StopEnd, deadline, now_ms, prepare_send_paths_confined, receive_checked,
+    Congestion, Keep, Outgoing, Pins, ReceiptTarget, ReceiveOptions, RelayModeChoice, StopEnd,
+    deadline, now_ms, prepare_send_paths_confined, receive_checked,
 };
 use sluice_core::ticket::{Body, Ticket};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -134,11 +134,15 @@ impl Service {
 
     /// A send of paths inside a root. Every file is copied from a handle proved to be the object the
     /// confined walk recorded, and a single file has the same root as a one-shot send of it has.
-    async fn prepare(&self, paths: &[PathBuf], expiry: Option<u64>) -> Result<Outgoing, Error> {
+    async fn prepare(
+        &self,
+        args: Vec<sluice_core::manifest::ConfinedArg>,
+        expiry: Option<u64>,
+    ) -> Result<Outgoing, Error> {
         let relay = self.inner.relay.clone();
         prepare_send_paths_confined(
             &self.inner.home,
-            paths,
+            args,
             relay,
             Congestion::Cubic,
             expiry,
@@ -147,19 +151,6 @@ impl Service {
         )
         .await
     }
-}
-
-/// Refuses when a path no longer names the object the walk opened for it.
-fn still_the_same(opened: &[Opened]) -> Result<(), ApiError> {
-    let swapped = opened
-        .iter()
-        .any(|o| ObjectId::of_path(&o.path).ok() != Some(o.pin));
-    if swapped {
-        return Err(ApiError::Refused(
-            "a path was replaced after it was checked, so nothing is sent".to_string(),
-        ));
-    }
-    Ok(())
 }
 
 fn keep_of(request: &proto::StartSendRequest) -> Result<Keep, ApiError> {
@@ -221,9 +212,17 @@ async fn send_task(
     plan: Plan,
     answer: Answer,
 ) {
-    let paths: Vec<PathBuf> = opened.iter().map(|o| o.path.clone()).collect();
+    let args: Result<Vec<_>, ApiError> = opened.iter().map(Opened::confined_arg).collect();
+    let args = match args {
+        Ok(args) => args,
+        Err(refused) => {
+            job.finish(JobState::Failed, refused.to_string(), false);
+            let _ = answer.send(Err(refused));
+            return;
+        }
+    };
     let prepared = tokio::select! {
-        prepared = service.prepare(&paths, deadline(now_ms(), plan.expires)) => prepared,
+        prepared = service.prepare(args, deadline(now_ms(), plan.expires)) => prepared,
         () = job.cancelled() => {
             job.finish(JobState::Cancelled, "the job was cancelled".to_string(), false);
             let _ = answer.send(Err(ApiError::Unavailable("the send was cancelled".to_string())));
@@ -238,13 +237,6 @@ async fn send_task(
             return;
         }
     };
-    // The engine opened the paths itself, so each is checked once more against the object the walk
-    // opened. One that was swapped in between is refused and nothing is served.
-    if let Err(refused) = still_the_same(&opened) {
-        job.finish(JobState::Failed, refused.to_string(), false);
-        let _ = answer.send(Err(refused));
-        return;
-    }
     outgoing.reserve(plan.keep);
     let ticket = outgoing.ticket.encode();
     let response = proto::StartSendResponse {

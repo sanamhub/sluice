@@ -13,10 +13,11 @@ use iroh_blobs::{
     store::fs::FsStore,
 };
 
+use super::copy::{check_room, chunks, open_for_copy, read_packed};
 use super::{Congestion, Outgoing, Provider, RelayModeChoice, Scratch, serving, storage};
 use crate::{
     Error, Home,
-    manifest::{Build, Built, Kind, Loc, Manifest},
+    manifest::{Build, Built, ConfinedArg, Kind, Loc, Manifest},
     ticket::{Body, Format, Ticket},
 };
 
@@ -42,49 +43,48 @@ pub async fn prepare_paths_with_rate(
     port: Option<u16>,
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
-    prepare_paths_inner(home, paths, relay, congestion, expiry_ms, port, rate, false).await
+    let built = Manifest::build_paths(paths)?;
+    prepare_built(home, built, relay, congestion, expiry_ms, port, rate).await
 }
 
-/// [`prepare_paths_with_rate`] for a caller that keeps the tree inside the folders it names: a
-/// link, a file with more than one name and an entry on another volume anywhere below them refuse
-/// the send, and the error names the entry. A daemon sends this way and a one-shot `send` does not.
+/// [`prepare_paths_with_rate`] for a caller that opened and proved its folders itself, such as a
+/// daemon's roots. The walk lists and opens everything relative to the handles it is given and never
+/// follows a link, so nothing outside them can be sent. Every file is then opened again the same
+/// way, hashed and copied into the send's own store from that one open object, so the walk, the
+/// hash and the copy cannot disagree and nothing is read from a path afterwards. A one-shot `send`
+/// does not do this: it references its files where they live.
 pub async fn prepare_paths_confined(
     home: &Home,
-    paths: &[PathBuf],
+    args: Vec<ConfinedArg>,
     relay: RelayModeChoice,
     congestion: Congestion,
     expiry_ms: Option<u64>,
     port: Option<u16>,
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
-    prepare_paths_inner(home, paths, relay, congestion, expiry_ms, port, rate, true).await
+    let built = Manifest::build_confined(args)?;
+    prepare_built(home, built, relay, congestion, expiry_ms, port, rate).await
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn prepare_paths_inner(
+async fn prepare_built(
     home: &Home,
-    paths: &[PathBuf],
+    built: Build,
     relay: RelayModeChoice,
     congestion: Congestion,
     expiry_ms: Option<u64>,
     port: Option<u16>,
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
-    confined: bool,
 ) -> Result<Outgoing, Error> {
     // Read before the store exists, so a home whose identity cannot be read fails this send with
     // nothing of its own left behind.
     let seed = home.identity()?.secret_seed();
-    let built = if confined {
-        Manifest::build_paths_confined(paths)?
-    } else {
-        Manifest::build_paths(paths)?
-    };
     let Build::Ready(built) = built else {
         return Err(Error::Policy(
             "a path cannot be sent because a receiver would reject one of its names".to_string(),
         ));
     };
     let manifest = &built.manifest;
+    check_room(home, &built)?;
     let scratch = Scratch::open(home, storage::Collector::Off).await?;
     let mut tags = Vec::new();
     import_blobs(scratch.store(), &built, manifest, &mut tags).await?;
@@ -122,42 +122,6 @@ async fn prepare_paths_inner(
     })
 }
 
-/// Opens a file of a confined send without following a link and proves it is the object the walk
-/// recorded, so nothing is read from a file that was swapped after the walk.
-pub(super) fn open_recorded(
-    disk: &std::path::Path,
-    expected: crate::engine::ObjectId,
-) -> Result<fs::File, Error> {
-    let changed = || {
-        Error::Verify(
-            "a file was replaced after the folder was read, so it is not sent".to_string(),
-        )
-    };
-    let file = crate::engine::open_file(disk).map_err(|_| changed())?;
-    match crate::engine::facts(&file) {
-        Ok(found) if found.identity == expected => Ok(file),
-        _ => Err(changed()),
-    }
-}
-
-/// The bytes of an open file in chunks, for the store to copy.
-fn chunks(
-    file: fs::File,
-) -> impl n0_future::Stream<Item = std::io::Result<bytes::Bytes>> + Send + Sync + 'static {
-    let mut file = file;
-    n0_future::stream::iter(std::iter::from_fn(move || {
-        let mut buffer = vec![0u8; 1 << 20];
-        match std::io::Read::read(&mut file, &mut buffer) {
-            Ok(0) => None,
-            Ok(n) => {
-                buffer.truncate(n);
-                Some(Ok(bytes::Bytes::from(buffer)))
-            }
-            Err(e) => Some(Err(e)),
-        }
-    }))
-}
-
 /// Imports every distinct file blob once, in place. A second file with the same content shares the
 /// blob, which is why the sequence names each root once.
 async fn import_blobs(
@@ -178,14 +142,14 @@ async fn import_blobs(
             .disk
             .file(index)
             .ok_or_else(|| Error::Bug("a file entry has no disk path".to_string()))?;
-        let added = match built.disk.file_id(index) {
+        let added = match built.disk.below(index) {
             // A confined send copies what it read from the handle it proved, so a later change to
             // the path cannot put other bytes on the wire.
-            Some(expected) => {
-                let file = open_recorded(disk, expected)?;
+            Some(below) => {
+                let file = open_for_copy(below, entry)?;
                 store
                     .blobs()
-                    .add_stream(chunks(file))
+                    .add_stream(chunks(file, entry.size))
                     .await
                     .temp_tag()
                     .await
@@ -239,15 +203,8 @@ async fn add_pack(
             .disk
             .file(entry_index)
             .ok_or_else(|| Error::Bug("a packed entry has no disk path".to_string()))?;
-        let body = match built.disk.file_id(entry_index) {
-            Some(expected) => {
-                let mut body = Vec::new();
-                std::io::Read::read_to_end(&mut open_recorded(disk, expected)?, &mut body)
-                    .map_err(|e| {
-                        Error::Storage(format!("cannot read a packed file: {}", e.kind()))
-                    })?;
-                body
-            }
+        let body = match built.disk.below(entry_index) {
+            Some(below) => read_packed(open_for_copy(below, entry)?, entry.size)?,
             None => fs::read(disk)
                 .map_err(|e| Error::Storage(format!("cannot read a packed file: {}", e.kind())))?,
         };

@@ -7,12 +7,20 @@
 
 mod argument;
 mod assemble;
+mod below;
 mod collide;
-mod confine;
+pub use below::{Below, ConfinedArg};
+mod dirs;
 mod disk;
 mod finding;
 mod hash;
 mod meta;
+
+/// The modification time of an open file in the form a manifest carries it, for a send that checks
+/// a file against its entry.
+pub(crate) fn mtime_ms_of(meta: &std::fs::Metadata) -> u64 {
+    meta::mtime_ms(meta)
+}
 mod walk;
 
 use std::path::{Path, PathBuf};
@@ -207,7 +215,7 @@ impl Manifest {
                 "the path to send is not a folder".to_string(),
             ));
         }
-        build_either(&[root.to_path_buf()], limits, |_| {}, false, false)
+        build_either(&[root.to_path_buf()], limits, |_| {}, false)
     }
 
     /// Builds one manifest from several arguments, as `sluice send a.mov photos/` does.
@@ -235,15 +243,17 @@ impl Manifest {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn build_paths(paths: &[PathBuf]) -> Result<Build, Error> {
-        build_either(paths, Limits::default(), |_| {}, true, false)
+        build_either(paths, Limits::default(), |_| {}, true)
     }
 
-    /// [`Manifest::build_paths`] for a caller that must keep the tree inside the folder it was
-    /// given: a link, a file with more than one name and an entry on another volume refuse the
-    /// build with an error that names the entry. Every entry is judged from a handle opened
-    /// without following a link, so a path that was swapped for a link cannot lead out.
-    pub fn build_paths_confined(paths: &[PathBuf]) -> Result<Build, Error> {
-        build_either(paths, Limits::default(), |_| {}, true, true)
+    /// Builds the manifest of folders and files a caller opened and proved itself, such as a daemon's
+    /// roots. Every listing and every open is relative to a handle, never following a link, so
+    /// nothing can lead out of the folders given; an entry that is a link, a file with more than one
+    /// name, or on another volume refuses the build, and the error names the entry. Each file is
+    /// found again below its handle by `Built::disk`, with the identity it had here.
+    pub fn build_confined(args: Vec<ConfinedArg>) -> Result<Build, Error> {
+        let walked = below::walk(args)?;
+        finish(walked, Limits::default(), |_| {})
     }
 }
 
@@ -256,9 +266,13 @@ fn build_either(
     limits: Limits,
     between: impl Fn(&Path),
     name_roots: bool,
-    confined: bool,
 ) -> Result<Build, Error> {
-    let walked = walk::walk_paths(paths, name_roots, confined)?;
+    let walked = walk::walk_paths(paths, name_roots)?;
+    finish(walked, limits, between)
+}
+
+/// Hashes what the walk found and assembles the manifest.
+fn finish(walked: walk::Walk, limits: Limits, between: impl Fn(&Path)) -> Result<Build, Error> {
     // Before the names are compared and before any file is hashed: renaming files does not
     // bring the count down, so a list of names to fix would not help.
     check_entries(walked.items.len(), limits)?;
@@ -293,7 +307,7 @@ fn build_either(
     skipped.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(Build::Ready(Built {
         manifest,
-        disk: DiskPaths::new(assembled.disk, assembled.ids),
+        disk: DiskPaths::new(assembled.disk, assembled.below),
         skipped,
     }))
 }
@@ -302,7 +316,7 @@ fn build_either(
 /// between its last byte and the second look at it. The folder itself is not an entry.
 #[cfg(test)]
 pub(super) fn build(root: &Path, limits: Limits, between: impl Fn(&Path)) -> Result<Build, Error> {
-    build_either(&[root.to_path_buf()], limits, between, false, false)
+    build_either(&[root.to_path_buf()], limits, between, false)
 }
 
 /// Decoding rule 2 at the sender. The message gives numbers and no name.
