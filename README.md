@@ -236,8 +236,10 @@ A client names a root and a path below it, and the daemon sends from and receive
 folders and nowhere else. A daemon started with no `--root` refuses every send and receive and says
 how to allow one. A path with a `..`, an absolute path or a link in it is refused. The daemon
 returns a ticket only to the call that made it, and no log line, error, event or job list holds one.
-At most 16 jobs run at once, a watcher that falls behind is told how many events it missed, and a
-message is at most 1 MiB.
+A daemon send copies the files it sends into the home's temporary area, so it needs as much free
+space there as they take and refuses to start without it; a one-shot `send` still reads its files
+where they live. At most 16 jobs run at once, a watcher that falls behind is told how many events it
+missed, and a message is at most 1 MiB.
 
 `SIGINT`, `SIGTERM` or `SIGHUP`, a console `Ctrl+C`, `Ctrl+Break`, close, logoff or shutdown on
 Windows, or `sluice daemon stop` ends running jobs as cancelled. A receive keeps its partial store,
