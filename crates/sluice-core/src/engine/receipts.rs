@@ -18,13 +18,9 @@ use std::{
 };
 
 use ed25519_dalek::SigningKey;
-use iroh::endpoint::{RecvStream, SendStream};
 use iroh_blobs::Hash;
 use n0_future::time::timeout;
-use tokio::{
-    io::AsyncWriteExt,
-    sync::{Notify, mpsc::UnboundedSender},
-};
+use tokio::sync::{Notify, mpsc::UnboundedSender};
 
 use super::hello::{CAP_RECEIPTS, Hello, read_stream_varint, varint_bytes};
 use super::policy::{Asked, Places};
@@ -32,17 +28,15 @@ use super::{Event, Receiver, now_ms};
 use crate::receipt::Receipt;
 use crate::ticket::Ticket;
 
+mod serve;
 mod write;
 
+pub use serve::parse_request;
+pub(in crate::engine) use serve::serve_request;
 pub(super) use write::{ready, write_file};
 
-/// The bytes of a request: one root.
-const REQUEST_LEN: u64 = 32;
 /// How long a receiver waits for the answer, counted from the connection coming up.
 const ANSWER_WAIT: Duration = Duration::from_secs(10);
-/// How long a sender waits for the request after the greeting, so a peer that greets and says
-/// nothing cannot hold the connection open.
-const REQUEST_WAIT: Duration = Duration::from_secs(10);
 /// The window between a receipt's time and the receiver's clock.
 pub(super) const CLOCK_WINDOW_MS: u64 = 300_000;
 /// How long a one-download sender keeps answering after the last byte of what it serves.
@@ -215,93 +209,6 @@ impl Receipts {
     }
 }
 
-/// Answers one request on a `sluice/1` stream, after both greetings, and finishes the stream. A
-/// request that is not 32 bytes or arrives too late writes nothing, and so does a refused one. The
-/// answer is counted once the asker has it, or has closed the connection, and never later than
-/// [`HOLD`] after it was written.
-pub(super) async fn serve_request(
-    receipts: &Receipts,
-    conn: &iroh::endpoint::Connection,
-    recv: &mut RecvStream,
-    mut send: SendStream,
-) -> std::io::Result<()> {
-    let peer = *conn.remote_id().as_bytes();
-    let Ok(Ok(root)) = timeout(REQUEST_WAIT, read_request(recv)).await else {
-        return send.finish().map_err(std::io::Error::other);
-    };
-    let Some(receipt) = receipts.answer(peer, root, now_ms()) else {
-        return send.finish().map_err(std::io::Error::other);
-    };
-    receipts.begin();
-    let written = write_answer(receipts, &receipt, recv, &mut send).await;
-    let delivered = match written {
-        Ok(true) if send.finish().is_ok() => taken(&send, conn).await,
-        _ => false,
-    };
-    receipts.settle(delivered);
-    Ok(())
-}
-
-/// Writes the record, and says whether one was written.
-async fn write_answer(
-    receipts: &Receipts,
-    receipt: &Receipt,
-    recv: &mut RecvStream,
-    send: &mut SendStream,
-) -> std::io::Result<bool> {
-    #[cfg(test)]
-    {
-        let delay = *lock(&receipts.delay);
-        tokio::time::sleep(delay).await;
-        let forced = lock(&receipts.forced).clone();
-        if let Some(record) = forced {
-            if record.is_empty() {
-                // A sender that writes nothing: hold the stream until the dialer gives up, so the
-                // receiver's wait is what ends the exchange.
-                let _ = read_stream_varint(recv).await;
-                return Ok(false);
-            }
-            send.write_all(&record).await?;
-            send.flush().await?;
-            return Ok(true);
-        }
-    }
-    #[cfg(not(test))]
-    let _ = (receipts, &recv);
-    let mut record = varint_bytes(crate::receipt::RECORD_LEN as u64);
-    record.extend_from_slice(&receipt.to_bytes());
-    send.write_all(&record).await?;
-    send.flush().await?;
-    Ok(true)
-}
-
-/// Waits for the asker to take what was written: the send stream is acknowledged or stopped, or the
-/// asker closes the connection, and never longer than [`HOLD`]. Returns whether it did, so a record
-/// that may still be in flight is not counted as delivered.
-async fn taken(send: &SendStream, conn: &iroh::endpoint::Connection) -> bool {
-    tokio::select! {
-        _ = send.stopped() => true,
-        _ = conn.closed() => true,
-        () = tokio::time::sleep(HOLD) => false,
-    }
-}
-
-/// One request: its length as a varint, which must be 32, and then the root.
-async fn read_request(recv: &mut RecvStream) -> std::io::Result<[u8; 32]> {
-    let len = read_stream_varint(recv).await?;
-    if len != REQUEST_LEN {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "a receipt request is 32 bytes",
-        ));
-    }
-    let mut root = [0u8; 32];
-    recv.read_exact(&mut root)
-        .await
-        .map_err(std::io::Error::other)?;
-    Ok(root)
-}
-
 /// Asks the sender of `ticket` for a receipt of the content that arrived, and returns it when one
 /// passes every rule of section 10. `None` is the whole of a refusal, and a transfer never fails
 /// over it.
@@ -349,10 +256,10 @@ async fn exchange(
     if !ours.both(&theirs, CAP_RECEIPTS) {
         return None;
     }
-    let mut request = varint_bytes(REQUEST_LEN);
+    let mut request = varint_bytes(serve::REQUEST_LEN);
     request.extend_from_slice(&root);
     send.write_all(&request).await.ok()?;
-    send.flush().await.ok()?;
+    send.finish().ok()?;
     let len = read_stream_varint(&mut recv).await.ok()?;
     // A record of another length is an absence, and nothing more is read from it: a peer that
     // writes a length it does not follow would otherwise make a receiver wait for its bytes.

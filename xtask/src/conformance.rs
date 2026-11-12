@@ -10,6 +10,7 @@ mod manifests;
 mod need_ranges;
 mod packs;
 mod paths;
+mod receipt_requests;
 mod receipts;
 mod sequences;
 #[cfg(test)]
@@ -96,6 +97,7 @@ pub fn check(root: &Path) -> Result<Report> {
             "need-ranges" => need_ranges::run(&dir, &mut report)?,
             "packs" => packs::run(&dir, &mut report)?,
             "paths" => paths::run(&dir, &mut report)?,
+            "receipt-requests" => receipt_requests::run(&dir, &mut report)?,
             "receipts" => receipts::run(&dir, &mut report)?,
             "sequences" => sequences::run(&dir, &mut report)?,
             "tickets" => tickets::run(&dir, &mut report)?,

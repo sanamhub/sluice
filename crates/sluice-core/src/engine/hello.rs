@@ -180,7 +180,7 @@ fn take_one(bytes: &[u8], at: &mut usize) -> Result<u8, ()> {
     Ok(byte)
 }
 
-fn take_varint(bytes: &[u8], at: &mut usize) -> Option<u64> {
+pub(super) fn take_varint(bytes: &[u8], at: &mut usize) -> Option<u64> {
     let mut value = 0u64;
     for count in 1..=10u32 {
         let byte = take_one(bytes, at).ok()?;
