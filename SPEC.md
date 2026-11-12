@@ -68,7 +68,8 @@ Hello = {
 
 Unknown bits MUST be ignored, never treated as an error. A capability is usable only when both sides
 set it. A sender of fixed content sets `DELTA`, because it serves signatures, and sets `RECEIPTS`
-for as long as it offers a receipt; a live send sets neither of the two. A `proto_version` mismatch MUST close the connection with a clear reason string.
+for as long as it offers a receipt; a live send sets neither of the two. A `proto_version` mismatch
+MUST close the connection with a clear reason string.
 
 A dialer MUST offer exactly one ALPN from this table per connection, so the order in which a
 listener registers or prefers them never decides which protocol runs. Static content and `sluice/1`
