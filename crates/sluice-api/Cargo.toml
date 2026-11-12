@@ -1,0 +1,52 @@
+[package]
+name = "sluice-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The local control interface of Sluice: the service, its job table and the daemon that serves it"
+homepage.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["p2p", "file-transfer", "grpc", "daemon"]
+categories = ["network-programming"]
+
+[dependencies]
+blake3.workspace = true
+hyper-util.workspace = true
+prost.workspace = true
+sluice-core = { path = "../sluice-core" }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "net", "sync"] }
+tokio-stream.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+tower.workspace = true
+tracing.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# `Win32_System_Pipes` is the one module this crate adds to the workspace list: the client process
+# of a pipe connection.
+windows-sys = { workspace = true, features = ["Win32_System_Pipes", "Win32_System_IO"] }
+
+[dev-dependencies]
+protox.workspace = true
+tempfile.workspace = true
+tonic-prost-build.workspace = true
+tracing-subscriber.workspace = true
+
+# The Windows pipe's access list and the client check need platform calls, so this crate denies
+# unsafe instead of forbidding it, and the two modules that need it say why.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# Not released on its own: dist builds only the `sluice` binary (dist-workspace.toml).
+[package.metadata.dist]
+dist = false
