@@ -2,6 +2,7 @@
 //! the two thin clients `status` and `stop`. `send` and `recv` stay one-shot and never use it.
 
 mod client;
+mod signals;
 
 use std::path::PathBuf;
 
@@ -62,6 +63,8 @@ pub fn run(args: &DaemonArgs, output: &Output) -> Result<u8, Error> {
 /// Opens the home, listens and serves until a signal or a `stop`.
 async fn serve(args: &DaemonArgs, output: &Output) -> Result<u8, Error> {
     init_logging();
+    // Registered before the daemon says where it listens, so a signal that follows is never lost.
+    let signals = signals::Signals::register()?;
     let relay = if args.loopback {
         RelayModeChoice::Loopback
     } else {
@@ -78,7 +81,7 @@ async fn serve(args: &DaemonArgs, output: &Output) -> Result<u8, Error> {
     let daemon = Daemon::bind(home, roots, relay).map_err(refused)?;
     tracing::info!("listening on {}", daemon.location());
     output.write_stdout(&listening_line(output, daemon.location()))?;
-    daemon.serve(signalled()).await.map_err(refused)?;
+    daemon.serve(signals.arrived()).await.map_err(refused)?;
     tracing::info!("stopped");
     Ok(0)
 }
@@ -104,29 +107,6 @@ fn init_logging() {
         .with_writer(std::io::stderr)
         .with_ansi(false)
         .try_init();
-}
-
-/// Resolves on Ctrl+C, and on Unix on a termination signal as well.
-async fn signalled() {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-        match signal(SignalKind::terminate()) {
-            Ok(mut terminate) => {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {}
-                    _ = terminate.recv() => {}
-                }
-            }
-            Err(_) => {
-                let _ = tokio::signal::ctrl_c().await;
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
-    }
 }
 
 /// The kind of error that goes with each kind of refusal, so the exit code says what happened.

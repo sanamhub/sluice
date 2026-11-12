@@ -232,3 +232,24 @@ async fn a_stop_cancels_a_running_receive_keeps_its_store_and_the_next_receive_r
         body
     );
 }
+
+/// Each signal that stops a daemon ends it well, and the socket goes with it. Unix only: Windows
+/// has no way to send a console event to a process from a test.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn sigint_sigterm_and_sighup_each_stop_the_daemon_and_remove_its_socket() {
+    for signal in ["INT", "TERM", "HUP"] {
+        let pair = pair();
+        let mut daemon = start(&pair.sender_home, &[&pair.outgoing], "info");
+        let socket = pair.sender_home.join("run").join("control.sock");
+        assert!(socket.exists());
+        let sent = std::process::Command::new("kill")
+            .arg(format!("-{signal}"))
+            .arg(daemon.id().to_string())
+            .status()
+            .unwrap();
+        assert!(sent.success());
+        assert!(daemon.wait_for_exit(), "SIG{signal} ends the daemon well");
+        assert!(!socket.exists(), "SIG{signal} leaves no socket");
+    }
+}

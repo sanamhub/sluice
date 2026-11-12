@@ -87,3 +87,59 @@ fn a_folder_that_others_can_reach_is_refused() {
         .expect_err("an open folder is refused");
     assert!(refused.to_string().contains("0700"), "{refused}");
 }
+
+#[tokio::test]
+async fn a_peer_the_check_refuses_gets_no_connection() {
+    let dir = home();
+    let asked = std::sync::Arc::new(tokio::sync::Notify::new());
+    let tell = asked.clone();
+    let refuse: Check<UnixStream> = std::sync::Arc::new(move |_| {
+        tell.notify_one();
+        Err(ApiError::Refused("another user".to_string()))
+    });
+    let (mut incoming, _guard, shown) = listen_with(dir.path(), refuse).unwrap();
+    let _client = UnixStream::connect(&shown).await.unwrap();
+    asked.notified().await;
+    let delivered = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        tokio_stream::StreamExt::next(&mut incoming.connections),
+    )
+    .await;
+    assert!(
+        delivered.is_err(),
+        "a refused peer is never handed to the server"
+    );
+}
+
+#[tokio::test]
+async fn the_real_check_passes_a_peer_of_this_user() {
+    let dir = home();
+    let (mut incoming, _guard, shown) = listen(dir.path()).unwrap();
+    let _client = UnixStream::connect(&shown).await.unwrap();
+    let got = tokio_stream::StreamExt::next(&mut incoming.connections).await;
+    assert!(got.is_some_and(|c| c.is_ok()));
+}
+
+#[test]
+fn a_run_folder_another_user_could_reach_or_a_link_is_refused_to_the_client_too() {
+    let dir = home();
+    let folder = dir.path().join(FOLDER);
+    fs::create_dir(&folder).unwrap();
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o700)).unwrap();
+    check_folder(&folder).unwrap();
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o750)).unwrap();
+    assert!(check_folder(&folder).is_err());
+    let link = dir.path().join("run-link");
+    std::os::unix::fs::symlink(&folder, &link).unwrap();
+    assert!(check_folder(&link).is_err());
+}
+
+#[test]
+fn the_socket_of_a_home_that_is_a_link_is_in_the_folder_the_link_leads_to() {
+    let dir = home();
+    let real = dir.path().join("real");
+    fs::create_dir(&real).unwrap();
+    let link = dir.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    assert_eq!(target(&link), target(&real));
+}
