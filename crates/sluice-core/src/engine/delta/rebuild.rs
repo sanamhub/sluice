@@ -10,8 +10,7 @@
 //! ranges it fetched, which the plain fetch reuses.
 
 use std::{
-    fs,
-    io::{self, SeekFrom},
+    fs, io,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -23,7 +22,6 @@ use iroh_blobs::{
     store::fs::FsStore,
 };
 use sluice_delta::{Plan, Span};
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::{BLOCK, Candidate, MAX_NEED_RANGES, WORTH_EIGHTHS, ask};
@@ -206,8 +204,11 @@ async fn assemble(
         .temp_tag()
         .await
         .map_err(|e| Error::Storage(format!("cannot import a delta: {}", crate::plain(&e))))?;
+    // The store has its own copy now: a reference would keep the holes of the partial entry that
+    // the fetched ranges made, and the file in the work area is removed when `assembly` drops.
     drop(assembly);
-    Ok(tag.hash() == hash)
+    let imported = tag.hash() == hash;
+    Ok(imported)
 }
 
 /// Copies every local span from the candidate into the assembly, a block at a time.
@@ -250,18 +251,12 @@ async fn copy_fetched(
     plan: &Plan,
     file: &std::sync::Arc<fs::File>,
 ) -> io::Result<()> {
-    let mut reader = store.blobs().reader(hash);
-    let mut buffer = vec![0u8; BLOCK];
     for span in plan.spans() {
         let Span::Fetch(range) = span else { continue };
-        reader.seek(SeekFrom::Start(range.start())).await?;
-        let mut done = 0u64;
-        while done < range.len() {
-            let n = usize::try_from((range.len() - done).min(BLOCK as u64)).unwrap_or(BLOCK);
-            reader.read_exact(&mut buffer[..n]).await?;
-            write_all_at(file, &buffer[..n], range.start() + done)?;
-            done += n as u64;
-        }
+        super::export(store, hash, range.start()..range.end(), |offset, piece| {
+            write_all_at(file, piece, offset)
+        })
+        .await?;
     }
     Ok(())
 }

@@ -17,9 +17,9 @@ use iroh::endpoint::{Connection, RecvStream, SendStream};
 use iroh_blobs::{Hash, api::proto::BlobStatus, store::fs::FsStore};
 use n0_future::time::timeout;
 use sluice_delta::{Entry, MAX_ENTRIES, NeedRanges, SMALLEST, SigList, StreamCut};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 
-use super::{BLOCK, MAX_NEED_FRAME, REQUEST_WAIT, frame, params_for, read_frame};
+use super::{MAX_NEED_FRAME, REQUEST_WAIT, frame, params_for, read_frame};
 use crate::engine::hello::{Hello, MAX_FRAME_BYTES};
 use crate::engine::policy::{Asked, Places};
 
@@ -197,27 +197,23 @@ impl Delta {
             return None;
         }
         let params = params_for(size, frame_limit)?;
-        let mut reader = self.store.blobs().reader(hash);
         let mut cut = StreamCut::new(params);
         let mut entries: Vec<Entry> = Vec::new();
         let mut sound = true;
-        let mut buffer = vec![0u8; BLOCK];
         let mut read = 0u64;
-        loop {
-            let n = reader.read(&mut buffer).await.ok()?;
-            if n == 0 {
-                break;
-            }
-            read += n as u64;
-            cut.feed(&buffer[..n], |chunk| match Entry::of_bytes(chunk) {
+        let exported = super::export(&self.store, hash, 0..size, |_, piece| {
+            read += piece.len() as u64;
+            cut.feed(piece, |chunk| match Entry::of_bytes(chunk) {
                 Ok(entry) => entries.push(entry),
                 Err(_) => sound = false,
             });
             if !sound || entries.len() > MAX_ENTRIES as usize {
-                return None;
+                return Err(std::io::Error::other("a list the format cannot hold"));
             }
-            tokio::task::yield_now().await;
-        }
+            Ok(())
+        })
+        .await;
+        exported.ok()?;
         cut.finish(|chunk| match Entry::of_bytes(chunk) {
             Ok(entry) => entries.push(entry),
             Err(_) => sound = false,

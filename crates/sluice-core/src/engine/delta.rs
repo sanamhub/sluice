@@ -102,6 +102,32 @@ pub fn parse_request(stream: &[u8]) -> Result<[u8; 32], crate::Error> {
         .map_err(|_| crate::Error::Policy("a delta request is the 32 bytes of a root".to_string()))
 }
 
+/// Streams the bytes `range` of the blob `hash` out of the store, in the order they lie, handing each
+/// piece and its offset to `each`. A `BlobReader` would do the same a piece at a time, but it starts
+/// a new export for every read and a read is only a few kilobytes, which costs seconds for a
+/// megabyte; one export for the whole range is the same bytes at the store's own speed.
+pub(super) async fn export(
+    store: &iroh_blobs::store::fs::FsStore,
+    hash: iroh_blobs::Hash,
+    range: std::ops::Range<u64>,
+    mut each: impl FnMut(u64, &[u8]) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    use iroh_blobs::api::proto::ExportRangesItem;
+    use n0_future::StreamExt;
+
+    let mut stream = std::pin::pin!(store.blobs().export_ranges(hash, range).stream());
+    while let Some(item) = stream.next().await {
+        match item {
+            ExportRangesItem::Size(_) => {}
+            ExportRangesItem::Data(leaf) => each(leaf.offset, &leaf.data)?,
+            ExportRangesItem::Error(e) => {
+                return Err(std::io::Error::other(format!("cannot read the blob: {e}")));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// A frame as it travels, as a record of section 6 does: its length as a varint, then its bytes.
 pub(super) fn frame(bytes: &[u8]) -> Vec<u8> {
     let mut out = super::hello::varint_bytes(bytes.len() as u64);
