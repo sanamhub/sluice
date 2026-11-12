@@ -100,7 +100,8 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
         }
         if args.delta_from.is_some() {
             return Err(Error::Policy(
-                "--delta-from names the older version of one ticket's content, so receive them                  one at a time"
+                "--delta-from names the older version of one ticket's content, so receive them \
+                 one at a time"
                     .to_string(),
             ));
         }
