@@ -25,6 +25,8 @@ struct Status {
     receivers: u32,
     resumable: bool,
     state: Option<JobState>,
+    /// The daemon's sentence for a job that failed, which is escaped as a peer's text is.
+    failure: Option<String>,
 }
 
 /// One job.
@@ -35,6 +37,10 @@ pub(crate) struct Job {
     verified_root: Option<String>,
     began: Instant,
     status: Mutex<Status>,
+    /// The ticket a send serves, once it is prepared. Only `Service::job_detail` reads it, for a
+    /// caller that started the send without waiting for its ticket, and no summary, event or log
+    /// line holds it.
+    ticket: Mutex<Option<String>>,
     hub: Hub,
     cancel: watch::Sender<bool>,
     ended: watch::Sender<bool>,
@@ -58,6 +64,24 @@ impl Job {
             receivers: status.receivers,
             resumable: status.resumable,
         }
+    }
+
+    /// Keeps the ticket of a send for the one call that may read it back.
+    pub(crate) fn keep_ticket(&self, ticket: String) {
+        *self
+            .ticket
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ticket);
+    }
+
+    /// The summary, the ticket if one was kept, and the failure sentence if the job failed.
+    pub(crate) fn detail(&self) -> (proto::JobSummary, Option<String>, Option<String>) {
+        let ticket = self
+            .ticket
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        (self.summary(), ticket, self.status().failure.clone())
     }
 
     pub(crate) fn is_running(&self) -> bool {
@@ -108,6 +132,9 @@ impl Job {
             let mut status = self.status();
             status.state = Some(state);
             status.resumable = resumable;
+            if state == JobState::Failed {
+                status.failure = Some(message.clone());
+            }
         }
         let last = event(
             &self.id,
@@ -254,6 +281,7 @@ impl Table {
             verified_root,
             began: Instant::now(),
             status: Mutex::new(Status::default()),
+            ticket: Mutex::new(None),
             hub: Hub::default(),
             cancel: watch::channel(false).0,
             ended: watch::channel(false).0,

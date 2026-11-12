@@ -42,11 +42,32 @@ impl Service {
             job,
             opened,
             Plan { keep, expires },
-            answer,
+            Delivery::Caller(answer),
         ));
         answered
             .await
             .unwrap_or_else(|_| Err(ApiError::Failed("the send did not start".to_string())))
+    }
+
+    /// Starts a send and returns its job id at once, before it is prepared. The ticket is read with
+    /// [`Service::job_detail`] once the send is prepared; the call that makes a ticket is the only
+    /// one that gets it, and here that is the caller of that method.
+    pub async fn begin_send(&self, request: proto::StartSendRequest) -> Result<String, ApiError> {
+        self.refuse_new_work()?;
+        self.refuse_without_roots()?;
+        let opened = self.send_paths(&request)?;
+        let keep = keep_of(&request)?;
+        let expires = (request.expires_seconds > 0).then_some(request.expires_seconds);
+        let job = self.inner.jobs.start(JobKind::Send, None)?;
+        let id = job.id.clone();
+        tokio::spawn(send_task(
+            self.clone(),
+            job,
+            opened,
+            Plan { keep, expires },
+            Delivery::Job,
+        ));
+        Ok(id)
     }
 
     /// Starts a receive of a ticket into a folder inside a root.
@@ -204,28 +225,63 @@ struct Plan {
 
 type Answer = oneshot::Sender<Result<proto::StartSendResponse, ApiError>>;
 
+/// Who is told how the preparing of a send went.
+enum Delivery {
+    /// A call that waits for the ticket.
+    Caller(Answer),
+    /// Nobody waits: the ticket is kept with the job.
+    Job,
+}
+
+impl Delivery {
+    /// Gives the outcome over. False when the caller has gone, and the job has been ended.
+    fn give(self, job: &Job, outcome: Result<proto::StartSendResponse, ApiError>) -> bool {
+        match self {
+            Self::Caller(answer) => hand_over(job, answer, outcome),
+            Self::Job => {
+                if let Ok(response) = outcome
+                    && let Some(ticket) = response.ticket
+                {
+                    job.keep_ticket(ticket.text);
+                }
+                true
+            }
+        }
+    }
+}
+
 /// Prepares the send, tells the caller, and serves it. Every way out ends the job.
 async fn send_task(
     service: Service,
     job: Arc<Job>,
     opened: Vec<Opened>,
     plan: Plan,
-    answer: Answer,
+    delivery: Delivery,
 ) {
     let args: Result<Vec<_>, ApiError> = opened.iter().map(Opened::confined_arg).collect();
     let args = match args {
         Ok(args) => args,
         Err(refused) => {
             job.finish(JobState::Failed, refused.to_string(), false);
-            let _ = answer.send(Err(refused));
+            let _ = delivery.give(&job, Err(refused));
             return;
         }
     };
+    let expires = deadline(now_ms(), plan.expires);
+    let worker = service.clone();
+    let mut preparing = tokio::spawn(async move { worker.prepare(args, expires).await });
     let prepared = tokio::select! {
-        prepared = service.prepare(args, deadline(now_ms(), plan.expires)) => prepared,
+        prepared = &mut preparing => prepared.unwrap_or_else(|_| {
+            Err(Error::Bug("the send's preparing did not finish".to_string()))
+        }),
         () = job.cancelled() => {
+            // The preparing is let finish, and its send stopped, so the store it made is closed and
+            // its folder removed and not left for a later command.
+            if let Ok(Ok(outgoing)) = preparing.await {
+                let _ = outgoing.provider.shutdown().await;
+            }
             job.finish(JobState::Cancelled, "the job was cancelled".to_string(), false);
-            let _ = answer.send(Err(ApiError::Unavailable("the send was cancelled".to_string())));
+            let _ = delivery.give(&job, Err(ApiError::Unavailable("the send was cancelled".to_string())));
             return;
         }
     };
@@ -233,7 +289,7 @@ async fn send_task(
         Ok(outgoing) => outgoing,
         Err(error) => {
             job.finish(JobState::Failed, message_of(&error, ""), false);
-            let _ = answer.send(Err(ApiError::from_core(&error, "")));
+            let _ = delivery.give(&job, Err(ApiError::from_core(&error, "")));
             return;
         }
     };
@@ -248,7 +304,7 @@ async fn send_task(
         files: outgoing.files,
     };
     tracing::info!(job = %job.id, files = response.files, bytes = response.bytes, "send started");
-    if !hand_over(&job, answer, Ok(response)) {
+    if !delivery.give(&job, Ok(response)) {
         return;
     }
     run_send(job, outgoing, plan.keep, opened, ticket).await;

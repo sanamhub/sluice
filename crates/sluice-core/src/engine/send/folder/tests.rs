@@ -183,3 +183,36 @@ fn a_single_file_has_the_same_root_confined_or_not() {
     let plain = crate::engine::root_of_path(&file).unwrap();
     assert_eq!(built.manifest.sequence_root(), plain.root);
 }
+
+/// A send that fails while it copies removes its store and its folder, and leaves nothing in the
+/// home for the next command to find.
+#[tokio::test]
+async fn a_send_that_fails_while_it_copies_leaves_nothing_in_the_home() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = crate::Home::open(&dir.path().join("home")).unwrap();
+    let sent = folder_with_a_big_file(dir.path());
+    let args = vec![ConfinedArg::folder(
+        open_folder(&sent).unwrap(),
+        "sent".to_string(),
+    )];
+    let swapped = sent.clone();
+    crate::engine::send::copy::before_copy(move || rename_over(&swapped, "data.bin", b"other"));
+    let result = super::prepare_paths_confined(
+        &home,
+        args,
+        crate::engine::RelayModeChoice::Loopback,
+        crate::engine::Congestion::Cubic,
+        None,
+        None,
+        None,
+    )
+    .await;
+    crate::engine::send::copy::before_copy(|| {});
+    assert!(matches!(result, Err(Error::Verify(_))));
+    crate::engine::wait_for_removals(std::time::Duration::from_secs(10));
+    let left: Vec<_> = fs::read_dir(home.temporary_folder().unwrap())
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect();
+    assert!(left.is_empty(), "left behind: {left:?}");
+}

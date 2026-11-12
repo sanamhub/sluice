@@ -31,5 +31,5 @@ pub use grpc::MAX_MESSAGE_BYTES;
 pub use hub::{MAX_WATCHERS, WATCH_BUFFER, Watcher};
 pub use jobs::{MAX_FINISHED, MAX_RUNNING};
 pub use roots::{NO_ROOTS, Roots};
-pub use service::{STOP_WAIT, Service};
+pub use service::{JobDetail, STOP_WAIT, Service};
 pub use transport::MAX_CONNECTIONS;
