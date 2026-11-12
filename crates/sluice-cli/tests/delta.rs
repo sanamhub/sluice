@@ -154,3 +154,24 @@ fn a_path_that_is_not_there_or_a_mode_with_no_file_is_refused() {
     }
     sender.0.kill().ok();
 }
+
+/// Several tickets and one `--delta-from` is refused with this sentence, which has one space
+/// between its words.
+#[test]
+fn several_tickets_with_a_delta_path_are_refused_with_one_sentence() {
+    let (dir, home, _source, older, _new) = fixture();
+    let output = recv_in(
+        dir.path(),
+        &home,
+        "first",
+        &["second", "--delta-from", older.to_str().unwrap()],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "--delta-from names the older version of one ticket's content, so receive them one at a time"
+        ),
+        "{stderr}"
+    );
+}
