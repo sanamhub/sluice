@@ -29,7 +29,7 @@ pub(super) const RANGES: [(u32, u32); 17] = [
 
 /// Whether `c` carries the property: a name may keep one and a file system may compare it
 /// as though it were not there.
-pub(super) fn is_ignorable(c: char) -> bool {
+pub(in crate::manifest) fn is_ignorable(c: char) -> bool {
     let code = u32::from(c);
     RANGES
         .binary_search_by(|&(first, last)| {
