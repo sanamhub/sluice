@@ -18,6 +18,7 @@ use crate::{
 pub(super) struct DeltaRun<'a> {
     pub(super) from: &'a std::path::Path,
     pub(super) work: std::path::PathBuf,
+    pub(super) wait: Option<std::time::Duration>,
     pub(super) totals: &'a crate::engine::delta::Totals,
 }
 
@@ -115,7 +116,7 @@ async fn fetch_content(
         if !seen.insert(root) {
             continue;
         }
-        if by_delta(session, conn, root, entry).await {
+        if by_delta(session, conn, root, entry, progress).await {
             progress = progress.saturating_add(shares.get(&root).copied().unwrap_or_default());
             report(session, progress);
             continue;
@@ -159,6 +160,7 @@ async fn by_delta(
     conn: &iroh::endpoint::Connection,
     root: [u8; 32],
     entry: &crate::manifest::Entry,
+    base: u64,
 ) -> bool {
     let Some(run) = &session.delta else {
         return false;
@@ -180,6 +182,9 @@ async fn by_delta(
         totals: run.totals,
         candidate: &candidate,
         work: &run.work,
+        wait: run.wait,
+        base,
+        total: session.plan.fetched,
     };
     crate::engine::delta::fetch_file(&job, root, entry.size).await
 }

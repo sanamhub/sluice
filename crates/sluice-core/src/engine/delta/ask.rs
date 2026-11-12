@@ -9,7 +9,7 @@ use n0_future::time::timeout;
 use sluice_delta::{NeedRanges, SigList};
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::{CONTROL_WAIT, MAX_SIG_FRAME, frame, read_frame};
+use super::{MAX_SIG_FRAME, frame, read_frame};
 use crate::engine::hello::{CAP_DELTA, Hello, MAX_FRAME_BYTES, greet_stream_with};
 use crate::engine::{ALPN, Event, Receiver};
 use crate::ticket::Ticket;
@@ -28,13 +28,14 @@ pub(in crate::engine) async fn signatures(
     ticket: &Ticket,
     root: [u8; 32],
     size: u64,
+    wait: std::time::Duration,
     events: &UnboundedSender<Event>,
 ) -> Option<(Control, SigList, u64)> {
     let conn = receiver
         .connect_alpn(ticket, ALPN, events.clone())
         .await
         .ok()?;
-    let asked = timeout(CONTROL_WAIT, ask(&conn, root, size)).await;
+    let asked = timeout(wait, ask(&conn, root, size)).await;
     match asked {
         Ok(Some((list, bytes))) => Some((Control { conn }, list, bytes)),
         _ => {

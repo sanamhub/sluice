@@ -177,6 +177,7 @@ mod tests {
             include: None,
             receipt: None,
             delta_from: None,
+            delta_wait: None,
         };
         let bounds = Bounds::new(&options, Path::new("home/tmp/store"));
         assert_eq!(bounds.output(), Path::new("."));

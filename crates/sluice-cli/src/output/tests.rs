@@ -217,6 +217,7 @@ async fn closed_by_a_peer(
         include: None,
         receipt: None,
         delta_from: None,
+        delta_wait: None,
     };
     (router, ticket.encode(), store, options)
 }

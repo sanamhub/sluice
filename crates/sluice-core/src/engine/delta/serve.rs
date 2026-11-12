@@ -14,19 +14,16 @@ use std::{
 };
 
 use iroh::endpoint::{Connection, RecvStream, SendStream};
-use iroh_blobs::{Hash, api::proto::BlobStatus, store::fs::FsStore};
+#[cfg(test)]
+use iroh_blobs::api::proto::BlobStatus;
+use iroh_blobs::{Hash, store::fs::FsStore};
 use n0_future::time::timeout;
-use sluice_delta::{Entry, MAX_ENTRIES, NeedRanges, SMALLEST, SigList, StreamCut};
+use sluice_delta::NeedRanges;
 use tokio::io::AsyncWriteExt;
 
-use super::{MAX_NEED_FRAME, REQUEST_WAIT, frame, params_for, read_frame};
+use super::{MAX_NEED_FRAME, REQUEST_WAIT, list::Lists, read_frame};
 use crate::engine::hello::{Hello, MAX_FRAME_BYTES};
 use crate::engine::policy::{Asked, Places};
-
-/// How many lists are built at once. A list costs one read of the file and a hash of every byte, so
-/// a peer that asks for several at once is answered for this many and refused for the rest, which
-/// then fetch plainly.
-const CONCURRENT: usize = 2;
 
 /// What a sender serves signatures from: its store, and the policy state that says who may ask.
 pub(crate) struct Delta {
@@ -34,7 +31,7 @@ pub(crate) struct Delta {
     allowed: Arc<Mutex<BTreeSet<Hash>>>,
     asked: Arc<Mutex<Asked>>,
     places: Arc<Mutex<Places>>,
-    permits: tokio::sync::Semaphore,
+    lists: Arc<Lists>,
     served: AtomicU32,
     /// Bytes a test serves in place of the list, with their own length prefix, so a hostile frame
     /// is reached through a real transfer. A send has no flag for it.
@@ -66,7 +63,7 @@ impl Delta {
             allowed,
             asked,
             places,
-            permits: tokio::sync::Semaphore::new(CONCURRENT),
+            lists: Lists::new(),
             served: AtomicU32::new(0),
             #[cfg(test)]
             forced: Mutex::new(None),
@@ -138,10 +135,7 @@ impl Delta {
         if !self.admitted(&peer, hash) {
             return done(send);
         }
-        let Ok(_permit) = self.permits.try_acquire() else {
-            return done(send);
-        };
-        let Some((bytes, size)) = self.list(hash, theirs.max_frame_bytes).await else {
+        let Some((bytes, size)) = self.list(hash, theirs.max_frame_bytes, conn).await else {
             return done(send);
         };
         send.write_all(&bytes).await?;
@@ -177,51 +171,51 @@ impl Delta {
     }
 
     /// The frame that carries the list for `hash`, and the size of the content it is about, or
-    /// `None` when there is nothing to say: the blob is not whole here, is too small to be worth a
-    /// delta, or is too large for any average to fit a frame.
-    async fn list(&self, hash: Hash, frame_limit: u32) -> Option<(Vec<u8>, u64)> {
-        let size = match self.store.blobs().status(hash).await {
-            Ok(BlobStatus::Complete { size }) => size,
-            _ => return None,
-        };
+    /// `None` when there is nothing to say. The list is built once for every requester, and the
+    /// build stops when the last requester waiting for it has gone.
+    async fn list(
+        &self,
+        hash: Hash,
+        frame_limit: u32,
+        conn: &Connection,
+    ) -> Option<(Vec<u8>, u64)> {
         #[cfg(test)]
-        if let Some(bytes) = self
+        let forced = self
             .forced
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .clone()
-        {
+            .clone();
+        #[cfg(test)]
+        if let Some(bytes) = forced {
+            let size = match self.store.blobs().status(hash).await {
+                Ok(BlobStatus::Complete { size }) => size,
+                _ => return None,
+            };
             return Some((bytes, size));
         }
-        if size < SMALLEST {
-            return None;
-        }
-        let params = params_for(size, frame_limit)?;
-        let mut cut = StreamCut::new(params);
-        let mut entries: Vec<Entry> = Vec::new();
-        let mut sound = true;
-        let mut read = 0u64;
-        let exported = super::export(&self.store, hash, 0..size, |_, piece| {
-            read += piece.len() as u64;
-            cut.feed(piece, |chunk| match Entry::of_bytes(chunk) {
-                Ok(entry) => entries.push(entry),
-                Err(_) => sound = false,
-            });
-            if !sound || entries.len() > MAX_ENTRIES as usize {
-                return Err(std::io::Error::other("a list the format cannot hold"));
-            }
-            Ok(())
-        })
-        .await;
-        exported.ok()?;
-        cut.finish(|chunk| match Entry::of_bytes(chunk) {
-            Ok(entry) => entries.push(entry),
-            Err(_) => sound = false,
-        });
-        if !sound || read != size {
-            return None;
-        }
-        let list = SigList::new(params.avg(), entries).ok()?;
-        Some((frame(&list.encode()), size))
+        self.lists.get(&self.store, hash, frame_limit, conn).await
+    }
+
+    /// Where the lists are written: a folder that goes with the send.
+    pub(crate) fn set_work(&self, dir: std::path::PathBuf) {
+        self.lists.set_work(dir);
+    }
+
+    /// Makes each list build wait `by` before it reads. A test only reaches this.
+    #[cfg(test)]
+    pub(crate) fn delay_builds(&self, by: std::time::Duration) {
+        self.lists.delay_builds(by);
+    }
+
+    /// How many list builds have started. A test only reaches this.
+    #[cfg(test)]
+    pub(crate) fn builds(&self) -> usize {
+        self.lists.builds()
+    }
+
+    /// How many list builds could start now. A test only reaches this.
+    #[cfg(test)]
+    pub(crate) fn free_permits(&self) -> usize {
+        self.lists.free_permits()
     }
 }

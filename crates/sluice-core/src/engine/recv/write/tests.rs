@@ -38,6 +38,7 @@ fn options(out: &std::path::Path) -> ReceiveOptions {
         include: None,
         receipt: None,
         delta_from: None,
+        delta_wait: None,
     }
 }
 

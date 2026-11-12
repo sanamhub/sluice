@@ -77,7 +77,7 @@ async fn a_candidate_is_read_only_inside_the_length_it_had() {
     let path = dir.path().join("candidate.bin");
     let body: Vec<u8> = (0..300_000u32).map(|n| (n * 7 % 251) as u8).collect();
     std::fs::write(&path, &body).unwrap();
-    let candidate = Candidate::open(&path).expect("a regular file opens");
+    let candidate = Candidate::open_blocking(&path).expect("a regular file opens");
 
     // Grown after the open: the extra bytes are not read.
     let mut file = std::fs::OpenOptions::new()
@@ -111,17 +111,17 @@ fn a_path_that_is_not_a_regular_file_is_not_a_candidate() {
     use super::Candidate;
 
     let dir = tempfile::tempdir().unwrap();
-    assert!(Candidate::open(&dir.path().join("absent")).is_none());
-    assert!(Candidate::open(dir.path()).is_none());
+    assert!(Candidate::open_blocking(&dir.path().join("absent")).is_none());
+    assert!(Candidate::open_blocking(dir.path()).is_none());
     let file = dir.path().join("real.bin");
     std::fs::write(&file, [1u8; 100]).unwrap();
-    assert!(Candidate::open(&file).is_some());
+    assert!(Candidate::open_blocking(&file).is_some());
     #[cfg(unix)]
     {
         let link = dir.path().join("link.bin");
         std::os::unix::fs::symlink(&file, &link).unwrap();
         assert!(
-            Candidate::open(&link).is_none(),
+            Candidate::open_blocking(&link).is_none(),
             "a link at the name was followed"
         );
     }
@@ -138,7 +138,7 @@ async fn a_candidate_is_never_modified() {
     let body = vec![5u8; 200_000];
     std::fs::write(&path, &body).unwrap();
     let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
-    let candidate = Candidate::open(&path).unwrap();
+    let candidate = Candidate::open_blocking(&path).unwrap();
     candidate
         .chunks(sluice_delta::Params::new(1024).unwrap())
         .await

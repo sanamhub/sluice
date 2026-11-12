@@ -98,6 +98,10 @@ pub struct ReceiveOptions {
     /// fetches from where it can. It is only read. `None` is a receive that never asks a sender
     /// for signatures and moves exactly the bytes it did before.
     pub delta_from: Option<PathBuf>,
+    /// How long a receive waits for a signature list before it fetches plainly. A real caller leaves
+    /// it as `None`, which is a minute and a second for every 64 MiB of the file; a test shortens
+    /// it to reach the end of the wait quickly.
+    pub delta_wait: Option<std::time::Duration>,
 }
 
 /// The file a receive writes the sender's receipt to.
@@ -161,7 +165,15 @@ pub async fn receive(
     if let Body::Static { size, .. } = ticket.body()
         && options.include.is_none()
     {
-        plan::check_space(options, *size)?;
+        // A delta writes the file once more in the store's work area before it imports it, so the
+        // transfer needs room for the largest file as well. The ticket's size is the bound that
+        // is known before the manifest is.
+        let extra = if options.delta_from.is_some() {
+            *size
+        } else {
+            0
+        };
+        plan::check_space(options, size.saturating_add(extra))?;
     }
     let receiver = Receiver::open(relay_of(&ticket), options.congestion).await?;
     let result = run(&receiver, &ticket, root, options, events).await;
@@ -266,6 +278,7 @@ async fn exchange(
         delta: options.delta_from.as_deref().map(|from| content::DeltaRun {
             from,
             work: partial.join("delta"),
+            wait: options.delta_wait,
             totals: &totals,
         }),
     };

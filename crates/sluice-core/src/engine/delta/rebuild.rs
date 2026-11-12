@@ -4,8 +4,9 @@
 //! The steps for one file: prove the size and ask for the root (the plain protocol's own first
 //! request), read the signatures, cut the candidate with the sender's average, plan, send the
 //! ranges that are still needed, fetch them into the store, and assemble the file in the store's
-//! temporary area from the candidate's bytes and the fetched ones. The assembly is hashed and
-//! compared with the root before it is imported. Every step that does not work ends the attempt
+//! temporary area from the candidate's bytes and the fetched ones. The store's import hashes the
+//! assembly once, and the blob is kept only if that hash is the root. Every step that does not work
+//! ends the attempt
 //! and leaves the plain fetch to do the file, with nothing of the attempt left behind but the
 //! ranges it fetched, which the plain fetch reuses.
 
@@ -24,7 +25,7 @@ use iroh_blobs::{
 use sluice_delta::{Plan, Span};
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::{BLOCK, Candidate, MAX_NEED_RANGES, WORTH_EIGHTHS, ask};
+use super::{BLOCK, Candidate, MAX_NEED_RANGES, WORTH_EIGHTHS, ask, params_for};
 use crate::Error;
 use crate::engine::{Event, Rate, Receiver, fetch};
 use crate::ticket::Ticket;
@@ -66,6 +67,11 @@ pub(in crate::engine) struct Job<'a> {
     pub(in crate::engine) candidate: &'a Path,
     /// The store's temporary area, where the assembly is written.
     pub(in crate::engine) work: &'a Path,
+    /// How long to wait for the list, which a test shortens.
+    pub(in crate::engine) wait: Option<std::time::Duration>,
+    /// What the files before this one have moved, and what the whole receive moves, for progress.
+    pub(in crate::engine) base: u64,
+    pub(in crate::engine) total: u64,
 }
 
 /// Tries to put the blob `root`, `size` bytes, in the store by a delta. `true` is a complete blob in
@@ -76,20 +82,34 @@ pub(in crate::engine) async fn fetch_file(job: &Job<'_>, root: [u8; 32], size: u
 
 async fn attempt(job: &Job<'_>, root: [u8; 32], size: u64) -> Result<bool, Error> {
     let hash = Hash::from(root);
-    let Some(candidate) = Candidate::open(job.candidate) else {
+    let Some(candidate) = Candidate::open(job.candidate).await else {
         return Ok(false);
     };
+    // The candidate is cut with the average a sender picks for this size while the first requests
+    // are in flight. It is cut again only if the list's average turns out to be another.
+    let early = params_for(size, crate::engine::hello::MAX_FRAME_BYTES).map(|params| {
+        let candidate = candidate.clone();
+        (
+            params,
+            tokio::spawn(async move { candidate.chunks(params).await }),
+        )
+    });
     // The request that proves the size also tells the sender's policy this endpoint asked for the
     // root, which is what lets it be told about the root's chunks.
     if fetch::verified_size(job.store, job.conn, hash).await? != size {
         return Ok(false);
     }
+    let wait = job.wait.unwrap_or_else(|| super::control_wait(size));
     let Some((control, list, signature_bytes)) =
-        ask::signatures(job.receiver, job.ticket, root, size, job.events).await
+        ask::signatures(job.receiver, job.ticket, root, size, wait, job.events).await
     else {
         return Ok(false);
     };
-    let planned = plan_for(&candidate, &list, size).await;
+    // A list that arrived cost its bytes, whatever becomes of the attempt.
+    job.totals
+        .signatures
+        .fetch_add(signature_bytes, Ordering::SeqCst);
+    let planned = plan_for(&candidate, &list, size, early).await;
     let Some(plan) = planned.filter(|plan| worth_it(plan, size)) else {
         control.close();
         return Ok(false);
@@ -102,6 +122,10 @@ async fn attempt(job: &Job<'_>, root: [u8; 32], size: u64) -> Result<bool, Error
     let fetched = fetch_needed(job, hash, &need).await;
     control.close();
     fetched?;
+    // The ranges came over the network, and stay counted if the file then fails its hash.
+    job.totals
+        .network
+        .fetch_add(plan.fetch_bytes(), Ordering::SeqCst);
     let rebuilt = assemble(job, &candidate, &plan, hash, size).await;
     if !matches!(rebuilt, Ok(true)) {
         return Ok(false);
@@ -109,25 +133,36 @@ async fn attempt(job: &Job<'_>, root: [u8; 32], size: u64) -> Result<bool, Error
     job.totals
         .local
         .fetch_add(plan.local_bytes(), Ordering::SeqCst);
-    job.totals
-        .network
-        .fetch_add(plan.fetch_bytes(), Ordering::SeqCst);
-    job.totals
-        .signatures
-        .fetch_add(signature_bytes, Ordering::SeqCst);
     Ok(true)
 }
 
-/// The plan for `list` against `candidate`, cut with the list's average.
-async fn plan_for(candidate: &Candidate, list: &sluice_delta::SigList, size: u64) -> Option<Plan> {
+/// The plan for `list` against `candidate`, cut with the list's average. `early` is the cut that was
+/// started with a guess of the average, and is used when the guess was right.
+async fn plan_for(
+    candidate: &Candidate,
+    list: &sluice_delta::SigList,
+    size: u64,
+    early: Option<(
+        sluice_delta::Params,
+        tokio::task::JoinHandle<Option<sluice_delta::Candidate>>,
+    )>,
+) -> Option<Plan> {
     let params = sluice_delta::Params::new(list.avg_bytes()).ok()?;
-    let chunks = candidate.chunks(params).await?;
+    let chunks = match early {
+        Some((guess, cut)) if guess == params => cut.await.ok().flatten()?,
+        other => {
+            if let Some((_, cut)) = other {
+                cut.abort();
+            }
+            candidate.chunks(params).await?
+        }
+    };
     sluice_delta::plan(list, &chunks, size).ok()
 }
 
 /// Whether a plan saves enough to be worth assembling: at least an eighth of the file comes from the
 /// candidate, and the request is of a size one frame carries.
-fn worth_it(plan: &Plan, size: u64) -> bool {
+pub(in crate::engine) fn worth_it(plan: &Plan, size: u64) -> bool {
     let ranges = plan
         .spans()
         .iter()
@@ -150,7 +185,19 @@ async fn fetch_needed(
     if ranges.is_empty() {
         return Ok(());
     }
-    fetch::fetch_range(job.store, job.conn, hash, ranges, job.rate).await
+    let (events, base, total) = (job.events, job.base, job.total);
+    fetch::fetch_range_reporting(job.store, job.conn, hash, ranges, job.rate, |seen| {
+        if total > 0 {
+            crate::engine::emit(
+                events,
+                Event::Progress {
+                    bytes: base.saturating_add(seen).min(total),
+                    total,
+                },
+            );
+        }
+    })
+    .await
 }
 
 /// A file in the temporary area that is removed when it is dropped, whatever became of it.
@@ -187,10 +234,9 @@ async fn assemble(
     copy_fetched(job.store, hash, plan, &file)
         .await
         .map_err(io)?;
-    // A candidate that changed while it was read gives an assembly that fails the hash below; the
-    // look here only saves the hash.
-    let same = candidate.unchanged() && hashes_to(&path, hash).await.map_err(io)?;
-    if !same {
+    // A candidate that changed while it was read gives an assembly whose hash is not the root's;
+    // the look here only saves the import.
+    if !candidate.unchanged() {
         return Ok(false);
     }
     let tag = job
@@ -204,10 +250,20 @@ async fn assemble(
         .temp_tag()
         .await
         .map_err(|e| Error::Storage(format!("cannot import a delta: {}", crate::plain(&e))))?;
-    // The store has its own copy now: a reference would keep the holes of the partial entry that
-    // the fetched ranges made, and the file in the work area is removed when `assembly` drops.
+    // The store hashed the file as it imported it, and that hash is the only check: the blob is the
+    // file the manifest names when it has the root's hash. The store has its own copy now, and the
+    // file in the work area goes whatever the hash was.
     drop(assembly);
     let imported = tag.hash() == hash;
+    if imported && job.total > 0 {
+        crate::engine::emit(
+            job.events,
+            Event::Progress {
+                bytes: job.base.saturating_add(size).min(job.total),
+                total: job.total,
+            },
+        );
+    }
     Ok(imported)
 }
 
@@ -259,27 +315,6 @@ async fn copy_fetched(
         .await?;
     }
     Ok(())
-}
-
-/// Whether the file at `path` hashes to `hash`.
-async fn hashes_to(path: &Path, hash: Hash) -> io::Result<bool> {
-    let path = path.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        use std::io::Read;
-        let mut file = fs::File::open(path)?;
-        let mut hasher = blake3::Hasher::new();
-        let mut buffer = vec![0u8; BLOCK];
-        loop {
-            let n = file.read(&mut buffer)?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buffer[..n]);
-        }
-        Ok(hasher.finalize().as_bytes() == hash.as_bytes())
-    })
-    .await
-    .map_err(io::Error::other)?
 }
 
 #[cfg(unix)]

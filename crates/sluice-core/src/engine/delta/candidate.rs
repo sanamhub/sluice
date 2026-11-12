@@ -56,9 +56,19 @@ pub(in crate::engine) fn candidate_path(
 }
 
 impl Candidate {
-    /// Opens `path` as a candidate. `None` is a path that is not a regular file, is a link, cannot be
-    /// read, or changed between the check and the open.
-    pub(in crate::engine) fn open(path: &Path) -> Option<Self> {
+    /// Opens `path` as a candidate on a thread that may block. A path swapped for a pipe between the
+    /// check and the open would hold an async worker for ever; it holds this thread, and the open
+    /// itself does not wait for a writer (`O_NONBLOCK` on Unix).
+    pub(in crate::engine) async fn open(path: &Path) -> Option<Self> {
+        let path = path.to_path_buf();
+        tokio::task::spawn_blocking(move || Self::open_blocking(&path))
+            .await
+            .ok()?
+    }
+
+    /// [`Self::open`] on the calling thread. `None` is a path that is not a regular file, is a
+    /// link, cannot be read, or changed between the check and the open.
+    pub(in crate::engine) fn open_blocking(path: &Path) -> Option<Self> {
         let meta = fs::symlink_metadata(path).ok()?;
         if meta.file_type().is_symlink() || !meta.is_file() {
             return None;
@@ -176,7 +186,7 @@ fn open_without_following(path: &Path) -> io::Result<File> {
     use std::os::unix::fs::OpenOptionsExt;
     fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK)
         .open(path)
 }
 

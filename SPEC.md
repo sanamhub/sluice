@@ -508,6 +508,12 @@ is not a request. A provider SHOULD cut a file with the smallest `avg_bytes` fro
 a list of the file's shortest possible chunks, `size / (avg_bytes / 4)` entries, fits the limits
 below and the requester's `max_frame_bytes`, and writes no list for a file that no average fits.
 
+A list is built once for each root. Every request for a root waits on the one build, and the build
+stops when every requester waiting for it has closed its connection. A provider builds at most two
+lists at a time and answers a request for a third with nothing. A requester waits for a list for
+`CONTROL_WAIT`, which is 60 seconds plus one second for every 64 MiB of the file the root names
+(76 seconds for 1 GiB), and then closes the connection and fetches the file plainly.
+
 **What a requester discloses.** The requester sends no signature of its own, but `NeedRanges`, and
 the ranges it then fetches, name the parts of the target it could not rebuild, and so, by
 omission, the parts it could. A provider that wrote a list of guesses can read the answer: a

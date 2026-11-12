@@ -112,6 +112,9 @@ impl Provider {
 
     /// Keeps the folder this send's store lives in, and removes it once the store is closed.
     pub(crate) fn hold(&mut self, dir: storage::Temp) {
+        if let Some(delta) = &self.delta {
+            delta.set_work(dir.path().join("delta"));
+        }
         self._dir = Some(dir);
     }
 

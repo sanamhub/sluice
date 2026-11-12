@@ -123,5 +123,6 @@ pub(super) fn options(
                     .map_err(|e| Error::Policy(format!("cannot resolve {}: {e}", path.display())))
             })
             .transpose()?,
+        delta_wait: None,
     })
 }
