@@ -239,11 +239,12 @@ returns a ticket only to the call that made it, and no log line, error, event or
 At most 16 jobs run at once, a watcher that falls behind is told how many events it missed, and a
 message is at most 1 MiB.
 
-`SIGINT` or `SIGTERM`, `Ctrl+C` on Windows, or `sluice daemon stop` ends running jobs as cancelled.
-A receive keeps its partial store, so receiving the same ticket again resumes it. The daemon holds
-the home's lock, so a command that opens the same home, `send` among them, is refused until it
-stops, unless it uses another `SLUICE_HOME`. `--loopback` makes the daemon's transfers listen on `127.0.0.1` only, which no other
-computer can reach.
+`SIGINT`, `SIGTERM` or `SIGHUP`, a console `Ctrl+C`, `Ctrl+Break`, close, logoff or shutdown on
+Windows, or `sluice daemon stop` ends running jobs as cancelled. A receive keeps its partial store,
+so receiving the same ticket again resumes it. The daemon holds the home's lock, so a command that
+opens the same home, `send` among them, is refused until it stops, unless it uses another
+`SLUICE_HOME`. `--loopback` makes the daemon's transfers use `127.0.0.1` only, with no relay, which
+no other computer can reach. It cannot be combined with `--relay` or `--n0-relays`.
 
 ## How it works
 

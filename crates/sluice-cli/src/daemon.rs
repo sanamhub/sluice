@@ -18,7 +18,7 @@ use crate::output::Output;
 pub struct DaemonArgs {
     #[command(subcommand)]
     pub action: Option<Action>,
-    /// A folder the daemon may send from and receive into, written as a client will name it;
+    /// A folder the daemon may send from and receive into, written as a client names it;
     /// repeat for more. Without one the daemon refuses every send and every receive
     #[arg(long, value_name = "DIR")]
     pub root: Vec<PathBuf>,
