@@ -40,18 +40,21 @@ fn the_report_names_the_commitment_and_the_sender_in_hex() {
 }
 
 /// A file whose send root is the one the receipt commits to reads as a match, and the exit code
-/// stays 0.
+/// stays 0. The line names no root.
 #[test]
 fn a_matching_file_says_so() {
     let check = Check {
         path: "report.pdf".to_string(),
         matched: true,
         found_len: 1024,
-        found_root: Some(hex(&[9; 32])),
+        found_commit: Some(hex(&commitment(&[9; 32]))),
     };
     let text = text(&report(Some(check)));
-    let expected = format!("matches: its send root is {}", hex(&[9; 32]));
-    assert!(text.contains(&expected), "{text}");
+    assert!(
+        text.contains("matches: its length and commitment"),
+        "{text}"
+    );
+    assert!(!text.contains(&hex(&[9; 32])), "{text}");
     assert!(text.starts_with("receipt ok: "), "{text}");
 }
 
@@ -62,7 +65,7 @@ fn a_file_of_another_length_is_not_hashed() {
         path: "other.bin".to_string(),
         matched: false,
         found_len: 5,
-        found_root: None,
+        found_commit: None,
     };
     let mut report = report(Some(check));
     report.code = 4;
@@ -71,19 +74,19 @@ fn a_file_of_another_length_is_not_hashed() {
     assert!(text.contains("is 5 bytes, so it was not read"), "{text}");
 }
 
-/// A file of the right length whose root is another says what that root is.
+/// A file of the right length whose content is another says what commitment that content has.
 #[test]
-fn a_file_of_the_right_length_names_its_own_root() {
+fn a_file_of_the_right_length_names_its_own_commitment() {
     let check = Check {
         path: "other.bin".to_string(),
         matched: false,
         found_len: 5,
-        found_root: Some("ab".repeat(32)),
+        found_commit: Some("ab".repeat(32)),
     };
     let mut report = report(Some(check));
     report.code = 4;
     let text = text(&report);
-    assert!(text.contains("is 5 bytes and its send root is"), "{text}");
+    assert!(text.contains("is 5 bytes and its commitment is"), "{text}");
     assert!(text.contains(&"ab".repeat(32)), "{text}");
 }
 

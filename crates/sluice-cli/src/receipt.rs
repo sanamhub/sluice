@@ -21,7 +21,7 @@ use sluice_core::{
     Error,
     engine::{PathRoot, root_of_path},
     manifest::path::shown,
-    receipt::Receipt,
+    receipt::{Receipt, commitment},
 };
 
 use crate::output::{Outcome, bytes_text};
@@ -77,9 +77,10 @@ pub struct Check {
     pub path: String,
     pub matched: bool,
     pub found_len: u64,
-    /// The root a send of the path names, or `None` when the length was already wrong and the path
-    /// was not read.
-    pub found_root: Option<String>,
+    /// The commitment to the root a send of the path names, or `None` when the length was already
+    /// wrong and the path was not read. The root itself is never kept: with the length and the
+    /// receipt's sender key it is a ticket body, which is what the commitment exists to prevent.
+    pub found_commit: Option<String>,
 }
 
 fn verify_one(args: &VerifyArgs) -> Result<Outcome, Error> {
@@ -130,7 +131,7 @@ fn check(path: &Path, receipt: &Receipt) -> Result<Check, Error> {
             path: shown,
             matched: false,
             found_len: meta.len(),
-            found_root: None,
+            found_commit: None,
         });
     }
     let PathRoot {
@@ -140,7 +141,7 @@ fn check(path: &Path, receipt: &Receipt) -> Result<Check, Error> {
         path: shown,
         matched: receipt.total_len() == total_len && receipt.is_of(&root),
         found_len: total_len,
-        found_root: Some(hex(&root)),
+        found_commit: Some(hex(&commitment(&root))),
     })
 }
 
@@ -176,15 +177,14 @@ pub fn text(report: &Report) -> String {
 fn describe(check: &Check) -> String {
     if check.matched {
         return format!(
-            "file      {} matches: its send root is {}\n",
-            check.path,
-            check.found_root.as_deref().unwrap_or_default()
+            "file      {} matches: its length and commitment are the receipt's\n",
+            check.path
         );
     }
-    match &check.found_root {
-        Some(root) => format!(
-            "file      {} is {} bytes and its send root is {}\n",
-            check.path, check.found_len, root
+    match &check.found_commit {
+        Some(commit) => format!(
+            "file      {} is {} bytes and its commitment is {}\n",
+            check.path, check.found_len, commit
         ),
         None => format!(
             "file      {} is {} bytes, so it was not read\n",
@@ -201,7 +201,7 @@ pub fn json(report: &Report) -> String {
             "path": check.path,
             "matched": check.matched,
             "length": check.found_len.to_string(),
-            "root": check.found_root,
+            "commit": check.found_commit,
         }),
         None => Value::Null,
     };
