@@ -284,3 +284,33 @@ async fn a_link_on_the_way_or_at_the_name_is_not_a_candidate() {
     assert_eq!(sender.delta.served(), 0, "a link at the name was used");
     stopped(sender).await;
 }
+
+/// A delta receive reports progress while it fetches and when it has assembled, so a user sees
+/// bytes move and the last report is the whole of what the receive moves.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_delta_receive_reports_progress() {
+    let dir = tempfile::tempdir().unwrap();
+    let new = bytes(SIZE, 49);
+    let mut old = new.clone();
+    for byte in &mut old[1 << 20..(1 << 20) + 200_000] {
+        *byte ^= 0x21;
+    }
+    let from = dir.path().join("old.bin");
+    fs::write(&from, &old).unwrap();
+    let sender = sender(&dir, &new).await;
+    let out = dir.path().join("received");
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    super::receive(&sender.text, &delta_options(&out, &from), &tx)
+        .await
+        .unwrap();
+    drop(tx);
+    let mut last = None;
+    while let Some(event) = rx.recv().await {
+        if let Event::Progress { bytes, total } = event {
+            last = Some((bytes, total));
+        }
+    }
+    let (bytes, total) = last.expect("no progress was reported");
+    assert_eq!(bytes, total, "the last report is the whole");
+    stopped(sender).await;
+}
