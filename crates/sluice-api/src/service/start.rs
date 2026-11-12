@@ -12,6 +12,7 @@ use sluice_core::engine::{
 };
 use sluice_core::ticket::{Body, Ticket};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+use tokio::sync::oneshot;
 
 use super::{Service, decode_refusal, ticket_text};
 use crate::error::{ApiError, message_of};
@@ -23,39 +24,30 @@ use crate::roots::{Opened, Use};
 const MAX_SEND_PATHS: usize = 1024;
 
 impl Service {
-    /// Starts a send of paths inside a root and returns the ticket it serves.
+    /// Starts a send of paths inside a root and returns the ticket it serves. The send is prepared
+    /// by a task of its own, so a caller that goes away while it is prepared leaves a job that
+    /// ends, and not one that serves a ticket nobody has.
     pub async fn start_send(
         &self,
         request: proto::StartSendRequest,
     ) -> Result<proto::StartSendResponse, ApiError> {
+        self.refuse_new_work()?;
         self.refuse_without_roots()?;
         let opened = self.send_paths(&request)?;
-        let paths: Vec<PathBuf> = opened.iter().map(|o| o.path.clone()).collect();
         let keep = keep_of(&request)?;
         let expires = (request.expires_seconds > 0).then_some(request.expires_seconds);
         let job = self.inner.jobs.start(JobKind::Send, None)?;
-        let mut outgoing = match self.prepare(&paths, deadline(now_ms(), expires)).await {
-            Ok(outgoing) => outgoing,
-            Err(error) => {
-                job.finish(JobState::Failed, message_of(&error, ""), false);
-                return Err(ApiError::from_core(&error, ""));
-            }
-        };
-        // The engine opened the paths itself, so each is checked once more against the object the
-        // walk opened. One that was swapped in between is refused and nothing is served.
-        still_the_same(&opened)?;
-        outgoing.reserve(keep);
-        let response = proto::StartSendResponse {
-            ticket: Some(proto::Ticket {
-                text: outgoing.ticket.encode(),
-            }),
-            job_id: job.id.clone(),
-            bytes: outgoing.bytes,
-            files: outgoing.files,
-        };
-        tracing::info!(job = %job.id, files = response.files, bytes = response.bytes, "send started");
-        tokio::spawn(run_send(job, outgoing, keep, opened));
-        Ok(response)
+        let (answer, answered) = oneshot::channel();
+        tokio::spawn(send_task(
+            self.clone(),
+            job,
+            opened,
+            Plan { keep, expires },
+            answer,
+        ));
+        answered
+            .await
+            .unwrap_or_else(|_| Err(ApiError::Failed("the send did not start".to_string())))
     }
 
     /// Starts a receive of a ticket into a folder inside a root.
@@ -63,6 +55,7 @@ impl Service {
         &self,
         request: proto::StartReceiveRequest,
     ) -> Result<proto::StartReceiveResponse, ApiError> {
+        self.refuse_new_work()?;
         self.refuse_without_roots()?;
         let text = ticket_text(request.ticket)?;
         let ticket = Ticket::decode(&text).map_err(|e| decode_refusal(&e, &text))?;
@@ -96,6 +89,16 @@ impl Service {
         tracing::info!(job = %job.id, "receive started");
         tokio::spawn(run_receive(job, text, options, pins, held));
         Ok(response)
+    }
+
+    /// A daemon that has begun to stop starts nothing.
+    fn refuse_new_work(&self) -> Result<(), ApiError> {
+        if *self.inner.stop.borrow() {
+            return Err(ApiError::Unavailable(
+                "this daemon is stopping and starts no new job".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     /// A daemon with no root refuses before it looks at anything the request carries.
@@ -209,7 +212,84 @@ async fn pump(job: Arc<Job>, mut events: UnboundedReceiver<sluice_core::engine::
     }
 }
 
-async fn run_send(job: Arc<Job>, outgoing: Outgoing, keep: Keep, _opened: Vec<Opened>) {
+/// How a send is to run.
+struct Plan {
+    keep: Keep,
+    expires: Option<u64>,
+}
+
+type Answer = oneshot::Sender<Result<proto::StartSendResponse, ApiError>>;
+
+/// Prepares the send, tells the caller, and serves it. Every way out ends the job.
+async fn send_task(
+    service: Service,
+    job: Arc<Job>,
+    opened: Vec<Opened>,
+    plan: Plan,
+    answer: Answer,
+) {
+    let paths: Vec<PathBuf> = opened.iter().map(|o| o.path.clone()).collect();
+    let prepared = tokio::select! {
+        prepared = service.prepare(&paths, deadline(now_ms(), plan.expires)) => prepared,
+        () = job.cancelled() => {
+            job.finish(JobState::Cancelled, "the job was cancelled".to_string(), false);
+            let _ = answer.send(Err(ApiError::Unavailable("the send was cancelled".to_string())));
+            return;
+        }
+    };
+    let mut outgoing = match prepared {
+        Ok(outgoing) => outgoing,
+        Err(error) => {
+            job.finish(JobState::Failed, message_of(&error, ""), false);
+            let _ = answer.send(Err(ApiError::from_core(&error, "")));
+            return;
+        }
+    };
+    // The engine opened the paths itself, so each is checked once more against the object the walk
+    // opened. One that was swapped in between is refused and nothing is served.
+    if let Err(refused) = still_the_same(&opened) {
+        job.finish(JobState::Failed, refused.to_string(), false);
+        let _ = answer.send(Err(refused));
+        return;
+    }
+    outgoing.reserve(plan.keep);
+    let ticket = outgoing.ticket.encode();
+    let response = proto::StartSendResponse {
+        ticket: Some(proto::Ticket {
+            text: ticket.clone(),
+        }),
+        job_id: job.id.clone(),
+        bytes: outgoing.bytes,
+        files: outgoing.files,
+    };
+    tracing::info!(job = %job.id, files = response.files, bytes = response.bytes, "send started");
+    if !hand_over(&job, answer, Ok(response)) {
+        return;
+    }
+    run_send(job, outgoing, plan.keep, opened, ticket).await;
+}
+
+/// Gives the caller its answer. A caller that went away has no ticket, so the job it started is
+/// ended and not served.
+pub(super) fn hand_over<T>(job: &Job, answer: oneshot::Sender<T>, value: T) -> bool {
+    if answer.send(value).is_ok() {
+        return true;
+    }
+    job.finish(
+        JobState::Cancelled,
+        "the call ended before it was answered".to_string(),
+        false,
+    );
+    false
+}
+
+async fn run_send(
+    job: Arc<Job>,
+    outgoing: Outgoing,
+    keep: Keep,
+    _opened: Vec<Opened>,
+    ticket: String,
+) {
     let (events, received) = unbounded_channel();
     let pumping = tokio::spawn(pump(job.clone(), received));
     let end = tokio::select! {
@@ -235,7 +315,7 @@ async fn run_send(job: Arc<Job>, outgoing: Outgoing, keep: Keep, _opened: Vec<Op
                 false,
             );
         }
-        Some(Err(error)) => job.finish(JobState::Failed, message_of(&error, ""), false),
+        Some(Err(error)) => job.finish(JobState::Failed, message_of(&error, &ticket), false),
     }
 }
 

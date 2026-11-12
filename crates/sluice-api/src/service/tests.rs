@@ -151,3 +151,66 @@ async fn a_watcher_that_cannot_keep_up_is_told_how_many_events_it_missed_and_its
     assert_eq!(kept, crate::WATCH_BUFFER as u64);
     assert_eq!(missed, sent - kept, "every event is either read or counted");
 }
+
+#[tokio::test]
+async fn a_call_that_goes_away_leaves_a_job_that_ends_and_frees_its_place() {
+    let (_dir, service) = service(&[]);
+    let job = service
+        .inner
+        .jobs
+        .start(proto::JobKind::Send, None)
+        .unwrap();
+    let mut watcher = job.watch().unwrap();
+    let (answer, answered) = tokio::sync::oneshot::channel::<u8>();
+    drop(answered);
+    assert!(
+        !start::hand_over(&job, answer, 1),
+        "nobody is left to take it"
+    );
+    let mut last = None;
+    while let Some(next) = watcher.next().await {
+        last = next.event;
+    }
+    let Some(proto::event::Event::Done(done)) = last else {
+        panic!("the job ends with a done event");
+    };
+    assert_eq!(done.state, JobState::Cancelled as i32);
+    assert!(
+        service
+            .list_jobs(&proto::ListJobsRequest {
+                state: JobState::Running as i32
+            })
+            .jobs
+            .is_empty()
+    );
+    // The place is free again: the table takes its full number of jobs.
+    for _ in 0..crate::MAX_RUNNING {
+        service
+            .inner
+            .jobs
+            .start(proto::JobKind::Send, None)
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_daemon_that_has_begun_to_stop_starts_no_job() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("root");
+    std::fs::create_dir(&root).unwrap();
+    let (_home, service) = service(std::slice::from_ref(&root));
+    service.shutdown();
+    let refused = service
+        .start_send(StartSendRequest {
+            paths: vec![at(&root, "").unwrap()],
+            ..Default::default()
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(refused, ApiError::Unavailable(_)), "{refused}");
+    let receive = service
+        .start_receive(StartReceiveRequest::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(receive, ApiError::Unavailable(_)), "{receive}");
+}

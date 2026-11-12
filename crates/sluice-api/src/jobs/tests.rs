@@ -92,3 +92,18 @@ async fn the_engine_events_become_the_events_a_watcher_reads() {
     assert_eq!(names, ["progress 5/10", "verified 64", "done 3"]);
     assert_eq!(job.summary().bytes_done, 5);
 }
+
+#[test]
+fn a_job_id_is_128_random_bits_in_hex_and_two_jobs_never_share_one() {
+    let jobs = table();
+    let first = jobs.start(JobKind::Send, None).unwrap();
+    let second = jobs.start(JobKind::Send, None).unwrap();
+    assert_eq!(first.id.len(), 32);
+    assert!(
+        first
+            .id
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    );
+    assert_ne!(first.id, second.id);
+}
