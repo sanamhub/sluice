@@ -3,16 +3,17 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use sluice_core::Error;
 use sluice_core::engine::{
-    Congestion, Keep, Outgoing, Pins, ReceiptTarget, ReceiveOptions, RelayModeChoice, StopEnd,
-    deadline, now_ms, prepare_send_paths_confined, receive_checked,
+    Congestion, Keep, Outgoing, Pins, ReceiptTarget, ReceiveOptions, RelayModeChoice, deadline,
+    now_ms, prepare_send_paths_confined,
 };
 use sluice_core::ticket::{Body, Ticket};
-use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
 
+use super::run::{run_receive, run_send};
 use super::{Service, decode_refusal, ticket_text};
 use crate::error::{ApiError, message_of};
 use crate::jobs::Job;
@@ -159,6 +160,7 @@ impl Service {
         &self,
         args: Vec<sluice_core::manifest::ConfinedArg>,
         expiry: Option<u64>,
+        cancel: Arc<AtomicBool>,
     ) -> Result<Outgoing, Error> {
         let relay = self.inner.relay.clone();
         prepare_send_paths_confined(
@@ -169,6 +171,7 @@ impl Service {
             expiry,
             None,
             None,
+            cancel,
         )
         .await
     }
@@ -208,13 +211,6 @@ fn options(out: PathBuf, force: bool, receipt: Option<PathBuf>) -> ReceiveOption
 
 fn hex(bytes: &[u8; 32]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-/// Hands every event the engine reports to the job, until the engine drops its sender.
-async fn pump(job: Arc<Job>, mut events: UnboundedReceiver<sluice_core::engine::Event>) {
-    while let Some(event) = events.recv().await {
-        job.observe(&event);
-    }
 }
 
 /// How a send is to run.
@@ -269,22 +265,41 @@ async fn send_task(
     };
     let expires = deadline(now_ms(), plan.expires);
     let worker = service.clone();
-    let mut preparing = tokio::spawn(async move { worker.prepare(args, expires).await });
-    let prepared = tokio::select! {
-        prepared = &mut preparing => prepared.unwrap_or_else(|_| {
-            Err(Error::Bug("the send's preparing did not finish".to_string()))
-        }),
-        () = job.cancelled() => {
-            // The preparing is let finish, and its send stopped, so the store it made is closed and
-            // its folder removed and not left for a later command.
-            if let Ok(Ok(outgoing)) = preparing.await {
-                let _ = outgoing.provider.shutdown().await;
-            }
-            job.finish(JobState::Cancelled, "the job was cancelled".to_string(), false);
-            let _ = delivery.give(&job, Err(ApiError::Unavailable("the send was cancelled".to_string())));
-            return;
-        }
+    // The copy looks at this between files and between chunks, so a cancel stops it within a chunk.
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    let preparing = {
+        let stop = stop.clone();
+        tokio::spawn(async move { worker.prepare(args, expires, stop).await })
     };
+    let watching = {
+        let job = job.clone();
+        tokio::spawn(async move {
+            job.cancelled().await;
+            flag.store(true, Ordering::Relaxed);
+        })
+    };
+    let prepared = preparing.await.unwrap_or_else(|_| {
+        Err(Error::Bug(
+            "the send's preparing did not finish".to_string(),
+        ))
+    });
+    watching.abort();
+    let cancelled = |what: &str| {
+        job.finish(JobState::Cancelled, what.to_string(), false);
+    };
+    if stop.load(Ordering::Relaxed) {
+        // The copy stopped and closed its store on the way out, or the preparing finished before
+        // the cancel was seen and the send it made is stopped here, so either way the store is
+        // closed and its folder removed and not left for a later command.
+        if let Ok(outgoing) = prepared {
+            let _ = outgoing.provider.shutdown().await;
+        }
+        cancelled("the job was cancelled");
+        let gone = ApiError::Unavailable("the send was cancelled".to_string());
+        let _ = delivery.give(&job, Err(gone));
+        return;
+    }
     let mut outgoing = match prepared {
         Ok(outgoing) => outgoing,
         Err(error) => {
@@ -322,75 +337,4 @@ pub(super) fn hand_over<T>(job: &Job, answer: oneshot::Sender<T>, value: T) -> b
         false,
     );
     false
-}
-
-async fn run_send(
-    job: Arc<Job>,
-    outgoing: Outgoing,
-    keep: Keep,
-    _opened: Vec<Opened>,
-    ticket: String,
-) {
-    let (events, received) = unbounded_channel();
-    let pumping = tokio::spawn(pump(job.clone(), received));
-    let end = tokio::select! {
-        end = outgoing.serve(keep, &events) => Some(end),
-        () = job.cancelled() => None,
-    };
-    drop(events);
-    let _ = pumping.await;
-    match end {
-        None => job.finish(
-            JobState::Cancelled,
-            "the job was cancelled".to_string(),
-            false,
-        ),
-        Some(Ok(StopEnd::Expired)) => {
-            job.finish(JobState::Done, "the ticket expired".to_string(), false);
-        }
-        Some(Ok(StopEnd::Downloaded)) => job.finish(JobState::Done, String::new(), false),
-        Some(Ok(StopEnd::Interrupted)) => {
-            job.finish(
-                JobState::Cancelled,
-                "the send was interrupted".to_string(),
-                false,
-            );
-        }
-        Some(Err(error)) => job.finish(JobState::Failed, message_of(&error, &ticket), false),
-    }
-}
-
-async fn run_receive(
-    job: Arc<Job>,
-    ticket: String,
-    options: ReceiveOptions,
-    pins: Pins,
-    _opened: Vec<Opened>,
-) {
-    let (events, received) = unbounded_channel();
-    let pumping = tokio::spawn(pump(job.clone(), received));
-    let result = tokio::select! {
-        result = receive_checked(&ticket, &options, pins, &events) => Some(result),
-        () = job.cancelled() => None,
-    };
-    drop(events);
-    let _ = pumping.await;
-    match result {
-        // The partial store stays beside the output, so the next receive of the ticket resumes.
-        None => job.finish(
-            JobState::Cancelled,
-            "the job was cancelled".to_string(),
-            true,
-        ),
-        Some(Ok(_)) => job.finish(JobState::Done, String::new(), false),
-        Some(Err(error)) => {
-            let resumable = matches!(error, Error::Network(_) | Error::Cancelled);
-            let state = if matches!(error, Error::Cancelled) {
-                JobState::Cancelled
-            } else {
-                JobState::Failed
-            };
-            job.finish(state, message_of(&error, &ticket), resumable);
-        }
-    }
 }

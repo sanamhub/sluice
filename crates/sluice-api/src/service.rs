@@ -18,6 +18,7 @@ use crate::roots::Roots;
 
 mod doctor;
 mod inspect;
+mod run;
 mod start;
 
 /// How many tickets are inspected at once.

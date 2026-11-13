@@ -19,8 +19,9 @@ the read cannot close that: the path is resolved again at the read.
 
 1. **A daemon send copies every file into the send's own store.** The files are found below the
    handles the daemon proved, never by path, with each open relative to a folder handle and never
-   following a link. The walk, the hash and the copy use one open object, which is accepted only if it
-   is the object the walk saw. The copy reads no more than the walk saw, so a file that grew, shrank
+   following a link; the names of a folder are read from its handle. The walk, the hash and the copy each
+   open the file again below its folder handle, and each accepts it only if it is the object the walk
+   saw. The copy reads no more than the walk saw, so a file that grew, shrank
    or was replaced is refused before any of its bytes are served.
 2. **A one-shot send is unchanged.** It still references its files where they live.
 3. **The room is checked first.** A send refuses, before it imports, when the volume of the home has
