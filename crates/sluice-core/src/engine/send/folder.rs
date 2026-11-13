@@ -2,6 +2,8 @@
 //! hashed every file; this module puts the same bytes into the home store as the blobs and packs
 //! the manifest names, then starts one provider for the whole sequence.
 
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
 use iroh_blobs::{
@@ -13,7 +15,7 @@ use iroh_blobs::{
     store::fs::FsStore,
 };
 
-use super::copy::{check_room, chunks, open_for_copy, read_packed};
+use super::copy::{check_room, chunks, open_blocking, read_packed, stopped};
 use super::{Congestion, Outgoing, Provider, RelayModeChoice, Scratch, serving, storage};
 use crate::{
     Error, Home,
@@ -44,15 +46,19 @@ pub async fn prepare_paths_with_rate(
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
 ) -> Result<Outgoing, Error> {
     let built = Manifest::build_paths(paths)?;
-    prepare_built(home, built, relay, congestion, expiry_ms, port, rate).await
+    let never = Arc::new(AtomicBool::new(false));
+    prepare_built(home, built, relay, congestion, expiry_ms, port, rate, never).await
 }
 
 /// [`prepare_paths_with_rate`] for a caller that opened and proved its folders itself, such as a
 /// daemon's roots. The walk lists and opens everything relative to the handles it is given and never
 /// follows a link, so nothing outside them can be sent. Every file is then opened again the same
-/// way, hashed and copied into the send's own store from that one open object, so the walk, the
-/// hash and the copy cannot disagree and nothing is read from a path afterwards. A one-shot `send`
-/// does not do this: it references its files where they live.
+/// way, and the file found is accepted only if it is the object the walk saw there, at the hash and
+/// again at the copy, so the walk, the hash and the copy cannot disagree and nothing is read from a
+/// path afterwards. `cancel` is checked between files and between chunks, and a send that is told to
+/// stop ends with [`Error::Cancelled`] and removes its store. A one-shot `send` does not do this: it
+/// references its files where they live.
+#[allow(clippy::too_many_arguments)]
 pub async fn prepare_paths_confined(
     home: &Home,
     args: Vec<ConfinedArg>,
@@ -61,14 +67,19 @@ pub async fn prepare_paths_confined(
     expiry_ms: Option<u64>,
     port: Option<u16>,
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
+    cancel: Arc<AtomicBool>,
 ) -> Result<Outgoing, Error> {
     // The walk and the hashing read every file, which is not work for an async thread.
     let built = tokio::task::spawn_blocking(move || Manifest::build_confined(args))
         .await
         .map_err(|_| Error::Bug("the walk did not finish".to_string()))??;
-    prepare_built(home, built, relay, congestion, expiry_ms, port, rate).await
+    prepare_built(
+        home, built, relay, congestion, expiry_ms, port, rate, cancel,
+    )
+    .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn prepare_built(
     home: &Home,
     built: Build,
@@ -77,6 +88,7 @@ async fn prepare_built(
     expiry_ms: Option<u64>,
     port: Option<u16>,
     rate: Option<std::sync::Arc<crate::engine::Rate>>,
+    cancel: Arc<AtomicBool>,
 ) -> Result<Outgoing, Error> {
     // Read before the store exists, so a home whose identity cannot be read fails this send with
     // nothing of its own left behind.
@@ -90,7 +102,7 @@ async fn prepare_built(
     check_room(home, &built)?;
     let scratch = Scratch::open(home, storage::Collector::Off).await?;
     let mut tags = Vec::new();
-    let filled = fill(&scratch, &built, &mut tags).await;
+    let filled = fill(&scratch, &built, &mut tags, &cancel).await;
     let sequence_root = match filled {
         Ok(root) => root,
         // A send that fails while it copies leaves nothing of its own: the store is closed and its
@@ -135,11 +147,12 @@ async fn fill(
     scratch: &Scratch,
     built: &Built,
     tags: &mut Vec<TempTag>,
+    cancel: &Arc<AtomicBool>,
 ) -> Result<[u8; 32], Error> {
     let manifest = &built.manifest;
-    import_blobs(scratch.store(), built, manifest, tags).await?;
+    import_blobs(scratch.store(), built, manifest, tags, cancel).await?;
     for index in 0..manifest.packs().len() {
-        add_pack(scratch.store(), built, manifest, index, tags).await?;
+        add_pack(scratch.store(), built, manifest, index, tags, cancel).await?;
     }
     add_manifest(scratch.store(), manifest, tags).await?;
     add_sequence(scratch.store(), manifest, tags).await
@@ -152,12 +165,16 @@ async fn import_blobs(
     built: &Built,
     manifest: &Manifest,
     tags: &mut Vec<TempTag>,
+    cancel: &Arc<AtomicBool>,
 ) -> Result<(), Error> {
     let mut done = BTreeSet::new();
     for (index, entry) in manifest.entries().iter().enumerate() {
         let Loc::Blob { root } = entry.loc else {
             continue;
         };
+        if stopped(cancel) {
+            return Err(Error::Cancelled);
+        }
         if !done.insert(root) {
             continue;
         }
@@ -169,10 +186,10 @@ async fn import_blobs(
             // A confined send copies what it read from the handle it proved, so a later change to
             // the path cannot put other bytes on the wire.
             Some(below) => {
-                let file = open_for_copy(below, entry)?;
+                let file = open_blocking(below, entry).await?;
                 store
                     .blobs()
-                    .add_stream(chunks(file, entry.size))
+                    .add_stream(chunks(file, entry.size, cancel.clone()))
                     .await
                     .temp_tag()
                     .await
@@ -189,8 +206,13 @@ async fn import_blobs(
                     .await
             }
         };
-        let tag = added
-            .map_err(|e| Error::Storage(format!("cannot import a file: {}", crate::plain(&e))))?;
+        let tag = added.map_err(|e| {
+            if stopped(cancel) {
+                Error::Cancelled
+            } else {
+                Error::Storage(format!("cannot import a file: {}", crate::plain(&e)))
+            }
+        })?;
         if *tag.hash().as_bytes() != root {
             return Err(Error::Verify(
                 "a file changed between the manifest build and the import".to_string(),
@@ -209,6 +231,7 @@ async fn add_pack(
     manifest: &Manifest,
     index: usize,
     tags: &mut Vec<TempTag>,
+    cancel: &Arc<AtomicBool>,
 ) -> Result<(), Error> {
     let pack = manifest
         .packs()
@@ -222,12 +245,21 @@ async fn add_pack(
         if pack_index as usize != index {
             continue;
         }
+        if stopped(cancel) {
+            return Err(Error::Cancelled);
+        }
         let disk = built
             .disk
             .file(entry_index)
             .ok_or_else(|| Error::Bug("a packed entry has no disk path".to_string()))?;
         let body = match built.disk.below(entry_index) {
-            Some(below) => read_packed(open_for_copy(below, entry)?, entry.size)?,
+            Some(below) => {
+                let file = open_blocking(below, entry).await?;
+                let (size, cancel) = (entry.size, cancel.clone());
+                tokio::task::spawn_blocking(move || read_packed(file, size, &cancel))
+                    .await
+                    .map_err(|_| Error::Bug("the read of a file did not finish".to_string()))??
+            }
             None => fs::read(disk)
                 .map_err(|e| Error::Storage(format!("cannot read a packed file: {}", e.kind())))?,
         };
@@ -349,10 +381,11 @@ fn total_bytes(manifest: &Manifest) -> u64 {
 
 #[cfg(test)]
 async fn add_pack_for_test(built: &Built) -> Result<(), Error> {
+    let cancel = Arc::new(AtomicBool::new(false));
     let dir = tempfile::tempdir().unwrap();
     let store = FsStore::load(dir.path()).await.unwrap();
     let mut tags = Vec::new();
-    let result = add_pack(&store, built, &built.manifest, 0, &mut tags).await;
+    let result = add_pack(&store, built, &built.manifest, 0, &mut tags, &cancel).await;
     drop(tags);
     store.shutdown().await.unwrap();
     result

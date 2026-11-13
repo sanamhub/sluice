@@ -3,6 +3,8 @@
 
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use iroh_blobs::{Hash, store::fs::FsStore};
 use n0_future::StreamExt;
@@ -28,7 +30,8 @@ async fn import(built: &Built, outside: &[u8]) -> (Result<(), Error>, bool) {
     let dir = tempfile::tempdir().unwrap();
     let store = FsStore::load(dir.path()).await.unwrap();
     let mut tags = Vec::new();
-    let result = import_blobs(&store, built, &built.manifest, &mut tags).await;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let result = import_blobs(&store, built, &built.manifest, &mut tags, &cancel).await;
     let held = store.blobs().has(Hash::new(outside)).await.unwrap();
     drop(tags);
     store.shutdown().await.unwrap();
@@ -49,6 +52,10 @@ fn rename_over(folder: &Path, name: &str, bytes: &[u8]) {
     let fresh = folder.join(format!("{name}.new"));
     fs::write(&fresh, bytes).unwrap();
     fs::rename(&fresh, folder.join(name)).unwrap();
+}
+
+fn never() -> Arc<AtomicBool> {
+    Arc::new(AtomicBool::new(false))
 }
 
 fn text_of(result: Result<(), Error>) -> String {
@@ -131,7 +138,7 @@ async fn the_copy_stops_at_the_size_the_walk_saw() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("f");
     fs::write(&path, vec![1u8; 4096]).unwrap();
-    let mut grown = Box::pin(chunks(fs::File::open(&path).unwrap(), 1000));
+    let mut grown = Box::pin(chunks(fs::File::open(&path).unwrap(), 1000, never()));
     let mut seen = 0;
     let mut failed = None;
     while let Some(item) = grown.next().await {
@@ -143,7 +150,7 @@ async fn the_copy_stops_at_the_size_the_walk_saw() {
     assert!(seen <= 1000, "{seen} bytes passed the size the walk saw");
     assert_eq!(failed.as_deref(), Some(CHANGED));
 
-    let mut short = Box::pin(chunks(fs::File::open(&path).unwrap(), 5000));
+    let mut short = Box::pin(chunks(fs::File::open(&path).unwrap(), 5000, never()));
     let mut ended = None;
     while let Some(item) = short.next().await {
         ended = item.err().map(|e| e.to_string());
@@ -205,9 +212,10 @@ async fn a_send_that_fails_while_it_copies_leaves_nothing_in_the_home() {
         None,
         None,
         None,
+        never(),
     )
     .await;
-    crate::engine::send::copy::before_copy(|| {});
+    crate::engine::send::copy::clear_before_copy();
     assert!(matches!(result, Err(Error::Verify(_))));
     crate::engine::wait_for_removals(std::time::Duration::from_secs(10));
     let left: Vec<_> = fs::read_dir(home.temporary_folder().unwrap())
@@ -229,4 +237,31 @@ fn a_send_without_room_for_its_copies_is_refused_and_one_with_exactly_enough_is_
     assert!(text.contains("999") && text.contains("1000"), "{text}");
     refuse_without_room(1000, 1000).unwrap();
     refuse_without_room(u64::MAX, 1000).unwrap();
+}
+
+/// A send that is told to stop ends as cancelled between files and between chunks, and a copy in
+/// progress stops at the next chunk.
+#[tokio::test]
+async fn a_send_that_is_told_to_stop_ends_as_cancelled() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = confined(&folder_with_a_big_file(dir.path()));
+    let store_dir = tempfile::tempdir().unwrap();
+    let store = FsStore::load(store_dir.path()).await.unwrap();
+    let mut tags = Vec::new();
+    let cancel = Arc::new(AtomicBool::new(true));
+    let result = import_blobs(&store, &built, &built.manifest, &mut tags, &cancel).await;
+    assert!(matches!(result, Err(Error::Cancelled)), "{result:?}");
+    drop(tags);
+    store.shutdown().await.unwrap();
+
+    let path = dir.path().join("f");
+    fs::write(&path, vec![1u8; 4096]).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let mut stream = Box::pin(chunks(fs::File::open(&path).unwrap(), 4096, stop.clone()));
+    stop.store(true, Ordering::Relaxed);
+    let mut ended = None;
+    while let Some(item) = stream.next().await {
+        ended = item.err().map(|e| e.to_string());
+    }
+    assert_eq!(ended.as_deref(), Some(crate::engine::send::copy::STOPPED));
 }

@@ -38,9 +38,9 @@ fn is_escaped(c: char) -> bool {
 /// sequence into it.
 ///
 /// These are the characters of [`is_display_control`], the two Unicode line separators, and the
-/// default-ignorable code points. A
-/// manifest path cannot hold any of them; a live stream's name is a file name on the sender's disk,
-/// which on Unix may hold anything.
+/// default-ignorable code points. A manifest path can hold the ignorables, which are shown here as
+/// escapes so they cannot hide text, and none of the controls or separators; a live stream's name is
+/// a file name on the sender's disk, which on Unix may hold anything.
 ///
 /// The escape for a character is `\u{…}`, so a backslash in the text could be read as the start of
 /// one: a name holding the literal text `\u{202e}` would print exactly like the escape written for

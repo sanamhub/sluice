@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
 
 use super::argument::{file_item, nfc_name, unique_name};
-use super::below::Below;
+use super::handles::Below;
 use super::{Finding, Reason, meta};
 use crate::Error;
 use crate::manifest::link::LinkTarget;

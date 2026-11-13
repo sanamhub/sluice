@@ -104,6 +104,14 @@ pub(super) fn through_filter_handle(held: File) -> Result<Opened, HashFault> {
     }
     // SAFETY: `raw` is a valid handle that nothing else owns.
     let file = unsafe { File::from_raw_handle(raw as _) };
+    // The reopened handle has to be the object that was held, and not what a rename put there.
+    let same = match (crate::engine::facts(&file), crate::engine::facts(&held)) {
+        (Ok(now), Ok(was)) => now.identity == was.identity,
+        _ => false,
+    };
+    if !same {
+        return Err(HashFault::Changed);
+    }
     let before = file
         .metadata()
         .map_err(|e| HashFault::Unreadable(e.kind()))?;

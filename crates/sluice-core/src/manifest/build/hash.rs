@@ -5,7 +5,7 @@ use std::fs::{self, File, Metadata, OpenOptions};
 use std::io::{self, Read};
 use std::path::Path;
 
-use super::below::Below;
+use super::handles::Below;
 use super::meta;
 
 /// What reading a file found out about it, besides its bytes.

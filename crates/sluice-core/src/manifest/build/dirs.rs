@@ -20,6 +20,13 @@ pub(super) enum Kind {
     Other,
 }
 
+/// Whether `name` is one component: not empty, not `.` or `..`, and holding no separator. Every name
+/// opened from a folder handle is one, and the walk asks the folder for it by a name it listed.
+fn is_one_component(name: &OsStr) -> bool {
+    let text = name.to_string_lossy();
+    !text.is_empty() && text != "." && text != ".." && !text.contains(['/', '\\'])
+}
+
 /// An open folder.
 #[derive(Debug)]
 pub(super) struct Dir(File);
@@ -48,6 +55,10 @@ mod imp {
 
     impl Dir {
         fn open_at(&self, name: &OsStr, extra: OFlags) -> io::Result<File> {
+            debug_assert!(
+                super::is_one_component(name),
+                "{name:?} is not one component"
+            );
             let flags = OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | extra;
             Ok(File::from(rustix::fs::openat(
                 &self.0,
@@ -115,12 +126,20 @@ mod imp {
     use super::{Dir, File, Kind, OsStr, OsString, io};
     use crate::engine::is_link;
 
-    /// `FILE_READ_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE`.
+    /// `FILE_READ_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE`: what reading a file or listing a folder
+    /// needs.
     const ACCESS: u32 = 0x1 | 0x80 | 0x10_0000;
+    /// `FILE_READ_ATTRIBUTES | SYNCHRONIZE`: all that asking what a name is needs, so a file that
+    /// cannot be read can still be told apart from a link.
+    const LOOK: u32 = 0x80 | 0x10_0000;
     const NOT_FOUND: [i32; 2] = [0xC000_0034_u32 as i32, 0xC000_003A_u32 as i32];
 
     impl Dir {
-        fn open_rel(&self, name: &OsStr, options: u32) -> io::Result<File> {
+        fn open_rel(&self, name: &OsStr, options: u32, access: u32) -> io::Result<File> {
+            debug_assert!(
+                super::is_one_component(name),
+                "{name:?} is not one component"
+            );
             let wide: Vec<u16> = name.encode_wide().collect();
             let bytes = u16::try_from(wide.len() * 2)
                 .map_err(|_| io::Error::other("a name is too long"))?;
@@ -144,7 +163,7 @@ mod imp {
             let result = unsafe {
                 NtCreateFile(
                     &mut handle,
-                    ACCESS,
+                    access,
                     &attributes,
                     &mut status,
                     null(),
@@ -169,7 +188,7 @@ mod imp {
 
         /// The folder `name`, which fails when it is a link or not a folder.
         pub(in crate::manifest::build) fn open_dir(&self, name: &OsStr) -> io::Result<Dir> {
-            let folder = self.open_rel(name, FILE_DIRECTORY_FILE)?;
+            let folder = self.open_rel(name, FILE_DIRECTORY_FILE, ACCESS)?;
             if is_link(&folder)? {
                 return Err(io::Error::other("it is a link"));
             }
@@ -178,7 +197,7 @@ mod imp {
 
         /// The file `name`, which fails when it is not a file or is a link.
         pub(in crate::manifest::build) fn open_file(&self, name: &OsStr) -> io::Result<File> {
-            let file = self.open_rel(name, FILE_NON_DIRECTORY_FILE)?;
+            let file = self.open_rel(name, FILE_NON_DIRECTORY_FILE, ACCESS)?;
             if is_link(&file)? {
                 return Err(io::Error::other("it is a link"));
             }
@@ -186,7 +205,7 @@ mod imp {
         }
 
         pub(in crate::manifest::build) fn kind(&self, name: &OsStr) -> io::Result<Kind> {
-            let found = self.open_rel(name, 0)?;
+            let found = self.open_rel(name, 0, LOOK)?;
             let meta = found.metadata()?;
             Ok(if is_link(&found)? {
                 Kind::Link
