@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Sluice</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+<script src="api.js" defer></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="./" aria-label="Sluice">
+    <svg viewBox="0 0 64 64" width="28" height="28" aria-hidden="true">
+      <path class="mark-ink" d="M10 16Q10 11 14.5 13.5L29 28Q32 32 29 36L14.5 50.5Q10 53 10 48Z"/>
+      <path class="mark-water" d="M54 16Q54 11 49.5 13.5L35 28Q32 32 35 36L49.5 50.5Q54 53 54 48Z"/>
+    </svg>
+    <span>Sluice</span>
+  </a>
+  <p class="daemon" id="daemon" role="status">Connecting to the daemon</p>
+  <button class="theme" id="theme" type="button" aria-label="Switch theme">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"/></svg>
+  </button>
+</header>
+
+<main id="app">
+  <section class="lock" id="locked" hidden>
+    <h1>Open this page from Sluice</h1>
+    <p>This page talks to the Sluice daemon on this computer, and it needs the key the daemon hands out. Run this, and Sluice opens the page with the key:</p>
+    <pre><code>sluice ui</code></pre>
+  </section>
+
+  <div class="panes" id="panes" hidden>
+    <section class="pane send" aria-labelledby="send-h">
+      <h2 id="send-h">Send</h2>
+
+      <div id="send-pick">
+        <div class="crumbs" id="crumbs"></div>
+        <ul class="entries" id="entries" aria-label="Files and folders"></ul>
+        <div class="picked" id="picked-wrap" hidden>
+          <h3>Sending</h3>
+          <ul id="picked"></ul>
+        </div>
+        <div class="actions">
+          <button class="gate" id="send-go" type="button" disabled>Send</button>
+          <p class="hint" id="send-hint">Choose files or folders above.</p>
+        </div>
+      </div>
+
+      <div class="ticket" id="ticket" hidden>
+        <img id="ticket-qr" alt="QR code of the ticket" width="220" height="220">
+        <div class="ticket-text">
+          <h3>Ticket</h3>
+          <p class="ticket-value" id="ticket-value" tabindex="0"></p>
+          <div class="row">
+            <button class="gate" id="ticket-copy" type="button">Copy ticket</button>
+            <button class="quiet" id="ticket-done" type="button">Send something else</button>
+          </div>
+          <p class="note">Anyone with this ticket can receive these files while this transfer is open. Send it over a channel you trust.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="pane receive" aria-labelledby="recv-h">
+      <h2 id="recv-h">Receive</h2>
+      <form id="recv-form" autocomplete="off">
+        <label for="recv-ticket">Ticket</label>
+        <textarea id="recv-ticket" rows="3" spellcheck="false" placeholder="Paste a ticket"></textarea>
+        <button class="quiet" type="submit">Look inside</button>
+      </form>
+
+      <div class="offer" id="offer" hidden>
+        <p class="offer-size" id="offer-size"></p>
+        <p class="untrusted-label">Names the sender chose</p>
+        <ul class="untrusted" id="offer-names"></ul>
+        <label for="recv-root">Save into</label>
+        <select id="recv-root"></select>
+        <div class="actions">
+          <button class="gate" id="recv-go" type="button">Receive</button>
+        </div>
+      </div>
+      <p class="error" id="recv-error" role="alert" hidden></p>
+    </section>
+  </div>
+
+  <section class="transfers" id="transfers-wrap" hidden aria-labelledby="xfer-h">
+    <h2 id="xfer-h">Transfers</h2>
+    <p class="empty" id="transfers-empty">Nothing has moved yet.</p>
+    <ol class="transfers-list" id="transfers"></ol>
+  </section>
+</main>
+</body>
+</html>

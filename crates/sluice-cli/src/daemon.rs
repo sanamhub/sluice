@@ -34,6 +34,11 @@ pub struct DaemonArgs {
     /// with `--relay` or `--n0-relays`
     #[arg(long, conflicts_with_all = ["relay", "n0_relays"])]
     pub loopback: bool,
+    /// Also serve a page and the control interface as JSON over HTTP on 127.0.0.1, on a port the
+    /// system picks, for `sluice ui`. A key made at start guards every call, and the port and key go
+    /// to a file in the home that only this user can read
+    #[arg(long)]
+    pub ui: bool,
 }
 
 /// What a client of a running daemon asks.
@@ -79,11 +84,35 @@ async fn serve(args: &DaemonArgs, output: &Output) -> Result<u8, Error> {
         output.write_stderr(&format!("sluice: {NO_ROOTS}\n"));
     }
     let daemon = Daemon::bind(home, roots, relay).map_err(refused)?;
+    let page = start_page(args, &daemon).await?;
     tracing::info!("listening on {}", daemon.location());
     output.write_stdout(&listening_line(output, daemon.location()))?;
-    daemon.serve(signals.arrived()).await.map_err(refused)?;
+    let served = daemon.serve(signals.arrived()).await;
+    if let Some((page, service)) = page {
+        page.stop();
+        service.remove_private(crate::ui::PORT_FILE);
+    }
+    served.map_err(refused)?;
     tracing::info!("stopped");
     Ok(0)
+}
+
+/// Starts the page's listener when `--ui` was given, and writes its port and key where `sluice ui`
+/// reads them. The key is in that file and nowhere else: not on a console and not in a log.
+async fn start_page(
+    args: &DaemonArgs,
+    daemon: &Daemon,
+) -> Result<Option<(crate::ui::Page, sluice_api::Service)>, Error> {
+    if !args.ui {
+        return Ok(None);
+    }
+    let service = daemon.service();
+    let page = crate::ui::start(service.clone()).await?;
+    service
+        .write_private(crate::ui::PORT_FILE, page.file_text().as_bytes())
+        .map_err(refused)?;
+    tracing::info!("the page is on 127.0.0.1 port {}", page.port());
+    Ok(Some((page, service)))
 }
 
 /// The one line on standard output that says where the daemon listens, which a script waits for.

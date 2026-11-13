@@ -46,6 +46,7 @@ mod tests {
                 "sluice-receipt.1",
                 "sluice-recv.1",
                 "sluice-send.1",
+                "sluice-ui.1",
                 "sluice.1"
             ]
         );

@@ -117,6 +117,10 @@ prost = "0.14.5"
 # The official Rust SDK of the Model Context Protocol, for `sluice mcp`. Pinned exactly: a release
 # changes the protocol surface the tool list is checked against, so it has to be a decision.
 rmcp = { version = "=3.9.0", default-features = false, features = ["server", "macros", "transport-io"] }
+# The loopback listener of the page `sluice daemon --ui` serves: the HTTP/1 server, and the body types
+# its answers use. hyper is already in the tree through tonic.
+hyper = { version = "1.12", default-features = false, features = ["http1", "server"] }
+http-body-util = "0.1.5"
 # Property tests for parsers. Without default features it skips fork and timeout, which add
 # rusty-fork and tempfile to run each case in a child process. No test here needs that.
 proptest = { version = "1.12", default-features = false, features = ["std"] }

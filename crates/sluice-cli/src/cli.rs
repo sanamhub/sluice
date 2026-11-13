@@ -12,6 +12,7 @@ use crate::id;
 use crate::inspect;
 use crate::mcp;
 use crate::output::Format;
+use crate::page;
 use crate::{receipt, recv, send};
 
 /// The congestion controller as the command line spells it.
@@ -124,6 +125,12 @@ pub enum Command {
     /// every send and receive. A send returns a ticket, which is a secret and which the client's
     /// transcript then holds. The server ends when its input closes.
     Mcp(mcp::McpArgs),
+    /// Open the page of the daemon that is running
+    ///
+    /// The page sends, receives and shows transfers in a browser, and it drives the daemon: it never
+    /// carries file bytes. Start the daemon with `sluice daemon --ui`. The address holds a key, which
+    /// the browser takes out of it, and it is printed only with `--print`.
+    Ui(page::UiArgs),
 }
 
 #[cfg(test)]

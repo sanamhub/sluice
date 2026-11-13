@@ -32,13 +32,19 @@ impl Drop for Running {
 /// Starts a daemon on `home` with `roots`, waits for the line that says it listens, and returns it.
 /// `log_level` is what `RUST_LOG` is set to.
 pub fn start(home: &Path, roots: &[&Path], log_level: &str) -> Running {
+    start_with(home, roots, log_level, &[])
+}
+
+/// [`start`] with more arguments for `sluice daemon`.
+pub fn start_with(home: &Path, roots: &[&Path], log_level: &str, extra: &[&str]) -> Running {
     let log = home.with_extension("log");
     let mut command = Command::new(EXE);
     command
         .env("SLUICE_HOME", home)
         .env("RUST_LOG", log_level)
         .env_remove("NO_COLOR")
-        .args(["daemon", "--loopback"]);
+        .args(["daemon", "--loopback"])
+        .args(extra);
     for root in roots {
         command.arg("--root").arg(root);
     }

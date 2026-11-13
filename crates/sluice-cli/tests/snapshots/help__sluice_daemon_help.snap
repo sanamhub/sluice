@@ -40,5 +40,8 @@ Options:
       --loopback
           Listen for transfers on 127.0.0.1 only, with no relay, no mDNS, no port mapping and no address publishing, so nothing outside this computer can reach them. It cannot be combined with `--relay` or `--n0-relays`
 
+      --ui
+          Also serve a page and the control interface as JSON over HTTP on 127.0.0.1, on a port the system picks, for `sluice ui`. A key made at start guards every call, and the port and key go to a file in the home that only this user can read
+
   -h, --help
           Print help (see a summary with '-h')
