@@ -169,9 +169,8 @@ time, on one task, and hashes and cuts it on a blocking thread. Reading 240 MiB 
 36 MiB/s and made a 1 GiB list take half a minute. One list is built for each root, however many
 receivers ask, and a receiver waits 60 s plus 1 s for every 64 MiB of the file for it.
 
-**Not measured.** A file of 4 GiB. The volume had 11 GB free, and the run needs about 20 GB (the
-sender's file, the receiver's older file and its output, the store's copy and the assembly). The
-fixed wait of 60 s that a list was once given was passed by any file larger than about 3 GiB, at
-the 50 MiB/s the first build ran at. The wait now grows with the size: a 4 GiB list builds in about
-18 s at the measured speed, against a wait of 124 s. The harness is not part of the repository; the method above
-is enough to repeat it.
+**Not measured.** A file of 4 GiB. The run needs about 20 GB of disk: the sender's file, the
+receiver's older file and its output, the store's copy and the assembly. At the measured speed the
+list of a 4 GiB file builds in about 18 s, against a wait of 124 s, which is 60 s and 1 s for each
+64 MiB of the file; that figure is a calculation and not a run. The harness is not part of the
+repository, and the method above is enough to repeat it.

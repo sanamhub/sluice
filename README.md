@@ -156,7 +156,8 @@ Fetch only what changed. Name the older version of the file, or a folder that ho
 ticket's own paths, and the parts that match are copied from it. The summary says how many bytes
 came from the local file and how many from the network. The sender is told which ranges you still
 need, so it can tell which parts of that file you hold: name only a file you are content to
-disclose that of, and fetch plainly otherwise:
+disclose that of, and fetch plainly otherwise. The assembled file is written once more before it is
+stored, so the volume needs room for the ticket's whole size as well, which is an upper bound:
 
 ```sh
 sluice recv <ticket> --out ./inbox --delta-from ./inbox/report-v1.pdf
