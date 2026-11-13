@@ -55,9 +55,9 @@ pub(crate) struct Opened {
     pub is_file: bool,
     /// The open folder the object is, or for a file the open folder it is in: the handle a confined
     /// send lists and opens from, which is never turned back into a path.
-    pub(super) handle: File,
+    pub(crate) handle: File,
     /// The name the object arrives under, which is its name below that handle for a file.
-    pub(super) name: String,
+    pub(crate) name: String,
     // Every handle the walk opened, which keeps the chain it proved in place where the platform lets
     // an open handle do that.
     pub(super) _held: Vec<File>,

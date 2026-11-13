@@ -42,6 +42,8 @@ pub(crate) struct Job {
     /// line holds it.
     ticket: Mutex<Option<String>>,
     hub: Hub,
+    /// Every job's events, which a page that watches the whole daemon reads.
+    all: Arc<Hub>,
     cancel: watch::Sender<bool>,
     ended: watch::Sender<bool>,
 }
@@ -123,7 +125,9 @@ impl Job {
     }
 
     fn publish(&self, kind: Kind) {
-        self.hub.publish(&event(&self.id, kind));
+        let event = event(&self.id, kind);
+        self.hub.publish(&event);
+        self.all.publish(&event);
     }
 
     /// Ends the job: the state, the one sentence for a failure, and the last event.
@@ -151,6 +155,7 @@ impl Job {
             }),
         );
         tracing::info!(job = %self.id, state = state.as_str_name(), "job ended");
+        self.all.publish(&last);
         self.hub.finish(&last);
         self.ended.send_replace(true);
     }
@@ -254,6 +259,7 @@ fn random_id() -> Result<String, ApiError> {
 #[derive(Default)]
 pub(crate) struct Table {
     jobs: Mutex<Vec<Arc<Job>>>,
+    all: Arc<Hub>,
 }
 
 impl Table {
@@ -289,11 +295,17 @@ impl Table {
             status: Mutex::new(Status::default()),
             ticket: Mutex::new(None),
             hub: Hub::default(),
+            all: self.all.clone(),
             cancel: watch::channel(false).0,
             ended: watch::channel(false).0,
         });
         jobs.push(job.clone());
         Ok(job)
+    }
+
+    /// A reader of every job's events from now on, which is never closed.
+    pub(crate) fn watch_all(&self) -> Result<Watcher, ApiError> {
+        self.all.watch("")
     }
 
     pub(crate) fn get(&self, id: &str) -> Result<Arc<Job>, ApiError> {

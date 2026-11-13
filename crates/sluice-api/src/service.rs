@@ -18,6 +18,7 @@ use crate::roots::Roots;
 
 mod doctor;
 mod inspect;
+mod list;
 mod run;
 mod start;
 
@@ -92,6 +93,39 @@ impl Service {
             secret_ticket,
             failure,
         })
+    }
+
+    /// Every job's events from now on, in one reader that the daemon never closes while it runs. A
+    /// reader that falls behind loses the newest and is told how many, as one of a job's is.
+    pub fn watch_all_events(&self) -> Result<Watcher, ApiError> {
+        self.inner.jobs.watch_all()
+    }
+
+    /// Writes a small file in the home that only this user can read, for the daemon to hand
+    /// something to another command.
+    pub fn write_private(&self, name: &str, bytes: &[u8]) -> Result<(), ApiError> {
+        self.inner
+            .home
+            .write_private(name, bytes)
+            .map_err(|e| ApiError::Failed(e.to_string()))
+    }
+
+    /// Removes a file written with [`Service::write_private`].
+    pub fn remove_private(&self, name: &str) {
+        self.inner.home.remove_private(name);
+    }
+
+    /// The names of the roots, never their paths.
+    pub fn list_roots(&self) -> proto::ListRootsResponse {
+        proto::ListRootsResponse {
+            roots: self
+                .inner
+                .roots
+                .labels()
+                .into_iter()
+                .map(|name| proto::RootInfo { name })
+                .collect(),
+        }
     }
 
     /// One job's events from now on.

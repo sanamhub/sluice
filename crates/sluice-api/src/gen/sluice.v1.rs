@@ -339,6 +339,48 @@ pub struct ShutdownResponse {
     #[prost(uint32, tag = "1")]
     pub cancelled_jobs: u32,
 }
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListRootsRequest {}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListRootsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub roots: ::prost::alloc::vec::Vec<RootInfo>,
+}
+/// A root, as a client names it in a `RootPath`.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RootInfo {
+    /// The folder's own name, which is also what the daemon was given when it names the root that way.
+    /// Never the folder's path.
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListEntriesRequest {
+    /// The folder to list: a root and a path below it, checked as every `RootPath` is.
+    #[prost(message, optional, tag = "1")]
+    pub path: ::core::option::Option<RootPath>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListEntriesResponse {
+    /// Folders first, then by name, at most 10,000.
+    #[prost(message, repeated, tag = "1")]
+    pub entries: ::prost::alloc::vec::Vec<DirEntry>,
+    /// Whether the folder holds more than were returned.
+    #[prost(bool, tag = "2")]
+    pub truncated: bool,
+}
+/// One name directly under the listed folder. A name can come from a file a peer sent, so it is a
+/// `PeerName`.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DirEntry {
+    #[prost(message, optional, tag = "1")]
+    pub name: ::core::option::Option<PeerName>,
+    #[prost(enumeration = "EntryKind", tag = "2")]
+    pub kind: i32,
+    /// The size of a file in bytes, and zero for a folder or a link.
+    #[prost(uint64, tag = "3")]
+    pub size: u64,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum JobKind {
@@ -466,6 +508,38 @@ impl CheckState {
             "CHECK_STATE_OK" => Some(Self::Ok),
             "CHECK_STATE_WARN" => Some(Self::Warn),
             "CHECK_STATE_FAIL" => Some(Self::Fail),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum EntryKind {
+    Unspecified = 0,
+    File = 1,
+    Folder = 2,
+    Link = 3,
+}
+impl EntryKind {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "ENTRY_KIND_UNSPECIFIED",
+            Self::File => "ENTRY_KIND_FILE",
+            Self::Folder => "ENTRY_KIND_FOLDER",
+            Self::Link => "ENTRY_KIND_LINK",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "ENTRY_KIND_UNSPECIFIED" => Some(Self::Unspecified),
+            "ENTRY_KIND_FILE" => Some(Self::File),
+            "ENTRY_KIND_FOLDER" => Some(Self::Folder),
+            "ENTRY_KIND_LINK" => Some(Self::Link),
             _ => None,
         }
     }
@@ -759,6 +833,57 @@ pub mod control_service_client {
                 .insert(GrpcMethod::new("sluice.v1.ControlService", "Doctor"));
             self.inner.unary(req, path, codec).await
         }
+        /// The roots this daemon was started with, by name. A root's folder is never in the answer.
+        pub async fn list_roots(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListRootsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListRootsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/sluice.v1.ControlService/ListRoots",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("sluice.v1.ControlService", "ListRoots"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// The entries directly under a path below a root, by name, kind and size, up to a limit. A link is
+        /// listed and never followed, and no file content is in the answer.
+        pub async fn list_entries(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListEntriesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListEntriesResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/sluice.v1.ControlService/ListEntries",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("sluice.v1.ControlService", "ListEntries"));
+            self.inner.unary(req, path, codec).await
+        }
         /// Stops the daemon. Running jobs end as cancelled and a receive keeps its partial store, then the
         /// socket or pipe is removed. The answer is sent before the daemon stops listening.
         pub async fn shutdown(
@@ -864,6 +989,23 @@ pub mod control_service_server {
             &self,
             request: tonic::Request<super::DoctorRequest>,
         ) -> std::result::Result<tonic::Response<super::DoctorResponse>, tonic::Status>;
+        /// The roots this daemon was started with, by name. A root's folder is never in the answer.
+        async fn list_roots(
+            &self,
+            request: tonic::Request<super::ListRootsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListRootsResponse>,
+            tonic::Status,
+        >;
+        /// The entries directly under a path below a root, by name, kind and size, up to a limit. A link is
+        /// listed and never followed, and no file content is in the answer.
+        async fn list_entries(
+            &self,
+            request: tonic::Request<super::ListEntriesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListEntriesResponse>,
+            tonic::Status,
+        >;
         /// Stops the daemon. Running jobs end as cancelled and a receive keeps its partial store, then the
         /// socket or pipe is removed. The answer is sent before the daemon stops listening.
         async fn shutdown(
@@ -1297,6 +1439,96 @@ pub mod control_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = DoctorSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/sluice.v1.ControlService/ListRoots" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListRootsSvc<T: ControlService>(pub Arc<T>);
+                    impl<
+                        T: ControlService,
+                    > tonic::server::UnaryService<super::ListRootsRequest>
+                    for ListRootsSvc<T> {
+                        type Response = super::ListRootsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListRootsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ControlService>::list_roots(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListRootsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/sluice.v1.ControlService/ListEntries" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListEntriesSvc<T: ControlService>(pub Arc<T>);
+                    impl<
+                        T: ControlService,
+                    > tonic::server::UnaryService<super::ListEntriesRequest>
+                    for ListEntriesSvc<T> {
+                        type Response = super::ListEntriesResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListEntriesRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ControlService>::list_entries(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListEntriesSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

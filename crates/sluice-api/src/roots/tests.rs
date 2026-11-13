@@ -238,3 +238,36 @@ fn a_root_that_is_the_home_holds_it_or_lies_inside_it_is_refused() {
     Roots::open(&[beside]).unwrap().refuse_home(&home).unwrap();
     Roots::none().refuse_home(&home).unwrap();
 }
+
+#[test]
+fn two_roots_with_the_same_folder_name_are_refused_so_a_label_is_never_ambiguous() {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (
+        dir.path().join("a").join("files"),
+        dir.path().join("b").join("files"),
+    );
+    fs::create_dir_all(&a).unwrap();
+    fs::create_dir_all(&b).unwrap();
+    let refused = Roots::open(&[a.clone(), b])
+        .err()
+        .expect("two labels alike");
+    assert!(refused.to_string().contains("files"), "{refused}");
+    let roots = Roots::open(&[a]).unwrap();
+    assert_eq!(roots.labels(), vec!["files".to_string()]);
+}
+
+#[test]
+fn a_root_is_found_by_its_label_as_well_as_by_the_name_it_was_given() {
+    let (_dir, root, roots) = one_root();
+    assert!(roots.resolve(Some(&at(&root, "")), Use::Dir).is_ok());
+    assert!(
+        roots
+            .resolve(Some(&at(Path::new("root"), "")), Use::Dir)
+            .is_ok()
+    );
+    assert!(
+        roots
+            .resolve(Some(&at(Path::new("rootx"), "")), Use::Dir)
+            .is_err()
+    );
+}

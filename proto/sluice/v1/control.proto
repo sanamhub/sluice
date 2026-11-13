@@ -35,6 +35,13 @@ service ControlService {
   // The same checks `sluice doctor` makes, with the exit code that report would have.
   rpc Doctor(DoctorRequest) returns (DoctorResponse);
 
+  // The roots this daemon was started with, by name. A root's folder is never in the answer.
+  rpc ListRoots(ListRootsRequest) returns (ListRootsResponse);
+
+  // The entries directly under a path below a root, by name, kind and size, up to a limit. A link is
+  // listed and never followed, and no file content is in the answer.
+  rpc ListEntries(ListEntriesRequest) returns (ListEntriesResponse);
+
   // Stops the daemon. Running jobs end as cancelled and a receive keeps its partial store, then the
   // socket or pipe is removed. The answer is sent before the daemon stops listening.
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
@@ -317,4 +324,45 @@ message ShutdownRequest {}
 message ShutdownResponse {
   // How many jobs were still running when the call arrived, and so ended as cancelled.
   uint32 cancelled_jobs = 1;
+}
+
+message ListRootsRequest {}
+
+message ListRootsResponse {
+  repeated RootInfo roots = 1;
+}
+
+// A root, as a client names it in a `RootPath`.
+message RootInfo {
+  // The folder's own name, which is also what the daemon was given when it names the root that way.
+  // Never the folder's path.
+  string name = 1;
+}
+
+message ListEntriesRequest {
+  // The folder to list: a root and a path below it, checked as every `RootPath` is.
+  RootPath path = 1;
+}
+
+message ListEntriesResponse {
+  // Folders first, then by name, at most 10,000.
+  repeated DirEntry entries = 1;
+  // Whether the folder holds more than were returned.
+  bool truncated = 2;
+}
+
+// One name directly under the listed folder. A name can come from a file a peer sent, so it is a
+// `PeerName`.
+message DirEntry {
+  PeerName name = 1;
+  EntryKind kind = 2;
+  // The size of a file in bytes, and zero for a folder or a link.
+  uint64 size = 3;
+}
+
+enum EntryKind {
+  ENTRY_KIND_UNSPECIFIED = 0;
+  ENTRY_KIND_FILE = 1;
+  ENTRY_KIND_FOLDER = 2;
+  ENTRY_KIND_LINK = 3;
 }

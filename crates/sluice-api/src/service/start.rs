@@ -123,7 +123,7 @@ impl Service {
     }
 
     /// A daemon with no root refuses before it looks at anything the request carries.
-    fn refuse_without_roots(&self) -> Result<(), ApiError> {
+    pub(super) fn refuse_without_roots(&self) -> Result<(), ApiError> {
         if self.inner.roots.is_empty() {
             return Err(ApiError::Refused(crate::roots::NO_ROOTS.to_string()));
         }
