@@ -255,8 +255,7 @@ async fn a_failed_job_gives_its_sentence_to_its_starter_and_a_running_one_does_n
 }
 
 /// A cancel that arrives while a send is still being prepared ends the job as cancelled and leaves
-/// no store or folder of the send in the home, where the dropped preparing used to leave both for a
-/// later command to find. The endpoint is loopback only.
+/// no store or folder of the send in the home. The endpoint is loopback only.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cancel_during_the_preparing_ends_the_job_and_leaves_nothing_in_the_home() {
     let dir = tempfile::tempdir().unwrap();
