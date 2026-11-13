@@ -1,0 +1,277 @@
+/* The site's palette, a canal at night. Water is data in motion and never a button; brass is the
+   gate, the one action that asks to be pressed. Dark is the base, and light follows the system or
+   the toggle. */
+:root {
+  color-scheme: dark;
+  --basin: light-dark(#eef3f1, #081820);
+  --basin-deep: light-dark(#e1eae7, #050f15);
+  --stone: light-dark(#ffffff, #10262e);
+  --stone-2: light-dark(#f5f8f7, #15313a);
+  --line: light-dark(#d2dfdc, #1f3e48);
+  --line-strong: light-dark(#a9c0bc, #2f5866);
+  --ink: light-dark(#0d2229, #e4eff0);
+  --mist: light-dark(#4b6269, #8faab1);
+  --water: light-dark(#0b7c8c, #7adce8);
+  --water-deep: light-dark(#075c69, #2b8fa0);
+  --water-soft: light-dark(rgb(11 124 140 / 0.1), rgb(122 220 232 / 0.12));
+  --brass: light-dark(#94621a, #e0b26a);
+  --brass-ink: light-dark(#ffffff, #241806);
+  --brass-soft: light-dark(rgb(148 98 26 / 0.12), rgb(224 178 106 / 0.14));
+  --danger: light-dark(#a3302a, #f19a8f);
+
+  --sans: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", monospace;
+  --r-s: 6px;
+  --r-m: 12px;
+  --gutter: clamp(1rem, 4vw, 2.5rem);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) { color-scheme: light; }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--basin);
+  color: var(--ink);
+  font: 400 1rem/1.55 var(--sans);
+}
+h1, h2, h3 { font-stretch: 116%; line-height: 1.15; margin: 0; }
+h2 { font-size: 1.5rem; font-weight: 700; }
+h3 { font-size: 1rem; font-weight: 600; }
+button, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--water); outline-offset: 2px; }
+
+/* Top bar */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem var(--gutter);
+  border-bottom: 1px solid var(--line);
+  background: var(--basin-deep);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 700;
+  font-stretch: 125%;
+  font-size: 1.15rem;
+}
+.mark-ink { fill: var(--mist); }
+.mark-water { fill: var(--water); }
+.daemon { margin: 0 0 0 auto; color: var(--mist); font-size: 0.875rem; }
+.daemon[data-state="up"]::before {
+  content: "";
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.45rem;
+  border-radius: 50%;
+  background: var(--water);
+  vertical-align: 0.05em;
+}
+.daemon[data-state="down"] { color: var(--danger); }
+.theme {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  background: none;
+  cursor: pointer;
+}
+.theme svg { fill: var(--mist); }
+
+main { max-width: 76rem; margin: 0 auto; padding: 2rem var(--gutter) 4rem; }
+
+/* The two panes are the two ends of the channel: they share one border, not two cards. */
+.panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--line);
+  border-radius: var(--r-m);
+  background: var(--stone);
+  overflow: hidden;
+}
+.pane { padding: 1.5rem; min-width: 0; }
+.pane + .pane { border-left: 1px solid var(--line); }
+.pane h2 { margin-bottom: 1.25rem; }
+@media (max-width: 52rem) {
+  .panes { grid-template-columns: 1fr; }
+  .pane + .pane { border-left: 0; border-top: 1px solid var(--line); }
+}
+
+/* File chooser */
+.crumbs { display: flex; flex-wrap: wrap; gap: 0.25rem; font-size: 0.875rem; margin-bottom: 0.5rem; }
+.crumbs button {
+  border: 0;
+  background: none;
+  padding: 0.15rem 0.35rem;
+  border-radius: var(--r-s);
+  color: var(--water);
+  cursor: pointer;
+}
+.crumbs button[aria-current="true"] { color: var(--ink); cursor: default; }
+.crumbs span { color: var(--mist); }
+.entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 18rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  background: var(--stone-2);
+}
+.entries li { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+.entries li:last-child { border-bottom: 0; }
+.entries label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+.entries input { accent-color: var(--brass); }
+.entries .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entries .size { margin-left: auto; color: var(--mist); font-size: 0.8125rem; white-space: nowrap; }
+.entries .open {
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: none;
+  padding: 0.5rem 0.75rem;
+  color: var(--water);
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+.entries .folder .name { font-weight: 600; }
+.entries .empty-row { padding: 0.75rem; color: var(--mist); }
+.picked { margin-top: 1rem; }
+.picked ul { margin: 0.4rem 0 0; padding-left: 1.1rem; color: var(--mist); font-size: 0.9rem; }
+.picked li { overflow-wrap: anywhere; }
+
+.actions { display: flex; align-items: center; gap: 1rem; margin-top: 1.25rem; flex-wrap: wrap; }
+.hint { margin: 0; color: var(--mist); font-size: 0.875rem; }
+
+/* Brass is the gate: only the one action that moves bytes, and the ticket. */
+.gate {
+  border: 0;
+  border-radius: var(--r-s);
+  padding: 0.65rem 1.4rem;
+  background: var(--brass);
+  color: var(--brass-ink);
+  font-weight: 700;
+  font-stretch: 116%;
+  cursor: pointer;
+}
+.gate:disabled { background: var(--line); color: var(--mist); cursor: not-allowed; }
+.quiet {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-s);
+  padding: 0.55rem 1rem;
+  background: none;
+  cursor: pointer;
+}
+
+/* The ticket: the memorable thing. A gate set in brass, holding the only secret on the page. */
+.ticket {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1.5rem;
+  padding: 1.25rem;
+  border: 2px solid var(--brass);
+  border-radius: var(--r-m);
+  background: var(--brass-soft);
+}
+.ticket img { display: block; width: 220px; height: 220px; background: #fff; border-radius: var(--r-s); padding: 8px; }
+.ticket-value {
+  margin: 0.5rem 0 1rem;
+  font: 0.8125rem/1.5 var(--mono);
+  overflow-wrap: anywhere;
+  max-height: 7.5em;
+  overflow: auto;
+  user-select: all;
+}
+.ticket .row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+.note { margin: 1rem 0 0; font-size: 0.875rem; color: var(--mist); }
+@media (max-width: 34rem) {
+  .ticket { grid-template-columns: 1fr; justify-items: start; }
+}
+
+/* Receive */
+form label, .offer label { display: block; font-weight: 600; margin-bottom: 0.35rem; }
+textarea, select {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-s);
+  background: var(--stone-2);
+  padding: 0.6rem 0.7rem;
+}
+textarea { font: 0.8125rem/1.5 var(--mono); resize: vertical; margin-bottom: 0.75rem; }
+.offer { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); }
+.offer-size { margin: 0 0 1rem; font-size: 1.125rem; font-weight: 600; font-stretch: 116%; }
+.untrusted-label { margin: 0 0 0.35rem; font-size: 0.8125rem; color: var(--mist); }
+/* Names come from the sender. They render as text in a dashed well, never as markup. */
+.untrusted {
+  margin: 0 0 1.25rem;
+  padding: 0.6rem 0.75rem 0.6rem 1.8rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-s);
+  font: 0.8125rem/1.6 var(--mono);
+  max-height: 10rem;
+  overflow: auto;
+}
+.untrusted li { overflow-wrap: anywhere; }
+.error { margin: 1rem 0 0; color: var(--danger); }
+
+/* Transfers: each row is a stretch of channel, and the water line is the progress. */
+.transfers { margin-top: 2.5rem; }
+.transfers h2 { margin-bottom: 1rem; }
+.empty { color: var(--mist); margin: 0; }
+.transfers-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+.xfer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 1rem;
+  padding: 0.9rem 1rem 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  background: var(--stone);
+  overflow: hidden;
+}
+.xfer-title { font-weight: 600; }
+.xfer-meta { color: var(--mist); font-size: 0.875rem; }
+.xfer-side { grid-row: span 2; align-self: center; display: flex; gap: 0.75rem; align-items: center; }
+.xfer-state { font-size: 0.875rem; color: var(--mist); }
+.xfer[data-state="done"] .xfer-state { color: var(--water); }
+.xfer[data-state="failed"] .xfer-state { color: var(--danger); }
+.channel {
+  grid-column: 1 / -1;
+  height: 4px;
+  margin: 0.6rem -1rem 0;
+  background: var(--water-soft);
+}
+.channel span { display: block; height: 100%; width: 0; background: var(--water); transition: width 0.4s linear; }
+.xfer[data-state="done"] .channel span { background: var(--water-deep); }
+.xfer[data-state="failed"] .channel span,
+.xfer[data-state="cancelled"] .channel span { background: var(--line-strong); }
+
+.lock { max-width: 36rem; }
+.lock h1 { font-size: 1.75rem; margin-bottom: 0.75rem; }
+.lock pre { background: var(--stone); border: 1px solid var(--line); border-radius: var(--r-s); padding: 0.75rem 1rem; font-family: var(--mono); }
+
+@media (prefers-reduced-motion: reduce) {
+  .channel span { transition: none; }
+}

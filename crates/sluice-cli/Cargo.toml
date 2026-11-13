@@ -34,6 +34,13 @@ qrcodegen.workspace = true
 terminal_size = "0.4.4"
 # Only for the JSON error object, whose message needs escaping.
 serde_json.workspace = true
+# The page the daemon serves: HTTP/1 on loopback, the bodies of its answers, and its key.
+bytes.workspace = true
+getrandom.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+tokio-stream.workspace = true
 # The daemon and the two commands that call it.
 sluice-api = { path = "../sluice-api" }
 sluice-core = { path = "../sluice-core" }

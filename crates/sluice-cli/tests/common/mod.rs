@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 pub mod daemon;
+pub mod page;
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;

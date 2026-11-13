@@ -14,11 +14,13 @@ mod inspect;
 mod mcp;
 mod network;
 mod output;
+mod page;
 mod qr;
 mod queue;
 mod receipt;
 mod recv;
 mod send;
+mod ui;
 
 use std::ffi::OsString;
 use std::process::ExitCode;
@@ -117,6 +119,7 @@ fn execute(command: Command, output: &Output) -> Result<u8, sluice_core::Error> 
         Command::Doctor(args) => doctor::run(&args)?,
         Command::Daemon(args) => return daemon::run(&args, output),
         Command::Mcp(args) => return mcp::run(&args, output),
+        Command::Ui(args) => return page::run(&args, output),
     };
     output.print(&outcome)?;
     Ok(outcome.code())
