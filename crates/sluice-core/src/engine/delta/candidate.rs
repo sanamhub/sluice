@@ -12,7 +12,10 @@ use std::{
     fs::{self, File},
     io,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use sluice_delta::{Candidate as Chunks, Entry, Params, StreamCut};
@@ -20,6 +23,17 @@ use sluice_delta::{Candidate as Chunks, Entry, Params, StreamCut};
 use super::{BLOCK, CANDIDATE_ENTRIES};
 use crate::engine::send::Stamp;
 use crate::manifest::{Entry as ManifestEntry, Kind, Manifest};
+
+/// A stop flag that is set when this is dropped, so a cut stops on every way out of the code that
+/// started it.
+#[derive(Default)]
+pub(super) struct StopOnDrop(pub(super) Arc<AtomicBool>);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
 
 /// An opened candidate: the handle, the length it had at the open, and what the file looked like
 /// then, so a later look can tell whether it is still that file.
@@ -96,12 +110,34 @@ impl Candidate {
     /// [`CANDIDATE_ENTRIES`]. Past that the rest of the file is not read. A file that shrank while
     /// it was read is cut where it ended.
     pub(in crate::engine) async fn chunks(&self, params: Params) -> Option<Chunks> {
+        let stop = StopOnDrop::default();
+        self.chunks_until(params, &stop.0, std::time::Duration::ZERO)
+            .await
+    }
+
+    /// [`Self::chunks`] that stops, at the next block, once `stop` is set: a cut that nobody is
+    /// waiting for any more must not go on holding the file open. `delay` is what a test makes it
+    /// wait for each block.
+    pub(in crate::engine) async fn chunks_until(
+        &self,
+        params: Params,
+        stop: &Arc<AtomicBool>,
+        delay: std::time::Duration,
+    ) -> Option<Chunks> {
         let file = Arc::clone(&self.file);
+        let stop = Arc::clone(stop);
         let len = self.len;
-        tokio::task::spawn_blocking(move || cut(&file, len, params))
+        tokio::task::spawn_blocking(move || cut(&file, len, params, &stop, delay))
             .await
             .ok()?
             .ok()
+    }
+
+    /// How many handles hold the file open: this one, and each cut still running. A test only
+    /// reaches this.
+    #[cfg(test)]
+    pub(in crate::engine) fn handles(&self) -> usize {
+        Arc::strong_count(&self.file)
     }
 
     /// Fills `buf` from `offset`, which has to lie inside the length the file had at the open: a
@@ -123,13 +159,25 @@ impl Candidate {
 }
 
 /// The chunks of `file`, read in blocks inside `len` bytes.
-fn cut(file: &File, len: u64, params: Params) -> io::Result<Chunks> {
+fn cut(
+    file: &File,
+    len: u64,
+    params: Params,
+    stop: &AtomicBool,
+    delay: std::time::Duration,
+) -> io::Result<Chunks> {
     let mut cutter = StreamCut::new(params);
     let mut entries: Vec<Entry> = Vec::new();
     let mut buffer = vec![0u8; BLOCK];
     let mut at = 0u64;
     let mut sound = true;
     while at < len && entries.len() < CANDIDATE_ENTRIES {
+        if stop.load(Ordering::SeqCst) {
+            return Err(io::ErrorKind::Interrupted.into());
+        }
+        if !delay.is_zero() {
+            std::thread::sleep(delay);
+        }
         let want = usize::try_from((len - at).min(BLOCK as u64)).unwrap_or(BLOCK);
         let got = read_full_at(file, &mut buffer[..want], at)?;
         if got == 0 {

@@ -32,6 +32,8 @@ pub(crate) struct Delta {
     asked: Arc<Mutex<Asked>>,
     places: Arc<Mutex<Places>>,
     lists: Arc<Lists>,
+    /// Whether the greeting sets `DELTA`. Always true outside a test.
+    offering: std::sync::atomic::AtomicBool,
     served: AtomicU32,
     /// Bytes a test serves in place of the list, with their own length prefix, so a hostile frame
     /// is reached through a real transfer. A send has no flag for it.
@@ -64,12 +66,18 @@ impl Delta {
             asked,
             places,
             lists: Lists::new(),
+            offering: std::sync::atomic::AtomicBool::new(true),
             served: AtomicU32::new(0),
             #[cfg(test)]
             forced: Mutex::new(None),
             #[cfg(test)]
             needs: Mutex::new(Vec::new()),
         })
+    }
+
+    /// Whether the greeting sets `DELTA`.
+    pub(crate) fn offering(&self) -> bool {
+        self.offering.load(Ordering::SeqCst)
     }
 
     /// How many signature lists this sender has written.
@@ -204,7 +212,33 @@ impl Delta {
     /// Makes each list build wait `by` before it reads. A test only reaches this.
     #[cfg(test)]
     pub(crate) fn delay_builds(&self, by: std::time::Duration) {
-        self.lists.delay_builds(by);
+        self.delays(by, std::time::Duration::ZERO, std::time::Duration::ZERO);
+    }
+
+    /// Makes each build wait before it reads, for each block it reads, and for each block it
+    /// hashes. A test only reaches this.
+    #[cfg(test)]
+    pub(crate) fn delays(
+        &self,
+        before: std::time::Duration,
+        read: std::time::Duration,
+        cut: std::time::Duration,
+    ) {
+        self.lists
+            .delay_builds(super::list::Delays { before, read, cut });
+    }
+
+    /// How many builds stopped in the reader and in the hashing thread. A test only reaches this.
+    #[cfg(test)]
+    pub(crate) fn stopped_in(&self) -> (usize, usize) {
+        self.lists.stopped_in()
+    }
+
+    /// Stops this sender offering signatures, as one that does not set `DELTA` would. A test only
+    /// reaches this.
+    #[cfg(test)]
+    pub(crate) fn stop_offering(&self) {
+        self.offering.store(false, Ordering::SeqCst);
     }
 
     /// How many list builds have started. A test only reaches this.

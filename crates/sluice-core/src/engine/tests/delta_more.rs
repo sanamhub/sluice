@@ -173,11 +173,18 @@ async fn a_mismatch_leaves_no_assembly_behind() {
                 .is_some_and(|n| n.to_string_lossy().starts_with(".sluice-partial-"))
         })
         .expect("the store was kept");
+    // The assembly was made, so the work folder exists, and nothing is left in it.
     let work = partial.join("delta");
-    if let Ok(entries) = fs::read_dir(&work) {
-        let left: Vec<_> = entries.flatten().map(|e| e.file_name()).collect();
-        assert!(left.is_empty(), "{left:?} was left in the work folder");
-    }
+    assert!(
+        work.is_dir(),
+        "no assembly was made, so the check below says nothing"
+    );
+    let left: Vec<_> = fs::read_dir(&work)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert!(left.is_empty(), "{left:?} was left in the work folder");
     sender.serve.abort();
 }
 
@@ -305,12 +312,16 @@ async fn a_delta_receive_reports_progress() {
         .unwrap();
     drop(tx);
     let mut last = None;
+    let mut partial = false;
     while let Some(event) = rx.recv().await {
         if let Event::Progress { bytes, total } = event {
+            // A report while the ranges are being fetched, before the file is assembled.
+            partial |= bytes > 0 && bytes < total;
             last = Some((bytes, total));
         }
     }
     let (bytes, total) = last.expect("no progress was reported");
+    assert!(partial, "no report between nothing and the whole");
     assert_eq!(bytes, total, "the last report is the whole");
     stopped(sender).await;
 }

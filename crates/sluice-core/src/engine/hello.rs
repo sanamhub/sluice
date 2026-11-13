@@ -277,7 +277,7 @@ impl ProtocolHandler for SluiceProtocol {
             Some(receipts) if receipts.enabled() => Hello::ours().with(CAP_RECEIPTS),
             _ => Hello::ours(),
         };
-        if self.delta.is_some() {
+        if self.delta.as_ref().is_some_and(|delta| delta.offering()) {
             ours = ours.with(CAP_DELTA);
         }
         write_hello(&mut send, ours)
@@ -295,6 +295,7 @@ impl ProtocolHandler for SluiceProtocol {
             // left, and the connection close below is the whole answer.
             let _ = log.write_to(&mut send).await;
         } else if let Some(delta) = &self.delta
+            && delta.offering()
             && ours.both(&theirs, CAP_DELTA)
         {
             // One root and one list, and a refusal is nothing written: the stream is finished

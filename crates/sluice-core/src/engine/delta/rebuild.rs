@@ -6,9 +6,8 @@
 //! ranges that are still needed, fetch them into the store, and assemble the file in the store's
 //! temporary area from the candidate's bytes and the fetched ones. The store's import hashes the
 //! assembly once, and the blob is kept only if that hash is the root. Every step that does not work
-//! ends the attempt
-//! and leaves the plain fetch to do the file, with nothing of the attempt left behind but the
-//! ranges it fetched, which the plain fetch reuses.
+//! ends the attempt and leaves the plain fetch to do the file, with nothing of the attempt left
+//! behind but the ranges it fetched, which the plain fetch reuses.
 
 use std::{
     fs, io,
@@ -80,20 +79,62 @@ pub(in crate::engine) async fn fetch_file(job: &Job<'_>, root: [u8; 32], size: u
     matches!(attempt(job, root, size).await, Ok(true))
 }
 
+/// The cut of the candidate that is started with a guess of the sender's average while the first
+/// requests are in flight. It stops when this is dropped, and [`Self::finish`] waits for it to have
+/// stopped, so the file is not held open past the attempt.
+struct EarlyCut {
+    params: sluice_delta::Params,
+    handle: Option<tokio::task::JoinHandle<Option<sluice_delta::Candidate>>>,
+    stop: super::candidate::StopOnDrop,
+}
+
+impl EarlyCut {
+    fn start(candidate: &Candidate, params: sluice_delta::Params) -> Self {
+        let stop = super::candidate::StopOnDrop::default();
+        let (candidate, flag) = (candidate.clone(), std::sync::Arc::clone(&stop.0));
+        let handle = tokio::spawn(async move {
+            candidate
+                .chunks_until(params, &flag, std::time::Duration::ZERO)
+                .await
+        });
+        Self {
+            params,
+            handle: Some(handle),
+            stop,
+        }
+    }
+
+    /// Stops the cut and waits until its thread has let go of the file.
+    async fn finish(&mut self) {
+        self.stop.0.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.await;
+        }
+    }
+}
+
 async fn attempt(job: &Job<'_>, root: [u8; 32], size: u64) -> Result<bool, Error> {
-    let hash = Hash::from(root);
     let Some(candidate) = Candidate::open(job.candidate).await else {
         return Ok(false);
     };
-    // The candidate is cut with the average a sender picks for this size while the first requests
-    // are in flight. It is cut again only if the list's average turns out to be another.
-    let early = params_for(size, crate::engine::hello::MAX_FRAME_BYTES).map(|params| {
-        let candidate = candidate.clone();
-        (
-            params,
-            tokio::spawn(async move { candidate.chunks(params).await }),
-        )
-    });
+    let mut early = params_for(size, crate::engine::hello::MAX_FRAME_BYTES)
+        .map(|params| EarlyCut::start(&candidate, params));
+    let outcome = run(job, root, size, &candidate, &mut early).await;
+    // Whatever the outcome, the cut has stopped and let go of the file before the write phase.
+    if let Some(early) = early.as_mut() {
+        early.finish().await;
+    }
+    outcome
+}
+
+async fn run(
+    job: &Job<'_>,
+    root: [u8; 32],
+    size: u64,
+    candidate: &Candidate,
+    early: &mut Option<EarlyCut>,
+) -> Result<bool, Error> {
+    let hash = Hash::from(root);
     // The request that proves the size also tells the sender's policy this endpoint asked for the
     // root, which is what lets it be told about the root's chunks.
     if fetch::verified_size(job.store, job.conn, hash).await? != size {
@@ -109,7 +150,7 @@ async fn attempt(job: &Job<'_>, root: [u8; 32], size: u64) -> Result<bool, Error
     job.totals
         .signatures
         .fetch_add(signature_bytes, Ordering::SeqCst);
-    let planned = plan_for(&candidate, &list, size, early).await;
+    let planned = plan_for(candidate, &list, size, early).await;
     let Some(plan) = planned.filter(|plan| worth_it(plan, size)) else {
         control.close();
         return Ok(false);
@@ -126,7 +167,7 @@ async fn attempt(job: &Job<'_>, root: [u8; 32], size: u64) -> Result<bool, Error
     job.totals
         .network
         .fetch_add(plan.fetch_bytes(), Ordering::SeqCst);
-    let rebuilt = assemble(job, &candidate, &plan, hash, size).await;
+    let rebuilt = assemble(job, candidate, &plan, hash, size).await;
     if !matches!(rebuilt, Ok(true)) {
         return Ok(false);
     }
@@ -136,23 +177,22 @@ async fn attempt(job: &Job<'_>, root: [u8; 32], size: u64) -> Result<bool, Error
     Ok(true)
 }
 
-/// The plan for `list` against `candidate`, cut with the list's average. `early` is the cut that was
-/// started with a guess of the average, and is used when the guess was right.
+/// The plan for `list` against `candidate`, cut with the list's average. The early cut is used when
+/// its guess of the average was right, and is stopped and replaced by a cut with the list's when it
+/// was not.
 async fn plan_for(
     candidate: &Candidate,
     list: &sluice_delta::SigList,
     size: u64,
-    early: Option<(
-        sluice_delta::Params,
-        tokio::task::JoinHandle<Option<sluice_delta::Candidate>>,
-    )>,
+    early: &mut Option<EarlyCut>,
 ) -> Option<Plan> {
     let params = sluice_delta::Params::new(list.avg_bytes()).ok()?;
-    let chunks = match early {
-        Some((guess, cut)) if guess == params => cut.await.ok().flatten()?,
-        other => {
-            if let Some((_, cut)) = other {
-                cut.abort();
+    let guessed = early.as_ref().is_some_and(|cut| cut.params == params);
+    let chunks = match early.as_mut() {
+        Some(cut) if guessed => cut.handle.take()?.await.ok().flatten()?,
+        _ => {
+            if let Some(cut) = early.as_mut() {
+                cut.finish().await;
             }
             candidate.chunks(params).await?
         }
