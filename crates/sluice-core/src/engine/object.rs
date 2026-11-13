@@ -132,7 +132,7 @@ mod unix {
 }
 
 #[cfg(windows)]
-pub use windows::{facts, is_link, open_file, open_folder, volume_of};
+pub use windows::{facts, is_link, open_file, open_folder, reparse_tag, volume_of};
 
 #[cfg(windows)]
 mod windows {
@@ -192,8 +192,13 @@ mod windows {
     }
 
     /// Whether the open object is a reparse point of a name surrogate, read from its tag.
-    #[allow(unsafe_code)]
     pub fn is_link(file: &File) -> io::Result<bool> {
+        Ok(super::is_name_surrogate_tag(reparse_tag(file)?))
+    }
+
+    /// The reparse tag of the open object, or zero when it is not a reparse point.
+    #[allow(unsafe_code)]
+    pub fn reparse_tag(file: &File) -> io::Result<u32> {
         // SAFETY: the buffer is the structure the class names, and its size is given.
         let mut info: FILE_ATTRIBUTE_TAG_INFO = unsafe { std::mem::zeroed() };
         let got = unsafe {
@@ -207,7 +212,11 @@ mod windows {
         if got == 0 {
             return Err(io::Error::last_os_error());
         }
-        Ok(info.FileAttributes & 0x400 != 0 && super::is_name_surrogate_tag(info.ReparseTag))
+        Ok(if info.FileAttributes & 0x400 != 0 {
+            info.ReparseTag
+        } else {
+            0
+        })
     }
 
     /// A reparse point is opened as itself and not followed, and a folder needs backup semantics.

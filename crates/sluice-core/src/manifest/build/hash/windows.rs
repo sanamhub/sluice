@@ -54,6 +54,16 @@ pub(super) fn decide(attributes: u32, is_link: bool) -> Handle {
     }
 }
 
+/// Whether a file found by handle is read through its filter: it is a reparse point, and its tag is
+/// not that of a name surrogate. A cloud-file placeholder, a deduplicated file and the other tags
+/// stand for the file itself, so reading the handle that was opened as the point would give a stub;
+/// a link, a junction or a mount point is never read, and a plain file or folder is read as it is.
+pub(super) fn needs_filter(attributes: u32, tag: u32) -> bool {
+    attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        && attributes & FILE_ATTRIBUTE_DIRECTORY == 0
+        && !crate::engine::is_name_surrogate_tag(tag)
+}
+
 /// Opens `path` again without the flag, so the filter gives the content, while `held`, the first
 /// handle, keeps the path from being renamed or deleted. The second handle has to be a regular
 /// file as well.
@@ -115,6 +125,35 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn the_tag_decides_which_reparse_points_are_read_through_their_filter() {
+        let point = FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_ARCHIVE;
+        // Files that stand for themselves: deduplicated, cloud placeholders, projected, WIM.
+        for tag in [
+            0x8000_0013_u32, // IO_REPARSE_TAG_DEDUP
+            0x9000_001A,     // IO_REPARSE_TAG_CLOUD_9
+            0x8000_101A,     // OneDrive
+            0x9000_001C,     // IO_REPARSE_TAG_PROJFS
+            0x8000_0008,     // IO_REPARSE_TAG_WIM
+        ] {
+            assert!(
+                needs_filter(point | FILE_ATTRIBUTE_SPARSE_FILE, tag),
+                "{tag:#x}"
+            );
+        }
+        // Name surrogates are never read.
+        for tag in [0xA000_000C_u32, 0xA000_0003] {
+            assert!(!needs_filter(point, tag), "{tag:#x}");
+        }
+        // No reparse point, or a folder, is not read through a filter.
+        assert!(!needs_filter(FILE_ATTRIBUTE_ARCHIVE, 0));
+        assert!(!needs_filter(FILE_ATTRIBUTE_NORMAL, 0x8000_0013));
+        assert!(!needs_filter(
+            FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT,
+            0x8000_0013
+        ));
+    }
 
     #[test]
     fn a_plain_file_is_read_as_it_is() {

@@ -216,3 +216,17 @@ async fn a_send_that_fails_while_it_copies_leaves_nothing_in_the_home() {
         .collect();
     assert!(left.is_empty(), "left behind: {left:?}");
 }
+
+/// The room check is a decision on a free-space reading that a test can set: a send refuses when the
+/// volume has less than it copies, says both numbers, and goes ahead at exactly enough.
+#[test]
+fn a_send_without_room_for_its_copies_is_refused_and_one_with_exactly_enough_is_not() {
+    use crate::engine::send::copy::refuse_without_room;
+    let refused = refuse_without_room(999, 1000).unwrap_err();
+    let Error::Storage(text) = refused else {
+        panic!("a lack of room is a storage error");
+    };
+    assert!(text.contains("999") && text.contains("1000"), "{text}");
+    refuse_without_room(1000, 1000).unwrap();
+    refuse_without_room(u64::MAX, 1000).unwrap();
+}
