@@ -152,3 +152,43 @@ async fn a_candidate_is_never_modified() {
         modified
     );
 }
+
+/// A cut of the candidate that has been told to stop does so at the next block and lets go of the
+/// file, long before it would have reached the end of a file it reads at a block each 100 ms.
+#[tokio::test]
+async fn a_cut_that_is_stopped_lets_go_of_the_file() {
+    use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
+
+    use super::Candidate;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("candidate.bin");
+    std::fs::write(&path, vec![7u8; 16 << 20]).unwrap();
+    let candidate = Candidate::open_blocking(&path).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let started = std::time::Instant::now();
+    let cut = {
+        let (candidate, stop) = (candidate.clone(), Arc::clone(&stop));
+        tokio::spawn(async move {
+            candidate
+                .chunks_until(
+                    sluice_delta::Params::default(),
+                    &stop,
+                    std::time::Duration::from_millis(100),
+                )
+                .await
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    assert!(
+        candidate.handles() > 1,
+        "the cut holds the file while it runs"
+    );
+    stop.store(true, Ordering::SeqCst);
+    assert!(cut.await.unwrap().is_none(), "a stopped cut gave chunks");
+    assert!(
+        started.elapsed() < std::time::Duration::from_millis(1200),
+        "the cut ran on after it was stopped"
+    );
+    assert_eq!(candidate.handles(), 1, "the cut kept the file open");
+}
