@@ -467,6 +467,22 @@ process with no socket.
 - **Stopping.** A signal, or the `Shutdown` call, cancels running jobs, keeps a receive's partial
   store for a resume, and removes the socket.
 
+## The page
+
+`sluice daemon --ui` also serves a page over HTTP/1 on `127.0.0.1` at a port the system picks
+(ADR 0036). The listener closes a connection from any peer that is not on loopback. The port and a
+32-byte random key are in `ui.json` in the home, written with the private-file rules and removed when
+the daemon stops, and `sluice ui` reads it. Every call under `/api/v1` carries the key as a bearer
+token, compared in constant time. The guards run in a fixed order: `Host` must be the loopback
+address or `localhost` on the port, an `Origin` must be the page's own, only `GET` and `POST` are
+served so a preflight has no answer, a POST is `application/json` of at most 64 KiB, and no answer has
+a CORS header. The page is four static files compiled into the binary, with a content security policy
+that allows only its own origin, `nosniff`, no referrer and no caching. Each call is a method of the
+same `Service` the daemon serves, so the page and a gRPC client see the same roots, jobs and events.
+Events are one JSON object per line from a firehose of every job. `ListRoots` and `ListEntries` give
+the page its folders: labels and entries, never a path outside a root. Text a peer chose is set as
+`textContent` and is only ever a JSON string in an answer.
+
 ## MCP
 
 `sluice mcp` is a Model Context Protocol server over standard input and output, built with the

@@ -277,6 +277,16 @@ tool writes. The ticket is returned only in `secret_ticket`, so the client's tra
 it: anyone who can read the transcript can take the files while the send runs. A line of input over
 256 KiB is dropped.
 
+### Use the page
+
+`sluice daemon --ui --root FOLDER` also serves a page in a browser on a loopback port. `sluice ui`
+opens it, and `sluice ui --print` prints its address instead. The address holds a random key in its
+fragment, which the page takes out of it and sends with every call, so anyone who can read the
+address can control the daemon. The page picks files from the roots, shows a ticket and its QR code,
+inspects a ticket, receives into a root and lists transfers as they move. It carries no file bytes:
+the daemon sends and receives them. Only a page of the daemon's own address may call it, a request is
+JSON of at most 64 KiB, and no answer allows another site.
+
 ## How it works
 
 Sluice uses [iroh](https://github.com/n0-computer/iroh) for QUIC, address discovery and hole
