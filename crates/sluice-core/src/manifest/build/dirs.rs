@@ -96,7 +96,7 @@ mod imp {
     #![allow(unsafe_code)]
 
     use std::ffi::c_void;
-    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use std::os::windows::io::{AsRawHandle, FromRawHandle};
     use std::ptr::{null, null_mut};
 
@@ -107,7 +107,8 @@ mod imp {
     };
     use windows_sys::Win32::Foundation::{HANDLE, OBJ_CASE_INSENSITIVE, UNICODE_STRING};
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_SHARE_READ, FILE_SHARE_WRITE, GetFinalPathNameByHandleW,
+        FILE_ID_BOTH_DIR_INFO, FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdBothDirectoryInfo,
+        FileIdBothDirectoryRestartInfo, GetFileInformationByHandleEx,
     };
     use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
@@ -198,35 +199,98 @@ mod imp {
             })
         }
 
-        /// The names in the folder. They are listed from the folder's own path as the system gives it
-        /// for the handle, and every one is then opened from the handle, so a name that came from
-        /// another folder opens nothing here.
+        /// The names in the folder, listed from its own handle with `FileIdBothDirectoryInfo`, so no
+        /// path is resolved and a swap cannot change which folder is listed. The caller opens each
+        /// name from the handle.
         pub(in crate::manifest::build) fn names(&self) -> io::Result<Vec<OsString>> {
-            let mut buffer = vec![0u16; 1024];
-            let length = loop {
-                // SAFETY: the buffer holds `buffer.len()` units and the handle is open.
-                let written = unsafe {
-                    GetFinalPathNameByHandleW(
-                        self.0.as_raw_handle() as HANDLE,
-                        buffer.as_mut_ptr(),
-                        buffer.len() as u32,
-                        0,
-                    )
-                } as usize;
-                if written == 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                if written < buffer.len() {
-                    break written;
-                }
-                buffer.resize(written + 1, 0);
-            };
-            let path = String::from_utf16(&buffer[..length]).map_err(io::Error::other)?;
+            // Eight-byte units, so the buffer is aligned for the structure the call writes into it.
+            let mut buffer = vec![0u64; 8192];
             let mut names = Vec::new();
-            for entry in std::fs::read_dir(&path)? {
-                names.push(entry?.file_name());
+            let mut class = FileIdBothDirectoryRestartInfo;
+            loop {
+                // SAFETY: the buffer holds `buffer.len() * 8` bytes, which the call is told.
+                let got = unsafe {
+                    GetFileInformationByHandleEx(
+                        self.0.as_raw_handle() as HANDLE,
+                        class,
+                        buffer.as_mut_ptr().cast::<c_void>(),
+                        (buffer.len() * 8) as u32,
+                    )
+                };
+                if got == 0 {
+                    let error = io::Error::last_os_error();
+                    // `ERROR_NO_MORE_FILES` ends the listing.
+                    return if error.raw_os_error() == Some(18) {
+                        Ok(names)
+                    } else {
+                        Err(error)
+                    };
+                }
+                class = FileIdBothDirectoryInfo;
+                let base = buffer.as_ptr().cast::<u8>();
+                let mut at = 0usize;
+                loop {
+                    // SAFETY: the call filled the buffer with entries chained by `NextEntryOffset`,
+                    // each laid out as the structure says, and `at` stays inside the filled bytes.
+                    let entry = unsafe { &*base.add(at).cast::<FILE_ID_BOTH_DIR_INFO>() };
+                    let name = unsafe {
+                        let start = (&raw const entry.FileName).cast::<u16>();
+                        std::slice::from_raw_parts(start, entry.FileNameLength as usize / 2)
+                    };
+                    let name = OsString::from_wide(name);
+                    if name != "." && name != ".." {
+                        names.push(name);
+                    }
+                    if entry.NextEntryOffset == 0 {
+                        break;
+                    }
+                    at += entry.NextEntryOffset as usize;
+                }
             }
-            Ok(names)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+    use crate::engine::open_folder;
+
+    /// The names come from the handle, so a folder swapped for another under the same path after it
+    /// was opened does not change which folder is listed.
+    #[test]
+    fn the_names_are_those_of_the_open_folder_and_not_of_whatever_the_path_leads_to_now() {
+        let dir = tempfile::tempdir().unwrap();
+        let sent = dir.path().join("sent");
+        fs::create_dir(&sent).unwrap();
+        fs::write(sent.join("inside.txt"), b"a").unwrap();
+        fs::create_dir(sent.join("sub")).unwrap();
+        let handle = Dir::from_file(open_folder(&sent).unwrap());
+
+        let moved = fs::rename(&sent, dir.path().join("moved"));
+        if cfg!(windows) && moved.is_err() {
+            // A folder with a handle open cannot be renamed here: the swap itself cannot happen.
+            return;
+        }
+        moved.unwrap();
+        fs::create_dir(&sent).unwrap();
+        fs::write(sent.join("outside.txt"), b"b").unwrap();
+
+        let mut names = handle.names().unwrap();
+        names.sort();
+        assert_eq!(names, [OsString::from("inside.txt"), OsString::from("sub")]);
+    }
+
+    #[test]
+    fn an_empty_folder_lists_nothing_and_a_big_one_lists_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        let empty = Dir::from_file(open_folder(dir.path()).unwrap());
+        assert!(empty.names().unwrap().is_empty());
+        for n in 0..3000 {
+            fs::write(dir.path().join(format!("file-{n:05}.txt")), b"x").unwrap();
+        }
+        assert_eq!(empty.names().unwrap().len(), 3000);
     }
 }

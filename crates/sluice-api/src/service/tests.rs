@@ -253,3 +253,44 @@ async fn a_failed_job_gives_its_sentence_to_its_starter_and_a_running_one_does_n
         Err(ApiError::NotFound(_))
     ));
 }
+
+/// A cancel that arrives while a send is still being prepared ends the job as cancelled and leaves
+/// no store or folder of the send in the home, where the dropped preparing used to leave both for a
+/// later command to find. The endpoint is loopback only.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancel_during_the_preparing_ends_the_job_and_leaves_nothing_in_the_home() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("root");
+    std::fs::create_dir(&root).unwrap();
+    // Large enough that the hashing is still running when the cancel arrives.
+    std::fs::write(root.join("big.bin"), vec![3u8; 150 * 1024 * 1024]).unwrap();
+    let home = Home::open(&dir.path().join("home")).unwrap();
+    let temporary = home.temporary_folder().unwrap();
+    let roots = Roots::open(std::slice::from_ref(&root)).unwrap();
+    let service = Service::new(home, roots, RelayModeChoice::Loopback);
+
+    let id = service
+        .begin_send(StartSendRequest {
+            paths: vec![at(&root, "big.bin").unwrap()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    service
+        .cancel_job(&proto::CancelJobRequest { job_id: id.clone() })
+        .unwrap();
+    let mut events = service
+        .watch_events(&proto::WatchEventsRequest { job_id: id.clone() })
+        .unwrap();
+    while events.next().await.is_some() {}
+
+    let detail = service.job_detail(&id).unwrap();
+    assert_eq!(detail.summary.state, JobState::Cancelled as i32);
+    assert!(detail.secret_ticket.is_none(), "no ticket was made");
+    sluice_core::engine::wait_for_removals(Duration::from_secs(10));
+    let left: Vec<_> = std::fs::read_dir(&temporary)
+        .unwrap()
+        .filter_map(Result::ok)
+        .collect();
+    assert!(left.is_empty(), "left behind: {left:?}");
+}

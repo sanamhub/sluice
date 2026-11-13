@@ -22,7 +22,12 @@ pub(super) fn check_room(home: &Home, built: &Built) -> Result<(), Error> {
         return Ok(());
     }
     let folder = home.temporary_folder()?;
-    let available = storage::available_bytes(&folder)?;
+    refuse_without_room(storage::available_bytes(&folder)?, needed)
+}
+
+/// The decision of [`check_room`], with the free space given as a value so a test can try any
+/// reading of it.
+pub(super) fn refuse_without_room(available: u64, needed: u64) -> Result<(), Error> {
     if available < needed {
         return Err(Error::Storage(format!(
             "the home's volume has {available} bytes free and this send copies {needed} bytes into \

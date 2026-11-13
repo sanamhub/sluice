@@ -85,8 +85,12 @@ pub(super) fn open_below(found: &Below) -> Result<Opened, HashFault> {
         .metadata()
         .map_err(|e| HashFault::Unreadable(e.kind()))?;
     #[cfg(windows)]
-    if let windows::Handle::ReparsePoint = windows::classify(&before) {
-        return windows::through_filter_handle(file);
+    {
+        use std::os::windows::fs::MetadataExt;
+        let tag = crate::engine::reparse_tag(&file).map_err(|e| HashFault::Unreadable(e.kind()))?;
+        if windows::needs_filter(before.file_attributes(), tag) {
+            return windows::through_filter_handle(file);
+        }
     }
     if !before.is_file() {
         return Err(HashFault::Changed);
