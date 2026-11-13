@@ -71,11 +71,12 @@ impl Opened {
             ApiError::Refused(format!("cannot use the path: {}", shown(&e.to_string())))
         })?;
         let name = self.name.clone();
-        Ok(if self.is_file {
+        let arg = if self.is_file {
             sluice_core::manifest::ConfinedArg::file(handle, name)
         } else {
             sluice_core::manifest::ConfinedArg::folder(handle, name)
-        })
+        };
+        Ok(arg.expecting(self.pin))
     }
 
     /// Refuses a file with more than one name: its other name may lie outside every root, and no

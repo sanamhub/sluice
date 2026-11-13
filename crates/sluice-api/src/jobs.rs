@@ -136,6 +136,12 @@ impl Job {
                 status.failure = Some(message.clone());
             }
         }
+        // A ticket is read only while the send runs: once the job has ended nobody can take what it
+        // served, and nothing should keep the ticket.
+        *self
+            .ticket
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
         let last = event(
             &self.id,
             Kind::Done(proto::Done {

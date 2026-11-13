@@ -1,13 +1,12 @@
 //! What the tools take and what they give back. Every answer is a structured value, and what a peer
 //! chose lives only in a field whose name begins `untrusted_`, so a client can tell it from what
-//! this program wrote and an client is not handed it as part of a sentence.
+//! this program wrote and a client is not handed it as part of a sentence.
 
 use rmcp::schemars;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sluice_api::ApiError;
 use sluice_api::proto::{self, JobKind, JobState};
-use sluice_core::manifest::path::shown;
 
 /// A path below one of the roots the server was started with.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -85,7 +84,7 @@ impl From<ApiError> for Failure {
         Self {
             kind: kind.to_string(),
             message: message.to_string(),
-            untrusted_detail: shown(&error.to_string()),
+            untrusted_detail: error.to_string(),
         }
     }
 }
@@ -168,7 +167,7 @@ impl JobResult {
     pub fn detailed(detail: &sluice_api::JobDetail) -> Self {
         Self {
             secret_ticket: detail.secret_ticket.clone(),
-            untrusted_detail: detail.failure.as_deref().map(shown),
+            untrusted_detail: detail.failure.clone(),
             ..Self::from(&detail.summary)
         }
     }
@@ -221,4 +220,19 @@ pub struct DoctorResult {
     /// What `sluice doctor` would exit with.
     pub exit_code: u32,
     pub checks: Vec<CheckResult>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The text of a refusal is escaped once, where it is made, and passed on as it is: a second
+    /// escape would double the backslash of the first.
+    #[test]
+    fn untrusted_detail_is_not_escaped_a_second_time() {
+        let escaped = r"policy denied: a\u{202e}b".to_string();
+        let failure = Failure::from(ApiError::Refused(escaped.clone()));
+        assert_eq!(failure.untrusted_detail, escaped);
+        assert!(!failure.untrusted_detail.contains('\u{202e}'));
+    }
 }

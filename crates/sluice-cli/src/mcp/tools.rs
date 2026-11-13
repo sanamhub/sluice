@@ -43,7 +43,7 @@ pub struct Tools {
 
 impl Tools {
     /// Tools over `service`. `roots` are the names the server was started with, which the
-    /// instructions list so an client knows what it may name.
+    /// instructions list so a client knows what it may name.
     pub fn new(service: Service, roots: Vec<String>) -> Self {
         Self {
             service,
