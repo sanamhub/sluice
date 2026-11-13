@@ -153,8 +153,10 @@ of this page for memory, 250 MB, holds with room: 35 MiB for the receiver at mos
 | | delta | 10,656,413 (0.99%) | 2,276,888 | 8.5 (7.8 to 9.5) | 35 / 31 |
 | 1 MiB inserted at the start | plain | 1,074,790,400 (100%) | 0 | 8.7 (7.9 to 11.7) | 26 / 26 |
 | | delta | 1,058,975 (0.10%) | 2,278,808 | 6.6 (5.9 to 10.0) | 35 / 31 |
-| Unrelated content | plain | 1,073,741,824 (100%) | 0 | 9.5 (7.6 to 10.0) | 27 / 27 |
-| | delta | 1,073,741,824 (100%) | 2,275,288 (list read, plan dropped) | 13.5 (12.4 to 18.1) | 35 / 31 |
+| Unrelated content | plain | 1,073,741,824 (100%) | 0 | 8.2 (7.6 to 14.8) | 27 / 26 |
+| | delta | 1,073,741,824 (100%) | 2,275,288 (list read, plan dropped) | 12.0 (10.7 to 17.7) | 35 / 31 |
+
+The unrelated-content rows come from a second set of five runs, and the other rows from the first.
 
 **What it shows.** Both changed cases move well under 3% of the bytes: 0.99% for the edit in place,
 which is the 10 MiB that changed and no more, and 0.10% for the insertion, which is the 1 MiB
