@@ -294,3 +294,17 @@ async fn a_cancel_during_the_preparing_ends_the_job_and_leaves_nothing_in_the_ho
         .collect();
     assert!(left.is_empty(), "left behind: {left:?}");
 }
+
+#[tokio::test]
+async fn a_job_that_ends_no_longer_gives_its_ticket() {
+    let (_dir, service) = service(&[]);
+    let job = service
+        .inner
+        .jobs
+        .start(proto::JobKind::Send, None)
+        .unwrap();
+    job.keep_ticket("sluice1secret".to_string());
+    assert!(service.job_detail(&job.id).unwrap().secret_ticket.is_some());
+    job.finish(JobState::Done, String::new(), false);
+    assert!(service.job_detail(&job.id).unwrap().secret_ticket.is_none());
+}
