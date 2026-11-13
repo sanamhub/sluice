@@ -7,6 +7,8 @@
 //! is opened as itself and not followed.
 
 use std::ffi::{OsStr, OsString};
+
+mod entries;
 use std::fs::File;
 use std::io;
 
@@ -21,10 +23,16 @@ pub(super) enum Kind {
 }
 
 /// Whether `name` is one component: not empty, not `.` or `..`, and holding no separator. Every name
-/// opened from a folder handle is one, and the walk asks the folder for it by a name it listed.
+/// opened from a folder handle is one, and the walk asks the folder for it by a name it listed. A
+/// backslash is a separator only on Windows: `a\b` is a legal name on Unix.
 fn is_one_component(name: &OsStr) -> bool {
     let text = name.to_string_lossy();
-    !text.is_empty() && text != "." && text != ".." && !text.contains(['/', '\\'])
+    let separator = if cfg!(windows) {
+        ['/', '\\']
+    } else {
+        ['/', '/']
+    };
+    !text.is_empty() && text != "." && text != ".." && !text.contains(separator)
 }
 
 /// An open folder.
@@ -107,7 +115,7 @@ mod imp {
     #![allow(unsafe_code)]
 
     use std::ffi::c_void;
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use std::os::windows::ffi::OsStrExt;
     use std::os::windows::io::{AsRawHandle, FromRawHandle};
     use std::ptr::{null, null_mut};
 
@@ -118,8 +126,8 @@ mod imp {
     };
     use windows_sys::Win32::Foundation::{HANDLE, OBJ_CASE_INSENSITIVE, UNICODE_STRING};
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_ID_BOTH_DIR_INFO, FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdBothDirectoryInfo,
-        FileIdBothDirectoryRestartInfo, GetFileInformationByHandleEx,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo,
+        GetFileInformationByHandleEx,
     };
     use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
@@ -224,47 +232,39 @@ mod imp {
         pub(in crate::manifest::build) fn names(&self) -> io::Result<Vec<OsString>> {
             // Eight-byte units, so the buffer is aligned for the structure the call writes into it.
             let mut buffer = vec![0u64; 8192];
+            let length = buffer.len() * 8;
             let mut names = Vec::new();
             let mut class = FileIdBothDirectoryRestartInfo;
+            let mut first = true;
             loop {
-                // SAFETY: the buffer holds `buffer.len() * 8` bytes, which the call is told.
+                // SAFETY: the buffer holds `length` bytes, which the call is told.
                 let got = unsafe {
                     GetFileInformationByHandleEx(
                         self.0.as_raw_handle() as HANDLE,
                         class,
                         buffer.as_mut_ptr().cast::<c_void>(),
-                        (buffer.len() * 8) as u32,
+                        length as u32,
                     )
                 };
                 if got == 0 {
                     let error = io::Error::last_os_error();
-                    // `ERROR_NO_MORE_FILES` ends the listing.
-                    return if error.raw_os_error() == Some(18) {
-                        Ok(names)
-                    } else {
-                        Err(error)
+                    return match error.raw_os_error() {
+                        // `ERROR_NO_MORE_FILES` ends the listing.
+                        Some(18) => Ok(names),
+                        // A folder with no entry at all, not even "." and "..", answers the first
+                        // query with `ERROR_FILE_NOT_FOUND`: exFAT folders and volume roots have
+                        // none. It is an empty listing there, and an error on any later call.
+                        Some(2) if first => Ok(names),
+                        _ => Err(error),
                     };
                 }
+                first = false;
                 class = FileIdBothDirectoryInfo;
-                let base = buffer.as_ptr().cast::<u8>();
-                let mut at = 0usize;
-                loop {
-                    // SAFETY: the call filled the buffer with entries chained by `NextEntryOffset`,
-                    // each laid out as the structure says, and `at` stays inside the filled bytes.
-                    let entry = unsafe { &*base.add(at).cast::<FILE_ID_BOTH_DIR_INFO>() };
-                    let name = unsafe {
-                        let start = (&raw const entry.FileName).cast::<u16>();
-                        std::slice::from_raw_parts(start, entry.FileNameLength as usize / 2)
-                    };
-                    let name = OsString::from_wide(name);
-                    if name != "." && name != ".." {
-                        names.push(name);
-                    }
-                    if entry.NextEntryOffset == 0 {
-                        break;
-                    }
-                    at += entry.NextEntryOffset as usize;
-                }
+                // SAFETY: the buffer is `length` bytes of initialized memory, and `parse_entries`
+                // checks every offset it reads against that length.
+                let filled =
+                    unsafe { std::slice::from_raw_parts(buffer.as_ptr().cast::<u8>(), length) };
+                super::entries::parse_entries(filled, &mut names)?;
             }
         }
     }
@@ -288,18 +288,37 @@ mod tests {
         fs::create_dir(sent.join("sub")).unwrap();
         let handle = Dir::from_file(open_folder(&sent).unwrap());
 
+        // The rename has to happen, on every platform, or the test proves nothing. On Windows the
+        // share mode of the handle is what lets it: `open_folder` shares delete, so the folder can be
+        // renamed under the open handle, and a handle opened without that share mode would make this
+        // assertion fail. The listing below is then the proof that it is still the opened folder.
         let moved = fs::rename(&sent, dir.path().join("moved"));
-        if cfg!(windows) && moved.is_err() {
-            // A folder with a handle open cannot be renamed here: the swap itself cannot happen.
-            return;
-        }
-        moved.unwrap();
+        assert!(
+            moved.is_ok(),
+            "the folder is renamed under its open handle: {moved:?}"
+        );
         fs::create_dir(&sent).unwrap();
         fs::write(sent.join("outside.txt"), b"b").unwrap();
 
         let mut names = handle.names().unwrap();
         names.sort();
         assert_eq!(names, [OsString::from("inside.txt"), OsString::from("sub")]);
+    }
+
+    /// A backslash is a legal name on Unix, so a folder called `a\b` is one component there and is
+    /// listed and opened from its handle.
+    #[cfg(unix)]
+    #[test]
+    fn a_unix_folder_named_with_a_backslash_is_one_component() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("a\\b")).unwrap();
+        fs::write(dir.path().join("a\\b").join("f.txt"), b"x").unwrap();
+        let handle = Dir::from_file(open_folder(dir.path()).unwrap());
+        assert!(is_one_component(OsStr::new("a\\b")));
+        assert_eq!(handle.names().unwrap(), [OsString::from("a\\b")]);
+        assert_eq!(handle.kind(OsStr::new("a\\b")).unwrap(), Kind::Dir);
+        let inner = handle.open_dir(OsStr::new("a\\b")).unwrap();
+        assert_eq!(inner.names().unwrap(), [OsString::from("f.txt")]);
     }
 
     #[test]
