@@ -987,7 +987,12 @@ implementations MUST NOT describe it as proof of delivery.
 
 The local control interface is defined by `proto/sluice/v1`, governed by `buf`, and served over a
 Unix socket or Windows named pipe. An implementation MAY also serve it over TCP, and then MUST
-require TLS and token authentication.
+require TLS and token authentication. It MAY also serve it as JSON over HTTP on a loopback port, for a
+page in a browser that runs on the same computer, and then it MUST bind only a loopback address and
+close a connection from any other peer, MUST require a random key of at least 32 bytes on every call,
+MUST refuse a request whose `Host` or `Origin` is not its own, MUST send no CORS header, MUST accept a
+request body only as JSON of at most 64 KiB, and MUST serve a page that loads nothing from another
+origin. The page carries no file bytes: the server moves them as a peer.
 
 It is a control plane. **No file bytes ever traverse this API.** A client asks the engine to move
 bytes and observes progress; it never carries them.
@@ -1003,6 +1008,14 @@ after it is reported by `path_changed` like any other move. `dropped` is the one
 the transfer's: it says that a watcher could not keep up, and how many events of the job it did not
 get. A watcher MUST treat the gap as unknown rather than as nothing having happened, and a server
 MUST never grow a buffer without a bound to avoid one.
+
+`ListRoots` returns the label of each root, which is the name of its folder, and never its path; a
+request names a root by that label or by the name the root was started with. `ListEntries` returns
+the name, kind and size of the entries directly under a path below a root, folders first, at most
+10 000 of them with a flag that says whether it cut the list. It resolves the path as every path under
+a root is resolved and reads the listing from the handle it opened, and a link in it is listed with
+its own kind and never followed. Two roots whose folders have the same name are refused when the
+server starts, because a label names exactly one.
 
 **Roots.** A server is started with zero or more root folders (`sluice daemon --root DIR`,
 repeatable), and every path a client names lives inside one of them: the path of a send, the output
