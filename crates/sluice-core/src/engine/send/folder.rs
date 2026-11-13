@@ -380,8 +380,7 @@ fn total_bytes(manifest: &Manifest) -> u64 {
 }
 
 #[cfg(test)]
-async fn add_pack_for_test(built: &Built) -> Result<(), Error> {
-    let cancel = Arc::new(AtomicBool::new(false));
+async fn add_pack_for_test(built: &Built, cancel: Arc<AtomicBool>) -> Result<(), Error> {
     let dir = tempfile::tempdir().unwrap();
     let store = FsStore::load(dir.path()).await.unwrap();
     let mut tags = Vec::new();

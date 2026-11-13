@@ -93,7 +93,7 @@ async fn a_small_packed_file_replaced_by_one_of_the_same_size_is_refused() {
     fs::write(sent.join("tiny.txt"), b"tiny").unwrap();
     let built = confined(&sent);
     rename_over(&sent, "tiny.txt", b"fake");
-    let pack = super::add_pack_for_test(&built).await;
+    let pack = super::add_pack_for_test(&built, never()).await;
     assert!(text_of(pack).contains("replaced"));
 }
 
@@ -264,4 +264,37 @@ async fn a_send_that_is_told_to_stop_ends_as_cancelled() {
         ended = item.err().map(|e| e.to_string());
     }
     assert_eq!(ended.as_deref(), Some(crate::engine::send::copy::STOPPED));
+}
+
+/// A send that is told to stop opens no file. The opens are counted through the hook, and the flag is
+/// already set when the import and the packing start, so the count is zero for both.
+#[tokio::test]
+async fn a_send_told_to_stop_before_it_starts_opens_no_file() {
+    use std::sync::atomic::AtomicUsize;
+    static OPENS: AtomicUsize = AtomicUsize::new(0);
+    OPENS.store(0, Ordering::SeqCst);
+    crate::engine::send::copy::before_copy(|| {
+        OPENS.fetch_add(1, Ordering::SeqCst);
+    });
+
+    let dir = tempfile::tempdir().unwrap();
+    let blob = confined(&folder_with_a_big_file(dir.path()));
+    let stopped = Arc::new(AtomicBool::new(true));
+    let store_dir = tempfile::tempdir().unwrap();
+    let store = FsStore::load(store_dir.path()).await.unwrap();
+    let mut tags = Vec::new();
+    let result = import_blobs(&store, &blob, &blob.manifest, &mut tags, &stopped).await;
+    assert!(matches!(result, Err(Error::Cancelled)), "{result:?}");
+    drop(tags);
+    store.shutdown().await.unwrap();
+
+    let small = dir.path().join("small");
+    fs::create_dir(&small).unwrap();
+    fs::write(small.join("tiny.txt"), b"tiny").unwrap();
+    let packed = confined(&small);
+    let result = super::add_pack_for_test(&packed, stopped.clone()).await;
+    assert!(matches!(result, Err(Error::Cancelled)), "{result:?}");
+
+    crate::engine::send::copy::clear_before_copy();
+    assert_eq!(OPENS.load(Ordering::SeqCst), 0, "no file was opened");
 }
