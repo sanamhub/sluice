@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use super::below::Below;
+use super::handles::Below;
 
 /// The disk path of each entry of a [`Built`](super::Built) manifest, by index, so a caller reads
 /// the files the walk saw. A second walk could find a different folder.

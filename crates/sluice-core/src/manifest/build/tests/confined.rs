@@ -154,3 +154,102 @@ fn an_ancestor_of_a_file_swapped_for_a_link_after_the_open_leads_nowhere() {
     std::io::Read::read_to_end(&mut below.open().unwrap(), &mut body).unwrap();
     assert_eq!(body, b"inside bytes");
 }
+
+/// The walk lists what the open folder holds. A folder swapped for a link between the open and the
+/// listing is not what is listed: on Unix the opened folder is renamed away and a link to a folder
+/// with secrets put in its place, and the listing is still the opened folder's. On Windows a folder
+/// with a handle open cannot be renamed at all.
+#[test]
+fn the_listing_is_of_the_folder_that_was_opened_and_not_of_what_replaced_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let sent = dir.path().join("sent");
+    let outside = dir.path().join("outside");
+    fs::create_dir_all(sent.join("sub")).unwrap();
+    fs::create_dir(&outside).unwrap();
+    fs::write(sent.join("sub").join("inside.txt"), b"in").unwrap();
+    fs::write(outside.join("secret.txt"), b"outside bytes").unwrap();
+
+    let renamed = std::rc::Rc::new(std::cell::Cell::new(None));
+    let (sub, gone, target) = (sent.join("sub"), sent.join("gone"), outside.clone());
+    let seen = renamed.clone();
+    super::super::below::after_open(move |listing| {
+        if listing.ends_with("/sub") {
+            let moved = fs::rename(&sub, &gone);
+            seen.set(Some(moved.is_ok()));
+            if moved.is_ok() {
+                link_to_folder(&sub, &target);
+            }
+        }
+    });
+    let _ = super::super::below::take_listed();
+    let result = build(&sent);
+    super::super::below::after_open(|_| {});
+    let listed = super::super::below::take_listed();
+
+    if cfg!(windows) {
+        assert_eq!(
+            renamed.get(),
+            Some(false),
+            "an open folder cannot be renamed"
+        );
+    } else {
+        assert_eq!(renamed.get(), Some(true));
+    }
+    let sub_names: Vec<&String> = listed
+        .iter()
+        .filter(|(folder, _)| folder.ends_with("/sub"))
+        .flat_map(|(_, names)| names)
+        .collect();
+    assert_eq!(sub_names, ["inside.txt"], "{listed:?}");
+    // Whatever the build made of it, nothing outside is in it.
+    if let Ok(Build::Ready(built)) = result {
+        assert!(
+            !built
+                .manifest
+                .entries()
+                .iter()
+                .any(|e| e.path.as_str().contains("secret"))
+        );
+    }
+}
+
+/// A file argument whose name is NFD, beside a file with the NFC spelling: it is opened by the
+/// spelling the folder has and its identity is the one that was checked, and only the manifest path
+/// is NFC. Linux keeps the two spellings as two files.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_file_argument_is_opened_by_its_own_spelling_and_checked_against_its_identity() {
+    use crate::engine::ObjectId;
+    let dir = tempfile::tempdir().unwrap();
+    let nfc = "caf\u{e9}.txt";
+    let nfd = "cafe\u{301}.txt";
+    fs::write(dir.path().join(nfc), b"the NFC file").unwrap();
+    fs::write(dir.path().join(nfd), b"the NFD file").unwrap();
+    let wanted = ObjectId::of_path(&dir.path().join(nfd)).unwrap();
+    let parent = || open_folder(dir.path()).unwrap();
+
+    let arg = ConfinedArg::file(parent(), nfd.to_string()).expecting(wanted);
+    let Build::Ready(built) = Manifest::build_confined(vec![arg]).unwrap() else {
+        panic!("a plain file builds");
+    };
+    assert_eq!(
+        built.manifest.entries()[0].path.as_str(),
+        nfc,
+        "the manifest path is NFC"
+    );
+    let mut body = Vec::new();
+    std::io::Read::read_to_end(&mut built.disk.below(0).unwrap().open().unwrap(), &mut body)
+        .unwrap();
+    assert_eq!(
+        body, b"the NFD file",
+        "the file opened is the one that was named"
+    );
+
+    // An identity that is another file's is refused.
+    let other = ObjectId::of_path(&dir.path().join(nfc)).unwrap();
+    let arg = ConfinedArg::file(parent(), nfd.to_string()).expecting(other);
+    assert!(matches!(
+        Manifest::build_confined(vec![arg]),
+        Err(Error::Policy(_))
+    ));
+}

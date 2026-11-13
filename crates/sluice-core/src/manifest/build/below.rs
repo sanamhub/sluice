@@ -10,89 +10,19 @@
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use unicode_normalization::UnicodeNormalization;
 
 use super::argument::{nfc_name, unique_name};
 use super::dirs::{Dir, Kind};
+use super::handles::{Below, ConfinedArg, open_dir_below, open_in};
 use super::walk::{Item, Walk, What};
 use super::{Finding, Reason, meta};
 use crate::Error;
 use crate::engine::{ObjectId, facts, is_link};
 use crate::manifest::path::{ManifestPath, component_rule};
-
-/// A folder, or a file with the folder it is in, that a caller opened and proved.
-#[derive(Debug)]
-pub struct ConfinedArg {
-    handle: File,
-    name: String,
-    file: bool,
-}
-
-impl ConfinedArg {
-    /// A folder to send. `handle` is the open folder, and `name` is the name it arrives under.
-    pub fn folder(handle: File, name: String) -> Self {
-        Self {
-            handle,
-            name,
-            file: false,
-        }
-    }
-
-    /// A file to send. `parent` is the open folder it is in, and `name` is its name there.
-    pub fn file(parent: File, name: String) -> Self {
-        Self {
-            handle: parent,
-            name,
-            file: true,
-        }
-    }
-}
-
-/// Where a confined walk found a file: the folder handle it is below, its path below that, and the
-/// object it was.
-#[derive(Clone, Debug)]
-pub struct Below {
-    root: Arc<Dir>,
-    rel: PathBuf,
-    id: ObjectId,
-}
-
-impl Below {
-    /// Opens the file again, from the folder handle and without following a link anywhere on the
-    /// way, and refuses it unless it is the object the walk saw.
-    pub fn open(&self) -> io::Result<File> {
-        let file = open_file_below(&self.root, &self.rel)?;
-        if facts(&file)?.identity != self.id {
-            return Err(io::Error::other("the file is not the object the walk saw"));
-        }
-        Ok(file)
-    }
-}
-
-/// Opens the folder `rel` below `root`, one component at a time, never following a link.
-pub(crate) fn open_dir_below(root: &Dir, rel: &Path) -> io::Result<Dir> {
-    let mut here = root.try_clone()?;
-    for part in rel.components() {
-        here = here.open_dir(part.as_os_str())?;
-    }
-    Ok(here)
-}
-
-/// Opens the file `rel` below `root`, never following a link, the last component included.
-pub(crate) fn open_file_below(root: &Dir, rel: &Path) -> io::Result<File> {
-    let name = rel
-        .file_name()
-        .ok_or_else(|| io::Error::other("a file has a name"))?;
-    let parent = open_dir_below(root, rel.parent().unwrap_or(Path::new("")))?;
-    open_in(&parent, name)
-}
-
-fn open_in(parent: &Dir, name: &OsStr) -> io::Result<File> {
-    parent.open_file(name)
-}
 
 fn refused(shown: &str, why: &str) -> Error {
     Error::Policy(format!(
@@ -109,11 +39,31 @@ thread_local! {
     static BEFORE_LISTING: std::cell::RefCell<Hook> = std::cell::RefCell::new(Box::new(|_| {}));
 }
 
-/// Runs `hook` with the name of each folder just before the walk lists it, which is where a test
-/// swaps a folder for a link, the one moment a real run cannot be made to hit on purpose.
+/// Runs `hook` with the name of each folder just before the walk opens it to list it, which is where
+/// a test swaps a folder for a link, the one moment a real run cannot be made to hit on purpose.
 #[cfg(test)]
 pub(super) fn before_listing(hook: impl Fn(&str) + 'static) {
     BEFORE_LISTING.with(|slot| *slot.borrow_mut() = Box::new(hook));
+}
+
+#[cfg(test)]
+thread_local! {
+    static AFTER_OPEN: std::cell::RefCell<Hook> = std::cell::RefCell::new(Box::new(|_| {}));
+    static LISTED: std::cell::RefCell<Vec<(String, Vec<String>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Runs `hook` with the name of each folder after the walk opened it and before it lists what the
+/// open handle holds, where a test swaps the folder the handle was opened from.
+#[cfg(test)]
+pub(super) fn after_open(hook: impl Fn(&str) + 'static) {
+    AFTER_OPEN.with(|slot| *slot.borrow_mut() = Box::new(hook));
+}
+
+/// The folders listed so far and the names each gave, then forgets them.
+#[cfg(test)]
+pub(super) fn take_listed() -> Vec<(String, Vec<String>)> {
+    LISTED.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
 }
 
 /// A folder still to be read.
@@ -168,10 +118,10 @@ pub(super) fn walk(args: Vec<ConfinedArg>) -> Result<Walk, Error> {
         let name = unique_name(&mut names, nfc_name(&arg.name)?, &shown)?;
         let root = Arc::new(Dir::from_file(arg.handle));
         if arg.file {
-            file_argument(&mut out, root, name)?;
+            file_argument(&mut out, root, &arg.name, name, arg.expect)?;
         } else {
             let handle = root.try_clone().map_err(|e| unreadable(&shown, &e))?;
-            folder_argument(&mut out, &mut stack, root, &handle, name)?;
+            folder_argument(&mut out, &mut stack, root, &handle, name, arg.expect)?;
         }
     }
     while let Some(folder) = stack.pop() {
@@ -184,14 +134,25 @@ fn unreadable(shown: &str, error: &io::Error) -> Error {
     refused(shown, &format!("it cannot be read ({})", error.kind()))
 }
 
-fn file_argument(out: &mut Walk, parent: Arc<Dir>, name: String) -> Result<(), Error> {
-    let file = open_in(&parent, OsStr::new(&name)).map_err(|e| unreadable(&name, &e))?;
-    let seen = prove(&file, &name, None)?;
+/// A file argument. It is opened by the spelling the folder has, `raw`, and not by the NFC form the
+/// manifest carries, since a folder can hold both spellings as two files.
+fn file_argument(
+    out: &mut Walk,
+    parent: Arc<Dir>,
+    raw: &str,
+    name: String,
+    expect: Option<ObjectId>,
+) -> Result<(), Error> {
+    let file = open_in(&parent, OsStr::new(raw)).map_err(|e| unreadable(raw, &e))?;
+    let seen = prove(&file, raw, None)?;
     if !seen.meta.is_file() {
-        return Err(refused(&name, "it is not a regular file or a folder"));
+        return Err(refused(raw, "it is not a regular file or a folder"));
     }
     if seen.links > 1 {
-        return Err(refused(&name, MORE_THAN_ONE_NAME));
+        return Err(refused(raw, MORE_THAN_ONE_NAME));
+    }
+    if expect.is_some_and(|expected| expected != seen.id) {
+        return Err(refused(raw, "it is not the object that was checked"));
     }
     let path = ManifestPath::parse_rule(&name).map_err(|rule| {
         Error::Policy(format!(
@@ -202,10 +163,10 @@ fn file_argument(out: &mut Walk, parent: Arc<Dir>, name: String) -> Result<(), E
         path,
         shown: name.clone(),
         what: What::File {
-            disk: PathBuf::from(&name),
+            disk: PathBuf::from(raw),
             below: Some(Below {
                 root: parent,
-                rel: PathBuf::from(&name),
+                rel: PathBuf::from(raw),
                 id: seen.id,
             }),
         },
@@ -221,12 +182,16 @@ fn folder_argument(
     root: Arc<Dir>,
     handle: &Dir,
     name: String,
+    expect: Option<ObjectId>,
 ) -> Result<(), Error> {
     let file = handle
         .try_clone()
         .map_err(|e| unreadable(&name, &e))?
         .into_file();
     let seen = prove(&file, &name, None)?;
+    if expect.is_some_and(|expected| expected != seen.id) {
+        return Err(refused(&name, "it is not the object that was checked"));
+    }
     let path = ManifestPath::parse_rule(&name).map_err(|rule| {
         Error::Policy(format!(
             "{name} has a name a receiver would reject (rule {rule})"
@@ -270,7 +235,17 @@ fn read_folder(out: &mut Walk, stack: &mut Vec<Pending>, folder: &Pending) -> Re
             &format!("it cannot be opened ({})", e.kind()),
         )
     })?;
+    #[cfg(test)]
+    AFTER_OPEN.with(|hook| (hook.borrow())(&folder.shown));
     let names = dir.names().map_err(|e| unreadable(&folder.shown, &e))?;
+    #[cfg(test)]
+    LISTED.with(|slot| {
+        let listed = names
+            .iter()
+            .map(|n| n.to_string_lossy().into_owned())
+            .collect();
+        slot.borrow_mut().push((folder.shown.clone(), listed));
+    });
     for name in names {
         let shown = format!("{}/{}", folder.shown, name.to_string_lossy());
         let kind = dir.kind(&name).map_err(|e| unreadable(&shown, &e))?;
