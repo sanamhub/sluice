@@ -116,6 +116,22 @@ impl ControlService for Grpc {
         Ok(Response::new(self.0.doctor().await?))
     }
 
+    async fn list_roots(
+        &self,
+        _request: Request<proto::ListRootsRequest>,
+    ) -> Result<Response<proto::ListRootsResponse>, Status> {
+        Ok(Response::new(self.0.list_roots()))
+    }
+
+    async fn list_entries(
+        &self,
+        request: Request<proto::ListEntriesRequest>,
+    ) -> Result<Response<proto::ListEntriesResponse>, Status> {
+        Ok(Response::new(
+            self.0.list_entries(request.into_inner()).await?,
+        ))
+    }
+
     async fn shutdown(
         &self,
         _request: Request<proto::ShutdownRequest>,

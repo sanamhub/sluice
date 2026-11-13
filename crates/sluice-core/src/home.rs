@@ -7,6 +7,7 @@ mod folder;
 mod identity;
 mod layout;
 mod lock;
+mod private;
 // The only unsafe code in the crate. Everything else stays under the crate's `deny`.
 #[cfg(windows)]
 #[allow(unsafe_code)]

@@ -25,6 +25,9 @@ send and receive; start it with `sluice daemon --root DIR` to allow the folders 
 /// the open handle that stands for that folder.
 struct Root {
     name: String,
+    /// The folder's own name, which a client may use for the root in place of `name`, and which is
+    /// all a listing of the roots says of it.
+    label: String,
     path: PathBuf,
     // The proof of which folder the daemon opened: the name is compared with it on every request.
     held: File,
@@ -58,7 +61,14 @@ impl Roots {
                     shown(name)
                 )));
             }
-            roots.push(open_one(name, dir)?);
+            let root = open_one(name, dir)?;
+            if roots.iter().any(|other| other.label == root.label) {
+                return Err(ApiError::Invalid(format!(
+                    "two roots would both be called {}; give them folders of different names",
+                    shown(&root.label)
+                )));
+            }
+            roots.push(root);
         }
         Ok(Self { roots })
     }
@@ -78,6 +88,11 @@ impl Roots {
             }
         }
         Ok(())
+    }
+
+    /// The names of the roots, as a client may give them: each folder's own name, never its path.
+    pub fn labels(&self) -> Vec<String> {
+        self.roots.iter().map(|root| root.label.clone()).collect()
     }
 
     /// Whether the daemon has no root.
@@ -110,9 +125,9 @@ impl Roots {
     fn find(&self, name: &str) -> Result<&Root, ApiError> {
         self.roots
             .iter()
-            .find(|root| root.name == name)
+            .find(|root| root.name == name || root.label == name)
             .ok_or_else(|| {
-                let known: Vec<String> = self.roots.iter().map(|r| shown(&r.name)).collect();
+                let known: Vec<String> = self.roots.iter().map(|r| shown(&r.label)).collect();
                 ApiError::Refused(format!(
                     "{} is not a root of this daemon; its roots are {}",
                     shown(name),
@@ -136,8 +151,12 @@ fn open_one(name: &str, dir: &Path) -> Result<Root, ApiError> {
         )));
     }
     let found = facts(&held).map_err(|e| refuse_io("look at", &path, &e))?;
+    let label = path
+        .file_name()
+        .map_or_else(|| name.to_string(), |n| n.to_string_lossy().into_owned());
     Ok(Root {
         name: name.to_string(),
+        label,
         path,
         held,
         identity: found.identity,

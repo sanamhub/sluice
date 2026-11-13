@@ -22,6 +22,7 @@ use rules::{Fault, check_all, rule};
 
 pub(crate) use build::mtime_ms_of;
 pub use build::{Below, Build, Built, ConfinedArg, DiskPaths, Finding, Reason, Refusal};
+pub use build::{EntryKind, FolderEntry, Listing, list_folder};
 pub use entry::{Entry, Kind, Loc, PackRef};
 pub use sequence::parse as parse_sequence;
 
