@@ -45,6 +45,20 @@ action and event such a window needs.
 6. **SPEC section 11 changes in place**, since it is not released. A loopback HTTP listener is
    allowed without TLS only under points 1, 3 and 4. Every other TCP listener still requires TLS and
    a token.
+7. **The page meets WCAG 2.2 at level AA.** A person who uses a keyboard alone, a screen reader,
+   a high zoom or a phone does the same things as anyone else:
+   - every control is reached and used from the keyboard, the focus is always visible, and a
+     control keeps the focus while the numbers beside it change;
+   - every control and every progress bar has a name, and the page has one first-level heading
+     and landmarks for its parts;
+   - what changes without the user's action is said through a status region: the end of a
+     transfer, a copied ticket, a send being prepared. Progress is not announced;
+   - text has a contrast of at least 4.5 to 1 in the light and the dark theme, the placeholder
+     included;
+   - the page reads at 320 CSS pixels wide with no sideways scroll, and it stops its motion for
+     a user who asks for less.
+   A test checks the parts of this that the page's own text can show. A change to the page is
+   also checked in a browser, in both themes and at a phone's width.
 
 ## Alternatives
 
