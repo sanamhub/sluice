@@ -13,6 +13,10 @@ crates/**
 !crates/sluice-core/**
 !crates/sluice-live
 !crates/sluice-live/**
+!crates/sluice-api
+!crates/sluice-api/src
+!crates/sluice-api/src/**
+!crates/sluice-api/Cargo.toml
 !crates/sluice-delta
 !crates/sluice-delta/**
 !crates/sluice-wasm
