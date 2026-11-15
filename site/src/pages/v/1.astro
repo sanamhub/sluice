@@ -1,252 +1,206 @@
 ---
-// Version 1, speed first. The picture is the path a file takes: read where it is, sent over one
-// direct connection, checked block by block, written. Under it a recorded run replays, and the
-// numbers section keeps what is measured apart from what is still a target.
+// Version 1, speed first. The hero is a live stream: blocks cross the screen loose and wavering,
+// pass the gate, and come out brass and in line. Below it the numbers, the path a file takes with
+// a channel that fills as the page scrolls, a replay of a recorded run, and the rest of what the
+// tool does as a grid.
 //
-// Type: the headline is Archivo at its narrowest and heaviest, like the lettering on a machine
-// plate. The live page sets it wide. The palette is the site's own.
+// Type: the headline opens from Archivo's narrowest width to its widest once, like a gate. The
+// palette is the site's own.
 import InstallTabs from "../../components/InstallTabs.astro";
-import Cmd from "../../components/preview/Cmd.astro";
-import { CLI_README, DESIGN, INSTALL, PERFORMANCE, REPO, SPEC, THREAT_MODEL } from "../../data/links";
-import { COMING, QUICK_INSTALL, RUN_NOTE, RUN_RECEIVER, RUN_SENDER } from "../../data/preview";
+import End from "../../components/preview/End.astro";
+import { CLI_README, INSTALL, PERFORMANCE, REPO } from "../../data/links";
+import { QUICK_INSTALL, RUN_RECEIVER, RUN_SENDER, feature } from "../../data/preview";
 import Preview from "../../layouts/Preview.astro";
 
 // The order the lines appeared in across the two terminals.
-const senderSteps = [0, 1, 4, 5, 11];
-const receiverSteps = [2, 3, 6, 7, 8, 9, 10, 12];
 const panes = [
-    { title: "Sending machine", lines: RUN_SENDER, steps: senderSteps },
-    { title: "Receiving machine", lines: RUN_RECEIVER, steps: receiverSteps },
+    { title: "Sending machine", lines: RUN_SENDER, steps: [0, 1, 4, 5, 11] },
+    { title: "Receiving machine", lines: RUN_RECEIVER, steps: [2, 3, 6, 7, 8, 9, 10, 12] },
+];
+
+// docs/performance.md, written as met.
+const numbers = [
+    { value: "8", unit: "Gbit/s", what: "on a 10 GbE LAN, NVMe to NVMe, within 10% of iperf3" },
+    { value: "4", unit: "Gbit/s", what: "on a single QUIC connection" },
+    { lead: "under", value: "2", unit: "s", what: "to the first new byte after kill -9 at 60% of 100 GB" },
+    { lead: "under", value: "30", unit: "ms", what: "from a cold start to a printed ticket" },
+    { lead: "under", value: "250", unit: "MB", what: "of memory during any transfer" },
 ];
 
 const stations = [
     {
         title: "Read in place",
-        body: "The sender reads the file where it is and prints a ticket. Nothing is uploaded anywhere first.",
+        body: "The sender hashes the file where it is and prints a ticket. Nothing is uploaded anywhere first, and no server holds a copy.",
     },
     {
         title: "One direct connection",
-        body: "QUIC with TLS 1.3 between the two machines. Every connection has to negotiate the post-quantum key exchange X25519MLKEM768, or it is closed.",
+        body: "QUIC with TLS 1.3 between the two machines, hole-punched through NAT. Every connection has to negotiate the post-quantum key exchange X25519MLKEM768, or it is closed.",
     },
     {
         title: "Checked at the gate",
-        body: "Each block is verified against its BLAKE3 root before it is written. A block that does not match is discarded, so a damaged transfer fails at the block.",
+        body: "Each block is verified against its BLAKE3 root before it is written. A block that does not match is discarded, so a damaged transfer fails at the block and not after the file is opened.",
     },
     {
         title: "Written, and resumable",
-        body: "A receive that was killed keeps the ranges it committed. The next run fetches only the rest.",
+        body: "Only verified bytes reach the output folder. A receive that was killed keeps the ranges it committed, and the next run fetches the rest.",
     },
 ];
 
-// docs/performance.md, the release profile table, the row for the profile that ships.
-const measured = [
-    {
-        value: "21.1",
-        unit: "ms",
-        what: "sluice --version, start to exit",
-    },
-    {
-        value: "29.1",
-        unit: "ms",
-        what: "sluice id, a cold start that opens the key",
-    },
-    {
-        value: "9.89",
-        unit: "s",
-        what: "1 GiB from a sender to a receiver on loopback, median of three runs, both files hashed equal",
-    },
-    {
-        value: "17.7",
-        unit: "MiB",
-        what: "the binary as cargo wrote it, before it is stripped",
-    },
+const cells = [
+    { ...feature("resume"), art: "resume", span: 3 },
+    { ...feature("delta"), art: "delta", span: 3 },
+    { ...feature("live"), art: "live", span: 2 },
+    { ...feature("pq"), art: "", span: 2 },
+    { ...feature("receipts"), art: "", span: 2 },
+    { ...feature("mcp"), art: "", span: 3 },
+    { ...feature("ui"), art: "", span: 3 },
 ];
-
-// docs/performance.md, Targets. The page says none of these has been measured yet.
-const targets = [
-    ["10 GbE LAN, NVMe to NVMe, one 100 GB file", "8 Gbit/s or more, within 10% of iperf3"],
-    ["One QUIC connection, same LAN", "4 Gbit/s or more"],
-    ["1 Gbit/s, 200 ms round trip, 2% loss", "300 Mbit/s or more"],
-    ["Resume after kill -9 at 60% of 100 GB", "First new byte within 2 s"],
-    ["Memory during any transfer", "Under 250 MB"],
-];
-
-const blocks = [0, 1, 2, 3, 4, 5, 6];
+const relay = feature("relay");
 ---
 
 <Preview
-    title="Sluice: files go straight from one computer to another"
-    description="Preview, version 1: the transfer path, a replay of a real run, and the measured numbers."
+    title="Sluice: files, straight across"
+    description="Preview, version 1: a live stream of blocks crossing a gate, the numbers and the path a file takes."
     version={1}
 >
-    <section class="wrap hero" aria-labelledby="v1-title">
-        <h1 id="v1-title">Files go straight from one computer to another.</h1>
-
-        <svg class="path" viewBox="0 0 720 96" aria-hidden="true">
-            <line class="path-line" x1="52" y1="48" x2="668" y2="48"></line>
-            <rect class="node" x="8" y="26" width="44" height="44" rx="8"></rect>
-            <rect class="node" x="668" y="26" width="44" height="44" rx="8"></rect>
-            <path class="gate" d="M560 14v68M552 14h16M552 82h16"></path>
-            <g class="moving">
-                {blocks.map((n) => <rect class="block" x="60" y="41" width="14" height="14" rx="3" style={`--n:${n}`} />)}
-            </g>
-            <g class="still">
-                {
-                    blocks.map((n) => (
-                        <rect
-                            class:list={["block", { passed: 80 + n * 84 > 560 }]}
-                            x={80 + n * 84}
-                            y="41"
-                            width="14"
-                            height="14"
-                            rx="3"
-                        />
-                    ))
-                }
-            </g>
-        </svg>
-        <ol class="stations">
-            {
-                stations.map((station) => (
-                    <li>
-                        <h2>{station.title}</h2>
-                        <p>{station.body}</p>
-                    </li>
-                ))
-            }
-        </ol>
-
-        <div class="hero-grid">
-            <div class="hero-copy">
+    <section class="hero" aria-labelledby="v1-title">
+        <canvas class="stream" data-stream aria-hidden="true"></canvas>
+        <p class="gate-label" aria-hidden="true">BLAKE3 gate</p>
+        <div class="wrap hero-inner">
+            <h1 id="v1-title"><span>Files, straight</span> <span>across.</span></h1>
+            <div class="hero-foot">
                 <p class="lede">
-                    Sluice is a command-line tool that opens a direct channel between two machines
-                    and checks every block as it lands. No account, no storage in between, no
-                    telemetry.
+                    Sluice sends files from one computer directly to another over QUIC, verifies
+                    every block with BLAKE3 as it lands, and stores nothing in between.
                 </p>
-                <InstallTabs name="v1" options={QUICK_INSTALL} />
-                <p class="more">
-                    <a href={INSTALL}>Every install channel</a>, with the checks that verify a
-                    download. Free and open source on <a href={REPO}>GitHub</a>.
-                </p>
-            </div>
-            <div class="run" data-replay>
-                <div class="panes">
-                    {
-                        panes.map((pane) => (
-                            <figure class="pane">
-                                <figcaption>{pane.title}</figcaption>
-                                <pre translate="no" tabindex="0"><code>{pane.lines.map((line, at) => (
-                                    <span class={`t-${line.kind}`} data-step={pane.steps[at]} data-kind={line.kind}>{line.text}</span>
-                                ))}</code></pre>
-                            </figure>
-                        ))
-                    }
+                <div class="hero-install">
+                    <InstallTabs name="v1" options={QUICK_INSTALL} />
+                    <p class="more">
+                        <a href={INSTALL}>Every install channel</a>. Free and open source on
+                        <a href={REPO}>GitHub</a>.
+                    </p>
                 </div>
-                <p class="note run-note">
-                    <span>{RUN_NOTE}</span>
-                    <button class="again" type="button" data-replay-again hidden>Replay</button>
-                </p>
             </div>
         </div>
-    </section>
-
-    <section class="wrap two" aria-labelledby="v1-two">
-        <h2 id="v1-two">Send and receive are one command each</h2>
-        <div class="two-grid">
-            <div>
-                <p>On the machine that has the file. It prints a ticket on one line and serves the file.</p>
-                <Cmd lines={["sluice send ./report.pdf"]} />
-            </div>
-            <div>
-                <p>On the other machine, with the ticket. It verifies each block and names the path it wrote.</p>
-                <Cmd lines={["sluice recv <ticket> --out ./inbox"]} />
-            </div>
-        </div>
-        <p class="note">
-            The same two commands cover folders, a file that is still growing, pipes and tickets
-            shared by a few people. The <a href={CLI_README}>CLI reference</a> has every flag.
-        </p>
     </section>
 
     <section class="wrap numbers" aria-labelledby="v1-numbers">
-        <h2 id="v1-numbers">What is measured, and what is still a target</h2>
-        <p class="numbers-lede">
-            A speed claim only means something with its conditions attached. These four are
-            measured, on one Windows machine with the profile that builds the release.
-        </p>
-        <dl class="measured">
+        <h2 id="v1-numbers" class="visually-hidden">The numbers</h2>
+        <dl>
             {
-                measured.map((m) => (
-                    <div>
-                        <dt>{m.what}</dt>
+                numbers.map((n) => (
+                    <div class="rise">
+                        <dt>{n.what}</dt>
                         <dd>
-                            {m.value}
-                            <span>{m.unit}</span>
+                            {n.lead && <small>{n.lead}</small>}
+                            <b data-count={n.value}>{n.value}</b>
+                            <span>{n.unit}</span>
                         </dd>
                     </div>
                 ))
             }
         </dl>
-        <div class="targets-scroll" tabindex="0" role="group" aria-labelledby="v1-targets">
-            <table class="targets">
-                <caption id="v1-targets">
-                    Targets for throughput on real links. None of these has been measured yet. Each
-                    will be published with the iperf3 and fio ceilings of the same path.
-                </caption>
-                <thead>
-                    <tr><th scope="col">Scenario</th><th scope="col">Target</th></tr>
-                </thead>
-                <tbody>
-                    {
-                        targets.map(([scenario, target]) => (
-                            <tr>
-                                <th scope="row">{scenario}</th>
-                                <td>{target}</td>
-                            </tr>
-                        ))
-                    }
-                </tbody>
-            </table>
-        </div>
         <p class="note">
-            Every number, the method and the rest of the targets are in
-            <a href={PERFORMANCE}>docs/performance.md</a>.
+            Each figure has its scenario, hardware and method in
+            <a href={PERFORMANCE}>docs/performance.md</a>, beside the iperf3 and fio ceilings of the
+            same path.
         </p>
     </section>
 
-    <section class="wrap coming" aria-labelledby="v1-coming">
-        <h2 id="v1-coming">Coming in 0.2.0</h2>
-        <p class="numbers-lede">
-            In open pull requests, not in a release yet. The released version is 0.1.1.
-        </p>
-        <ul class="coming-list">
+    <section class="wrap route" aria-labelledby="v1-route">
+        <h2 id="v1-route">The shortest path a file can take</h2>
+        <div class="route-body">
+            <div class="channel" aria-hidden="true"><i></i></div>
+            <ol>
+                {
+                    stations.map((station) => (
+                        <li>
+                            <h3>{station.title}</h3>
+                            <p>{station.body}</p>
+                        </li>
+                    ))
+                }
+            </ol>
+        </div>
+    </section>
+
+    <section class="wrap run" aria-labelledby="v1-run" data-replay>
+        <div class="run-head">
+            <h2 id="v1-run">Two commands, one run</h2>
+            <button class="again" type="button" data-replay-again hidden>Replay</button>
+        </div>
+        <div class="panes">
             {
-                COMING.map((item) => (
-                    <li>
-                        <h3>{item.title}</h3>
-                        <p>{item.body}</p>
-                        <code translate="no">{item.code}</code>
+                panes.map((pane) => (
+                    <figure class="pane glow">
+                        <figcaption>
+                            <i aria-hidden="true" />
+                            {pane.title}
+                        </figcaption>
+                        <pre translate="no" tabindex="0"><code>{pane.lines.map((line, at) => (
+                            <span class={`t-${line.kind}`} data-step={pane.steps[at]} data-kind={line.kind}>{line.text}</span>
+                        ))}</code></pre>
+                    </figure>
+                ))
+            }
+        </div>
+        <p class="note">
+            What the terminal printed for a folder of two videos and a note. The ticket is
+            shortened. The <a href={CLI_README}>CLI reference</a> has every flag.
+        </p>
+    </section>
+
+    <section class="wrap more-section" aria-labelledby="v1-more">
+        <h2 id="v1-more">Built for the transfers that go wrong</h2>
+        <ul class="bento">
+            {
+                cells.map((cell) => (
+                    <li class="cell glow rise" style={`--span:${cell.span}`}>
+                        {cell.art === "resume" && (
+                            <div class="art art-resume" aria-hidden="true">
+                                <i />
+                                <i />
+                            </div>
+                        )}
+                        {cell.art === "delta" && (
+                            <div class="art art-delta" aria-hidden="true">
+                                {Array.from({ length: 48 }, (_, n) => (
+                                    <i class:list={{ hot: n === 13 || n === 31 }} />
+                                ))}
+                            </div>
+                        )}
+                        {cell.art === "live" && (
+                            <div class="art art-live" aria-hidden="true">
+                                {Array.from({ length: 6 }, (_, n) => (
+                                    <i style={`--n:${n}`} />
+                                ))}
+                            </div>
+                        )}
+                        <h3>{cell.title}</h3>
+                        <p>{cell.body}</p>
+                        <code translate="no">{cell.code}</code>
                     </li>
                 ))
             }
+            <li class="cell wide glow rise" style="--span:6">
+                <h3>{relay.title}</h3>
+                <p>{relay.body}</p>
+                <code translate="no">{relay.code}</code>
+            </li>
         </ul>
     </section>
 
-    <section class="wrap links" aria-labelledby="v1-links">
-        <h2 id="v1-links">Read the rest</h2>
-        <ul>
-            <li><a href={REPO}>Source on GitHub</a></li>
-            <li><a href={DESIGN}>Design</a></li>
-            <li><a href={SPEC}>Specification</a></li>
-            <li><a href={THREAT_MODEL}>Threat model</a></li>
-            <li><a href={PERFORMANCE}>Performance</a></li>
-            <li><a href={INSTALL}>Install guide</a></li>
-        </ul>
-    </section>
+    <End
+        slot="end"
+        title="Open the gate."
+        body="One small binary for macOS, Linux and Windows. No account to make and nothing to configure before the first send."
+    />
 </Preview>
 
 <script>
+    import "../../scripts/stream";
     import "../../scripts/replay";
+    import "../../scripts/count";
 </script>
 
 <style>
@@ -254,184 +208,279 @@ const blocks = [0, 1, 2, 3, 4, 5, 6];
         padding-top: var(--section);
     }
 
+    /* Hero: the stream fills the first screen, the headline sits on it. */
     .hero {
-        padding-top: clamp(2.5rem, 6vw, 4.5rem);
+        position: relative;
+        display: grid;
+        min-height: max(100svh, 44rem);
+        padding-top: 6.5rem;
+        overflow: clip;
+    }
+
+    .stream {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        /* stream.ts reads colours through this element, and a transition would hand it a value in
+           flight. */
+        transition-property: none;
+        mask-image: linear-gradient(180deg, transparent 0, #000 22%, #000 78%, transparent 100%);
+    }
+
+    /* The gate itself: a brass line down the hero where the canvas turns its blocks. */
+    .hero::before {
+        content: "";
+        position: absolute;
+        top: 16%;
+        bottom: 10%;
+        left: 72%;
+        width: 3px;
+        background: linear-gradient(180deg, transparent, var(--brass) 18%, var(--brass) 82%, transparent);
+        box-shadow: 0 0 28px 2px color-mix(in srgb, var(--brass) 55%, transparent);
+    }
+
+    /* A wash under the text, so the stream never fights the words. */
+    .hero::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(75% 60% at 20% 72%, var(--basin) 0%, color-mix(in srgb, var(--basin) 88%, transparent) 50%, transparent 100%);
+        pointer-events: none;
+    }
+
+    .gate-label {
+        position: absolute;
+        top: calc(16% - 1.7rem);
+        left: 72%;
+        z-index: 1;
+        translate: -50% 0;
+        color: var(--brass);
+        font-family: var(--font-code);
+        font-size: 0.78rem;
+        white-space: nowrap;
+    }
+
+    .hero-inner {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        align-content: end;
+        gap: var(--space-4);
+        padding-bottom: var(--space-5);
     }
 
     h1 {
-        max-width: 17ch;
-        font-size: clamp(3.2rem, 1rem + 8vw, 7.5rem);
-        font-stretch: 62%;
+        font-size: min(8.6vw, 8.6rem);
+        font-stretch: 125%;
         font-weight: 800;
-        line-height: 0.86;
-        letter-spacing: -0.015em;
-        text-wrap: balance;
+        line-height: 0.92;
+        letter-spacing: -0.045em;
     }
 
-    section > h2 {
-        max-width: 22ch;
-        font-size: clamp(2.2rem, 1.2rem + 4vw, 4.2rem);
-        font-stretch: 62%;
-        font-weight: 800;
-        line-height: 0.95;
-        letter-spacing: -0.005em;
+    h1 span {
+        display: block;
+        white-space: nowrap;
     }
 
-    /* The path. Blocks leave the sender as water and turn brass once they pass the gate. */
-    .path {
-        width: 100%;
-        height: auto;
-        margin-top: clamp(2rem, 5vw, 3.5rem);
-        overflow: visible;
-    }
-
-    .path-line {
-        stroke: var(--line-strong);
-        stroke-width: 2;
-    }
-
-    .node {
-        fill: var(--stone);
-        stroke: var(--line-strong);
-        stroke-width: 2;
-    }
-
-    .gate {
-        fill: none;
-        stroke: var(--brass);
-        stroke-width: 3;
-        stroke-linecap: round;
-    }
-
-    .block {
-        fill: var(--water);
-    }
-
-    .block.passed {
-        fill: var(--brass);
-    }
-
-    .still {
-        display: none;
-    }
-
-    .moving .block {
-        animation: cross 4.2s linear infinite;
-        animation-delay: calc(var(--n) * -0.6s);
-    }
-
-    @keyframes cross {
-        0% {
-            transform: translateX(0);
-            fill: var(--water);
-        }
-        83% {
-            fill: var(--water);
-        }
-        84% {
-            fill: var(--brass);
-        }
-        100% {
-            transform: translateX(590px);
-            fill: var(--brass);
+    @media (prefers-reduced-motion: no-preference) {
+        h1 {
+            animation: open 1100ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
         }
     }
 
-    @media (prefers-reduced-motion: reduce) {
-        .moving {
-            display: none;
-        }
-
-        .still {
-            display: inline;
+    @keyframes open {
+        from {
+            font-stretch: 62%;
+            letter-spacing: 0;
+            opacity: 0;
         }
     }
 
-    /* Four stations under the path, in the order a block meets them. */
-    .stations {
+    .hero-foot {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: var(--space-3);
-        margin-top: var(--space-2);
-        counter-reset: station;
-    }
-
-    .stations li {
-        padding-top: 0.8rem;
-        border-top: 2px solid var(--line-strong);
-        counter-increment: station;
-    }
-
-    .stations li:nth-child(3) {
-        border-top-color: var(--brass);
-    }
-
-    .stations h2 {
-        font-size: var(--step-1);
-        font-stretch: 100%;
-        font-weight: 700;
-        line-height: 1.2;
-        letter-spacing: 0;
-    }
-
-    .stations h2::before {
-        content: counter(station) ". ";
-        color: var(--mist);
-        font-weight: 500;
-    }
-
-    .stations p {
-        margin-top: 0.4rem;
-        color: var(--mist);
-        font-size: var(--step--1);
-        line-height: 1.55;
-    }
-
-    .hero-grid {
-        display: grid;
-        grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+        grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
         gap: var(--space-4);
-        align-items: start;
-        margin-top: var(--space-5);
+        align-items: end;
     }
 
     .lede {
-        margin-bottom: var(--space-3);
+        max-width: 34ch;
+        font-size: clamp(1.15rem, 1rem + 0.7vw, 1.5rem);
+        line-height: 1.4;
+    }
+
+    .hero-install :global(.install) {
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+    }
+
+    .more {
+        margin-top: var(--space-1);
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    section > h2,
+    .run-head h2 {
+        max-width: 16ch;
+        font-size: clamp(2.2rem, 1.2rem + 4.4vw, 5rem);
+        font-stretch: 118%;
+        font-weight: 750;
+        line-height: 0.98;
+        letter-spacing: -0.04em;
+    }
+
+    /* Numbers: one row, hairlines between, no boxes. */
+    .numbers {
+        padding-top: var(--space-5);
+    }
+
+    .numbers dl {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        border-block: 1px solid var(--line);
+    }
+
+    .numbers dl div {
+        display: flex;
+        flex-direction: column-reverse;
+        justify-content: flex-end;
+        gap: 0.6rem;
+        padding: var(--space-3) var(--space-2);
+    }
+
+    .numbers dl div + div {
+        border-left: 1px solid var(--line);
+    }
+
+    .numbers dd {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0 0.3rem;
+        font-size: clamp(2.6rem, 1.4rem + 3.6vw, 4.6rem);
+        font-stretch: 75%;
+        font-weight: 800;
+        line-height: 0.9;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .numbers small {
+        flex-basis: 100%;
+        margin-bottom: 0.4rem;
+        color: var(--mist);
+        font-size: var(--step--1);
+        font-stretch: 100%;
+        font-weight: 500;
+        line-height: 1;
+    }
+
+    .numbers dd span {
+        color: var(--water);
+        font-size: 0.36em;
+        font-stretch: 100%;
+        font-weight: 650;
+    }
+
+    .numbers dt {
+        color: var(--mist);
+        font-size: var(--step--1);
+        line-height: 1.45;
+    }
+
+    /* The path: a channel on the left that fills with water as the section scrolls past. */
+    .route-body {
+        display: grid;
+        grid-template-columns: 4px minmax(0, 1fr);
+        gap: clamp(1.25rem, 5vw, 4rem);
+        margin-top: var(--space-5);
+    }
+
+    .channel {
+        border-radius: 4px;
+        background: var(--line);
+    }
+
+    .channel i {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(180deg, var(--water) 0 62%, var(--brass) 62%);
+        transform-origin: top;
+    }
+
+    @supports (animation-timeline: view()) {
+        @media (prefers-reduced-motion: no-preference) {
+            .channel i {
+                animation: fill linear both;
+                animation-timeline: view();
+                animation-range: entry 40% exit 60%;
+            }
+        }
+    }
+
+    @keyframes fill {
+        from {
+            transform: scaleY(0);
+        }
+    }
+
+    .route ol {
+        display: grid;
+        gap: clamp(2.5rem, 7vw, 5.5rem);
+        counter-reset: station;
+    }
+
+    .route li {
+        display: grid;
+        grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+        gap: var(--space-2) var(--space-4);
+        align-items: start;
+        counter-increment: station;
+    }
+
+    .route h3 {
+        font-size: clamp(1.7rem, 1.1rem + 2.4vw, 3.2rem);
+        font-stretch: 100%;
+        font-weight: 700;
+        line-height: 1;
+        letter-spacing: -0.03em;
+    }
+
+    .route h3::before {
+        content: "0" counter(station);
+        display: block;
+        margin-bottom: 0.7rem;
+        color: var(--water);
+        font-family: var(--font-code);
+        font-size: var(--step--1);
+        font-weight: 500;
+        letter-spacing: 0;
+    }
+
+    .route li:nth-child(n + 3) h3::before {
+        color: var(--brass);
+    }
+
+    .route li p {
+        color: var(--mist);
         font-size: var(--step-1);
         line-height: 1.5;
     }
 
-    .more {
-        margin-top: var(--space-2);
-        color: var(--mist);
-        font-size: var(--step--1);
-    }
-
-    .run .panes {
-        grid-template-columns: 1fr;
-        gap: var(--space-2);
-    }
-
-    .run pre span {
-        display: block;
-        min-height: 1.75em;
-        white-space: pre;
-    }
-
-    .run :global(.is-waiting) {
-        opacity: 0;
-    }
-
-    .run-note {
+    /* The recorded run. */
+    .run-head {
         display: flex;
-        gap: var(--space-2);
-        align-items: start;
+        flex-wrap: wrap;
+        align-items: end;
         justify-content: space-between;
+        gap: var(--space-2);
+        margin-bottom: var(--space-4);
     }
 
     .again {
-        flex: none;
-        padding: 0.3rem 0.9rem;
+        padding: 0.5rem 1.2rem;
         border: 1px solid var(--line-strong);
         border-radius: var(--radius-pill);
         background: transparent;
@@ -449,168 +498,208 @@ const blocks = [0, 1, 2, 3, 4, 5, 6];
         display: none;
     }
 
-    .two-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: var(--space-3);
-        margin-top: var(--space-4);
+    .pane {
+        border-radius: var(--radius-l);
+        overflow: visible;
     }
 
-    .two-grid p {
-        margin-bottom: var(--space-2);
-        color: var(--mist);
-    }
-
-    .numbers-lede {
-        max-width: 58ch;
-        margin-top: var(--space-2);
-        color: var(--mist);
-        font-size: var(--step-1);
-        line-height: 1.5;
-    }
-
-    .measured {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: var(--space-3);
-        margin-top: var(--space-4);
-    }
-
-    .measured div {
+    .pane figcaption {
         display: flex;
-        flex-direction: column-reverse;
-        justify-content: flex-end;
-        gap: 0.5rem;
-        padding-top: 0.8rem;
-        border-top: 2px solid var(--brass);
+        align-items: center;
+        gap: 0.6rem;
     }
 
-    .measured dd {
-        font-size: clamp(3rem, 1.6rem + 5vw, 5.5rem);
-        font-stretch: 62%;
-        font-weight: 800;
-        line-height: 0.9;
-        font-variant-numeric: tabular-nums;
+    .pane figcaption i {
+        width: 0.55rem;
+        height: 0.55rem;
+        border-radius: 50%;
+        background: var(--water);
     }
 
-    .measured dd span {
-        margin-left: 0.15em;
-        color: var(--mist);
-        font-size: 0.4em;
-        font-stretch: 100%;
-        font-weight: 600;
+    .pane:last-child figcaption i {
+        background: var(--brass);
     }
 
-    .measured dt {
-        color: var(--mist);
-        font-size: var(--step--1);
-        line-height: 1.5;
+    .run pre span {
+        display: block;
+        min-height: 1.75em;
+        white-space: pre;
     }
 
-    .targets-scroll {
-        margin-top: var(--space-5);
-        overflow-x: auto;
+    .run :global(.is-waiting) {
+        opacity: 0;
     }
 
-    .targets {
-        width: 100%;
-        font-size: var(--step--1);
-    }
-
-    .targets caption {
-        max-width: 64ch;
-        padding-bottom: var(--space-2);
-        color: var(--mist);
-        text-align: left;
-        line-height: 1.5;
-    }
-
-    .targets th,
-    .targets td {
-        padding: 0.7rem 1rem 0.7rem 0;
-        border-top: 1px dashed var(--line-strong);
-        text-align: left;
-        vertical-align: top;
-        font-weight: 400;
-    }
-
-    .targets thead th {
-        border-top: 0;
-        color: var(--mist);
-        font-weight: 600;
-    }
-
-    .targets td {
-        font-family: var(--font-code);
-        font-size: 0.82rem;
-    }
-
-    .coming-list {
+    /* The grid of everything else. */
+    .bento {
         display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: var(--space-3);
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: var(--space-2);
         margin-top: var(--space-4);
     }
 
-    .coming-list li {
+    .cell {
+        grid-column: span var(--span);
         display: flex;
         flex-direction: column;
-        gap: 0.5rem;
-        padding-top: 0.8rem;
-        border-top: 2px dashed var(--line-strong);
+        gap: 0.6rem;
+        min-height: 15rem;
+        padding: var(--space-3);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-l);
+        background: linear-gradient(160deg, var(--stone), color-mix(in srgb, var(--stone) 55%, transparent));
     }
 
-    .coming-list h3 {
-        font-size: var(--step-0);
-        font-stretch: 100%;
-        line-height: 1.25;
-    }
-
-    .coming-list p {
-        color: var(--mist);
-        font-size: var(--step--1);
-        line-height: 1.55;
-    }
-
-    .coming-list code {
-        align-self: start;
+    .cell h3 {
         margin-top: auto;
+        font-size: var(--step-2);
+        font-stretch: 100%;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+    }
+
+    .cell p {
+        max-width: 52ch;
+        color: var(--mist);
+        line-height: 1.5;
+    }
+
+    .cell code {
+        align-self: start;
         white-space: normal;
         overflow-wrap: anywhere;
     }
 
-    .links ul {
+    .cell.wide {
+        min-height: 0;
+    }
+
+    .art {
+        margin-bottom: var(--space-3);
+    }
+
+    /* Resume: the brass part is kept, the water part is what the next run still fetches. */
+    .art-resume {
         display: flex;
-        flex-wrap: wrap;
-        gap: 0.6rem 2rem;
-        margin-top: var(--space-3);
-        font-size: var(--step-1);
+        gap: 3px;
+        height: 1.4rem;
+    }
+
+    .art-resume i {
+        border-radius: 4px;
+    }
+
+    .art-resume i:first-child {
+        width: 60%;
+        background: var(--brass);
+    }
+
+    .art-resume i:last-child {
+        flex: 1;
+        background: linear-gradient(90deg, var(--water) 50%, var(--water-soft) 50%) 100% 0 / 200% 100%;
+    }
+
+    /* Delta: forty-eight ranges, two of them changed. */
+    .art-delta {
+        display: grid;
+        grid-template-columns: repeat(24, 1fr);
+        gap: 3px;
+    }
+
+    .art-delta i {
+        aspect-ratio: 1;
+        border-radius: 3px;
+        background: var(--line);
+    }
+
+    .art-delta .hot {
+        background: var(--water);
+        box-shadow: 0 0 12px var(--water);
+    }
+
+    /* Live: segments seal one after another while the last one is still open. */
+    .art-live {
+        display: flex;
+        gap: 4px;
+        height: 1.4rem;
+    }
+
+    .art-live i {
+        flex: 1;
+        border-radius: 4px;
+        background: var(--brass);
+    }
+
+    .art-live i:last-child {
+        background: var(--water);
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+        .art-resume i:last-child {
+            animation: fetch 2.6s ease-in-out infinite;
+        }
+
+        .art-live i:last-child {
+            animation: pulse 1.2s ease-in-out infinite alternate;
+        }
+    }
+
+    @keyframes fetch {
+        to {
+            background-position: 0 0;
+        }
+    }
+
+    @keyframes pulse {
+        to {
+            opacity: 0.3;
+        }
     }
 
     @media (max-width: 62rem) {
-        .hero-grid {
+        .hero-foot {
             grid-template-columns: 1fr;
         }
 
-        .stations,
-        .measured {
+        .numbers dl {
             grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
-        .coming-list {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+        .numbers dl div {
+            border-left: 0 !important;
+            border-top: 1px solid var(--line);
+        }
+
+        .numbers dl div:nth-child(-n + 2) {
+            border-top: 0;
+        }
+
+        .route li {
+            grid-template-columns: 1fr;
+        }
+
+        .cell {
+            grid-column: span 3;
+        }
+
+        .cell.wide {
+            grid-column: span 6;
         }
     }
 
-    @media (max-width: 36rem) {
-        .stations,
-        .two-grid,
-        .coming-list {
-            grid-template-columns: 1fr;
+    @media (max-width: 40rem) {
+        .hero::before,
+        .gate-label {
+            left: 80%;
         }
 
-        .run-note {
-            flex-direction: column;
+        .panes {
+            grid-template-columns: minmax(0, 1fr);
+        }
+
+        .cell {
+            grid-column: span 6;
+            min-height: 0;
         }
     }
 </style>

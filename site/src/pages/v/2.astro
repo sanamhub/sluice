@@ -1,90 +1,238 @@
 ---
-// Version 2, for everyone. One sentence, one button, three steps and plain answers. The picture is
-// the ticket: the one thing that goes from you to the other person. No protocol names until
-// someone asks a question that needs one.
+// Version 2, for everyone. The hero is the product: two windows of the browser page play a whole
+// handoff, from picking files to the ticket, the other computer looking inside, the transfer and
+// the check at the end. The step buttons under it jump to any moment. No protocol names until
+// someone opens a question that needs one.
 //
-// Type: Archivo at its normal width, large and centred. The page sits on one flat ground instead
-// of the canal gradient, and brass marks only the action and the ticket.
+// Type: Archivo wide and heavy for the few big statements, normal width for everything else. The
+// ground is a slow drift of the two brand colours behind glass panels.
 import InstallTabs from "../../components/InstallTabs.astro";
 import Cmd from "../../components/preview/Cmd.astro";
-import { CLI_README, INSTALL, REPO, THREAT_MODEL } from "../../data/links";
-import { COMING, QUICK_INSTALL } from "../../data/preview";
+import End from "../../components/preview/End.astro";
+import { INSTALL, THREAT_MODEL } from "../../data/links";
+import { QUICK_INSTALL } from "../../data/preview";
 import Preview from "../../layouts/Preview.astro";
+
+const files = [
+    { name: "beach.mp4", size: "48.1 MiB" },
+    { name: "dinner.mp4", size: "27.2 MiB" },
+    { name: "note.txt", size: "1.0 KiB" },
+];
+
+const steps = [
+    { go: 0, until: 1, label: "Pick the files" },
+    { go: 2, until: 2, label: "Get a ticket" },
+    { go: 3, until: 4, label: "They receive" },
+    { go: 5, until: 5, label: "Checked and saved" },
+];
+
+// A drawing of a QR code, not a scannable one: three corner squares and a fixed scatter.
+const QR = 13;
+const corner = (x: number, y: number) => {
+    const inBox = (ox: number, oy: number) => x >= ox && x < ox + 3 && y >= oy && y < oy + 3;
+    return inBox(0, 0) || inBox(QR - 3, 0) || inBox(0, QR - 3);
+};
+const qr = Array.from({ length: QR * QR }, (_, n) => {
+    const x = n % QR;
+    const y = Math.floor(n / QR);
+    return corner(x, y) || (x * 7 + y * 13 + x * y) % 5 < 2;
+});
+
+const ways = [
+    {
+        title: "In your browser",
+        body: "A page on your own computer. Pick files, copy the ticket or show its QR code, and watch transfers move.",
+        code: "sluice ui",
+    },
+    {
+        title: "In a terminal",
+        body: "One command to send and one to receive. Folders, pipes and files that are still growing work the same way.",
+        code: "sluice send ./holiday-video",
+    },
+    {
+        title: "Through your AI assistant",
+        body: "Ask it to send a folder or fetch a ticket. It works only inside the folders you allow.",
+        code: "sluice mcp",
+    },
+];
+
+const promises = [
+    {
+        title: "Nothing is uploaded.",
+        body: "The file goes from your computer to theirs. No server keeps a copy, because no server ever has one.",
+    },
+    {
+        title: "Every piece is checked.",
+        body: "Each block is verified before it is written. A damaged file never lands in the folder.",
+    },
+    {
+        title: "It picks up where it stopped.",
+        body: "Close the laptop, lose the Wi-Fi, come back tomorrow. Only the missing part moves.",
+    },
+    {
+        title: "No size limit. No account.",
+        body: "There is no plan to buy and nothing to sign up for. A 100 GB folder is sent the same way as a photo.",
+    },
+];
 
 const questions = [
     {
         q: "Where does my file go?",
-        a: "Straight to the other computer. It is not uploaded to storage and no server keeps a copy. If the two computers cannot reach each other directly, the transfer goes through a relay that you run. The relay forwards encrypted packets it cannot read, and keeps nothing.",
+        a: "Straight to the other computer. If the two computers cannot reach each other directly, the transfer goes through a relay that you run. The relay forwards encrypted packets it cannot read, and keeps nothing.",
     },
     {
-        q: "Is there a size limit?",
-        a: "No. There is no account and no plan. Sluice is built for large files, slow links and connections that drop.",
-    },
-    {
-        q: "What if the connection drops halfway?",
-        a: "Run the same command again. The receiver keeps the parts it already checked and fetches only the rest.",
-    },
-    {
-        q: "How do I know the file arrived whole?",
-        a: "Every block is checked before it is written. A block that does not match is thrown away, so a damaged file never lands in your folder.",
+        q: "What is a ticket?",
+        a: "A line of text that tells the other computer where to find yours and what to ask for. Anyone who has it can fetch the files while you are sending, so share it the way you would share a password.",
     },
     {
         q: "Can anyone else read it on the way?",
-        a: "The connection is encrypted with TLS 1.3 over QUIC, and it has to use a post-quantum key exchange or it is refused. The ticket is the key to the file, so share it the way you would share a password.",
+        a: "The connection is encrypted with TLS 1.3 over QUIC, and it has to use a post-quantum key exchange or it is refused.",
     },
     {
-        q: "Do I have to use a terminal?",
-        a: "Today, yes: one command to send and one to receive. Version 0.2.0 adds a page in your browser.",
+        q: "Can I prove I sent it?",
+        a: "Yes. The receiver can ask for a signed receipt, and anyone can check that receipt later without being online.",
+    },
+    {
+        q: "I changed one slide in a huge file. Do I send it all again?",
+        a: "No. The receiver names the old copy, and only the parts that changed are sent.",
+    },
+    {
+        q: "Do both sides need Sluice?",
+        a: "Yes. It is one small program on each computer, for macOS, Linux and Windows.",
     },
 ];
-
-const ui = COMING.find((item) => item.id === "ui")!;
-const others = COMING.filter((item) => item.id !== "ui");
 ---
 
 <Preview
-    title="Sluice: send a file to another computer"
-    description="Preview, version 2: one action, three steps and plain answers."
+    title="Sluice: any file, straight to their computer"
+    description="Preview, version 2: the browser page plays a whole handoff in the hero."
     version={2}
 >
-    <section class="wrap hero" aria-labelledby="v2-title">
-        <h1 id="v2-title">Send a file to another computer.</h1>
-        <p class="lede">
-            Sluice moves a file from your computer straight to theirs, however big it is. Nothing
-            is uploaded or stored along the way, and there is no account to make.
-        </p>
-        <p class="actions">
-            <a class="button primary" href="#install">Install Sluice</a>
-            <a href="#questions">Common questions</a>
-        </p>
+    <section class="hero" aria-labelledby="v2-title">
+        <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="wrap hero-inner">
+            <h1 id="v2-title">Any file, straight to their computer.</h1>
+            <p class="lede">
+                Sluice hands a file from your computer to someone else's, however big it is.
+                Nothing is uploaded, nothing is stored along the way, and there is no account.
+            </p>
+            <p class="actions">
+                <a class="button primary" href="#install">Get Sluice</a>
+                <a class="button" href="#questions">How it stays private</a>
+            </p>
 
-        <div class="handoff" role="img" aria-label="You run sluice send and get a ticket. They run sluice recv with the ticket, and the file goes from your computer to theirs.">
-            <div class="side">
-                <span class="who">You</span>
-                <code translate="no">sluice send</code>
-            </div>
-            <div class="ticket">
-                <span class="ticket-word">ticket</span>
-                <span class="ticket-code" translate="no">sluice10406jfph…</span>
-            </div>
-            <div class="side">
-                <span class="who">Them</span>
-                <code translate="no">sluice recv</code>
+            <div class="demo" data-demo data-stage="5">
+                <div class="windows" aria-hidden="true">
+                    <div class="window">
+                        <div class="bar"><i></i><i></i><i></i><span>Your computer</span></div>
+                        <div class="view v-pick">
+                            <p class="pane-title">Send</p>
+                            <ul class="entries">
+                                {
+                                    files.map((file) => (
+                                        <li>
+                                            <i class="tick" />
+                                            <span>{file.name}</span>
+                                            <small>{file.size}</small>
+                                        </li>
+                                    ))
+                                }
+                            </ul>
+                            <span class="gate-button">Send</span>
+                        </div>
+                        <div class="view v-ticket">
+                            <p class="pane-title">Ticket</p>
+                            <div class="ticket-row">
+                                <div class="qr">{qr.map((on) => <i class:list={{ on }} />)}</div>
+                                <div>
+                                    <p class="ticket-value" translate="no">sluice10406jfphae599kc7nksv9zf46r051…</p>
+                                    <span class="gate-button compact">Copy ticket</span>
+                                </div>
+                            </div>
+                            <p class="status s-wait">Waiting for the other computer</p>
+                            <p class="status s-go">Connected directly</p>
+                            <p class="status s-done">Finished. They have everything.</p>
+                        </div>
+                    </div>
+
+                    <div class="fly"><span>ticket</span></div>
+
+                    <div class="window">
+                        <div class="bar"><i></i><i></i><i></i><span>Their computer</span></div>
+                        <div class="view v-empty">
+                            <p class="pane-title">Receive</p>
+                            <div class="paste">Paste a ticket</div>
+                            <span class="quiet-button">Look inside</span>
+                        </div>
+                        <div class="view v-offer">
+                            <p class="pane-title">Receive</p>
+                            <p class="offer-size">3 files, 1 folder, 75.3 MiB</p>
+                            <ul class="entries plain">
+                                {files.map((file) => <li><span>{file.name}</span><small>{file.size}</small></li>)}
+                            </ul>
+                            <span class="gate-button">Receive</span>
+                        </div>
+                        <div class="view v-progress">
+                            <p class="pane-title">Transfers</p>
+                            <p class="offer-size">holiday-video</p>
+                            <div class="meter"><i></i></div>
+                            <p class="status s-go">Receiving 3 files, 75.3 MiB</p>
+                            <p class="status s-done">
+                                <svg viewBox="0 0 24 24" width="18" height="18"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                                Verified 75.3 MiB. Saved into Downloads.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <div class="stepper">
+                    {
+                        steps.map((step) => (
+                            <button type="button" data-go={step.go} data-until={step.until} aria-pressed={step.until === 5 ? "true" : "false"}>
+                                {step.label}
+                            </button>
+                        ))
+                    }
+                    <button class="toggle" type="button" data-demo-toggle hidden>Pause</button>
+                </div>
             </div>
         </div>
-        <p class="handoff-note">
-            You get a ticket. You pass it on in a chat, an email or a note. They use it to fetch
-            the file from your computer.
-        </p>
+    </section>
+
+    <section class="wrap ways" aria-labelledby="v2-ways">
+        <h2 id="v2-ways">Use it the way you like</h2>
+        <ul>
+            {
+                ways.map((way) => (
+                    <li class="way glow rise">
+                        <h3>{way.title}</h3>
+                        <p>{way.body}</p>
+                        <code translate="no">{way.code}</code>
+                    </li>
+                ))
+            }
+        </ul>
+    </section>
+
+    <section class="promises" aria-labelledby="v2-promises">
+        <h2 id="v2-promises" class="visually-hidden">What you can count on</h2>
+        <ul class="wrap">
+            {
+                promises.map((promise) => (
+                    <li class="rise">
+                        <h3>{promise.title}</h3>
+                        <p>{promise.body}</p>
+                    </li>
+                ))
+            }
+        </ul>
     </section>
 
     <section class="wrap steps" id="install" aria-labelledby="v2-steps">
-        <h2 id="v2-steps">Three steps</h2>
+        <h2 id="v2-steps">Ready in three steps</h2>
         <ol>
             <li>
                 <div class="step-body">
-                    <h3>Install Sluice on both computers</h3>
-                    <p>It is one small program for macOS, Linux and Windows. Free and open source.</p>
+                    <h3>Install it on both computers</h3>
                     <InstallTabs name="v2" options={QUICK_INSTALL} />
                     <p class="small"><a href={INSTALL}>Other ways to install</a></p>
                 </div>
@@ -92,14 +240,15 @@ const others = COMING.filter((item) => item.id !== "ui");
             <li>
                 <div class="step-body">
                     <h3>Send</h3>
-                    <p>Name a file or a folder. Sluice prints a ticket and waits.</p>
+                    <p>Open the page and pick files, or name them in a terminal. You get a ticket.</p>
+                    <Cmd lines={["sluice ui"]} />
                     <Cmd lines={["sluice send ./holiday-video"]} />
                 </div>
             </li>
             <li>
                 <div class="step-body">
                     <h3>Receive</h3>
-                    <p>On the other computer, paste the ticket and say where the file goes.</p>
+                    <p>On the other computer, paste the ticket and choose where the files go.</p>
                     <Cmd lines={["sluice recv <ticket> --out ./inbox"]} />
                 </div>
             </li>
@@ -107,11 +256,11 @@ const others = COMING.filter((item) => item.id !== "ui");
     </section>
 
     <section class="wrap questions" id="questions" aria-labelledby="v2-questions">
-        <h2 id="v2-questions">Common questions</h2>
+        <h2 id="v2-questions">Good questions</h2>
         <div class="qa">
             {
                 questions.map((item) => (
-                    <details>
+                    <details name="v2-qa">
                         <summary>{item.q}</summary>
                         <p>{item.a}</p>
                     </details>
@@ -123,85 +272,107 @@ const others = COMING.filter((item) => item.id !== "ui");
         </p>
     </section>
 
-    <section class="wrap coming" aria-labelledby="v2-coming">
-        <h2 id="v2-coming">Coming in 0.2.0</h2>
-        <p class="lede">
-            These are being reviewed and are not in a release yet. The current release is 0.1.1.
-        </p>
-        <div class="coming-grid">
-            <figure class="window">
-                <div class="window-bar" aria-hidden="true">
-                    <i></i><i></i><i></i>
-                    <span>127.0.0.1</span>
-                </div>
-                <div class="window-body" aria-hidden="true">
-                    <div class="drop">Send a file</div>
-                    <div class="drop">Receive with a ticket</div>
-                </div>
-                <figcaption>
-                    <strong>{ui.title}.</strong>
-                    {ui.plain} Run <code translate="no">{ui.code}</code> and it opens on your own
-                    computer. The drawing is a sketch, not a screenshot.
-                </figcaption>
-            </figure>
-            <ul class="coming-list">
-                {
-                    others.map((item) => (
-                        <li>
-                            <h3>{item.title}</h3>
-                            <p>{item.plain}</p>
-                        </li>
-                    ))
-                }
-            </ul>
-        </div>
-    </section>
-
-    <section class="wrap closing" aria-labelledby="v2-closing">
-        <h2 id="v2-closing">Free, open, and yours to read</h2>
-        <p class="lede">
-            Sluice is open source under Apache-2.0 or MIT. It has no analytics and sends nothing
-            home.
-        </p>
-        <p class="actions">
-            <a class="button" href={REPO}>Source on GitHub</a>
-            <a class="button" href={CLI_README}>Every command</a>
-            <a class="button" href={INSTALL}>Install guide</a>
-        </p>
-    </section>
+    <End
+        slot="end"
+        title="Send the big one."
+        body="Free and open source. No analytics, no cookies, and nothing sent home."
+    />
 </Preview>
 
-<style is:global>
-    body.preview-2 {
-        background: var(--stone);
-    }
-</style>
+<script>
+    import "../../scripts/demo";
+</script>
 
 <style>
     section {
         padding-top: var(--section);
+    }
+
+    /* Hero */
+    .hero {
+        position: relative;
+        padding-top: clamp(7.5rem, 14vw, 11rem);
+        overflow: clip;
         text-align: center;
     }
 
-    .hero {
-        padding-top: clamp(3rem, 9vw, 7rem);
+    /* Three soft lights that drift behind everything in the hero. */
+    .aurora {
+        position: absolute;
+        inset: -10% -10% 0;
+        filter: blur(90px);
+        opacity: 0.55;
+        pointer-events: none;
+    }
+
+    .aurora i {
+        position: absolute;
+        width: 46vmax;
+        aspect-ratio: 1;
+        border-radius: 50%;
+    }
+
+    .aurora i:nth-child(1) {
+        top: -12%;
+        left: 4%;
+        background: color-mix(in srgb, var(--water) 55%, transparent);
+    }
+
+    .aurora i:nth-child(2) {
+        top: 8%;
+        right: -4%;
+        background: color-mix(in srgb, var(--brass) 45%, transparent);
+    }
+
+    .aurora i:nth-child(3) {
+        top: 42%;
+        left: 30%;
+        background: color-mix(in srgb, var(--water-deep) 40%, transparent);
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+        .aurora i {
+            animation: drift 22s ease-in-out infinite alternate;
+        }
+
+        .aurora i:nth-child(2) {
+            animation-duration: 28s;
+            animation-direction: alternate-reverse;
+        }
+
+        .aurora i:nth-child(3) {
+            animation-duration: 34s;
+        }
+    }
+
+    @keyframes drift {
+        to {
+            translate: 9vmax 6vmax;
+            scale: 1.15;
+        }
+    }
+
+    .hero-inner {
+        position: relative;
     }
 
     h1 {
         max-width: 13ch;
         margin-inline: auto;
-        font-size: clamp(2.6rem, 1.4rem + 5.4vw, 5.4rem);
-        font-stretch: 100%;
-        font-weight: 650;
-        line-height: 1.02;
-        letter-spacing: -0.035em;
+        font-size: clamp(2.7rem, 1.2rem + 6.6vw, 6.8rem);
+        font-stretch: 118%;
+        font-weight: 750;
+        line-height: 0.96;
+        letter-spacing: -0.045em;
     }
 
     h2 {
-        font-size: clamp(1.9rem, 1.3rem + 2.4vw, 3rem);
-        font-stretch: 100%;
-        font-weight: 650;
-        letter-spacing: -0.03em;
+        font-size: clamp(2rem, 1.2rem + 3.6vw, 4.2rem);
+        font-stretch: 115%;
+        font-weight: 750;
+        line-height: 1;
+        letter-spacing: -0.04em;
+        text-align: center;
     }
 
     h3 {
@@ -219,9 +390,8 @@ const others = COMING.filter((item) => item.id !== "ui");
     .actions {
         display: flex;
         flex-wrap: wrap;
-        align-items: center;
         justify-content: center;
-        gap: var(--space-2) var(--space-3);
+        gap: var(--space-2);
         margin-top: var(--space-4);
     }
 
@@ -229,66 +399,420 @@ const others = COMING.filter((item) => item.id !== "ui");
         min-height: 3.4rem;
         padding-inline: 2rem;
         font-size: var(--step-1);
+        box-shadow: 0 14px 30px -12px color-mix(in srgb, var(--brass) 70%, transparent);
     }
 
-    /* You, the ticket, them. The ticket is a stub with a torn edge on each side. */
-    .handoff {
-        display: grid;
-        grid-template-columns: 1fr auto 1fr;
-        align-items: center;
-        gap: var(--space-2);
-        max-width: 46rem;
-        margin: var(--space-5) auto 0;
+    /* The demo: two glass windows and the ticket that crosses between them. */
+    .demo {
+        margin-top: var(--space-5);
+        text-align: left;
     }
 
-    .side {
+    .windows {
+        position: relative;
         display: grid;
-        gap: 0.5rem;
-        justify-items: center;
-        padding: var(--space-3) var(--space-2);
-        border: 1px solid var(--line);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: clamp(1rem, 4vw, 3rem);
+        max-width: 64rem;
+        margin-inline: auto;
+    }
+
+    .window {
+        min-height: 24rem;
+        border: 1px solid color-mix(in srgb, var(--line-strong) 55%, transparent);
         border-radius: var(--radius-l);
-        background: var(--basin);
+        background: color-mix(in srgb, var(--stone) 72%, transparent);
+        backdrop-filter: blur(20px) saturate(1.3);
+        -webkit-backdrop-filter: blur(20px) saturate(1.3);
+        box-shadow: 0 40px 80px -40px var(--shadow-color);
     }
 
-    .who {
+    .bar {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.8rem 1rem;
+        border-bottom: 1px solid var(--line);
+        color: var(--mist);
+        font-size: var(--step--1);
+        font-weight: 600;
+    }
+
+    .bar i {
+        width: 0.6rem;
+        height: 0.6rem;
+        border-radius: 50%;
+        background: var(--line-strong);
+    }
+
+    .bar span {
+        margin-left: 0.5rem;
+    }
+
+    .view {
+        display: none;
+        gap: var(--space-2);
+        align-content: start;
+        padding: var(--space-3);
+        transition:
+            opacity 420ms ease,
+            translate 420ms ease;
+    }
+
+    @starting-style {
+        .view {
+            opacity: 0;
+            translate: 0 0.6rem;
+        }
+    }
+
+    .demo:is([data-stage="0"], [data-stage="1"]) .v-pick,
+    .demo:not([data-stage="0"], [data-stage="1"]) .v-ticket,
+    .demo:is([data-stage="0"], [data-stage="1"], [data-stage="2"]) .v-empty,
+    .demo[data-stage="3"] .v-offer,
+    .demo:is([data-stage="4"], [data-stage="5"]) .v-progress {
+        display: grid;
+    }
+
+    .pane-title {
+        font-size: var(--step-2);
+        font-weight: 700;
+        letter-spacing: -0.03em;
+    }
+
+    .entries {
+        display: grid;
+        gap: 0.4rem;
+    }
+
+    .entries li {
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+        padding: 0.65rem 0.8rem;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-m);
+        background: var(--stone);
+        transition:
+            border-color 300ms ease,
+            background-color 300ms ease;
+    }
+
+    .entries small {
+        margin-left: auto;
+        color: var(--mist);
+        font-size: var(--step--1);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .tick {
+        flex: none;
+        width: 1.1rem;
+        height: 1.1rem;
+        border: 2px solid var(--line-strong);
+        border-radius: 5px;
+        transition:
+            background-color 300ms ease,
+            border-color 300ms ease;
+    }
+
+    .demo:not([data-stage="0"]) .v-pick li {
+        border-color: var(--water);
+        background: var(--water-soft);
+    }
+
+    .demo:not([data-stage="0"]) .tick {
+        border-color: var(--water);
+        background: var(--water);
+    }
+
+    .gate-button,
+    .quiet-button {
+        justify-self: start;
+        padding: 0.7rem 1.5rem;
+        border-radius: var(--radius-pill);
+        font-weight: 650;
+    }
+
+    .gate-button {
+        background: var(--brass);
+        color: var(--brass-ink);
+        transition: opacity 300ms ease;
+    }
+
+    .gate-button.compact {
+        display: inline-block;
+        margin-top: 0.7rem;
+        padding: 0.45rem 1.1rem;
+        font-size: var(--step--1);
+    }
+
+    .demo[data-stage="0"] .v-pick .gate-button {
+        opacity: 0.35;
+    }
+
+    .quiet-button {
+        border: 1px solid var(--line-strong);
+        color: var(--mist);
+    }
+
+    .ticket-row {
+        display: grid;
+        grid-template-columns: 7.5rem minmax(0, 1fr);
+        gap: var(--space-2);
+        align-items: center;
+    }
+
+    .qr {
+        display: grid;
+        grid-template-columns: repeat(13, 1fr);
+        gap: 1px;
+        padding: 0.5rem;
+        border-radius: var(--radius-m);
+        background: #fff;
+    }
+
+    .qr i {
+        aspect-ratio: 1;
+    }
+
+    .qr .on {
+        background: #0d2229;
+    }
+
+    .ticket-value {
+        font-family: var(--font-code);
+        font-size: 0.82rem;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+    }
+
+    .status {
+        display: none;
+        align-items: center;
+        gap: 0.5rem;
+        padding-top: var(--space-2);
+        border-top: 1px solid var(--line);
+        color: var(--mist);
+        font-weight: 550;
+    }
+
+    .demo:is([data-stage="2"], [data-stage="3"]) .s-wait,
+    .demo[data-stage="4"] .s-go,
+    .demo[data-stage="5"] .s-done {
+        display: flex;
+    }
+
+    .s-done {
+        color: var(--brass);
+    }
+
+    .paste {
+        display: grid;
+        place-items: center;
+        min-height: 7rem;
+        border: 2px dashed var(--line-strong);
+        border-radius: var(--radius-m);
+        color: var(--mist);
+    }
+
+    .offer-size {
         font-size: var(--step-1);
         font-weight: 650;
     }
 
-    .ticket {
-        display: grid;
-        gap: 0.2rem;
-        padding: 0.9rem 1.4rem;
+    .meter {
+        height: 0.9rem;
+        border-radius: var(--radius-pill);
+        background: var(--line);
+        overflow: hidden;
+    }
+
+    .meter i {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--brass);
+    }
+
+    .demo[data-stage="4"] .meter i {
+        background: var(--water);
+        animation: load 2400ms cubic-bezier(0.3, 0, 0.3, 1) both;
+    }
+
+    @keyframes load {
+        from {
+            width: 2%;
+        }
+    }
+
+    /* The ticket in flight, shown only while it crosses. */
+    .fly {
+        position: absolute;
+        top: 46%;
+        left: 50%;
+        z-index: 2;
+        display: none;
+        translate: -50% -50%;
+    }
+
+    .fly span {
+        display: block;
+        padding: 0.5rem 1.1rem;
         border-block: 2px solid var(--brass);
         border-inline: 2px dashed var(--brass);
         border-radius: var(--radius-s);
-        background: var(--brass-soft);
-        transform: rotate(-3deg);
-    }
-
-    .ticket-word {
+        background: var(--stone);
+        color: var(--ink);
         font-weight: 700;
+        box-shadow: 0 16px 30px -14px var(--shadow-color);
     }
 
-    .ticket-code {
-        font-family: var(--font-code);
-        font-size: 0.8rem;
+    .demo[data-stage="3"] .fly {
+        display: block;
     }
 
-    .handoff-note {
-        max-width: 44ch;
-        margin: var(--space-3) auto 0;
+    @media (prefers-reduced-motion: no-preference) {
+        .demo[data-stage="3"] .fly span {
+            animation: cross 1100ms cubic-bezier(0.3, 0, 0.2, 1) both;
+        }
+    }
+
+    @keyframes cross {
+        from {
+            translate: -9rem 0;
+            rotate: -8deg;
+            opacity: 0;
+        }
+
+        30% {
+            opacity: 1;
+        }
+
+        to {
+            translate: 9rem 0;
+            rotate: 6deg;
+            opacity: 0;
+        }
+    }
+
+    .stepper {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.5rem;
+        margin-top: var(--space-3);
+    }
+
+    .stepper button {
+        min-height: 2.5rem;
+        padding: 0.4rem 1.1rem;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-pill);
+        background: color-mix(in srgb, var(--stone) 70%, transparent);
         color: var(--mist);
+        font: inherit;
+        font-size: var(--step--1);
+        font-weight: 600;
+        cursor: pointer;
+        transition:
+            background-color 200ms ease,
+            color 200ms ease;
     }
 
+    .stepper button:hover {
+        color: var(--ink);
+    }
+
+    .stepper button[aria-pressed="true"] {
+        border-color: var(--ink);
+        background: var(--ink);
+        color: var(--basin);
+    }
+
+    .stepper .toggle {
+        border-style: dashed;
+    }
+
+    .stepper .toggle[hidden] {
+        display: none;
+    }
+
+    /* Three ways in. */
+    .ways ul {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-2);
+        margin-top: var(--space-4);
+    }
+
+    .way {
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+        min-height: 16rem;
+        padding: var(--space-3);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-l);
+        background: var(--stone);
+    }
+
+    .way h3 {
+        font-size: var(--step-2);
+        font-weight: 700;
+        letter-spacing: -0.03em;
+    }
+
+    .way p {
+        color: var(--mist);
+        line-height: 1.5;
+    }
+
+    .way code {
+        align-self: start;
+        margin-top: auto;
+    }
+
+    /* Four statements, set large, one after another. */
+    .promises li {
+        display: grid;
+        grid-template-columns: minmax(0, 7fr) minmax(0, 4fr);
+        gap: var(--space-2) var(--space-4);
+        align-items: end;
+        padding-block: clamp(1.5rem, 4vw, 3rem);
+        border-top: 1px solid var(--line);
+    }
+
+    .promises li:last-child {
+        border-bottom: 1px solid var(--line);
+    }
+
+    .promises h3 {
+        font-size: clamp(2rem, 1rem + 4.6vw, 5.2rem);
+        font-stretch: 118%;
+        font-weight: 750;
+        line-height: 0.98;
+        letter-spacing: -0.045em;
+    }
+
+    .promises li:nth-child(even) h3 {
+        color: var(--water);
+    }
+
+    .promises p {
+        color: var(--mist);
+        font-size: var(--step-1);
+        line-height: 1.45;
+    }
+
+    /* Steps */
     .steps ol {
         display: grid;
         gap: var(--space-4);
-        max-width: 40rem;
+        max-width: 42rem;
         margin: var(--space-4) auto 0;
         counter-reset: step;
-        text-align: left;
     }
 
     .steps li {
@@ -306,22 +830,22 @@ const others = COMING.filter((item) => item.id !== "ui");
         height: 3.2rem;
         border-radius: 50%;
         background: var(--ink);
-        color: var(--stone);
+        color: var(--basin);
         font-size: var(--step-1);
         font-weight: 700;
     }
 
     .step-body {
         display: grid;
-        gap: 0.6rem;
+        gap: 0.7rem;
         min-width: 0;
     }
 
     .steps h3 {
-        padding-top: 0.2rem;
+        padding-top: 0.25rem;
         font-size: var(--step-2);
-        font-weight: 650;
-        letter-spacing: -0.02em;
+        font-weight: 700;
+        letter-spacing: -0.03em;
     }
 
     .step-body > p {
@@ -335,17 +859,30 @@ const others = COMING.filter((item) => item.id !== "ui");
 
     .center {
         margin-top: var(--space-3);
+        text-align: center;
     }
 
+    /* Questions open and close with their height animated, where the browser can do that. */
     .qa {
-        max-width: 40rem;
+        max-width: 44rem;
         margin: var(--space-4) auto 0;
-        border-top: 1px solid var(--line);
-        text-align: left;
+        interpolate-size: allow-keywords;
     }
 
     details {
         border-bottom: 1px solid var(--line);
+    }
+
+    details::details-content {
+        block-size: 0;
+        overflow-y: clip;
+        transition:
+            block-size 320ms ease,
+            content-visibility 320ms allow-discrete;
+    }
+
+    details[open]::details-content {
+        block-size: auto;
     }
 
     summary {
@@ -353,9 +890,9 @@ const others = COMING.filter((item) => item.id !== "ui");
         align-items: center;
         justify-content: space-between;
         gap: var(--space-2);
-        padding: 1.1rem 0.25rem;
+        padding: 1.2rem 0.25rem;
         font-size: var(--step-1);
-        font-weight: 600;
+        font-weight: 650;
         cursor: pointer;
         list-style: none;
     }
@@ -368,119 +905,58 @@ const others = COMING.filter((item) => item.id !== "ui");
         content: "+";
         flex: none;
         color: var(--mist);
-        font-size: 1.5rem;
+        font-size: 1.6rem;
         font-weight: 400;
         line-height: 1;
+        transition: rotate 320ms ease;
     }
 
     details[open] summary::after {
-        content: "\2212";
+        rotate: 45deg;
     }
 
     details p {
-        max-width: 58ch;
-        padding: 0 0.25rem 1.3rem;
+        max-width: 60ch;
+        padding: 0 0.25rem 1.4rem;
         color: var(--mist);
     }
 
-    .coming-grid {
-        display: grid;
-        grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
-        gap: var(--space-4);
-        align-items: start;
-        max-width: 58rem;
-        margin: var(--space-4) auto 0;
-        text-align: left;
-    }
-
-    .window {
-        margin: 0;
-        border: 1px dashed var(--line-strong);
-        border-radius: var(--radius-l);
-        overflow: hidden;
-    }
-
-    .window-bar {
-        display: flex;
-        align-items: center;
-        gap: 0.4rem;
-        padding: 0.7rem 1rem;
-        border-bottom: 1px dashed var(--line-strong);
-        color: var(--mist);
-        font-family: var(--font-code);
-        font-size: 0.8rem;
-    }
-
-    .window-bar i {
-        width: 0.6rem;
-        height: 0.6rem;
-        border-radius: 50%;
-        background: var(--line-strong);
-    }
-
-    .window-bar span {
-        margin-left: 0.6rem;
-    }
-
-    .window-body {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-2);
-        padding: var(--space-3);
-    }
-
-    .drop {
-        display: grid;
-        place-items: center;
-        min-height: 7rem;
-        padding: 0.5rem;
-        border-radius: var(--radius-m);
-        background: var(--basin);
-        color: var(--mist);
-        font-weight: 600;
-        text-align: center;
-    }
-
-    .window figcaption {
-        padding: var(--space-2) var(--space-3) var(--space-3);
-        border-top: 1px dashed var(--line-strong);
-        color: var(--mist);
-        line-height: 1.55;
-    }
-
-    .window strong {
-        color: var(--ink);
-    }
-
-    .coming-list {
-        display: grid;
-        gap: var(--space-3);
-    }
-
-    .coming-list h3 {
-        font-size: var(--step-1);
-        font-weight: 650;
-    }
-
-    .coming-list p {
-        margin-top: 0.25rem;
-        color: var(--mist);
-    }
-
-    @media (max-width: 46rem) {
-        .handoff {
-            grid-template-columns: 1fr;
-            justify-items: center;
-        }
-
-        .side {
-            width: 100%;
-        }
-
-        .coming-grid {
+    @media (max-width: 52rem) {
+        .windows,
+        .ways ul {
             grid-template-columns: 1fr;
         }
 
+        .window {
+            min-height: 20rem;
+        }
+
+        .way {
+            min-height: 0;
+        }
+
+        .promises li {
+            grid-template-columns: 1fr;
+        }
+
+        @keyframes cross {
+            from {
+                translate: 0 -7rem;
+                opacity: 0;
+            }
+
+            30% {
+                opacity: 1;
+            }
+
+            to {
+                translate: 0 7rem;
+                opacity: 0;
+            }
+        }
+    }
+
+    @media (max-width: 36rem) {
         .steps li {
             grid-template-columns: 2.4rem minmax(0, 1fr);
         }
@@ -488,6 +964,10 @@ const others = COMING.filter((item) => item.id !== "ui");
         .steps li::before {
             width: 2.4rem;
             height: 2.4rem;
+        }
+
+        .ticket-row {
+            grid-template-columns: 5.5rem minmax(0, 1fr);
         }
     }
 </style>
