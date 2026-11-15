@@ -1,5 +1,4 @@
 //! On Unix, `identity` refuses a key that other users can read.
-#![cfg(unix)]
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
