@@ -2,7 +2,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use crate::engine::live::LiveLog;
+use crate::engine::{live::LiveLog, now_ms};
 
 /// When `send` stops serving.
 #[derive(Clone, Debug)]
@@ -46,5 +46,22 @@ pub(super) async fn wait_grace(grace: &mut Option<std::pin::Pin<Box<tokio::time:
     match grace {
         Some(sleep) => sleep.as_mut().await,
         None => std::future::pending::<()>().await,
+    }
+}
+
+/// What a deadline that just fired means: another wait when the wall clock moved back, or the end
+/// of the ticket. A sleep can wake early across a clock change, so the clock and not the timer
+/// decides, and the remainder is waited for again.
+pub(super) fn elapsed(
+    expiry: Option<u64>,
+    deadline: &mut std::pin::Pin<Box<tokio::time::Sleep>>,
+) -> Option<ServeEnd> {
+    match expiry {
+        Some(expiry) if now_ms() < expiry => {
+            let left = Duration::from_millis(expiry - now_ms());
+            deadline.as_mut().reset(tokio::time::Instant::now() + left);
+            None
+        }
+        _ => Some(ServeEnd::Expired),
     }
 }

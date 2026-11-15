@@ -18,7 +18,7 @@ mod start;
 mod stop;
 mod waiting;
 
-use stop::{GRACE, wait_grace};
+use stop::{GRACE, elapsed, wait_grace};
 pub use stop::{ServeEnd, Stop};
 use waiting::Waiting;
 
@@ -377,21 +377,4 @@ fn lock_lines(lines: &Mutex<policy::Lines>) -> std::sync::MutexGuard<'_, policy:
     lines
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-/// What a deadline that just fired means: another wait when the wall clock moved back, or the end
-/// of the ticket. A sleep can wake early across a clock change, so the clock and not the timer
-/// decides, and the remainder is waited for again.
-fn elapsed(
-    expiry: Option<u64>,
-    deadline: &mut std::pin::Pin<Box<tokio::time::Sleep>>,
-) -> Option<ServeEnd> {
-    match expiry {
-        Some(expiry) if now_ms() < expiry => {
-            let left = Duration::from_millis(expiry - now_ms());
-            deadline.as_mut().reset(tokio::time::Instant::now() + left);
-            None
-        }
-        _ => Some(ServeEnd::Expired),
-    }
 }
