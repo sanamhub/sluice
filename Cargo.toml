@@ -203,6 +203,16 @@ all = { level = "warn", priority = -1 }
 # binary of the three profiles measured in docs/performance.md, for a clean build about two minutes
 # longer than thin LTO, which is paid once per release: a local build uses `release`, which this does
 # not touch.
+# A debug build keeps line numbers, which is what a backtrace prints, and no more; a dependency
+# keeps none. Full debug info made the build folder several times larger and every link slower,
+# and nothing here is stepped through in a debugger by default. `CARGO_PROFILE_DEV_DEBUG=2` on the
+# command line brings it back for one build.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.dist]
 inherits = "release"
 lto = "fat"
