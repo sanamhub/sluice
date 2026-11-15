@@ -8,7 +8,7 @@ mod plan;
 mod write;
 
 use claim::{claim_store, hex, read_manifest};
-use finish::{announce, close_content, did_not_close, finished, keeps_store};
+use finish::{announce, close_content, did_not_close, finished, keeps_store, single_path};
 pub(super) use plan::check_one;
 pub(in crate::engine) use plan::{check_promised, choose, size_overflow, totals};
 pub(super) use write::write_range;
@@ -23,7 +23,7 @@ use super::{
 };
 use crate::{
     Error,
-    manifest::{Kind, Limits, Manifest, parse_sequence},
+    manifest::{Limits, Manifest, parse_sequence},
     receipt::Receipt,
     ticket::{Body, Format, Ticket},
 };
@@ -330,26 +330,6 @@ pub(super) async fn fetch_manifest(
         ));
     }
     Ok(manifest)
-}
-
-/// The name to put in `started` for a one-file transfer, and none for a tree.
-fn single_name(manifest: &Manifest) -> Option<String> {
-    single_entry(manifest).map(|entry| entry.path.as_str().to_string())
-}
-
-/// The file a one-file transfer wrote, and the output folder for a tree.
-fn single_path(manifest: &Manifest, options: &ReceiveOptions) -> PathBuf {
-    match single_entry(manifest) {
-        Some(entry) => entry.path.under(&options.out),
-        None => options.out.clone(),
-    }
-}
-
-fn single_entry(manifest: &Manifest) -> Option<&crate::manifest::Entry> {
-    match manifest.entries() {
-        [entry] if entry.kind == Kind::File => Some(entry),
-        _ => None,
-    }
 }
 
 fn static_root(ticket: &Ticket) -> Result<[u8; 32], Error> {
