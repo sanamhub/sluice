@@ -33,11 +33,12 @@
   </section>
 
   <div class="panes" id="panes" hidden>
+    <h1 class="sr">Sluice</h1>
     <section class="pane send" aria-labelledby="send-h">
-      <h2 id="send-h">Send</h2>
+      <h2 id="send-h" tabindex="-1">Send</h2>
 
       <div id="send-pick">
-        <div class="crumbs" id="crumbs"></div>
+        <nav class="crumbs" id="crumbs" aria-label="Folder path"></nav>
         <ul class="entries" id="entries" aria-label="Files and folders"></ul>
         <div class="picked" id="picked-wrap" hidden>
           <h3>Sending</h3>
@@ -45,7 +46,7 @@
         </div>
         <div class="actions">
           <button class="gate" id="send-go" type="button" disabled>Send</button>
-          <p class="hint" id="send-hint">Choose files or folders above.</p>
+          <p class="hint" id="send-hint" role="status">Choose files or folders above.</p>
         </div>
       </div>
 
@@ -90,6 +91,7 @@
     <p class="empty" id="transfers-empty">Nothing has moved yet.</p>
     <ol class="transfers-list" id="transfers"></ol>
   </section>
+  <p class="sr" id="say" role="status" aria-live="polite"></p>
 </main>
 </body>
 </html>

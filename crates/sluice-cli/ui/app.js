@@ -14,6 +14,12 @@ function bytes(n) {
   return i === 0 ? `${n} ${n === 1 ? "byte" : "bytes"}` : `${n.toFixed(n < 10 ? 1 : 0)} ${units[i]}`;
 }
 function count(n, one, many) { n = Number(n || 0); return `${n} ${n === 1 ? one : many}`; }
+// Says a sentence to a screen reader without moving the focus or changing what is shown.
+function say(text) {
+  const live = $("say");
+  live.textContent = "";
+  requestAnimationFrame(() => { live.textContent = text; });
+}
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -138,6 +144,7 @@ function showTicket(res) {
   $("ticket-value").textContent = res.ticket.text;
   $("ticket-qr").src = "data:image/svg+xml;base64," + btoa(res.qr_svg);
   addJob({ id: res.job_id, kind: "send", state: "running", bytes_total: res.bytes, bytes_done: 0, files: res.files });
+  $("ticket-value").focus();
 }
 
 async function copyTicket() {
@@ -145,9 +152,11 @@ async function copyTicket() {
   try {
     await navigator.clipboard.writeText($("ticket-value").textContent);
     btn.textContent = "Copied";
+    say("Ticket copied");
   } catch {
     getSelection().selectAllChildren($("ticket-value"));
     btn.textContent = "Press Ctrl+C";
+    say("The ticket is selected. Press Ctrl+C to copy it.");
   }
   setTimeout(() => { btn.textContent = "Copy ticket"; }, 2000);
 }
@@ -157,6 +166,7 @@ function closeTicket() {
   $("ticket-value").textContent = "";
   $("ticket-qr").removeAttribute("src");
   $("send-pick").hidden = false;
+  $("send-h").focus();
   openFolder(send.root, send.path);
 }
 
@@ -236,37 +246,64 @@ function jobMeta(j) {
 
 const STATE_TEXT = { queued: "Waiting", running: "Moving", done: "Done", failed: "Failed", cancelled: "Cancelled" };
 
+// A row is made once for a job and then updated in place, so a control that has the keyboard's
+// focus keeps it while the numbers beside it change.
+const rows = new Map();
+
+function jobRow(j) {
+  const li = el("li", "xfer");
+  li.tabIndex = -1;
+  const title = el("span", "xfer-title");
+  const side = el("div", "xfer-side");
+  const state = el("span", "xfer-state");
+  const stop = el("button", "quiet", "Cancel");
+  stop.type = "button";
+  stop.addEventListener("click", () => call(`/jobs/${encodeURIComponent(j.id)}/cancel`, {}).catch(() => {}));
+  side.append(state, stop);
+  const meta = el("span", "xfer-meta");
+  const bar = el("div", "channel");
+  bar.setAttribute("role", "progressbar");
+  bar.setAttribute("aria-valuemin", "0");
+  bar.setAttribute("aria-valuemax", "100");
+  const fill = el("span");
+  bar.append(fill);
+  li.append(title, side, meta, bar);
+  return { li, title, state, stop, meta, bar, fill };
+}
+
 function renderJobs() {
   const list = $("transfers");
   $("transfers-empty").hidden = jobs.size > 0;
-  const rows = [...jobs.values()].reverse().map((j) => {
-    const li = el("li", "xfer");
-    li.dataset.state = j.state;
-    li.append(el("span", "xfer-title", jobTitle(j)));
-    const side = el("div", "xfer-side");
-    side.append(el("span", "xfer-state", STATE_TEXT[j.state] || j.state));
-    if (j.state === "running" || j.state === "queued") {
-      const stop = el("button", "quiet", "Cancel");
-      stop.type = "button";
-      stop.addEventListener("click", () => call(`/jobs/${encodeURIComponent(j.id)}/cancel`, {}).catch(() => {}));
-      side.append(stop);
+  for (const j of jobs.values()) {
+    let row = rows.get(j.id);
+    if (!row) {
+      row = jobRow(j);
+      rows.set(j.id, row);
+      list.prepend(row.li);
     }
-    li.append(side, el("span", "xfer-meta", jobMeta(j)));
-    const ch = el("div", "channel");
-    const fill = el("span");
+    const title = jobTitle(j);
+    const stateText = STATE_TEXT[j.state] || j.state;
+    const live = j.state === "running" || j.state === "queued";
+    // The end of a transfer is said once, when its state changes; its progress is not.
+    if (row.li.dataset.state && row.li.dataset.state !== j.state && !live) say(`${title}: ${stateText}`);
+    row.li.dataset.state = j.state;
+    row.title.textContent = title;
+    row.state.textContent = stateText;
+    row.meta.textContent = jobMeta(j);
+    if (!live && document.activeElement === row.stop) row.li.focus();
+    row.stop.hidden = !live;
+    row.stop.setAttribute("aria-label", `Cancel: ${title}`);
     const pct = j.state === "done" ? 100 : j.bytes_total ? (100 * Number(j.bytes_done)) / Number(j.bytes_total) : 0;
-    fill.style.width = `${Math.min(100, pct)}%`;
-    ch.append(fill);
-    li.append(ch);
-    return li;
-  });
-  list.replaceChildren(...rows);
+    row.fill.style.width = `${Math.min(100, pct)}%`;
+    row.bar.setAttribute("aria-label", title);
+    row.bar.setAttribute("aria-valuenow", String(Math.round(Math.min(100, pct))));
+  }
 }
 
 function onEvent(ev) {
   const j = jobs.get(ev.job_id) || { id: ev.job_id, kind: "receive", state: "running", bytes_done: 0, bytes_total: 0 };
   if (ev.dropped) { loadJobs().catch(() => {}); return; }
-  if (ev.started) { j.kind = ev.started.kind; j.bytes_total = ev.started.bytes; j.files = ev.started.files; }
+  if (ev.started) { j.kind = ev.started.kind || j.kind; j.bytes_total = ev.started.bytes; j.files = ev.started.files; }
   if (ev.connected) j.path = ev.connected.path;
   if (ev.path_changed) j.path = ev.path_changed.path;
   if (ev.progress) { j.bytes_done = ev.progress.bytes_done; j.bytes_total = ev.progress.bytes_total; j.rate = ev.progress.bytes_per_second; }
