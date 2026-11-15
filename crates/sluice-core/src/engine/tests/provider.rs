@@ -24,8 +24,6 @@ async fn the_native_builds_default_provider_negotiates_the_post_quantum_group() 
     let (outgoing, _text) = prepared(&dir, b"a small file").await;
     let peer = iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
         .relay_mode(iroh::RelayMode::Disabled)
-        .bind_addr((std::net::Ipv4Addr::LOCALHOST, 0))
-        .unwrap()
         .bind()
         .await
         .unwrap();
