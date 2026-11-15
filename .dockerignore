@@ -13,6 +13,10 @@ crates/**
 !crates/sluice-core/**
 !crates/sluice-live
 !crates/sluice-live/**
+!crates/sluice-delta
+!crates/sluice-delta/**
+!crates/sluice-wasm
+!crates/sluice-wasm/**
 !bench
 bench/**
 !bench/probe
