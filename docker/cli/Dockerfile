@@ -23,6 +23,8 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/sluice-cli/Cargo.toml crates/sluice-cli/
 COPY crates/sluice-core/Cargo.toml crates/sluice-core/
 COPY crates/sluice-live/Cargo.toml crates/sluice-live/
+COPY crates/sluice-delta/Cargo.toml crates/sluice-delta/
+COPY crates/sluice-wasm/Cargo.toml crates/sluice-wasm/
 COPY bench/probe/Cargo.toml bench/probe/
 COPY bench/harness/Cargo.toml bench/harness/
 COPY bench/wasm-hash/Cargo.toml bench/wasm-hash/
@@ -32,6 +34,8 @@ COPY crates/sluice-cli/build.rs crates/sluice-cli/
 COPY crates/sluice-cli/src crates/sluice-cli/src
 COPY crates/sluice-core/src crates/sluice-core/src
 COPY crates/sluice-live/src crates/sluice-live/src
+COPY crates/sluice-delta/src crates/sluice-delta/src
+COPY crates/sluice-wasm/src crates/sluice-wasm/src
 COPY bench/probe/build.rs bench/probe/
 COPY bench/probe/src bench/probe/src
 COPY bench/harness/src bench/harness/src
