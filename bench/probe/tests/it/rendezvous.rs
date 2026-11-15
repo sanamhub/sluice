@@ -11,8 +11,7 @@ use iroh_relay::server::{QuicConfig, Server, ServerConfig};
 use rustls::pki_types::PrivatePkcs8KeyDer;
 use serde_json::Value;
 
-mod common;
-use common::{log_paths, probe, read_ticket, within_deadline};
+use crate::common::{log_paths, probe, read_ticket, within_deadline};
 
 const SIZE: &str = "8MiB";
 

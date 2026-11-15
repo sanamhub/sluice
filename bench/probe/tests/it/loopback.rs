@@ -5,8 +5,9 @@ use std::{io::BufReader, path::PathBuf, process::ChildStdout};
 
 use serde_json::Value;
 
-mod common;
-use common::{Probes, log_paths, path_in_use, probe, read_ticket, spawn_server, within_deadline};
+use crate::common::{
+    Probes, log_paths, path_in_use, probe, read_ticket, spawn_server, within_deadline,
+};
 
 const SIZE: u64 = 8 << 20;
 

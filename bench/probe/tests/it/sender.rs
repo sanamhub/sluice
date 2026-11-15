@@ -4,8 +4,7 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-mod common;
-use common::{
+use crate::common::{
     log_paths, path_in_use, probe, read_line, read_ticket, spawn_server, within_deadline,
 };
 
