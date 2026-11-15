@@ -2,9 +2,7 @@
 //! a replay is a repeat, and providers that drop, repeat and damage frames end where one clean
 //! provider would.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use proptest::prelude::*;
 use sluice_live::{Frame, Outcome, Receiver, Sender, Status};
 

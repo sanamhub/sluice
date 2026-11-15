@@ -1,8 +1,6 @@
 //! The sender refuses what would break a sender rule, and signs exactly the message of section 6.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use sluice_live::{Error, Fault, MAX_SEGMENT_BYTES, MIN_SEGMENT_BYTES, Outcome, Sender};
 
 fn sender() -> Sender {
@@ -28,7 +26,7 @@ fn the_sender_signs_the_records_the_spec_describes() {
 #[test]
 fn an_empty_stream_closes_on_the_hash_of_the_open() {
     let close = sender().close([0xf0; 32], 1_800_000_000_001);
-    assert_eq!(close, common::close(0, open().hash()));
+    assert_eq!(close, crate::common::close(0, open().hash()));
 }
 
 #[test]

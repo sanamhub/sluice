@@ -1,8 +1,6 @@
 //! Rules 1, 3 and 12 to 15 for the close, and what a closed receiver answers.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use sluice_live::{Fault, Outcome, Receiver, Status};
 
 fn closed(total_len: u64) -> Outcome {

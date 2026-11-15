@@ -1,8 +1,6 @@
 //! Rules 1 to 4: the opening record, checked against the ticket before a stream starts.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use sluice_live::{Error, Fault, LogOpen, MAX_SEGMENT_BYTES, MIN_SEGMENT_BYTES, Receiver};
 
 fn start(sender_key: [u8; 32], open: &LogOpen) -> Result<(), Error> {
