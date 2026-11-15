@@ -2,8 +2,6 @@
 //! unseen, since the tests signed and verified with the same wrong key and every one passed, while
 //! the vectors carried RFC 8032's public key.
 
-mod common;
-
 use std::fs;
 use std::path::Path;
 
@@ -13,7 +11,7 @@ const RFC_8032_TEST_1_PUBLIC: &str =
 
 #[test]
 fn the_tests_key_derives_the_public_key_of_rfc_8032_test_1() {
-    let derived: String = common::public()
+    let derived: String = crate::common::public()
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect();

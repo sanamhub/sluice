@@ -1,9 +1,7 @@
 //! Rules 1, 3 and 5 to 11 for frames: a refused frame changes nothing, and a frame the sender
 //! signed that breaks the chain aborts the stream at its `seq`.
 
-mod common;
-
-use common::*;
+use crate::common::*;
 use sluice_live::{Fault, Frame, Outcome, Status};
 
 fn aborted(seq: u64, reason: Fault) -> Outcome {
