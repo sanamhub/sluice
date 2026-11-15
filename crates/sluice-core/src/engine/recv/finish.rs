@@ -3,8 +3,13 @@
 
 use tokio::sync::mpsc::UnboundedSender;
 
-use super::{Event, ReceiveOptions, Received, Selection, emit, plan, single_name, storage};
-use crate::Error;
+use std::path::PathBuf;
+
+use super::{Event, ReceiveOptions, Received, Selection, emit, plan, storage};
+use crate::{
+    Error,
+    manifest::{Kind, Manifest},
+};
 
 /// The end of a receive that arrived: a store or endpoint that would not close is a warning, and the
 /// store is removed, keeping its record of names when this run took part of the ticket.
@@ -142,6 +147,26 @@ pub(super) fn did_not_close(
 /// byte does not, because the store holds nothing a retry could trust.
 pub(super) fn keeps_store(error: &Error) -> bool {
     matches!(error, Error::Network(_) | Error::Storage(_))
+}
+
+/// The name to put in `started` for a one-file transfer, and none for a tree.
+fn single_name(manifest: &Manifest) -> Option<String> {
+    single_entry(manifest).map(|entry| entry.path.as_str().to_string())
+}
+
+/// The file a one-file transfer wrote, and the output folder for a tree.
+pub(super) fn single_path(manifest: &Manifest, options: &ReceiveOptions) -> PathBuf {
+    match single_entry(manifest) {
+        Some(entry) => entry.path.under(&options.out),
+        None => options.out.clone(),
+    }
+}
+
+fn single_entry(manifest: &Manifest) -> Option<&crate::manifest::Entry> {
+    match manifest.entries() {
+        [entry] if entry.kind == Kind::File => Some(entry),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
