@@ -6,8 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-mod common;
-use common::{Probes, probe, read_line, read_ticket, spawn_server, within_deadline_of};
+use crate::common::{Probes, probe, read_line, read_ticket, spawn_server, within_deadline_of};
 
 const SHORT_DEADLINE: Duration = Duration::from_secs(3);
 
