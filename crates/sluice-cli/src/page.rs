@@ -50,6 +50,11 @@ pub fn address(home: &std::path::Path) -> Result<String, Error> {
     let (Some(port), Some(key)) = (port, key) else {
         return Err(Error::Network(NO_DAEMON.to_string()));
     };
+    // The key goes into an address that the system's opener is given. A key the daemon wrote is 64
+    // hex characters, and nothing else is passed on.
+    if key.len() != 64 || !key.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(Error::Network(NO_DAEMON.to_string()));
+    }
     let place = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     // A file left by a daemon that is gone names a port nobody listens on.
     TcpStream::connect_timeout(&place, Duration::from_secs(2))
@@ -80,6 +85,9 @@ mod tests {
     use std::net::TcpListener;
 
     use super::*;
+
+    /// A key of the form the daemon writes.
+    const KEY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     #[test]
     fn with_no_file_the_message_says_how_to_start_a_daemon() {
@@ -113,12 +121,12 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         fs::write(
             dir.path().join(PORT_FILE),
-            format!(r#"{{"port":{port},"key":"abc123"}}"#),
+            format!(r#"{{"port":{port},"key":"{KEY}"}}"#),
         )
         .unwrap();
         assert_eq!(
             address(dir.path()).unwrap(),
-            format!("http://127.0.0.1:{port}/#key=abc123")
+            format!("http://127.0.0.1:{port}/#key={KEY}")
         );
     }
 
@@ -135,6 +143,28 @@ mod tests {
             assert!(
                 matches!(address(dir.path()), Err(Error::Network(_))),
                 "{text}"
+            );
+        }
+    }
+
+    /// The opener is handed the address, so a key that is not the 64 hex characters the daemon
+    /// writes is not passed on, whatever answers on the port.
+    #[test]
+    fn a_key_that_is_not_64_hex_characters_gives_no_address() {
+        let dir = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let long = format!("{KEY}0");
+        let odd = KEY.replace('f', "&");
+        for key in ["abc123", long.as_str(), odd.as_str(), ""] {
+            fs::write(
+                dir.path().join(PORT_FILE),
+                serde_json::json!({ "port": port, "key": key }).to_string(),
+            )
+            .unwrap();
+            assert!(
+                matches!(address(dir.path()), Err(Error::Network(_))),
+                "{key}"
             );
         }
     }
