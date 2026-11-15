@@ -1,10 +1,8 @@
 //! `recv --receipt` and `send --no-receipt`: two processes, one transfer, and the file each leaves.
 
-mod common;
-
 use std::fs;
 
-use common::{bare, data, recv_in, start, start_in, stdout_text, wait_for_sender};
+use crate::common::{bare, data, recv_in, start, start_in, stdout_text, wait_for_sender};
 
 /// A file, a sender for it, and a folder to receive into.
 fn fixture() -> (

@@ -1,8 +1,6 @@
 //! One byte range of a one-file transfer, through two real processes.
 
-mod common;
-
-use common::{data, recv_range, start, start_in};
+use crate::common::{data, recv_range, start, start_in};
 
 /// The folders under the home's `tmp` now. A send keeps its own store there while it serves, so a
 /// test of what a receive leaves counts what was there before the receive started.

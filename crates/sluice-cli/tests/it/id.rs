@@ -2,9 +2,7 @@
 
 use std::fs;
 
-mod common;
-
-use common::{is_endpoint_id, sluice, stderr_text, stdout_of};
+use crate::common::{is_endpoint_id, sluice, stderr_text, stdout_of};
 
 #[test]
 fn the_first_run_makes_the_key_and_the_second_prints_the_same_id() {

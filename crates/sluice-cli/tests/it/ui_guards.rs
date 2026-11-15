@@ -1,13 +1,11 @@
 //! Each point of ADR 0036 that guards the page's listener, tried against a daemon as a process.
 //! Everything is on 127.0.0.1.
 
-mod common;
-
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpStream, UdpSocket};
 use std::time::Duration;
 
-use common::page::{authorized, get, page, post, raw};
+use crate::common::page::{authorized, get, page, post, raw};
 
 const CSP: &str = "default-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 

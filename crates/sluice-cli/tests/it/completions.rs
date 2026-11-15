@@ -1,8 +1,6 @@
 //! `sluice completions <shell>` for each shell it supports.
 
-mod common;
-
-use common::{bare, stderr_text, stdout_text};
+use crate::common::{bare, stderr_text, stdout_text};
 
 #[test]
 fn every_shell_gets_a_script_that_names_sluice() {

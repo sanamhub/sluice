@@ -1,10 +1,8 @@
 //! `sluice receipt verify`: what a receipt is worth, and what it is not.
 
-mod common;
-
 use std::fs;
 
-use common::{bare, start, start_in, stderr_text, stdout_text};
+use crate::common::{bare, start, start_in, stderr_text, stdout_text};
 use ed25519_dalek::SigningKey;
 use serde_json::Value;
 use sluice_core::{

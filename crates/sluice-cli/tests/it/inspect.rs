@@ -1,11 +1,9 @@
 //! `sluice inspect <ticket>`: what a ticket offers, read from its manifest by two real commands,
 //! without the content and without writing anything.
 
-mod common;
-
 use std::path::Path;
 
-use common::{assert_no_temporary_store, data, sluice, start, start_in, stdout_of};
+use crate::common::{assert_no_temporary_store, data, sluice, start, start_in, stdout_of};
 
 /// `sluice inspect` in `dir`, with `SLUICE_HOME` set to `home`, and its output as text.
 fn inspect_in(home: &Path, dir: &Path, ticket: &str, args: &[&str]) -> String {

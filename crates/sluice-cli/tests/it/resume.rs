@@ -1,13 +1,11 @@
 //! A receive that was killed partway: the store it left, and the run that continues from it.
 
-mod common;
-
 use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
 
-use common::{EXE, data, recv, start, start_in, wait_for_sender};
+use crate::common::{EXE, data, recv, start, start_in, wait_for_sender};
 
 #[test]
 fn a_killed_receive_resumes_from_its_partial_store() {

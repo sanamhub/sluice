@@ -1,9 +1,7 @@
 //! Snapshots of the help text, so a change to it shows up in review. `--color never` keeps the
 //! escape codes out of them.
 
-mod common;
-
-use common::{bare, stdout_text};
+use crate::common::{bare, stdout_text};
 
 fn help(args: &[&str]) -> String {
     let assert = bare()

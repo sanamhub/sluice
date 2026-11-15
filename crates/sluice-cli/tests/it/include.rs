@@ -1,11 +1,9 @@
 //! Taking part of a folder with two real processes: a send serves a tree, and a receive and an
 //! inspection take the entries their patterns name.
 
-mod common;
-
 use std::path::Path;
 
-use common::{recv_in, start_in, stdout_of};
+use crate::common::{recv_in, start_in, stdout_of};
 
 /// A folder with two files in it and one nested, so a pattern has something to leave out.
 fn folder(dir: &Path) -> std::path::PathBuf {
@@ -61,7 +59,7 @@ fn an_inspection_prints_the_same_filtered_view() {
     let home = dir.path().join("home");
     folder(dir.path());
     let (sender, ticket) = start_in(dir.path(), &home, &["tree", "--expires", "1h"]);
-    let text = stdout_of(common::bare().env("SLUICE_HOME", &home).args([
+    let text = stdout_of(crate::common::bare().env("SLUICE_HOME", &home).args([
         "inspect",
         &ticket,
         "--include",

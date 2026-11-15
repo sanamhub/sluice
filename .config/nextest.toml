@@ -8,5 +8,5 @@ threads-required = "num-cpus"
 # The two-process transfer tests each bind an endpoint and move a file. Run them away from the
 # other network tests, where a busy loopback and its port mapper made a connection drop once.
 [[profile.default.overrides]]
-filter = 'binary(transfer)'
+filter = 'binary_id(sluice-cli::it) & test(/^transfer::/)'
 threads-required = "num-cpus"

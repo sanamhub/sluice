@@ -2,8 +2,6 @@
 //! whether the receiver took the whole transfer. A send with places refuses the receiver it cannot
 //! serve, once.
 
-mod common;
-
 use std::{
     io::{BufRead, BufReader, Read},
     process::{Command, Stdio},
@@ -11,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use common::{EXE, data, recv};
+use crate::common::{EXE, data, recv};
 
 #[test]
 fn a_sender_names_each_receiver_that_connects_and_finishes() {
