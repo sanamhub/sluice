@@ -1,0 +1,93 @@
+/* Shared by the landing page previews under /v/: the version switcher in the header, the mark for
+   work that is not released yet, a bare command line, and the closing footer. Each version keeps
+   its own layout and type in its own page. */
+
+.switch {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  margin-inline: auto 0.25rem;
+  padding: 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  font-size: var(--step--1);
+}
+
+.switch a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2rem;
+  padding: 0.2rem 0.75rem;
+  border-radius: var(--radius-pill);
+  color: var(--mist);
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.switch a:hover {
+  color: var(--ink);
+}
+
+.switch a[aria-current="page"] {
+  background: var(--ink);
+  color: var(--basin);
+}
+
+.switch-n {
+  font-family: var(--font-code);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 46rem) {
+  .switch-name,
+  .preview .brand-word {
+    display: none;
+  }
+
+  .switch a {
+    padding-inline: 0.65rem;
+  }
+}
+
+/* Work that is in open pull requests and not in a release. */
+.soon {
+  display: inline-block;
+  padding: 0.1rem 0.55rem;
+  border: 1px dashed var(--brass);
+  background: var(--stone);
+  border-radius: var(--radius-pill);
+  color: var(--brass);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* A command outside the install box. */
+.cmd {
+  padding: 0.7rem 0.75rem 0.7rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--basin-deep) 70%, var(--stone));
+  align-items: center;
+}
+
+.cmd pre:focus-visible {
+  outline-offset: 6px;
+}
+
+.preview-foot {
+  margin-top: var(--section);
+  border-top: 1px solid var(--line);
+  color: var(--mist);
+  font-size: var(--step--1);
+}
+
+.preview-foot-inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  padding-block: var(--space-3);
+}

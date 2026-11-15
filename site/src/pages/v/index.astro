@@ -1,0 +1,253 @@
+---
+// The chooser: the three landing page directions side by side, each with a small drawing of its
+// layout, and a link back to the page that is live today.
+import { VERSIONS } from "../../data/preview";
+import Preview from "../../layouts/Preview.astro";
+---
+
+<Preview
+    title="Sluice landing page: three directions"
+    description="Three versions of the Sluice landing page, side by side, to compare and blend."
+    version={0}
+>
+    <section class="wrap pick">
+        <h1>Three directions for the landing page</h1>
+        <p class="pick-lede">
+            Each is a whole page with the same facts and a different idea of who is reading. Open
+            one, then move between them with the switcher in the header. The theme button works on
+            every page.
+        </p>
+        <ul class="pick-grid">
+            {
+                VERSIONS.map((v) => (
+                    <li>
+                        <a class="pick-card" href={v.href}>
+                            <span class={`thumb thumb-${v.id}`} aria-hidden="true">
+                                {v.id === 1 && (
+                                    <>
+                                        <i class="bar wide" />
+                                        <i class="bar wide short" />
+                                        <i class="path" />
+                                        <i class="term" />
+                                        <i class="term" />
+                                    </>
+                                )}
+                                {v.id === 2 && (
+                                    <>
+                                        <i class="bar mid" />
+                                        <i class="bar thin" />
+                                        <i class="pill" />
+                                        <i class="stub" />
+                                    </>
+                                )}
+                                {v.id === 3 && (
+                                    <>
+                                        <i class="bar mono" />
+                                        <i class="col" />
+                                        <i class="col" />
+                                        <i class="col dashed" />
+                                    </>
+                                )}
+                            </span>
+                            <span class="pick-n">Version {v.id}</span>
+                            <span class="pick-name">{v.name}</span>
+                            <span class="pick-idea">{v.idea}</span>
+                            <span class="pick-for">{v.for}</span>
+                        </a>
+                    </li>
+                ))
+            }
+        </ul>
+        <p class="pick-live">
+            For comparison, <a href="/">the page that is live today</a>.
+        </p>
+    </section>
+</Preview>
+
+<style>
+    .pick {
+        padding-top: clamp(3rem, 8vw, 6rem);
+    }
+
+    h1 {
+        max-width: 18ch;
+        font-size: var(--step-3);
+    }
+
+    .pick-lede {
+        max-width: 60ch;
+        margin-top: var(--space-3);
+        color: var(--mist);
+        font-size: var(--step-1);
+        line-height: 1.5;
+    }
+
+    .pick-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-3);
+        margin-top: var(--space-5);
+    }
+
+    .pick-card {
+        display: grid;
+        gap: 0.5rem;
+        height: 100%;
+        align-content: start;
+        padding: var(--space-2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-l);
+        background: var(--stone);
+        color: var(--ink);
+        text-decoration: none;
+        transition: border-color 160ms ease;
+    }
+
+    .pick-card:hover {
+        border-color: var(--water);
+    }
+
+    .pick-n {
+        margin-top: var(--space-2);
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    .pick-name {
+        font-size: var(--step-2);
+        font-stretch: var(--wide);
+        font-weight: 650;
+        line-height: 1.1;
+    }
+
+    .pick-idea {
+        line-height: 1.5;
+    }
+
+    .pick-for {
+        padding-top: 0.6rem;
+        border-top: 1px solid var(--line);
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    .pick-live {
+        margin-top: var(--space-4);
+        color: var(--mist);
+    }
+
+    /* The drawings: each one is its version's layout at thumbnail size. */
+    .thumb {
+        display: grid;
+        gap: 0.45rem;
+        align-content: start;
+        aspect-ratio: 16 / 10;
+        padding: 1rem;
+        border-radius: var(--radius-m);
+        background: var(--basin);
+        overflow: hidden;
+    }
+
+    .thumb i {
+        display: block;
+        border-radius: 3px;
+    }
+
+    .bar {
+        height: 0.7rem;
+        background: var(--ink);
+    }
+
+    .bar.wide {
+        width: 92%;
+        height: 1.1rem;
+    }
+
+    .bar.short {
+        width: 60%;
+    }
+
+    .path {
+        height: 2px;
+        margin-block: 0.5rem;
+        background: linear-gradient(90deg, var(--mist) 0 70%, var(--brass) 70%);
+    }
+
+    .thumb-1 {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .thumb-1 .bar,
+    .thumb-1 .path {
+        grid-column: 1 / -1;
+    }
+
+    .term {
+        height: 3rem;
+        border: 1px solid var(--line-strong);
+        background: var(--basin-deep);
+    }
+
+    .thumb-2 {
+        justify-items: center;
+        align-content: center;
+    }
+
+    .bar.mid {
+        width: 62%;
+        height: 1rem;
+    }
+
+    .bar.thin {
+        width: 44%;
+        height: 0.4rem;
+        background: var(--mist);
+    }
+
+    .pill {
+        width: 5.5rem;
+        height: 1.5rem;
+        margin-top: 0.3rem;
+        border-radius: 999px !important;
+        background: var(--brass);
+    }
+
+    .stub {
+        width: 70%;
+        height: 2.2rem;
+        margin-top: 0.5rem;
+        border: 1px dashed var(--brass);
+    }
+
+    .thumb-3 {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .bar.mono {
+        grid-column: 1 / -1;
+        width: 75%;
+        margin-bottom: 0.4rem;
+    }
+
+    .col {
+        height: 5rem;
+        border: 1px solid var(--line-strong);
+        background: var(--basin-deep);
+    }
+
+    .col.dashed {
+        border-style: dashed;
+        border-color: var(--brass);
+        background: transparent;
+    }
+
+    @media (max-width: 56rem) {
+        .pick-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .thumb {
+            aspect-ratio: 16 / 7;
+        }
+    }
+</style>

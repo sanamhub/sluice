@@ -1,0 +1,493 @@
+---
+// Version 2, for everyone. One sentence, one button, three steps and plain answers. The picture is
+// the ticket: the one thing that goes from you to the other person. No protocol names until
+// someone asks a question that needs one.
+//
+// Type: Archivo at its normal width, large and centred. The page sits on one flat ground instead
+// of the canal gradient, and brass marks only the action and the ticket.
+import InstallTabs from "../../components/InstallTabs.astro";
+import Cmd from "../../components/preview/Cmd.astro";
+import { CLI_README, INSTALL, REPO, THREAT_MODEL } from "../../data/links";
+import { COMING, QUICK_INSTALL } from "../../data/preview";
+import Preview from "../../layouts/Preview.astro";
+
+const questions = [
+    {
+        q: "Where does my file go?",
+        a: "Straight to the other computer. It is not uploaded to storage and no server keeps a copy. If the two computers cannot reach each other directly, the transfer goes through a relay that you run. The relay forwards encrypted packets it cannot read, and keeps nothing.",
+    },
+    {
+        q: "Is there a size limit?",
+        a: "No. There is no account and no plan. Sluice is built for large files, slow links and connections that drop.",
+    },
+    {
+        q: "What if the connection drops halfway?",
+        a: "Run the same command again. The receiver keeps the parts it already checked and fetches only the rest.",
+    },
+    {
+        q: "How do I know the file arrived whole?",
+        a: "Every block is checked before it is written. A block that does not match is thrown away, so a damaged file never lands in your folder.",
+    },
+    {
+        q: "Can anyone else read it on the way?",
+        a: "The connection is encrypted with TLS 1.3 over QUIC, and it has to use a post-quantum key exchange or it is refused. The ticket is the key to the file, so share it the way you would share a password.",
+    },
+    {
+        q: "Do I have to use a terminal?",
+        a: "Today, yes: one command to send and one to receive. Version 0.2.0 adds a page in your browser.",
+    },
+];
+
+const ui = COMING.find((item) => item.id === "ui")!;
+const others = COMING.filter((item) => item.id !== "ui");
+---
+
+<Preview
+    title="Sluice: send a file to another computer"
+    description="Preview, version 2: one action, three steps and plain answers."
+    version={2}
+>
+    <section class="wrap hero" aria-labelledby="v2-title">
+        <h1 id="v2-title">Send a file to another computer.</h1>
+        <p class="lede">
+            Sluice moves a file from your computer straight to theirs, however big it is. Nothing
+            is uploaded or stored along the way, and there is no account to make.
+        </p>
+        <p class="actions">
+            <a class="button primary" href="#install">Install Sluice</a>
+            <a href="#questions">Common questions</a>
+        </p>
+
+        <div class="handoff" role="img" aria-label="You run sluice send and get a ticket. They run sluice recv with the ticket, and the file goes from your computer to theirs.">
+            <div class="side">
+                <span class="who">You</span>
+                <code translate="no">sluice send</code>
+            </div>
+            <div class="ticket">
+                <span class="ticket-word">ticket</span>
+                <span class="ticket-code" translate="no">sluice10406jfph…</span>
+            </div>
+            <div class="side">
+                <span class="who">Them</span>
+                <code translate="no">sluice recv</code>
+            </div>
+        </div>
+        <p class="handoff-note">
+            You get a ticket. You pass it on in a chat, an email or a note. They use it to fetch
+            the file from your computer.
+        </p>
+    </section>
+
+    <section class="wrap steps" id="install" aria-labelledby="v2-steps">
+        <h2 id="v2-steps">Three steps</h2>
+        <ol>
+            <li>
+                <div class="step-body">
+                    <h3>Install Sluice on both computers</h3>
+                    <p>It is one small program for macOS, Linux and Windows. Free and open source.</p>
+                    <InstallTabs name="v2" options={QUICK_INSTALL} />
+                    <p class="small"><a href={INSTALL}>Other ways to install</a></p>
+                </div>
+            </li>
+            <li>
+                <div class="step-body">
+                    <h3>Send</h3>
+                    <p>Name a file or a folder. Sluice prints a ticket and waits.</p>
+                    <Cmd lines={["sluice send ./holiday-video"]} />
+                </div>
+            </li>
+            <li>
+                <div class="step-body">
+                    <h3>Receive</h3>
+                    <p>On the other computer, paste the ticket and say where the file goes.</p>
+                    <Cmd lines={["sluice recv <ticket> --out ./inbox"]} />
+                </div>
+            </li>
+        </ol>
+    </section>
+
+    <section class="wrap questions" id="questions" aria-labelledby="v2-questions">
+        <h2 id="v2-questions">Common questions</h2>
+        <div class="qa">
+            {
+                questions.map((item) => (
+                    <details>
+                        <summary>{item.q}</summary>
+                        <p>{item.a}</p>
+                    </details>
+                ))
+            }
+        </div>
+        <p class="small center">
+            The <a href={THREAT_MODEL}>threat model</a> says what is protected and what is not.
+        </p>
+    </section>
+
+    <section class="wrap coming" aria-labelledby="v2-coming">
+        <h2 id="v2-coming">Coming in 0.2.0</h2>
+        <p class="lede">
+            These are being reviewed and are not in a release yet. The current release is 0.1.1.
+        </p>
+        <div class="coming-grid">
+            <figure class="window">
+                <div class="window-bar" aria-hidden="true">
+                    <i></i><i></i><i></i>
+                    <span>127.0.0.1</span>
+                </div>
+                <div class="window-body" aria-hidden="true">
+                    <div class="drop">Send a file</div>
+                    <div class="drop">Receive with a ticket</div>
+                </div>
+                <figcaption>
+                    <strong>{ui.title}.</strong>
+                    {ui.plain} Run <code translate="no">{ui.code}</code> and it opens on your own
+                    computer. The drawing is a sketch, not a screenshot.
+                </figcaption>
+            </figure>
+            <ul class="coming-list">
+                {
+                    others.map((item) => (
+                        <li>
+                            <h3>{item.title}</h3>
+                            <p>{item.plain}</p>
+                        </li>
+                    ))
+                }
+            </ul>
+        </div>
+    </section>
+
+    <section class="wrap closing" aria-labelledby="v2-closing">
+        <h2 id="v2-closing">Free, open, and yours to read</h2>
+        <p class="lede">
+            Sluice is open source under Apache-2.0 or MIT. It has no analytics and sends nothing
+            home.
+        </p>
+        <p class="actions">
+            <a class="button" href={REPO}>Source on GitHub</a>
+            <a class="button" href={CLI_README}>Every command</a>
+            <a class="button" href={INSTALL}>Install guide</a>
+        </p>
+    </section>
+</Preview>
+
+<style is:global>
+    body.preview-2 {
+        background: var(--stone);
+    }
+</style>
+
+<style>
+    section {
+        padding-top: var(--section);
+        text-align: center;
+    }
+
+    .hero {
+        padding-top: clamp(3rem, 9vw, 7rem);
+    }
+
+    h1 {
+        max-width: 13ch;
+        margin-inline: auto;
+        font-size: clamp(2.6rem, 1.4rem + 5.4vw, 5.4rem);
+        font-stretch: 100%;
+        font-weight: 650;
+        line-height: 1.02;
+        letter-spacing: -0.035em;
+    }
+
+    h2 {
+        font-size: clamp(1.9rem, 1.3rem + 2.4vw, 3rem);
+        font-stretch: 100%;
+        font-weight: 650;
+        letter-spacing: -0.03em;
+    }
+
+    h3 {
+        font-stretch: 100%;
+    }
+
+    .lede {
+        max-width: 46ch;
+        margin: var(--space-3) auto 0;
+        color: var(--mist);
+        font-size: clamp(1.15rem, 1rem + 0.6vw, 1.4rem);
+        line-height: 1.5;
+    }
+
+    .actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2) var(--space-3);
+        margin-top: var(--space-4);
+    }
+
+    .actions .primary {
+        min-height: 3.4rem;
+        padding-inline: 2rem;
+        font-size: var(--step-1);
+    }
+
+    /* You, the ticket, them. The ticket is a stub with a torn edge on each side. */
+    .handoff {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        gap: var(--space-2);
+        max-width: 46rem;
+        margin: var(--space-5) auto 0;
+    }
+
+    .side {
+        display: grid;
+        gap: 0.5rem;
+        justify-items: center;
+        padding: var(--space-3) var(--space-2);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-l);
+        background: var(--basin);
+    }
+
+    .who {
+        font-size: var(--step-1);
+        font-weight: 650;
+    }
+
+    .ticket {
+        display: grid;
+        gap: 0.2rem;
+        padding: 0.9rem 1.4rem;
+        border-block: 2px solid var(--brass);
+        border-inline: 2px dashed var(--brass);
+        border-radius: var(--radius-s);
+        background: var(--brass-soft);
+        transform: rotate(-3deg);
+    }
+
+    .ticket-word {
+        font-weight: 700;
+    }
+
+    .ticket-code {
+        font-family: var(--font-code);
+        font-size: 0.8rem;
+    }
+
+    .handoff-note {
+        max-width: 44ch;
+        margin: var(--space-3) auto 0;
+        color: var(--mist);
+    }
+
+    .steps ol {
+        display: grid;
+        gap: var(--space-4);
+        max-width: 40rem;
+        margin: var(--space-4) auto 0;
+        counter-reset: step;
+        text-align: left;
+    }
+
+    .steps li {
+        display: grid;
+        grid-template-columns: 3.2rem minmax(0, 1fr);
+        column-gap: var(--space-2);
+        counter-increment: step;
+    }
+
+    .steps li::before {
+        content: counter(step);
+        display: grid;
+        place-items: center;
+        width: 3.2rem;
+        height: 3.2rem;
+        border-radius: 50%;
+        background: var(--ink);
+        color: var(--stone);
+        font-size: var(--step-1);
+        font-weight: 700;
+    }
+
+    .step-body {
+        display: grid;
+        gap: 0.6rem;
+        min-width: 0;
+    }
+
+    .steps h3 {
+        padding-top: 0.2rem;
+        font-size: var(--step-2);
+        font-weight: 650;
+        letter-spacing: -0.02em;
+    }
+
+    .step-body > p {
+        color: var(--mist);
+    }
+
+    .small {
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    .center {
+        margin-top: var(--space-3);
+    }
+
+    .qa {
+        max-width: 40rem;
+        margin: var(--space-4) auto 0;
+        border-top: 1px solid var(--line);
+        text-align: left;
+    }
+
+    details {
+        border-bottom: 1px solid var(--line);
+    }
+
+    summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        padding: 1.1rem 0.25rem;
+        font-size: var(--step-1);
+        font-weight: 600;
+        cursor: pointer;
+        list-style: none;
+    }
+
+    summary::-webkit-details-marker {
+        display: none;
+    }
+
+    summary::after {
+        content: "+";
+        flex: none;
+        color: var(--mist);
+        font-size: 1.5rem;
+        font-weight: 400;
+        line-height: 1;
+    }
+
+    details[open] summary::after {
+        content: "\2212";
+    }
+
+    details p {
+        max-width: 58ch;
+        padding: 0 0.25rem 1.3rem;
+        color: var(--mist);
+    }
+
+    .coming-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+        gap: var(--space-4);
+        align-items: start;
+        max-width: 58rem;
+        margin: var(--space-4) auto 0;
+        text-align: left;
+    }
+
+    .window {
+        margin: 0;
+        border: 1px dashed var(--line-strong);
+        border-radius: var(--radius-l);
+        overflow: hidden;
+    }
+
+    .window-bar {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.7rem 1rem;
+        border-bottom: 1px dashed var(--line-strong);
+        color: var(--mist);
+        font-family: var(--font-code);
+        font-size: 0.8rem;
+    }
+
+    .window-bar i {
+        width: 0.6rem;
+        height: 0.6rem;
+        border-radius: 50%;
+        background: var(--line-strong);
+    }
+
+    .window-bar span {
+        margin-left: 0.6rem;
+    }
+
+    .window-body {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-2);
+        padding: var(--space-3);
+    }
+
+    .drop {
+        display: grid;
+        place-items: center;
+        min-height: 7rem;
+        padding: 0.5rem;
+        border-radius: var(--radius-m);
+        background: var(--basin);
+        color: var(--mist);
+        font-weight: 600;
+        text-align: center;
+    }
+
+    .window figcaption {
+        padding: var(--space-2) var(--space-3) var(--space-3);
+        border-top: 1px dashed var(--line-strong);
+        color: var(--mist);
+        line-height: 1.55;
+    }
+
+    .window strong {
+        color: var(--ink);
+    }
+
+    .coming-list {
+        display: grid;
+        gap: var(--space-3);
+    }
+
+    .coming-list h3 {
+        font-size: var(--step-1);
+        font-weight: 650;
+    }
+
+    .coming-list p {
+        margin-top: 0.25rem;
+        color: var(--mist);
+    }
+
+    @media (max-width: 46rem) {
+        .handoff {
+            grid-template-columns: 1fr;
+            justify-items: center;
+        }
+
+        .side {
+            width: 100%;
+        }
+
+        .coming-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .steps li {
+            grid-template-columns: 2.4rem minmax(0, 1fr);
+        }
+
+        .steps li::before {
+            width: 2.4rem;
+            height: 2.4rem;
+        }
+    }
+</style>
