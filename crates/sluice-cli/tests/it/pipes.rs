@@ -1,14 +1,12 @@
 //! Pipes: a ticket on standard input, a raw blob from standard input, and content written to
 //! standard output instead of a file.
 
-mod common;
-
 use std::{
     io::Write,
     process::{Command, Stdio},
 };
 
-use common::{EXE, assert_no_temporary_store, data, start, start_stdin, wait_for_sender};
+use crate::common::{EXE, assert_no_temporary_store, data, start, start_stdin, wait_for_sender};
 
 #[test]
 fn a_ticket_on_standard_input_is_read() {

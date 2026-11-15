@@ -6,9 +6,7 @@ use std::process::Stdio;
 
 use serde_json::Value;
 
-mod common;
-
-use common::{bare, is_endpoint_id, sluice, stderr_text, stdout_of, stdout_text};
+use crate::common::{bare, is_endpoint_id, sluice, stderr_text, stdout_of, stdout_text};
 
 /// A home that a newer sluice made, which every command refuses with exit code 6.
 fn newer_home() -> tempfile::TempDir {

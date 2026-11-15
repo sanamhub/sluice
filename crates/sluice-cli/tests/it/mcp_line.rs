@@ -1,12 +1,10 @@
 //! `sluice mcp` and a line of input longer than it takes.
 
-mod common;
-
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
-use common::EXE;
+use crate::common::EXE;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 

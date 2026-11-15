@@ -1,9 +1,7 @@
 //! `sluice daemon --ui` as a process: the calls the page makes, from a send to a verified receive.
 //! Everything is on 127.0.0.1.
 
-mod common;
-
-use common::page::{authorized, get, json_of, page, post, watch};
+use crate::common::page::{authorized, get, json_of, page, post, watch};
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -100,7 +98,7 @@ fn the_calls_the_page_makes_send_inspect_receive_and_watch_to_done() {
     };
     assert_eq!(state, "done");
     assert!(verified, "a verified event came before done");
-    let want = common::data(300 * 1024, 5);
+    let want = crate::common::data(300 * 1024, 5);
     assert_eq!(
         std::fs::read(page.root.join("landing").join("payload.bin")).unwrap(),
         want
@@ -159,17 +157,17 @@ fn the_port_file_is_private_and_goes_when_the_daemon_stops() {
         );
     }
     // `sluice ui --print` finds the daemon through it, and says the address holds the key.
-    let found = common::sluice(&page.daemon.home)
+    let found = crate::common::sluice(&page.daemon.home)
         .args(["ui", "--print"])
         .assert()
         .success();
-    let url = common::stdout_text(&found);
+    let url = crate::common::stdout_text(&found);
     assert_eq!(
         url.trim(),
         format!("http://127.0.0.1:{}/#key={}", page.port, page.key)
     );
-    assert!(common::stderr_text(&found).contains("holds the key"));
-    common::sluice(&page.daemon.home)
+    assert!(crate::common::stderr_text(&found).contains("holds the key"));
+    crate::common::sluice(&page.daemon.home)
         .args(["daemon", "stop"])
         .assert()
         .success();
@@ -179,11 +177,11 @@ fn the_port_file_is_private_and_goes_when_the_daemon_stops() {
 #[test]
 fn with_no_daemon_ui_says_how_to_start_one() {
     let dir = tempfile::tempdir().unwrap();
-    let failed = common::sluice(&dir.path().join("home"))
+    let failed = crate::common::sluice(&dir.path().join("home"))
         .args(["ui", "--print"])
         .assert()
         .failure();
-    let text = common::stderr_text(&failed);
+    let text = crate::common::stderr_text(&failed);
     assert!(text.contains("sluice daemon --ui"), "{text}");
     assert!(!text.contains("key="), "no key is printed");
 }

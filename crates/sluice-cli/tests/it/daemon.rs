@@ -1,10 +1,8 @@
 //! `sluice daemon` as a process: the interface it serves, the roots it holds to, the commands that
 //! call it, and what it leaves out of its log.
 
-mod common;
-
-use common::daemon::{at, start};
-use common::{bare, sluice, stderr_text, stdout_text};
+use crate::common::daemon::{at, start};
+use crate::common::{bare, sluice, stderr_text, stdout_text};
 use sluice_api::NO_ROOTS;
 use sluice_api::proto::{ListJobsRequest, RootPath, StartReceiveRequest, StartSendRequest, Ticket};
 use tonic::Code;

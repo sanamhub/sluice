@@ -1,12 +1,10 @@
 //! `sluice mcp` as processes, driven through standard input and output with the SDK's own client.
 //! Every endpoint is on 127.0.0.1 only: the servers are started with `--loopback`.
 
-mod common;
-
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use common::{EXE, data};
+use crate::common::{EXE, data};
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use rmcp::service::RunningService;
 use rmcp::transport::{ConfigureCommandExt, TokioChildProcess};

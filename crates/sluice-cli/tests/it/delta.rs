@@ -1,11 +1,9 @@
 //! `recv --delta-from`: two processes, one transfer, and what the summary says about where the
 //! bytes came from.
 
-mod common;
-
 use std::fs;
 
-use common::{bare, recv_in, start, wait_for_sender};
+use crate::common::{bare, recv_in, start, wait_for_sender};
 
 /// `len` bytes from a fixed seed that do not repeat, so the chunker finds real boundaries.
 fn content(len: usize, seed: u64) -> Vec<u8> {
@@ -82,7 +80,7 @@ fn json_carries_the_two_sums_and_they_add_up() {
         .assert()
         .success();
     wait_for_sender(&mut sender);
-    let text = common::stdout_text(&assert);
+    let text = crate::common::stdout_text(&assert);
     let delta = text
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())

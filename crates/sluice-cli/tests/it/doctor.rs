@@ -3,9 +3,7 @@
 use std::fs;
 use std::path::Path;
 
-mod common;
-
-use common::{sluice, stderr_text, stdout_text};
+use crate::common::{sluice, stderr_text, stdout_text};
 
 /// A home as `sluice id` leaves it.
 fn ready_home(dir: &Path) -> std::path::PathBuf {

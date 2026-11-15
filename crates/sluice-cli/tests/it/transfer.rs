@@ -1,11 +1,9 @@
 //! Two real `sluice` processes on loopback: the sender prints a ticket and the receiver writes the
 //! file. No relay and no internet are involved.
 
-mod common;
-
 use std::process::Command;
 
-use common::{EXE, data, recv, recv_in, start, start_in, wait_for_sender};
+use crate::common::{EXE, data, recv, recv_in, start, start_in, wait_for_sender};
 
 #[test]
 fn one_file_crosses_two_processes_with_its_name() {

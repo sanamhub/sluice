@@ -1,13 +1,11 @@
 //! Several tickets in one command, and the byte cap of one command.
 
-mod common;
-
 use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
 
-use common::{data, recv, start, start_in, wait_for_sender};
+use crate::common::{data, recv, start, start_in, wait_for_sender};
 
 #[test]
 fn three_tickets_run_together_and_write_every_file() {
@@ -27,7 +25,7 @@ fn three_tickets_run_together_and_write_every_file() {
     let mut command: Vec<&str> = vec!["recv"];
     command.extend(tickets.iter().map(String::as_str));
     command.extend(["--out", out_text, "--priority", "high"]);
-    let result = std::process::Command::new(common::EXE)
+    let result = std::process::Command::new(crate::common::EXE)
         .env("SLUICE_HOME", dir.path().join("recv-home"))
         .args(&command)
         .output()
@@ -112,7 +110,7 @@ fn a_job_that_drops_is_retried_and_the_command_still_succeeds() {
     let mut command: Vec<&str> = vec!["recv"];
     command.extend(tickets.iter().map(String::as_str));
     command.extend(["--out", out_text, "--limit-rate", "8M"]);
-    let mut child = Command::new(common::EXE)
+    let mut child = Command::new(crate::common::EXE)
         .env("SLUICE_HOME", dir.path().join("recv-home"))
         .args(&command)
         .stdout(Stdio::null())
@@ -167,7 +165,7 @@ fn one_transfer_named_twice_is_refused() {
     // The same content sent from two homes: different senders, one root.
     let (mut first, one) = start(&dir.path().join("home-a"), &file, "1h");
     let (mut second, two) = start(&dir.path().join("home-b"), &file, "1h");
-    let result = std::process::Command::new(common::EXE)
+    let result = std::process::Command::new(crate::common::EXE)
         .env("SLUICE_HOME", dir.path().join("recv-home"))
         .args(["recv", &one, &two, "--out", out.to_str().unwrap()])
         .output()

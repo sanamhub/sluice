@@ -3,11 +3,8 @@
 //!
 //! The interrupt is sent as `SIGINT`, which a test can deliver on Unix only; on Windows a process
 //! cannot raise a console control event in another process without a console of its own.
-#![cfg(unix)]
 
-mod common;
-
-use common::{EXE, start_in};
+use crate::common::{EXE, start_in};
 use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
@@ -105,7 +102,7 @@ fn wait_for<T>(what: &str, mut check: impl FnMut() -> Option<T>) -> T {
 fn an_interrupted_receive_removes_the_temporary_store_it_made() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("big.bin");
-    std::fs::write(&file, common::data(32 << 20, 9)).unwrap();
+    std::fs::write(&file, crate::common::data(32 << 20, 9)).unwrap();
     let (sender, ticket) = start_in(
         dir.path(),
         &dir.path().join("home"),

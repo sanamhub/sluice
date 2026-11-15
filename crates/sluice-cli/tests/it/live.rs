@@ -1,14 +1,12 @@
 //! A live file through two real processes: the sender follows it while the receiver writes it.
 
-mod common;
-
 use std::{
     io::Write,
     process::{Command, Stdio},
     time::Duration,
 };
 
-use common::{EXE, recv_in, start_in, wait_for_sender};
+use crate::common::{EXE, recv_in, start_in, wait_for_sender};
 
 #[test]
 fn a_live_file_grows_while_the_receiver_watches() {

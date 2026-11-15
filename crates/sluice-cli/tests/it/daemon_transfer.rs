@@ -1,10 +1,8 @@
 //! Two `sluice daemon` processes on loopback: one sends, one receives, and what each leaves behind
 //! when a job ends, is stopped, or is read about in a log.
 
-mod common;
-
-use common::daemon::{at, ended_in, events_of, start};
-use common::data;
+use crate::common::daemon::{at, ended_in, events_of, start};
+use crate::common::data;
 use sluice_api::proto::event::Event as Kind;
 use sluice_api::proto::{
     JobState, ListJobsRequest, ShutdownRequest, StartReceiveRequest, StartSendRequest, Ticket,
