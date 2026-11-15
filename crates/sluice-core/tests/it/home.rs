@@ -196,7 +196,7 @@ fn start_holder(path: &Path) -> Holder {
     let mut child = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "child_that_holds_a_home_until_it_is_killed",
+            "home::child_that_holds_a_home_until_it_is_killed",
             "--nocapture",
         ])
         .env(HOLD_ENV, path)
