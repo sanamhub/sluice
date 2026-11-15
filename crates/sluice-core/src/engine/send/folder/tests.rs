@@ -53,8 +53,10 @@ async fn a_file_replaced_after_the_walk_is_refused_and_none_of_the_new_bytes_are
     let built = confined(&sent);
     // A different file takes the name: another object, with other bytes.
     let outside = vec![9u8; 2 * 1024 * 1024];
-    fs::remove_file(sent.join("data.bin")).unwrap();
-    fs::write(sent.join("data.bin"), &outside).unwrap();
+    // It is written beside the first and renamed over it, so both exist at once and the system
+    // cannot give the new file the identity of the one it replaces.
+    fs::write(sent.join("data.new"), &outside).unwrap();
+    fs::rename(sent.join("data.new"), sent.join("data.bin")).unwrap();
     let (result, held) = import(&built, &outside).await;
     let Err(Error::Verify(text)) = result else {
         panic!("the send is refused as changed: {result:?}");
