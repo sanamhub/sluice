@@ -1,0 +1,25 @@
+---
+// One command with a copy button, in the same markup the install box uses, so the copy script and
+// its styles serve both.
+interface Props {
+    lines: string[];
+    copy?: boolean;
+}
+
+const { lines, copy = true } = Astro.props;
+---
+
+<div class="install-code cmd">
+    <pre translate="no" tabindex="0"><code>{lines.map((line) => <span class="line">{line}</span>)}</code></pre>
+    {
+        copy && (
+            <button class="copy" type="button" data-copy hidden>
+                <span class="copy-text" aria-live="polite">Copy</span>
+            </button>
+        )
+    }
+</div>
+
+<script>
+    import "../../scripts/tabs";
+</script>

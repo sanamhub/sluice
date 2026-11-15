@@ -1,0 +1,568 @@
+---
+// Version 3, agents and automation. The page's one device is three columns: the same tool typed by
+// a person, run by a script and called by an agent. The first two are released; the third is the
+// 0.2.0 work and is drawn with a dashed edge wherever it appears.
+//
+// This version proposes its own palette and type: neutral graphite in place of the canal colours,
+// violet for anything an agent does, and IBM Plex Mono for the headings.
+import InstallTabs from "../../components/InstallTabs.astro";
+import Cmd from "../../components/preview/Cmd.astro";
+import { ADRS, CLI_README, DESIGN, INSTALL, REPO, SPEC, THREAT_MODEL } from "../../data/links";
+import { COMING, QUICK_INSTALL } from "../../data/preview";
+import Preview from "../../layouts/Preview.astro";
+
+// Both outputs are the examples in the CLI reference, character for character.
+const inspectJson =
+    '{"files":2,"folders":2,"links":0,"bytes":6,"entries":[{"path":"tree","kind":"directory","size":0},{"path":"tree/a.txt","kind":"file","size":4},{"path":"tree/sub","kind":"directory","size":0},{"path":"tree/sub/b.txt","kind":"file","size":2}]}';
+const errorJson =
+    '{"error":{"kind":"policy","message":"the store has layout version 2 and this sluice reads up to version 1. It does not write to a newer layout"}}';
+
+const tools = ["send", "receive", "inspect", "list_jobs", "job_status", "cancel_job", "doctor"];
+
+const rules = [
+    "The output format never depends on whether stdout is a terminal.",
+    "With --json, stdout holds only JSON, one object per line, with keys in snake_case.",
+    "A failure is one JSON line on stderr, and stdout stays empty.",
+    "The exit code is the same with or without --json.",
+];
+
+const exits = [
+    ["0", "Success", ""],
+    ["2", "Usage", "A bad command line"],
+    ["3", "Network", "A peer or relay could not be reached. Retrying can help"],
+    ["4", "Verify", "Bytes did not match the BLAKE3 root and were discarded"],
+    ["5", "Storage", "The store or the filesystem failed"],
+    ["6", "Policy", "Sluice refused by rule"],
+    ["70", "Bug", "A defect in Sluice, never in the environment"],
+    ["130", "Cancelled", "The caller cancelled"],
+];
+
+const guards = [
+    "A client names paths under a root it was given. Every path is opened from the root's handle one component at a time, and no link is followed.",
+    "Text that a peer chose comes back only in fields named untrusted_*, so an agent can tell data from instructions.",
+    "A send returns its job id at once. The ticket is read from job_status as secret_ticket, a name that says how to treat it.",
+    "The gRPC interface listens on a socket or pipe that only your user can reach. The page listens on 127.0.0.1 only.",
+];
+
+const under = [
+    ["Direct", "QUIC between the two machines, or through a relay you run when they cannot reach each other. No storage in between."],
+    ["Verified", "Each block is checked against its BLAKE3 root before it is written. A mismatch is exit code 4, and nothing unverified reaches the output folder."],
+    ["Post-quantum", "Every connection has to negotiate X25519MLKEM768. A receiver that is offered less closes the connection and exits with code 6."],
+    ["No account", "No sign-in, no telemetry, and no relay you did not name. Nothing to provision before an agent can use it."],
+];
+
+const byId = (id: string) => COMING.find((item) => item.id === id)!;
+---
+
+<Preview
+    title="Sluice: file transfer for people, scripts and agents"
+    description="Preview, version 3: one tool typed by a person, run by a script and called by an agent."
+    version={3}
+>
+    <section class="wrap hero" aria-labelledby="v3-title">
+        <h1 id="v3-title">File transfer that people type, scripts run and agents call.</h1>
+        <p class="lede">
+            Sluice sends files straight from one computer to another and verifies every block. Its
+            output, its exit codes and its errors are an interface, tested like one.
+        </p>
+
+        <div class="three">
+            <article class="door">
+                <h2>A person types it</h2>
+                <pre translate="no" tabindex="0"><code><span class="in">sluice inspect &lt;ticket&gt;</span>
+1 file, 1.5 KiB
+one.bin</code></pre>
+                <p>Plain text, a progress line on a terminal, and one sentence when something fails.</p>
+            </article>
+            <article class="door">
+                <h2>A script runs it</h2>
+                <pre translate="no" tabindex="0"><code><span class="in">sluice inspect &lt;ticket&gt; --json</span>
+{inspectJson}</code></pre>
+                <p>One JSON object per line on stdout. The exit code says what kind of failure it was.</p>
+            </article>
+            <article class="door agent">
+                <h2>An agent calls it <span class="soon">Coming in 0.2.0</span></h2>
+                <pre translate="no" tabindex="0"><code><span class="in">sluice mcp</span>
+{tools.map((tool) => <span class="tool">{tool}</span>)}</code></pre>
+                <p>
+                    A Model Context Protocol server over standard input and output. Seven tools,
+                    the same service underneath.
+                </p>
+            </article>
+        </div>
+        <p class="note">The two outputs are the examples in the <a href={CLI_README}>CLI reference</a>.</p>
+    </section>
+
+    <section class="wrap start" aria-labelledby="v3-start">
+        <h2 id="v3-start">Install, send, receive</h2>
+        <div class="start-grid">
+            <div>
+                <InstallTabs name="v3" options={QUICK_INSTALL} />
+                <p class="note"><a href={INSTALL}>Every install channel</a>, a container image among them.</p>
+            </div>
+            <div class="start-cmds">
+                <p>The sender prints a ticket on one line and serves the file.</p>
+                <Cmd lines={["sluice send ./build.tar"]} />
+                <p>The receiver fetches, verifies and names the path it wrote.</p>
+                <Cmd lines={["sluice recv <ticket> --out ./inbox"]} />
+            </div>
+        </div>
+    </section>
+
+    <section class="wrap contract" aria-labelledby="v3-contract">
+        <h2 id="v3-contract">What a script can rely on</h2>
+        <p class="lede">
+            Changing any of this is a breaking change and is tested. The wording of a message is
+            not part of it.
+        </p>
+        <div class="contract-grid">
+            <div>
+                <ul class="rules">
+                    {rules.map((rule) => <li>{rule}</li>)}
+                </ul>
+                <pre class="block" translate="no" tabindex="0"><code>{errorJson}</code></pre>
+                <p class="note">A failure with <code translate="no">--json</code>, as it is written to stderr.</p>
+            </div>
+            <div class="table-scroll" tabindex="0" role="group" aria-labelledby="v3-exits">
+                <table>
+                    <caption id="v3-exits">Exit codes</caption>
+                    <thead>
+                        <tr><th scope="col">Code</th><th scope="col">Kind</th><th scope="col">Meaning</th></tr>
+                    </thead>
+                    <tbody>
+                        {
+                            exits.map(([code, kind, meaning]) => (
+                                <tr>
+                                    <td class="code">{code}</td>
+                                    <th scope="row">{kind}</th>
+                                    <td>{meaning}</td>
+                                </tr>
+                            ))
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section class="wrap control" aria-labelledby="v3-control">
+        <h2 id="v3-control">One service, three doors <span class="soon">Coming in 0.2.0</span></h2>
+        <p class="lede">
+            In open pull requests, not in a release yet. A local daemon holds the transfers, and
+            three front ends ask it to work.
+        </p>
+        <div class="doors">
+            <div class="front">
+                <code translate="no">sluice mcp</code>
+                <p>For agents. Standard input and output.</p>
+            </div>
+            <div class="front">
+                <code translate="no">gRPC</code>
+                <p>For programs. A socket or pipe that only your user can reach.</p>
+            </div>
+            <div class="front">
+                <code translate="no">sluice ui</code>
+                <p>For people. A page on 127.0.0.1 that never carries file bytes.</p>
+            </div>
+            <div class="service">
+                <code translate="no">sluice daemon</code>
+                <p>The service: jobs, roots, send, receive, inspect, doctor.</p>
+            </div>
+        </div>
+        <ul class="guards">
+            {guards.map((guard) => <li>{guard}</li>)}
+        </ul>
+        <dl class="also">
+            {
+                [byId("receipts"), byId("delta")].map((item) => (
+                    <div>
+                        <dt>{item.title}</dt>
+                        <dd>
+                            {item.body} <code translate="no">{item.code}</code>
+                        </dd>
+                    </div>
+                ))
+            }
+        </dl>
+    </section>
+
+    <section class="wrap under" aria-labelledby="v3-under">
+        <h2 id="v3-under">Under every call</h2>
+        <dl class="under-list">
+            {
+                under.map(([term, text]) => (
+                    <div>
+                        <dt>{term}</dt>
+                        <dd>{text}</dd>
+                    </div>
+                ))
+            }
+        </dl>
+    </section>
+
+    <section class="wrap links" aria-labelledby="v3-links">
+        <h2 id="v3-links">Read the interface</h2>
+        <ul>
+            <li><a href={CLI_README}>CLI reference</a></li>
+            <li><a href={SPEC}>Specification</a></li>
+            <li><a href={DESIGN}>Design</a></li>
+            <li><a href={ADRS}>Decision records</a></li>
+            <li><a href={THREAT_MODEL}>Threat model</a></li>
+            <li><a href={REPO}>Source on GitHub</a></li>
+        </ul>
+    </section>
+</Preview>
+
+<style is:global>
+    /* The proposed palette. Graphite grounds, and one violet that means an agent is acting. */
+    body.preview-3 {
+        --basin: light-dark(#f2f3f5, #101214);
+        --basin-deep: light-dark(#e7e9ec, #0a0b0d);
+        --stone: light-dark(#ffffff, #181b1f);
+        --stone-2: light-dark(#f7f8f9, #1f2328);
+        --line: light-dark(#d6d9de, #2a2f36);
+        --line-strong: light-dark(#a3a9b3, #454c56);
+        --ink: light-dark(#14171a, #eceef0);
+        --mist: light-dark(#555c66, #9aa2ad);
+        --link: var(--ink);
+        --glass: light-dark(rgb(242 243 245 / 0.78), rgb(16 18 20 / 0.7));
+        --agent: light-dark(#5a3fd0, #b7a8ff);
+        --agent-soft: light-dark(rgb(90 63 208 / 0.07), rgb(183 168 255 / 0.08));
+        background: var(--basin);
+    }
+</style>
+
+<style>
+    section {
+        padding-top: var(--section);
+    }
+
+    .hero {
+        padding-top: clamp(2.5rem, 7vw, 5rem);
+    }
+
+    h1,
+    h2 {
+        font-family: var(--font-code);
+        font-stretch: 100%;
+        font-weight: 500;
+        letter-spacing: -0.045em;
+    }
+
+    h1 {
+        max-width: 22ch;
+        font-size: clamp(2rem, 1.2rem + 3.6vw, 3.9rem);
+        line-height: 1.08;
+    }
+
+    section > h2 {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.4rem 1rem;
+        font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.3rem);
+        line-height: 1.15;
+    }
+
+    .soon {
+        font-family: var(--font-body);
+        letter-spacing: 0;
+    }
+
+    .lede {
+        max-width: 60ch;
+        margin-top: var(--space-2);
+        color: var(--mist);
+        font-size: var(--step-1);
+        line-height: 1.5;
+    }
+
+    pre {
+        margin: 0;
+        font-size: 0.82rem;
+        line-height: 1.7;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+
+    .three {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-2);
+        margin-top: var(--space-4);
+    }
+
+    .door {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        padding: var(--space-3);
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-m);
+        background: var(--stone);
+    }
+
+    .door.agent {
+        border-style: dashed;
+        border-color: var(--agent);
+        background: var(--agent-soft);
+    }
+
+    .door h2 {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.4rem 0.75rem;
+        font-size: var(--step-1);
+        letter-spacing: -0.03em;
+    }
+
+    .door pre {
+        flex: 1;
+        color: var(--mist);
+    }
+
+    .in {
+        color: var(--ink);
+    }
+
+    .in::before {
+        content: "$ ";
+        color: var(--mist);
+    }
+
+    .agent .in::before {
+        color: var(--agent);
+    }
+
+    .tool {
+        display: block;
+        color: var(--agent);
+    }
+
+    .tool::before {
+        content: "tool  ";
+        color: var(--mist);
+    }
+
+    .door p {
+        padding-top: var(--space-2);
+        border-top: 1px solid var(--line);
+        color: var(--mist);
+        font-size: var(--step--1);
+        line-height: 1.55;
+    }
+
+    .door.agent p {
+        border-top-color: color-mix(in srgb, var(--agent) 35%, transparent);
+    }
+
+    .start-grid,
+    .contract-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-4);
+        align-items: start;
+        margin-top: var(--space-4);
+    }
+
+    .start-cmds {
+        display: grid;
+        gap: 0.6rem;
+    }
+
+    .start-cmds p {
+        color: var(--mist);
+    }
+
+    .start-cmds p:not(:first-child) {
+        margin-top: var(--space-2);
+    }
+
+    .rules {
+        display: grid;
+        gap: 0.7rem;
+        margin-bottom: var(--space-3);
+    }
+
+    .rules li {
+        padding-left: 1.4rem;
+        text-indent: -1.4rem;
+    }
+
+    .rules li::before {
+        content: "\2022";
+        display: inline-block;
+        width: 1.4rem;
+        color: var(--mist);
+        text-indent: 0;
+    }
+
+    .block {
+        padding: 1rem;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-m);
+        background: var(--stone);
+    }
+
+    .table-scroll {
+        overflow-x: auto;
+    }
+
+    table {
+        width: 100%;
+        font-size: var(--step--1);
+    }
+
+    caption {
+        padding-bottom: 0.6rem;
+        color: var(--mist);
+        font-weight: 600;
+        text-align: left;
+    }
+
+    th,
+    td {
+        padding: 0.55rem 1rem 0.55rem 0;
+        border-top: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+        font-weight: 400;
+    }
+
+    thead th {
+        color: var(--mist);
+        font-weight: 600;
+    }
+
+    tbody th {
+        font-weight: 600;
+    }
+
+    .code {
+        font-family: var(--font-code);
+    }
+
+    tbody td:last-child {
+        color: var(--mist);
+    }
+
+    /* Three front ends above the one service they all call. */
+    .doors {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-2);
+        margin-top: var(--space-4);
+    }
+
+    .front,
+    .service {
+        padding: var(--space-2) var(--space-3);
+        border: 1px dashed var(--line-strong);
+        border-radius: var(--radius-m);
+    }
+
+    .front:first-child {
+        border-color: var(--agent);
+        background: var(--agent-soft);
+    }
+
+    .service {
+        grid-column: 1 / -1;
+        border-style: solid;
+        background: var(--stone);
+    }
+
+    .doors code {
+        padding: 0;
+        border: 0;
+        background: none;
+        font-size: 1rem;
+        font-weight: 500;
+    }
+
+    .doors p {
+        margin-top: 0.3rem;
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    .guards {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-2) var(--space-4);
+        margin-top: var(--space-4);
+    }
+
+    .guards li {
+        padding-top: 0.7rem;
+        border-top: 1px solid var(--line);
+        color: var(--mist);
+        line-height: 1.55;
+    }
+
+    .also {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-2) var(--space-4);
+        margin-top: var(--space-4);
+    }
+
+    .also dt,
+    .under-list dt {
+        font-weight: 650;
+    }
+
+    .also dd,
+    .under-list dd {
+        margin-top: 0.3rem;
+        color: var(--mist);
+        line-height: 1.55;
+    }
+
+    .also code {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .under-list {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--space-3);
+        margin-top: var(--space-4);
+    }
+
+    .under-list div {
+        padding-top: 0.7rem;
+        border-top: 2px solid var(--ink);
+    }
+
+    .links ul {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem 2rem;
+        margin-top: var(--space-3);
+        font-size: var(--step-1);
+    }
+
+    @media (max-width: 60rem) {
+        .three,
+        .start-grid,
+        .contract-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .under-list {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 40rem) {
+        .doors,
+        .guards,
+        .also,
+        .under-list {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>

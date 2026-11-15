@@ -1,0 +1,616 @@
+---
+// Version 1, speed first. The picture is the path a file takes: read where it is, sent over one
+// direct connection, checked block by block, written. Under it a recorded run replays, and the
+// numbers section keeps what is measured apart from what is still a target.
+//
+// Type: the headline is Archivo at its narrowest and heaviest, like the lettering on a machine
+// plate. The live page sets it wide. The palette is the site's own.
+import InstallTabs from "../../components/InstallTabs.astro";
+import Cmd from "../../components/preview/Cmd.astro";
+import { CLI_README, DESIGN, INSTALL, PERFORMANCE, REPO, SPEC, THREAT_MODEL } from "../../data/links";
+import { COMING, QUICK_INSTALL, RUN_NOTE, RUN_RECEIVER, RUN_SENDER } from "../../data/preview";
+import Preview from "../../layouts/Preview.astro";
+
+// The order the lines appeared in across the two terminals.
+const senderSteps = [0, 1, 4, 5, 11];
+const receiverSteps = [2, 3, 6, 7, 8, 9, 10, 12];
+const panes = [
+    { title: "Sending machine", lines: RUN_SENDER, steps: senderSteps },
+    { title: "Receiving machine", lines: RUN_RECEIVER, steps: receiverSteps },
+];
+
+const stations = [
+    {
+        title: "Read in place",
+        body: "The sender reads the file where it is and prints a ticket. Nothing is uploaded anywhere first.",
+    },
+    {
+        title: "One direct connection",
+        body: "QUIC with TLS 1.3 between the two machines. Every connection has to negotiate the post-quantum key exchange X25519MLKEM768, or it is closed.",
+    },
+    {
+        title: "Checked at the gate",
+        body: "Each block is verified against its BLAKE3 root before it is written. A block that does not match is discarded, so a damaged transfer fails at the block.",
+    },
+    {
+        title: "Written, and resumable",
+        body: "A receive that was killed keeps the ranges it committed. The next run fetches only the rest.",
+    },
+];
+
+// docs/performance.md, the release profile table, the row for the profile that ships.
+const measured = [
+    {
+        value: "21.1",
+        unit: "ms",
+        what: "sluice --version, start to exit",
+    },
+    {
+        value: "29.1",
+        unit: "ms",
+        what: "sluice id, a cold start that opens the key",
+    },
+    {
+        value: "9.89",
+        unit: "s",
+        what: "1 GiB from a sender to a receiver on loopback, median of three runs, both files hashed equal",
+    },
+    {
+        value: "17.7",
+        unit: "MiB",
+        what: "the binary as cargo wrote it, before it is stripped",
+    },
+];
+
+// docs/performance.md, Targets. The page says none of these has been measured yet.
+const targets = [
+    ["10 GbE LAN, NVMe to NVMe, one 100 GB file", "8 Gbit/s or more, within 10% of iperf3"],
+    ["One QUIC connection, same LAN", "4 Gbit/s or more"],
+    ["1 Gbit/s, 200 ms round trip, 2% loss", "300 Mbit/s or more"],
+    ["Resume after kill -9 at 60% of 100 GB", "First new byte within 2 s"],
+    ["Memory during any transfer", "Under 250 MB"],
+];
+
+const blocks = [0, 1, 2, 3, 4, 5, 6];
+---
+
+<Preview
+    title="Sluice: files go straight from one computer to another"
+    description="Preview, version 1: the transfer path, a replay of a real run, and the measured numbers."
+    version={1}
+>
+    <section class="wrap hero" aria-labelledby="v1-title">
+        <h1 id="v1-title">Files go straight from one computer to another.</h1>
+
+        <svg class="path" viewBox="0 0 720 96" aria-hidden="true">
+            <line class="path-line" x1="52" y1="48" x2="668" y2="48"></line>
+            <rect class="node" x="8" y="26" width="44" height="44" rx="8"></rect>
+            <rect class="node" x="668" y="26" width="44" height="44" rx="8"></rect>
+            <path class="gate" d="M560 14v68M552 14h16M552 82h16"></path>
+            <g class="moving">
+                {blocks.map((n) => <rect class="block" x="60" y="41" width="14" height="14" rx="3" style={`--n:${n}`} />)}
+            </g>
+            <g class="still">
+                {
+                    blocks.map((n) => (
+                        <rect
+                            class:list={["block", { passed: 80 + n * 84 > 560 }]}
+                            x={80 + n * 84}
+                            y="41"
+                            width="14"
+                            height="14"
+                            rx="3"
+                        />
+                    ))
+                }
+            </g>
+        </svg>
+        <ol class="stations">
+            {
+                stations.map((station) => (
+                    <li>
+                        <h2>{station.title}</h2>
+                        <p>{station.body}</p>
+                    </li>
+                ))
+            }
+        </ol>
+
+        <div class="hero-grid">
+            <div class="hero-copy">
+                <p class="lede">
+                    Sluice is a command-line tool that opens a direct channel between two machines
+                    and checks every block as it lands. No account, no storage in between, no
+                    telemetry.
+                </p>
+                <InstallTabs name="v1" options={QUICK_INSTALL} />
+                <p class="more">
+                    <a href={INSTALL}>Every install channel</a>, with the checks that verify a
+                    download. Free and open source on <a href={REPO}>GitHub</a>.
+                </p>
+            </div>
+            <div class="run" data-replay>
+                <div class="panes">
+                    {
+                        panes.map((pane) => (
+                            <figure class="pane">
+                                <figcaption>{pane.title}</figcaption>
+                                <pre translate="no" tabindex="0"><code>{pane.lines.map((line, at) => (
+                                    <span class={`t-${line.kind}`} data-step={pane.steps[at]} data-kind={line.kind}>{line.text}</span>
+                                ))}</code></pre>
+                            </figure>
+                        ))
+                    }
+                </div>
+                <p class="note run-note">
+                    <span>{RUN_NOTE}</span>
+                    <button class="again" type="button" data-replay-again hidden>Replay</button>
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section class="wrap two" aria-labelledby="v1-two">
+        <h2 id="v1-two">Send and receive are one command each</h2>
+        <div class="two-grid">
+            <div>
+                <p>On the machine that has the file. It prints a ticket on one line and serves the file.</p>
+                <Cmd lines={["sluice send ./report.pdf"]} />
+            </div>
+            <div>
+                <p>On the other machine, with the ticket. It verifies each block and names the path it wrote.</p>
+                <Cmd lines={["sluice recv <ticket> --out ./inbox"]} />
+            </div>
+        </div>
+        <p class="note">
+            The same two commands cover folders, a file that is still growing, pipes and tickets
+            shared by a few people. The <a href={CLI_README}>CLI reference</a> has every flag.
+        </p>
+    </section>
+
+    <section class="wrap numbers" aria-labelledby="v1-numbers">
+        <h2 id="v1-numbers">What is measured, and what is still a target</h2>
+        <p class="numbers-lede">
+            A speed claim only means something with its conditions attached. These four are
+            measured, on one Windows machine with the profile that builds the release.
+        </p>
+        <dl class="measured">
+            {
+                measured.map((m) => (
+                    <div>
+                        <dt>{m.what}</dt>
+                        <dd>
+                            {m.value}
+                            <span>{m.unit}</span>
+                        </dd>
+                    </div>
+                ))
+            }
+        </dl>
+        <div class="targets-scroll" tabindex="0" role="group" aria-labelledby="v1-targets">
+            <table class="targets">
+                <caption id="v1-targets">
+                    Targets for throughput on real links. None of these has been measured yet. Each
+                    will be published with the iperf3 and fio ceilings of the same path.
+                </caption>
+                <thead>
+                    <tr><th scope="col">Scenario</th><th scope="col">Target</th></tr>
+                </thead>
+                <tbody>
+                    {
+                        targets.map(([scenario, target]) => (
+                            <tr>
+                                <th scope="row">{scenario}</th>
+                                <td>{target}</td>
+                            </tr>
+                        ))
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="note">
+            Every number, the method and the rest of the targets are in
+            <a href={PERFORMANCE}>docs/performance.md</a>.
+        </p>
+    </section>
+
+    <section class="wrap coming" aria-labelledby="v1-coming">
+        <h2 id="v1-coming">Coming in 0.2.0</h2>
+        <p class="numbers-lede">
+            In open pull requests, not in a release yet. The released version is 0.1.1.
+        </p>
+        <ul class="coming-list">
+            {
+                COMING.map((item) => (
+                    <li>
+                        <h3>{item.title}</h3>
+                        <p>{item.body}</p>
+                        <code translate="no">{item.code}</code>
+                    </li>
+                ))
+            }
+        </ul>
+    </section>
+
+    <section class="wrap links" aria-labelledby="v1-links">
+        <h2 id="v1-links">Read the rest</h2>
+        <ul>
+            <li><a href={REPO}>Source on GitHub</a></li>
+            <li><a href={DESIGN}>Design</a></li>
+            <li><a href={SPEC}>Specification</a></li>
+            <li><a href={THREAT_MODEL}>Threat model</a></li>
+            <li><a href={PERFORMANCE}>Performance</a></li>
+            <li><a href={INSTALL}>Install guide</a></li>
+        </ul>
+    </section>
+</Preview>
+
+<script>
+    import "../../scripts/replay";
+</script>
+
+<style>
+    section {
+        padding-top: var(--section);
+    }
+
+    .hero {
+        padding-top: clamp(2.5rem, 6vw, 4.5rem);
+    }
+
+    h1 {
+        max-width: 17ch;
+        font-size: clamp(3.2rem, 1rem + 8vw, 7.5rem);
+        font-stretch: 62%;
+        font-weight: 800;
+        line-height: 0.86;
+        letter-spacing: -0.015em;
+        text-wrap: balance;
+    }
+
+    section > h2 {
+        max-width: 22ch;
+        font-size: clamp(2.2rem, 1.2rem + 4vw, 4.2rem);
+        font-stretch: 62%;
+        font-weight: 800;
+        line-height: 0.95;
+        letter-spacing: -0.005em;
+    }
+
+    /* The path. Blocks leave the sender as water and turn brass once they pass the gate. */
+    .path {
+        width: 100%;
+        height: auto;
+        margin-top: clamp(2rem, 5vw, 3.5rem);
+        overflow: visible;
+    }
+
+    .path-line {
+        stroke: var(--line-strong);
+        stroke-width: 2;
+    }
+
+    .node {
+        fill: var(--stone);
+        stroke: var(--line-strong);
+        stroke-width: 2;
+    }
+
+    .gate {
+        fill: none;
+        stroke: var(--brass);
+        stroke-width: 3;
+        stroke-linecap: round;
+    }
+
+    .block {
+        fill: var(--water);
+    }
+
+    .block.passed {
+        fill: var(--brass);
+    }
+
+    .still {
+        display: none;
+    }
+
+    .moving .block {
+        animation: cross 4.2s linear infinite;
+        animation-delay: calc(var(--n) * -0.6s);
+    }
+
+    @keyframes cross {
+        0% {
+            transform: translateX(0);
+            fill: var(--water);
+        }
+        83% {
+            fill: var(--water);
+        }
+        84% {
+            fill: var(--brass);
+        }
+        100% {
+            transform: translateX(590px);
+            fill: var(--brass);
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .moving {
+            display: none;
+        }
+
+        .still {
+            display: inline;
+        }
+    }
+
+    /* Four stations under the path, in the order a block meets them. */
+    .stations {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--space-3);
+        margin-top: var(--space-2);
+        counter-reset: station;
+    }
+
+    .stations li {
+        padding-top: 0.8rem;
+        border-top: 2px solid var(--line-strong);
+        counter-increment: station;
+    }
+
+    .stations li:nth-child(3) {
+        border-top-color: var(--brass);
+    }
+
+    .stations h2 {
+        font-size: var(--step-1);
+        font-stretch: 100%;
+        font-weight: 700;
+        line-height: 1.2;
+        letter-spacing: 0;
+    }
+
+    .stations h2::before {
+        content: counter(station) ". ";
+        color: var(--mist);
+        font-weight: 500;
+    }
+
+    .stations p {
+        margin-top: 0.4rem;
+        color: var(--mist);
+        font-size: var(--step--1);
+        line-height: 1.55;
+    }
+
+    .hero-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+        gap: var(--space-4);
+        align-items: start;
+        margin-top: var(--space-5);
+    }
+
+    .lede {
+        margin-bottom: var(--space-3);
+        font-size: var(--step-1);
+        line-height: 1.5;
+    }
+
+    .more {
+        margin-top: var(--space-2);
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    .run .panes {
+        grid-template-columns: 1fr;
+        gap: var(--space-2);
+    }
+
+    .run pre span {
+        display: block;
+        min-height: 1.75em;
+        white-space: pre;
+    }
+
+    .run :global(.is-waiting) {
+        opacity: 0;
+    }
+
+    .run-note {
+        display: flex;
+        gap: var(--space-2);
+        align-items: start;
+        justify-content: space-between;
+    }
+
+    .again {
+        flex: none;
+        padding: 0.3rem 0.9rem;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-pill);
+        background: transparent;
+        color: var(--ink);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .again:hover {
+        border-color: var(--water);
+    }
+
+    .again[hidden] {
+        display: none;
+    }
+
+    .two-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-3);
+        margin-top: var(--space-4);
+    }
+
+    .two-grid p {
+        margin-bottom: var(--space-2);
+        color: var(--mist);
+    }
+
+    .numbers-lede {
+        max-width: 58ch;
+        margin-top: var(--space-2);
+        color: var(--mist);
+        font-size: var(--step-1);
+        line-height: 1.5;
+    }
+
+    .measured {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--space-3);
+        margin-top: var(--space-4);
+    }
+
+    .measured div {
+        display: flex;
+        flex-direction: column-reverse;
+        justify-content: flex-end;
+        gap: 0.5rem;
+        padding-top: 0.8rem;
+        border-top: 2px solid var(--brass);
+    }
+
+    .measured dd {
+        font-size: clamp(3rem, 1.6rem + 5vw, 5.5rem);
+        font-stretch: 62%;
+        font-weight: 800;
+        line-height: 0.9;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .measured dd span {
+        margin-left: 0.15em;
+        color: var(--mist);
+        font-size: 0.4em;
+        font-stretch: 100%;
+        font-weight: 600;
+    }
+
+    .measured dt {
+        color: var(--mist);
+        font-size: var(--step--1);
+        line-height: 1.5;
+    }
+
+    .targets-scroll {
+        margin-top: var(--space-5);
+        overflow-x: auto;
+    }
+
+    .targets {
+        width: 100%;
+        font-size: var(--step--1);
+    }
+
+    .targets caption {
+        max-width: 64ch;
+        padding-bottom: var(--space-2);
+        color: var(--mist);
+        text-align: left;
+        line-height: 1.5;
+    }
+
+    .targets th,
+    .targets td {
+        padding: 0.7rem 1rem 0.7rem 0;
+        border-top: 1px dashed var(--line-strong);
+        text-align: left;
+        vertical-align: top;
+        font-weight: 400;
+    }
+
+    .targets thead th {
+        border-top: 0;
+        color: var(--mist);
+        font-weight: 600;
+    }
+
+    .targets td {
+        font-family: var(--font-code);
+        font-size: 0.82rem;
+    }
+
+    .coming-list {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: var(--space-3);
+        margin-top: var(--space-4);
+    }
+
+    .coming-list li {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        padding-top: 0.8rem;
+        border-top: 2px dashed var(--line-strong);
+    }
+
+    .coming-list h3 {
+        font-size: var(--step-0);
+        font-stretch: 100%;
+        line-height: 1.25;
+    }
+
+    .coming-list p {
+        color: var(--mist);
+        font-size: var(--step--1);
+        line-height: 1.55;
+    }
+
+    .coming-list code {
+        align-self: start;
+        margin-top: auto;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .links ul {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem 2rem;
+        margin-top: var(--space-3);
+        font-size: var(--step-1);
+    }
+
+    @media (max-width: 62rem) {
+        .hero-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .stations,
+        .measured {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .coming-list {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 36rem) {
+        .stations,
+        .two-grid,
+        .coming-list {
+            grid-template-columns: 1fr;
+        }
+
+        .run-note {
+            flex-direction: column;
+        }
+    }
+</style>

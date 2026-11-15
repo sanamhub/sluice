@@ -1,0 +1,90 @@
+---
+// The shell of the landing page previews under /v/. Every page here is marked noindex and has no
+// canonical link or social card, so none of them can be taken for the live page. The header holds
+// the switcher that moves between the versions.
+import Fonts from "../components/Fonts.astro";
+import Logo from "../components/Logo.astro";
+import { VERSIONS } from "../data/preview";
+import { REPO } from "../data/links";
+import "../styles/site.css";
+import "../styles/preview.css";
+
+interface Props {
+    title: string;
+    description: string;
+    /** 0 is the chooser. */
+    version: 0 | 1 | 2 | 3;
+}
+
+const { title, description, version } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <script src="/theme.js" is:inline></script>
+        <title>{title}</title>
+        <meta name="description" content={description} />
+        <meta name="robots" content="noindex, nofollow" />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <Fonts />
+        <meta name="theme-color" content="#081820" media="(prefers-color-scheme: dark)" />
+        <meta name="theme-color" content="#eef3f1" media="(prefers-color-scheme: light)" />
+    </head>
+    <body class={`preview preview-${version}`}>
+        <a class="skip" href="#main">Skip to content</a>
+        <header class="top">
+            <div class="wrap top-inner">
+                <a class="brand" href="/v/" aria-label="Sluice, all preview versions">
+                    <Logo />
+                    <span class="brand-word">Sluice</span>
+                </a>
+                <nav class="switch" aria-label="Preview versions">
+                    <a href="/v/" aria-current={version === 0 ? "page" : undefined}>All</a>
+                    {
+                        VERSIONS.map((v) => (
+                            <a href={v.href} aria-current={version === v.id ? "page" : undefined}>
+                                <span class="switch-n">{v.id}</span>
+                                <span class="switch-name">{v.name}</span>
+                            </a>
+                        ))
+                    }
+                    <a href="/">Live</a>
+                </nav>
+                <button class="theme-toggle" type="button" data-theme-toggle hidden>
+                    <svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18"
+                        ><path
+                            fill="currentColor"
+                            d="M20.7 14.6A8.6 8.6 0 0 1 9.4 3.3a.6.6 0 0 0-.8-.7 9.8 9.8 0 1 0 12.8 12.8.6.6 0 0 0-.7-.8Z"
+                        ></path></svg
+                    >
+                    <svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true" width="18" height="18"
+                        ><circle cx="12" cy="12" r="4.4" fill="currentColor"></circle><path
+                            stroke="currentColor"
+                            stroke-width="1.8"
+                            stroke-linecap="round"
+                            d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"
+                        ></path></svg
+                    >
+                </button>
+            </div>
+        </header>
+        <main id="main">
+            <slot />
+        </main>
+        <footer class="preview-foot">
+            <div class="wrap preview-foot-inner">
+                <p>
+                    This page is a preview of a direction for the landing page. The live page is at
+                    <a href="/">sluicedrop.com</a>.
+                </p>
+                <p><a href={REPO}>Source on GitHub</a></p>
+            </div>
+        </footer>
+        <script>
+            import "../scripts/theme-toggle";
+        </script>
+    </body>
+</html>
