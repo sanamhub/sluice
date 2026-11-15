@@ -5,7 +5,6 @@
 import Fonts from "../components/Fonts.astro";
 import Logo from "../components/Logo.astro";
 import { VERSIONS } from "../data/preview";
-import { REPO } from "../data/links";
 import "../styles/site.css";
 import "../styles/preview.css";
 
@@ -74,17 +73,10 @@ const { title, description, version } = Astro.props;
         <main id="main">
             <slot />
         </main>
-        <footer class="preview-foot">
-            <div class="wrap preview-foot-inner">
-                <p>
-                    This page is a preview of a direction for the landing page. The live page is at
-                    <a href="/">sluicedrop.com</a>.
-                </p>
-                <p><a href={REPO}>Source on GitHub</a></p>
-            </div>
-        </footer>
+        <slot name="end" />
         <script>
             import "../scripts/theme-toggle";
+            import "../scripts/glow";
         </script>
     </body>
 </html>

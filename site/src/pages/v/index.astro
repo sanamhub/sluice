@@ -1,8 +1,10 @@
 ---
-// The chooser: the three landing page directions side by side, each with a small drawing of its
-// layout, and a link back to the page that is live today.
+// The chooser: the three landing page directions side by side. Each card is set in its own
+// version's ground, colours and headline type, so the difference shows before a click.
 import { VERSIONS } from "../../data/preview";
 import Preview from "../../layouts/Preview.astro";
+
+const lines = ["Files, straight across.", "Any file, straight to their computer.", "Give your agent a way to move files."];
 ---
 
 <Preview
@@ -11,71 +13,49 @@ import Preview from "../../layouts/Preview.astro";
     version={0}
 >
     <section class="wrap pick">
-        <h1>Three directions for the landing page</h1>
+        <h1>Three directions</h1>
         <p class="pick-lede">
-            Each is a whole page with the same facts and a different idea of who is reading. Open
-            one, then move between them with the switcher in the header. The theme button works on
-            every page.
+            Each is a whole landing page with the same tool and a different reader. Open one, then
+            move between them with the switcher above.
         </p>
         <ul class="pick-grid">
             {
-                VERSIONS.map((v) => (
+                VERSIONS.map((v, at) => (
                     <li>
-                        <a class="pick-card" href={v.href}>
-                            <span class={`thumb thumb-${v.id}`} aria-hidden="true">
-                                {v.id === 1 && (
-                                    <>
-                                        <i class="bar wide" />
-                                        <i class="bar wide short" />
-                                        <i class="path" />
-                                        <i class="term" />
-                                        <i class="term" />
-                                    </>
-                                )}
-                                {v.id === 2 && (
-                                    <>
-                                        <i class="bar mid" />
-                                        <i class="bar thin" />
-                                        <i class="pill" />
-                                        <i class="stub" />
-                                    </>
-                                )}
-                                {v.id === 3 && (
-                                    <>
-                                        <i class="bar mono" />
-                                        <i class="col" />
-                                        <i class="col" />
-                                        <i class="col dashed" />
-                                    </>
-                                )}
+                        <a class={`card card-${v.id}`} href={v.href}>
+                            <span class="stage" aria-hidden="true">
+                                {v.id === 2 && <i class="blob" />}
+                                <span class="headline">{lines[at]}</span>
                             </span>
-                            <span class="pick-n">Version {v.id}</span>
-                            <span class="pick-name">{v.name}</span>
-                            <span class="pick-idea">{v.idea}</span>
-                            <span class="pick-for">{v.for}</span>
+                            <span class="meta">
+                                <span class="n">Version {v.id}</span>
+                                <span class="name">{v.name}</span>
+                                <span class="idea">{v.idea}</span>
+                                <span class="for">{v.for}</span>
+                            </span>
                         </a>
                     </li>
                 ))
             }
         </ul>
-        <p class="pick-live">
-            For comparison, <a href="/">the page that is live today</a>.
-        </p>
+        <p class="pick-live">For comparison, <a href="/">the page that is live today</a>.</p>
     </section>
 </Preview>
 
 <style>
     .pick {
-        padding-top: clamp(3rem, 8vw, 6rem);
+        padding-block: clamp(8rem, 14vw, 11rem) var(--section);
     }
 
     h1 {
-        max-width: 18ch;
-        font-size: var(--step-3);
+        font-size: clamp(3rem, 1.4rem + 7vw, 7.5rem);
+        font-stretch: 125%;
+        line-height: 0.92;
+        letter-spacing: -0.05em;
     }
 
     .pick-lede {
-        max-width: 60ch;
+        max-width: 52ch;
         margin-top: var(--space-3);
         color: var(--mist);
         font-size: var(--step-1);
@@ -85,47 +65,127 @@ import Preview from "../../layouts/Preview.astro";
     .pick-grid {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: var(--space-3);
+        gap: var(--space-2);
         margin-top: var(--space-5);
     }
 
-    .pick-card {
+    .card {
         display: grid;
-        gap: 0.5rem;
+        grid-template-rows: auto 1fr;
         height: 100%;
-        align-content: start;
-        padding: var(--space-2);
         border: 1px solid var(--line);
         border-radius: var(--radius-l);
         background: var(--stone);
         color: var(--ink);
         text-decoration: none;
-        transition: border-color 160ms ease;
+        overflow: hidden;
+        transition:
+            translate 260ms ease,
+            border-color 260ms ease;
     }
 
-    .pick-card:hover {
-        border-color: var(--water);
+    .card:hover {
+        translate: 0 -6px;
+        border-color: var(--line-strong);
     }
 
-    .pick-n {
-        margin-top: var(--space-2);
+    /* The stage is the version at a glance: its ground, its accent, its headline. */
+    .stage {
+        position: relative;
+        display: grid;
+        align-content: end;
+        aspect-ratio: 4 / 3;
+        padding: var(--space-3);
+        overflow: hidden;
+    }
+
+    .headline {
+        position: relative;
+        text-wrap: balance;
+    }
+
+    .card-1 .stage {
+        color-scheme: dark;
+        background: linear-gradient(90deg, transparent 71.5%, var(--brass) 71.5% 72.3%, transparent 72.3%), var(--basin);
+        color: var(--ink);
+    }
+
+    .card-1 .headline {
+        font-size: clamp(1.7rem, 0.8rem + 2.4vw, 2.9rem);
+        font-stretch: 125%;
+        font-weight: 800;
+        line-height: 0.95;
+        letter-spacing: -0.045em;
+    }
+
+    .card-2 .stage {
+        color-scheme: light;
+        justify-items: center;
+        align-content: center;
+        background: var(--stone);
+        color: var(--ink);
+        text-align: center;
+    }
+
+    .blob {
+        position: absolute;
+        inset: -20% 10% 30% -20%;
+        border-radius: 50%;
+        background: radial-gradient(closest-side, color-mix(in srgb, var(--water) 45%, transparent), transparent), radial-gradient(closest-side at 80% 30%, color-mix(in srgb, var(--brass) 45%, transparent), transparent);
+        filter: blur(24px);
+    }
+
+    .card-2 .headline {
+        font-size: clamp(1.5rem, 0.8rem + 1.9vw, 2.4rem);
+        font-stretch: 118%;
+        font-weight: 750;
+        line-height: 1;
+        letter-spacing: -0.04em;
+    }
+
+    .card-3 .stage {
+        color-scheme: dark;
+        background:
+            linear-gradient(#262b32 1px, transparent 1px) 0 0 / 100% 2rem,
+            #0e1012;
+        color: #eceef0;
+        box-shadow: inset 0 -3px 0 #b7a8ff;
+    }
+
+    .card-3 .headline {
+        font-family: var(--font-code);
+        font-size: clamp(1.3rem, 0.7rem + 1.6vw, 2rem);
+        font-weight: 500;
+        line-height: 1.1;
+        letter-spacing: -0.055em;
+    }
+
+    .meta {
+        display: grid;
+        gap: 0.4rem;
+        align-content: start;
+        padding: var(--space-3);
+    }
+
+    .n {
         color: var(--mist);
         font-size: var(--step--1);
     }
 
-    .pick-name {
+    .name {
         font-size: var(--step-2);
         font-stretch: var(--wide);
-        font-weight: 650;
+        font-weight: 700;
         line-height: 1.1;
     }
 
-    .pick-idea {
+    .idea {
         line-height: 1.5;
     }
 
-    .pick-for {
-        padding-top: 0.6rem;
+    .for {
+        margin-top: 0.4rem;
+        padding-top: 0.7rem;
         border-top: 1px solid var(--line);
         color: var(--mist);
         font-size: var(--step--1);
@@ -136,118 +196,13 @@ import Preview from "../../layouts/Preview.astro";
         color: var(--mist);
     }
 
-    /* The drawings: each one is its version's layout at thumbnail size. */
-    .thumb {
-        display: grid;
-        gap: 0.45rem;
-        align-content: start;
-        aspect-ratio: 16 / 10;
-        padding: 1rem;
-        border-radius: var(--radius-m);
-        background: var(--basin);
-        overflow: hidden;
-    }
-
-    .thumb i {
-        display: block;
-        border-radius: 3px;
-    }
-
-    .bar {
-        height: 0.7rem;
-        background: var(--ink);
-    }
-
-    .bar.wide {
-        width: 92%;
-        height: 1.1rem;
-    }
-
-    .bar.short {
-        width: 60%;
-    }
-
-    .path {
-        height: 2px;
-        margin-block: 0.5rem;
-        background: linear-gradient(90deg, var(--mist) 0 70%, var(--brass) 70%);
-    }
-
-    .thumb-1 {
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .thumb-1 .bar,
-    .thumb-1 .path {
-        grid-column: 1 / -1;
-    }
-
-    .term {
-        height: 3rem;
-        border: 1px solid var(--line-strong);
-        background: var(--basin-deep);
-    }
-
-    .thumb-2 {
-        justify-items: center;
-        align-content: center;
-    }
-
-    .bar.mid {
-        width: 62%;
-        height: 1rem;
-    }
-
-    .bar.thin {
-        width: 44%;
-        height: 0.4rem;
-        background: var(--mist);
-    }
-
-    .pill {
-        width: 5.5rem;
-        height: 1.5rem;
-        margin-top: 0.3rem;
-        border-radius: 999px !important;
-        background: var(--brass);
-    }
-
-    .stub {
-        width: 70%;
-        height: 2.2rem;
-        margin-top: 0.5rem;
-        border: 1px dashed var(--brass);
-    }
-
-    .thumb-3 {
-        grid-template-columns: repeat(3, 1fr);
-    }
-
-    .bar.mono {
-        grid-column: 1 / -1;
-        width: 75%;
-        margin-bottom: 0.4rem;
-    }
-
-    .col {
-        height: 5rem;
-        border: 1px solid var(--line-strong);
-        background: var(--basin-deep);
-    }
-
-    .col.dashed {
-        border-style: dashed;
-        border-color: var(--brass);
-        background: transparent;
-    }
-
     @media (max-width: 56rem) {
         .pick-grid {
             grid-template-columns: 1fr;
         }
 
-        .thumb {
-            aspect-ratio: 16 / 7;
+        .stage {
+            aspect-ratio: 16 / 9;
         }
     }
 </style>

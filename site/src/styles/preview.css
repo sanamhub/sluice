@@ -1,15 +1,33 @@
-/* Shared by the landing page previews under /v/: the version switcher in the header, the mark for
-   work that is not released yet, a bare command line, and the closing footer. Each version keeps
-   its own layout and type in its own page. */
+/* Shared by the landing page previews under /v/: the floating header and its version switcher, the
+   move between versions, a bare command line, the pointer-lit border, the scroll entrance and the
+   closing block. Each version keeps its own layout and type in its own page. */
+
+/* The header floats as one capsule over the page instead of spanning it. */
+.preview .top {
+  top: 0.75rem;
+  width: min(100% - 1.5rem, 58rem);
+  margin-inline: auto;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 60%, transparent);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 12px 32px -18px var(--shadow-color);
+  view-transition-name: preview-top;
+}
+
+.preview .top-inner {
+  width: auto;
+  min-height: 3.25rem;
+  padding-inline: 1.1rem 0.4rem;
+}
+
+.preview main {
+  margin-top: -3.25rem;
+}
 
 .switch {
   display: flex;
   align-items: center;
   gap: 0.15rem;
   margin-inline: auto 0.25rem;
-  padding: 0.2rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
   font-size: var(--step--1);
 }
 
@@ -17,12 +35,15 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  min-height: 2rem;
-  padding: 0.2rem 0.75rem;
+  min-height: 2.25rem;
+  padding: 0.2rem 0.8rem;
   border-radius: var(--radius-pill);
   color: var(--mist);
   font-weight: 550;
   text-decoration: none;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
 }
 
 .switch a:hover {
@@ -46,22 +67,18 @@
   }
 
   .switch a {
-    padding-inline: 0.65rem;
+    padding-inline: 0.7rem;
   }
 }
 
-/* Work that is in open pull requests and not in a release. */
-.soon {
-  display: inline-block;
-  padding: 0.1rem 0.55rem;
-  border: 1px dashed var(--brass);
-  background: var(--stone);
-  border-radius: var(--radius-pill);
-  color: var(--brass);
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1.5;
-  white-space: nowrap;
+/* Moving between the versions is one cross-fade, and the header stays put through it. */
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 320ms;
 }
 
 /* A command outside the install box. */
@@ -77,17 +94,162 @@
   outline-offset: 6px;
 }
 
-.preview-foot {
+/* An entrance tied to the scroll position, where the browser has scroll-driven animation. With
+   reduced motion, or without support, the element is simply there. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    translate: 0 2.5rem;
+    scale: 0.97;
+  }
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .rise {
+      animation: rise linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 55%;
+    }
+  }
+}
+
+/* A border that lights up under the pointer. glow.ts writes the pointer's place into --mx and
+   --my on the element. */
+.glow {
+  position: relative;
+}
+
+.glow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: radial-gradient(
+    16rem circle at var(--mx, 50%) var(--my, 0%),
+    var(--glow, var(--water)),
+    transparent 65%
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  opacity: 0;
+  transition: opacity 240ms ease;
+  pointer-events: none;
+}
+
+@media (hover: hover) {
+  .glow:hover::before {
+    opacity: 1;
+  }
+}
+
+/* The closing block every version ends on: one action, the link columns, and the name set as wide
+   as the page. */
+.end {
   margin-top: var(--section);
+  overflow: clip;
+}
+
+.end-call {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-3);
+  padding-block: var(--space-5);
+  text-align: center;
+}
+
+.end-call h2 {
+  max-width: 18ch;
+  font-size: clamp(2.2rem, 1.2rem + 4.6vw, 5rem);
+  font-stretch: 112%;
+  line-height: 1;
+}
+
+.end-call p {
+  max-width: 44ch;
+  color: var(--mist);
+  font-size: var(--step-1);
+  line-height: 1.5;
+}
+
+.end-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.end-cols {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  padding-block: var(--space-4);
+  border-top: 1px solid var(--line);
+  font-size: var(--step--1);
+}
+
+.end-cols h3 {
+  margin-bottom: 0.8rem;
+  color: var(--mist);
+  font-size: var(--step--1);
+  font-stretch: 100%;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.end-cols ul {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.end-cols a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.end-cols a:hover {
+  text-decoration: underline;
+}
+
+.end-name {
+  margin: 0 0 -0.16em;
+  background: linear-gradient(
+    180deg,
+    var(--ink) 0%,
+    color-mix(in srgb, var(--end-tint, var(--water)) 70%, transparent) 55%,
+    transparent 92%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  font-size: 27.5vw;
+  font-stretch: 125%;
+  font-weight: 800;
+  line-height: 0.8;
+  letter-spacing: -0.05em;
+  text-align: center;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.end-base {
   border-top: 1px solid var(--line);
   color: var(--mist);
   font-size: var(--step--1);
 }
 
-.preview-foot-inner {
+.end-base .wrap {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
   gap: var(--space-1) var(--space-3);
-  padding-block: var(--space-3);
+  padding-block: var(--space-2);
+}
+
+@media (max-width: 40rem) {
+  .end-cols {
+    grid-template-columns: 1fr 1fr;
+  }
 }

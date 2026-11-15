@@ -1,29 +1,130 @@
 ---
-// Version 3, agents and automation. The page's one device is three columns: the same tool typed by
-// a person, run by a script and called by an agent. The first two are released; the third is the
-// 0.2.0 work and is drawn with a dashed edge wherever it appears.
+// Version 3, agents and automation. The hero is a session: someone asks an agent to send a build,
+// and the agent does it with the real tool calls, one after another. Below it every tool with what
+// it takes and returns, the rules that keep an agent inside its folders, the one service behind
+// the three front ends, and the contract a script can rely on.
 //
 // This version proposes its own palette and type: neutral graphite in place of the canal colours,
 // violet for anything an agent does, and IBM Plex Mono for the headings.
 import InstallTabs from "../../components/InstallTabs.astro";
 import Cmd from "../../components/preview/Cmd.astro";
-import { ADRS, CLI_README, DESIGN, INSTALL, REPO, SPEC, THREAT_MODEL } from "../../data/links";
-import { COMING, QUICK_INSTALL } from "../../data/preview";
+import End from "../../components/preview/End.astro";
+import { CLI_README, INSTALL, SPEC } from "../../data/links";
+import { QUICK_INSTALL } from "../../data/preview";
 import Preview from "../../layouts/Preview.astro";
 
-// Both outputs are the examples in the CLI reference, character for character.
-const inspectJson =
-    '{"files":2,"folders":2,"links":0,"bytes":6,"entries":[{"path":"tree","kind":"directory","size":0},{"path":"tree/a.txt","kind":"file","size":4},{"path":"tree/sub","kind":"directory","size":0},{"path":"tree/sub/b.txt","kind":"file","size":2}]}';
-const errorJson =
-    '{"error":{"kind":"policy","message":"the store has layout version 2 and this sluice reads up to version 1. It does not write to a newer layout"}}';
+const config = `{
+  "mcpServers": {
+    "sluice": {
+      "command": "sluice",
+      "args": ["mcp", "--root", "/home/me/Transfers"]
+    }
+  }
+}`;
 
-const tools = ["send", "receive", "inspect", "list_jobs", "job_status", "cancel_job", "doctor"];
+// The session in the hero. Field names and shapes are the server's own; the job id and the ticket
+// are shortened.
+const session = [
+    { kind: "cmd", who: "You", text: "Send last night's build to the staging box." },
+    {
+        kind: "call",
+        tool: "send",
+        text: `{ "paths": [{ "root": "/home/me/Transfers", "path": "nightly/build.tar" }] }`,
+    },
+    { kind: "result", text: `{ "ok": true, "result": { "job_id": "9f2c4e71…" } }` },
+    { kind: "call", tool: "job_status", text: `{ "job_id": "9f2c4e71…" }` },
+    {
+        kind: "result",
+        text: `{ "state": "running", "bytes_done": 0, "bytes_total": 2147483648,\n  "secret_ticket": "sluice1…" }`,
+    },
+    { kind: "say", who: "Agent", text: "The send is ready. I passed the ticket to staging and kept it out of this chat." },
+    { kind: "call", tool: "job_status", text: `{ "job_id": "9f2c4e71…" }` },
+    {
+        kind: "result",
+        text: `{ "state": "done", "bytes_done": 2147483648, "bytes_total": 2147483648,\n  "receivers": 1 }`,
+    },
+    { kind: "say", who: "Agent", text: "Done. Staging has all 2.0 GiB, and every block was verified." },
+];
 
-const rules = [
-    "The output format never depends on whether stdout is a terminal.",
-    "With --json, stdout holds only JSON, one object per line, with keys in snake_case.",
-    "A failure is one JSON line on stderr, and stdout stays empty.",
-    "The exit code is the same with or without --json.",
+const tools = [
+    {
+        name: "send",
+        about: "Start sending files or folders that are inside a root, and get a job id at once.",
+        takes: ["paths: [{ root, path }]", "expires_seconds?: number", "keep?: boolean"],
+        gives: ["job_id"],
+    },
+    {
+        name: "receive",
+        about: "Start receiving what a ticket names into a folder inside a root. A cancelled receive resumes.",
+        takes: ["ticket: string", "out: { root, path }", "force?: boolean"],
+        gives: ["job_id"],
+    },
+    {
+        name: "inspect",
+        about: "Read what a ticket offers without downloading any content.",
+        takes: ["ticket: string"],
+        gives: ["files, folders, links, bytes", "live", "more_names", "untrusted_names: string[]"],
+    },
+    {
+        name: "list_jobs",
+        about: "List the jobs this server knows about, newest last, with state and progress.",
+        takes: [],
+        gives: ["jobs: Job[]"],
+    },
+    {
+        name: "job_status",
+        about: "Report one job: its state, its progress, and for a send its ticket.",
+        takes: ["job_id: string"],
+        gives: [
+            "id, kind, state",
+            "bytes_total, bytes_done",
+            "receivers, resumable",
+            "secret_ticket?: string",
+            "untrusted_detail?: string",
+        ],
+    },
+    {
+        name: "cancel_job",
+        about: "Stop a job. A receive keeps its partial store, so the same ticket resumes it.",
+        takes: ["job_id: string"],
+        gives: ["was_running: boolean"],
+    },
+    {
+        name: "doctor",
+        about: "Run the local checks of the Sluice home and say what each found.",
+        takes: [],
+        gives: ["exit_code", "checks: [{ name, state, message }]"],
+    },
+];
+
+const guards = [
+    {
+        mark: "--root",
+        title: "It works inside the folders you name",
+        body: "Sends and receives happen only under a root. Every path is opened from the root's handle one component at a time, and no link is followed. With no root, every transfer is refused.",
+    },
+    {
+        mark: "untrusted_*",
+        title: "A peer's text is marked as data",
+        body: "File names and failure reasons a peer chose come back only in fields whose names begin untrusted_, escaped, and never inside a sentence the tool writes.",
+    },
+    {
+        mark: "secret_ticket",
+        title: "The ticket has one home",
+        body: "A send returns a job id, not a ticket. The ticket appears only in job_status under a name that says how to treat it.",
+    },
+    {
+        mark: "stdio",
+        title: "No socket, no port",
+        body: "The server speaks over standard input and output and ends when its input closes. No tool can change the identity, the relay or the roots.",
+    },
+];
+
+const doors = [
+    { code: "sluice mcp", who: "Agents", how: "Standard input and output, in process." },
+    { code: "gRPC", who: "Programs", how: "A socket or pipe that only your user can reach." },
+    { code: "sluice ui", who: "People", how: "A page on 127.0.0.1 that never carries file bytes." },
+    { code: "sluice send", who: "Shells", how: "Text for people, JSON lines with --json." },
 ];
 
 const exits = [
@@ -37,91 +138,167 @@ const exits = [
     ["130", "Cancelled", "The caller cancelled"],
 ];
 
-const guards = [
-    "A client names paths under a root it was given. Every path is opened from the root's handle one component at a time, and no link is followed.",
-    "Text that a peer chose comes back only in fields named untrusted_*, so an agent can tell data from instructions.",
-    "A send returns its job id at once. The ticket is read from job_status as secret_ticket, a name that says how to treat it.",
-    "The gRPC interface listens on a socket or pipe that only your user can reach. The page listens on 127.0.0.1 only.",
-];
+const errorJson =
+    '{"error":{"kind":"policy","message":"the store has layout version 2 and this sluice reads up to version 1. It does not write to a newer layout"}}';
 
 const under = [
-    ["Direct", "QUIC between the two machines, or through a relay you run when they cannot reach each other. No storage in between."],
-    ["Verified", "Each block is checked against its BLAKE3 root before it is written. A mismatch is exit code 4, and nothing unverified reaches the output folder."],
-    ["Post-quantum", "Every connection has to negotiate X25519MLKEM768. A receiver that is offered less closes the connection and exits with code 6."],
-    ["No account", "No sign-in, no telemetry, and no relay you did not name. Nothing to provision before an agent can use it."],
+    ["Direct", "QUIC between the two machines, or through a relay you run. No storage in between."],
+    ["Verified", "Each block is checked against its BLAKE3 root before it is written. A mismatch is exit code 4."],
+    ["Post-quantum", "Every connection has to negotiate X25519MLKEM768, or it is closed."],
+    ["Resumable", "A cancelled or killed receive keeps its verified ranges. The same ticket picks it up."],
+    ["Delta", "Name an older copy with --delta-from and only the changed ranges move."],
+    ["Receipts", "A signed statement of what was sent, checked offline with sluice receipt verify."],
 ];
-
-const byId = (id: string) => COMING.find((item) => item.id === id)!;
 ---
 
 <Preview
-    title="Sluice: file transfer for people, scripts and agents"
-    description="Preview, version 3: one tool typed by a person, run by a script and called by an agent."
+    title="Sluice: give your agent a way to move files"
+    description="Preview, version 3: an agent sends a file through real tool calls, beside the same job as a command."
     version={3}
 >
     <section class="wrap hero" aria-labelledby="v3-title">
-        <h1 id="v3-title">File transfer that people type, scripts run and agents call.</h1>
-        <p class="lede">
-            Sluice sends files straight from one computer to another and verifies every block. Its
-            output, its exit codes and its errors are an interface, tested like one.
-        </p>
-
-        <div class="three">
-            <article class="door">
-                <h2>A person types it</h2>
-                <pre translate="no" tabindex="0"><code><span class="in">sluice inspect &lt;ticket&gt;</span>
-1 file, 1.5 KiB
-one.bin</code></pre>
-                <p>Plain text, a progress line on a terminal, and one sentence when something fails.</p>
-            </article>
-            <article class="door">
-                <h2>A script runs it</h2>
-                <pre translate="no" tabindex="0"><code><span class="in">sluice inspect &lt;ticket&gt; --json</span>
-{inspectJson}</code></pre>
-                <p>One JSON object per line on stdout. The exit code says what kind of failure it was.</p>
-            </article>
-            <article class="door agent">
-                <h2>An agent calls it <span class="soon">Coming in 0.2.0</span></h2>
-                <pre translate="no" tabindex="0"><code><span class="in">sluice mcp</span>
-{tools.map((tool) => <span class="tool">{tool}</span>)}</code></pre>
-                <p>
-                    A Model Context Protocol server over standard input and output. Seven tools,
-                    the same service underneath.
-                </p>
-            </article>
+        <div class="hero-copy">
+            <h1 id="v3-title">Give your agent a way to move files.</h1>
+            <p class="lede">
+                Sluice sends files straight from one computer to another and verifies every block.
+                The same binary is a Model Context Protocol server, a local daemon and a command
+                line with a JSON contract.
+            </p>
+            <div class="config">
+                <p>Add it to an MCP client:</p>
+                <pre translate="no" tabindex="0"><code>{config}</code></pre>
+            </div>
         </div>
-        <p class="note">The two outputs are the examples in the <a href={CLI_README}>CLI reference</a>.</p>
+
+        <div class="session" data-replay>
+            <div class="session-bar">
+                <span>session</span>
+                <button class="again" type="button" data-replay-again hidden>Replay</button>
+            </div>
+            <ol>
+                {
+                    session.map((turn, at) => (
+                        <li class={`turn turn-${turn.kind}`}>
+                            {turn.who && <b>{turn.who}</b>}
+                            {turn.tool && <b class="tool-name" translate="no">{turn.tool}</b>}
+                            <span
+                                class:list={{ mono: turn.kind === "call" || turn.kind === "result" }}
+                                translate={turn.kind === "call" || turn.kind === "result" ? "no" : undefined}
+                                data-step={at}
+                                data-kind={turn.kind}>{turn.text}</span>
+                        </li>
+                    ))
+                }
+            </ol>
+        </div>
     </section>
 
-    <section class="wrap start" aria-labelledby="v3-start">
-        <h2 id="v3-start">Install, send, receive</h2>
-        <div class="start-grid">
-            <div>
-                <InstallTabs name="v3" options={QUICK_INSTALL} />
-                <p class="note"><a href={INSTALL}>Every install channel</a>, a container image among them.</p>
+    <section class="wrap tools" aria-labelledby="v3-tools">
+        <h2 id="v3-tools">Seven tools, one shape of answer</h2>
+        <p class="lede">
+            Every tool answers with <code translate="no">ok</code> and either a
+            <code translate="no">result</code> or a <code translate="no">failure</code>, never
+            both. A send or receive returns a job id before any file is copied.
+        </p>
+        <div class="tool-tabs" data-tabs>
+            <div class="tool-list" role="tablist" aria-label="Tools" hidden>
+                {
+                    tools.map((tool, index) => (
+                        <button
+                            type="button"
+                            role="tab"
+                            id={`tool-tab-${tool.name}`}
+                            aria-controls={`tool-panel-${tool.name}`}
+                            aria-selected={index === 0 ? "true" : "false"}
+                            tabindex={index === 0 ? 0 : -1}
+                            translate="no"
+                        >
+                            {tool.name}
+                        </button>
+                    ))
+                }
             </div>
-            <div class="start-cmds">
-                <p>The sender prints a ticket on one line and serves the file.</p>
-                <Cmd lines={["sluice send ./build.tar"]} />
-                <p>The receiver fetches, verifies and names the path it wrote.</p>
-                <Cmd lines={["sluice recv <ticket> --out ./inbox"]} />
+            {
+                tools.map((tool) => (
+                    <div
+                        class="tool-panel"
+                        role="tabpanel"
+                        id={`tool-panel-${tool.name}`}
+                        aria-labelledby={`tool-tab-${tool.name}`}
+                        tabindex="0"
+                    >
+                        <h3 translate="no">{tool.name}</h3>
+                        <p>{tool.about}</p>
+                        <dl translate="no">
+                            <div>
+                                <dt>takes</dt>
+                                <dd>{tool.takes.length ? tool.takes.map((line) => <span>{line}</span>) : <span class="none">nothing</span>}</dd>
+                            </div>
+                            <div>
+                                <dt>gives</dt>
+                                <dd>{tool.gives.map((line) => <span>{line}</span>)}</dd>
+                            </div>
+                        </dl>
+                    </div>
+                ))
+            }
+        </div>
+    </section>
+
+    <section class="wrap guards" aria-labelledby="v3-guards">
+        <h2 id="v3-guards">Built so an agent cannot wander</h2>
+        <ul>
+            {
+                guards.map((guard) => (
+                    <li class="guard glow rise">
+                        <code translate="no">{guard.mark}</code>
+                        <h3>{guard.title}</h3>
+                        <p>{guard.body}</p>
+                    </li>
+                ))
+            }
+        </ul>
+    </section>
+
+    <section class="wrap service" aria-labelledby="v3-service">
+        <h2 id="v3-service">One service, four ways in</h2>
+        <p class="lede">
+            A local daemon holds the jobs. Every front end asks the same service to work, so a
+            transfer an agent starts is one a person can watch.
+        </p>
+        <div class="doors">
+            {
+                doors.map((door) => (
+                    <div class="front">
+                        <code translate="no">{door.code}</code>
+                        <b>{door.who}</b>
+                        <p>{door.how}</p>
+                    </div>
+                ))
+            }
+            <div class="core">
+                <code translate="no">sluice daemon</code>
+                <p>Jobs, roots, send, receive, inspect, doctor.</p>
             </div>
         </div>
     </section>
 
     <section class="wrap contract" aria-labelledby="v3-contract">
-        <h2 id="v3-contract">What a script can rely on</h2>
+        <h2 id="v3-contract">For scripts, a contract</h2>
         <p class="lede">
-            Changing any of this is a breaking change and is tested. The wording of a message is
-            not part of it.
+            The exit codes and JSON shapes are an interface. Changing one is a breaking change, and
+            it is tested.
         </p>
         <div class="contract-grid">
             <div>
+                <Cmd lines={["sluice inspect <ticket> --json"]} />
                 <ul class="rules">
-                    {rules.map((rule) => <li>{rule}</li>)}
+                    <li>The output never depends on whether stdout is a terminal.</li>
+                    <li>With <code translate="no">--json</code>, stdout holds only JSON, one object per line.</li>
+                    <li>A failure is one JSON line on stderr, and stdout stays empty.</li>
+                    <li>The exit code is the same with or without <code translate="no">--json</code>.</li>
                 </ul>
                 <pre class="block" translate="no" tabindex="0"><code>{errorJson}</code></pre>
-                <p class="note">A failure with <code translate="no">--json</code>, as it is written to stderr.</p>
             </div>
             <div class="table-scroll" tabindex="0" role="group" aria-labelledby="v3-exits">
                 <table>
@@ -143,47 +320,10 @@ one.bin</code></pre>
                 </table>
             </div>
         </div>
-    </section>
-
-    <section class="wrap control" aria-labelledby="v3-control">
-        <h2 id="v3-control">One service, three doors <span class="soon">Coming in 0.2.0</span></h2>
-        <p class="lede">
-            In open pull requests, not in a release yet. A local daemon holds the transfers, and
-            three front ends ask it to work.
+        <p class="note">
+            The <a href={CLI_README}>CLI reference</a> has every JSON field, and the
+            <a href={SPEC}>specification</a> has the wire format.
         </p>
-        <div class="doors">
-            <div class="front">
-                <code translate="no">sluice mcp</code>
-                <p>For agents. Standard input and output.</p>
-            </div>
-            <div class="front">
-                <code translate="no">gRPC</code>
-                <p>For programs. A socket or pipe that only your user can reach.</p>
-            </div>
-            <div class="front">
-                <code translate="no">sluice ui</code>
-                <p>For people. A page on 127.0.0.1 that never carries file bytes.</p>
-            </div>
-            <div class="service">
-                <code translate="no">sluice daemon</code>
-                <p>The service: jobs, roots, send, receive, inspect, doctor.</p>
-            </div>
-        </div>
-        <ul class="guards">
-            {guards.map((guard) => <li>{guard}</li>)}
-        </ul>
-        <dl class="also">
-            {
-                [byId("receipts"), byId("delta")].map((item) => (
-                    <div>
-                        <dt>{item.title}</dt>
-                        <dd>
-                            {item.body} <code translate="no">{item.code}</code>
-                        </dd>
-                    </div>
-                ))
-            }
-        </dl>
     </section>
 
     <section class="wrap under" aria-labelledby="v3-under">
@@ -191,7 +331,7 @@ one.bin</code></pre>
         <dl class="under-list">
             {
                 under.map(([term, text]) => (
-                    <div>
+                    <div class="rise">
                         <dt>{term}</dt>
                         <dd>{text}</dd>
                     </div>
@@ -200,35 +340,60 @@ one.bin</code></pre>
         </dl>
     </section>
 
-    <section class="wrap links" aria-labelledby="v3-links">
-        <h2 id="v3-links">Read the interface</h2>
-        <ul>
-            <li><a href={CLI_README}>CLI reference</a></li>
-            <li><a href={SPEC}>Specification</a></li>
-            <li><a href={DESIGN}>Design</a></li>
-            <li><a href={ADRS}>Decision records</a></li>
-            <li><a href={THREAT_MODEL}>Threat model</a></li>
-            <li><a href={REPO}>Source on GitHub</a></li>
-        </ul>
+    <section class="wrap start" aria-labelledby="v3-start">
+        <h2 id="v3-start">Install, send, receive</h2>
+        <div class="start-grid">
+            <div>
+                <InstallTabs name="v3" options={QUICK_INSTALL} />
+                <p class="note"><a href={INSTALL}>Every install channel</a>, a container image among them.</p>
+            </div>
+            <div class="start-cmds">
+                <Cmd lines={["sluice send ./build.tar"]} />
+                <Cmd lines={["sluice recv <ticket> --out ./inbox"]} />
+                <Cmd lines={["sluice mcp --root ~/Transfers"]} />
+            </div>
+        </div>
     </section>
+
+    <End
+        slot="end"
+        title="One binary. Every caller."
+        body="No account to provision and no service to sign up for before an agent can use it."
+    />
 </Preview>
+
+<script>
+    import "../../scripts/replay";
+</script>
 
 <style is:global>
     /* The proposed palette. Graphite grounds, and one violet that means an agent is acting. */
     body.preview-3 {
-        --basin: light-dark(#f2f3f5, #101214);
-        --basin-deep: light-dark(#e7e9ec, #0a0b0d);
-        --stone: light-dark(#ffffff, #181b1f);
-        --stone-2: light-dark(#f7f8f9, #1f2328);
-        --line: light-dark(#d6d9de, #2a2f36);
-        --line-strong: light-dark(#a3a9b3, #454c56);
+        --basin: light-dark(#f2f3f5, #0e1012);
+        --basin-deep: light-dark(#e7e9ec, #08090a);
+        --stone: light-dark(#ffffff, #16191d);
+        --stone-2: light-dark(#f7f8f9, #1d2126);
+        --line: light-dark(#d6d9de, #262b32);
+        --line-strong: light-dark(#a3a9b3, #414852);
         --ink: light-dark(#14171a, #eceef0);
         --mist: light-dark(#555c66, #9aa2ad);
         --link: var(--ink);
-        --glass: light-dark(rgb(242 243 245 / 0.78), rgb(16 18 20 / 0.7));
+        --glass: light-dark(rgb(242 243 245 / 0.78), rgb(14 16 18 / 0.7));
         --agent: light-dark(#5a3fd0, #b7a8ff);
         --agent-soft: light-dark(rgb(90 63 208 / 0.07), rgb(183 168 255 / 0.08));
-        background: var(--basin);
+        --glow: var(--agent);
+        --end-tint: var(--agent);
+        background:
+            radial-gradient(60rem 36rem at 85% -5%, var(--agent-soft), transparent 70%),
+            linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 100% 4rem,
+            var(--basin);
+        background-attachment: scroll;
+    }
+
+    @property --turn {
+        syntax: "<angle>";
+        inherits: false;
+        initial-value: 0deg;
     }
 </style>
 
@@ -237,40 +402,31 @@ one.bin</code></pre>
         padding-top: var(--section);
     }
 
-    .hero {
-        padding-top: clamp(2.5rem, 7vw, 5rem);
-    }
-
     h1,
     h2 {
         font-family: var(--font-code);
         font-stretch: 100%;
         font-weight: 500;
-        letter-spacing: -0.045em;
+        letter-spacing: -0.055em;
     }
 
     h1 {
-        max-width: 22ch;
-        font-size: clamp(2rem, 1.2rem + 3.6vw, 3.9rem);
-        line-height: 1.08;
+        font-size: clamp(2.3rem, 1.1rem + 4.4vw, 4.8rem);
+        line-height: 1.02;
     }
 
     section > h2 {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.4rem 1rem;
-        font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.3rem);
-        line-height: 1.15;
+        max-width: 22ch;
+        font-size: clamp(1.7rem, 1.1rem + 2.4vw, 3.1rem);
+        line-height: 1.08;
     }
 
-    .soon {
-        font-family: var(--font-body);
-        letter-spacing: 0;
+    h3 {
+        font-stretch: 100%;
     }
 
     .lede {
-        max-width: 60ch;
+        max-width: 58ch;
         margin-top: var(--space-2);
         color: var(--mist);
         font-size: var(--step-1);
@@ -280,85 +436,400 @@ one.bin</code></pre>
     pre {
         margin: 0;
         font-size: 0.82rem;
-        line-height: 1.7;
+        line-height: 1.65;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
     }
 
-    .three {
+    /* Hero: the words on the left, the session on the right. */
+    .hero {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: minmax(0, 6fr) minmax(0, 7fr);
+        gap: var(--space-4);
+        align-items: center;
+        min-height: max(92svh, 42rem);
+        padding-top: 7rem;
+    }
+
+    .config {
+        max-width: 30rem;
+        margin-top: var(--space-4);
+    }
+
+    .config p {
+        margin-bottom: 0.5rem;
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    .config pre {
+        padding: 1rem 1.1rem;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-m);
+        background: var(--stone);
+    }
+
+    /* The session, with one light travelling round its edge. */
+    .session {
+        position: relative;
+        border-radius: var(--radius-l);
+        background: var(--stone);
+        box-shadow: 0 50px 90px -50px var(--shadow-color);
+    }
+
+    .session::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        padding: 1.5px;
+        border-radius: inherit;
+        background: conic-gradient(from var(--turn), var(--line-strong) 0 62%, var(--agent) 82%, var(--line-strong) 100%);
+        mask:
+            linear-gradient(#000 0 0) content-box exclude,
+            linear-gradient(#000 0 0);
+        pointer-events: none;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+        .session::before {
+            animation: turn 7s linear infinite;
+        }
+    }
+
+    @keyframes turn {
+        to {
+            --turn: 360deg;
+        }
+    }
+
+    .session-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 3rem;
+        padding: 0.4rem 0.6rem 0.4rem 1.2rem;
+        border-bottom: 1px solid var(--line);
+        color: var(--mist);
+        font-family: var(--font-code);
+        font-size: 0.8rem;
+    }
+
+    .again {
+        position: relative;
+        padding: 0.3rem 0.9rem;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-pill);
+        background: transparent;
+        color: var(--ink);
+        font: inherit;
+        cursor: pointer;
+    }
+
+    .again[hidden] {
+        display: none;
+    }
+
+    .session ol {
+        display: grid;
+        gap: 0.7rem;
+        padding: 1.2rem;
+    }
+
+    .turn {
+        display: grid;
+        gap: 0.25rem;
+    }
+
+    .turn b {
+        color: var(--mist);
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+
+    .turn span {
+        display: block;
+        min-height: 1.5em;
+        line-height: 1.5;
+    }
+
+    .turn-cmd span {
+        font-size: var(--step-1);
+        font-weight: 600;
+    }
+
+    .mono {
+        font-family: var(--font-code);
+        font-size: 0.8rem;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+
+    .turn-call {
+        padding: 0.7rem 0.9rem;
+        border: 1px solid color-mix(in srgb, var(--agent) 45%, transparent);
+        border-radius: var(--radius-m);
+        background: var(--agent-soft);
+    }
+
+    .turn-call .tool-name {
+        color: var(--agent);
+        font-family: var(--font-code);
+        font-size: 0.85rem;
+    }
+
+    .turn-result {
+        padding-left: 0.9rem;
+        border-left: 2px solid var(--line-strong);
+        color: var(--mist);
+    }
+
+    .turn:has(:global(.is-waiting)) {
+        opacity: 0;
+    }
+
+    .turn {
+        transition: opacity 260ms ease;
+    }
+
+    /* Tools: a list of names on the left, the chosen one's shape on the right. */
+    .tool-tabs {
+        display: grid;
         gap: var(--space-2);
         margin-top: var(--space-4);
     }
 
-    .door {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
+    .tool-tabs[data-enhanced] {
+        grid-template-columns: 14rem minmax(0, 1fr);
+        gap: 0;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-l);
+        background: var(--stone);
+        overflow: hidden;
+    }
+
+    .tool-list {
+        display: grid;
+        align-content: start;
+        padding: 0.6rem;
+        border-right: 1px solid var(--line);
+    }
+
+    .tool-list[hidden] {
+        display: none;
+    }
+
+    .tool-list button {
+        min-height: 2.75rem;
+        padding: 0.5rem 0.9rem;
+        border: 0;
+        border-radius: var(--radius-s);
+        background: transparent;
+        color: var(--mist);
+        font-family: var(--font-code);
+        font-size: 0.92rem;
+        text-align: left;
+        cursor: pointer;
+    }
+
+    .tool-list button:hover {
+        color: var(--ink);
+    }
+
+    .tool-list button[aria-selected="true"] {
+        background: var(--agent-soft);
+        color: var(--agent);
+        box-shadow: inset 2px 0 0 var(--agent);
+    }
+
+    .tool-panel {
         padding: var(--space-3);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-m);
+        background: var(--stone);
+    }
+
+    [data-enhanced] .tool-panel {
+        min-height: 21rem;
+        border: 0;
+        border-radius: 0;
+    }
+
+    .tool-panel h3 {
+        color: var(--agent);
+        font-family: var(--font-code);
+        font-size: var(--step-2);
+        font-weight: 500;
+        letter-spacing: -0.04em;
+    }
+
+    .tool-panel > p {
+        max-width: 56ch;
+        margin-top: 0.5rem;
+        color: var(--mist);
+        font-size: var(--step-1);
+        line-height: 1.45;
+    }
+
+    .tool-panel dl {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-3);
+        margin-top: var(--space-3);
+        font-family: var(--font-code);
+        font-size: 0.86rem;
+    }
+
+    .tool-panel dt {
+        margin-bottom: 0.5rem;
+        padding-bottom: 0.4rem;
+        border-bottom: 1px solid var(--line);
+        color: var(--mist);
+    }
+
+    .tool-panel dd span {
+        display: block;
+        line-height: 1.8;
+        overflow-wrap: anywhere;
+    }
+
+    .tool-panel .none {
+        color: var(--mist);
+    }
+
+    /* Guards */
+    .guards ul {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-2);
+        margin-top: var(--space-4);
+    }
+
+    .guard {
+        display: grid;
+        gap: 0.6rem;
+        align-content: start;
+        padding: var(--space-3);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-l);
+        background: var(--stone);
+    }
+
+    .guard code {
+        justify-self: start;
+        margin-bottom: var(--space-3);
+        padding: 0.2rem 0.6rem;
+        border-color: color-mix(in srgb, var(--agent) 45%, transparent);
+        background: var(--agent-soft);
+        color: var(--agent);
+        font-size: 1rem;
+    }
+
+    .guard h3 {
+        font-size: var(--step-2);
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        line-height: 1.1;
+    }
+
+    .guard p {
+        color: var(--mist);
+        line-height: 1.55;
+    }
+
+    /* Four ways in, each with a line running down into the one service. */
+    .doors {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0 var(--space-2);
+        margin-top: var(--space-4);
+    }
+
+    .front {
+        position: relative;
+        display: grid;
+        gap: 0.3rem;
+        align-content: start;
+        margin-bottom: 3.5rem;
+        padding: var(--space-2) var(--space-3);
         border: 1px solid var(--line-strong);
         border-radius: var(--radius-m);
         background: var(--stone);
     }
 
-    .door.agent {
-        border-style: dashed;
+    .front:first-child {
         border-color: var(--agent);
         background: var(--agent-soft);
     }
 
-    .door h2 {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.4rem 0.75rem;
-        font-size: var(--step-1);
-        letter-spacing: -0.03em;
+    .front::after {
+        content: "";
+        position: absolute;
+        top: 100%;
+        left: 50%;
+        width: 2px;
+        height: 3.5rem;
+        background: repeating-linear-gradient(180deg, var(--line-strong) 0 6px, transparent 6px 12px);
     }
 
-    .door pre {
-        flex: 1;
-        color: var(--mist);
+    .front:first-child::after {
+        background: repeating-linear-gradient(180deg, var(--agent) 0 6px, transparent 6px 12px);
     }
 
-    .in {
-        color: var(--ink);
+    @media (prefers-reduced-motion: no-preference) {
+        .front::after {
+            animation: flow 700ms linear infinite;
+        }
     }
 
-    .in::before {
-        content: "$ ";
-        color: var(--mist);
+    @keyframes flow {
+        to {
+            background-position: 0 12px;
+        }
     }
 
-    .agent .in::before {
-        color: var(--agent);
+    .core {
+        grid-column: 1 / -1;
+        padding: var(--space-3);
+        border: 1px solid var(--ink);
+        border-radius: var(--radius-m);
+        background: var(--ink);
+        color: var(--basin);
+        text-align: center;
     }
 
-    .tool {
-        display: block;
-        color: var(--agent);
+    .doors code {
+        padding: 0;
+        border: 0;
+        background: none;
+        color: inherit;
+        font-size: 1.05rem;
+        font-weight: 500;
     }
 
-    .tool::before {
-        content: "tool  ";
-        color: var(--mist);
+    .core code {
+        font-size: var(--step-2);
+        letter-spacing: -0.04em;
     }
 
-    .door p {
-        padding-top: var(--space-2);
-        border-top: 1px solid var(--line);
+    .front b {
+        font-size: var(--step--1);
+    }
+
+    .front p {
         color: var(--mist);
         font-size: var(--step--1);
-        line-height: 1.55;
+        line-height: 1.45;
     }
 
-    .door.agent p {
-        border-top-color: color-mix(in srgb, var(--agent) 35%, transparent);
+    .core p {
+        margin-top: 0.3rem;
+        opacity: 0.75;
+        font-size: var(--step--1);
     }
 
-    .start-grid,
-    .contract-grid {
+    /* Contract */
+    .contract-grid,
+    .start-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: var(--space-4);
@@ -366,36 +837,15 @@ one.bin</code></pre>
         margin-top: var(--space-4);
     }
 
-    .start-cmds {
-        display: grid;
-        gap: 0.6rem;
-    }
-
-    .start-cmds p {
-        color: var(--mist);
-    }
-
-    .start-cmds p:not(:first-child) {
-        margin-top: var(--space-2);
-    }
-
     .rules {
         display: grid;
         gap: 0.7rem;
-        margin-bottom: var(--space-3);
+        margin-block: var(--space-3);
     }
 
     .rules li {
-        padding-left: 1.4rem;
-        text-indent: -1.4rem;
-    }
-
-    .rules li::before {
-        content: "\2022";
-        display: inline-block;
-        width: 1.4rem;
-        color: var(--mist);
-        text-indent: 0;
+        padding-left: 1.2rem;
+        border-left: 2px solid var(--line-strong);
     }
 
     .block {
@@ -423,7 +873,7 @@ one.bin</code></pre>
 
     th,
     td {
-        padding: 0.55rem 1rem 0.55rem 0;
+        padding: 0.6rem 1rem 0.6rem 0;
         border-top: 1px solid var(--line);
         text-align: left;
         vertical-align: top;
@@ -447,109 +897,56 @@ one.bin</code></pre>
         color: var(--mist);
     }
 
-    /* Three front ends above the one service they all call. */
-    .doors {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: var(--space-2);
-        margin-top: var(--space-4);
-    }
-
-    .front,
-    .service {
-        padding: var(--space-2) var(--space-3);
-        border: 1px dashed var(--line-strong);
-        border-radius: var(--radius-m);
-    }
-
-    .front:first-child {
-        border-color: var(--agent);
-        background: var(--agent-soft);
-    }
-
-    .service {
-        grid-column: 1 / -1;
-        border-style: solid;
-        background: var(--stone);
-    }
-
-    .doors code {
-        padding: 0;
-        border: 0;
-        background: none;
-        font-size: 1rem;
-        font-weight: 500;
-    }
-
-    .doors p {
-        margin-top: 0.3rem;
-        color: var(--mist);
-        font-size: var(--step--1);
-    }
-
-    .guards {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: var(--space-2) var(--space-4);
-        margin-top: var(--space-4);
-    }
-
-    .guards li {
-        padding-top: 0.7rem;
-        border-top: 1px solid var(--line);
-        color: var(--mist);
-        line-height: 1.55;
-    }
-
-    .also {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: var(--space-2) var(--space-4);
-        margin-top: var(--space-4);
-    }
-
-    .also dt,
-    .under-list dt {
-        font-weight: 650;
-    }
-
-    .also dd,
-    .under-list dd {
-        margin-top: 0.3rem;
-        color: var(--mist);
-        line-height: 1.55;
-    }
-
-    .also code {
-        white-space: normal;
-        overflow-wrap: anywhere;
-    }
-
     .under-list {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: var(--space-3);
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-4) var(--space-3);
         margin-top: var(--space-4);
     }
 
     .under-list div {
-        padding-top: 0.7rem;
+        padding-top: 0.8rem;
         border-top: 2px solid var(--ink);
     }
 
-    .links ul {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.6rem 2rem;
-        margin-top: var(--space-3);
+    .under-list dt {
+        font-family: var(--font-code);
         font-size: var(--step-1);
+        letter-spacing: -0.03em;
     }
 
-    @media (max-width: 60rem) {
-        .three,
-        .start-grid,
-        .contract-grid {
+    .under-list dd {
+        margin-top: 0.4rem;
+        color: var(--mist);
+        line-height: 1.55;
+    }
+
+    .start-cmds {
+        display: grid;
+        gap: 0.6rem;
+    }
+
+    @media (max-width: 62rem) {
+        .hero,
+        .contract-grid,
+        .start-grid {
             grid-template-columns: 1fr;
+        }
+
+        .hero {
+            min-height: 0;
+        }
+
+        .doors {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .front {
+            margin-bottom: var(--space-2);
+        }
+
+        .front::after {
+            content: none;
         }
 
         .under-list {
@@ -558,9 +955,23 @@ one.bin</code></pre>
     }
 
     @media (max-width: 40rem) {
-        .doors,
-        .guards,
-        .also,
+        .tool-tabs[data-enhanced] {
+            grid-template-columns: 1fr;
+        }
+
+        .tool-list {
+            display: flex;
+            overflow-x: auto;
+            border-right: 0;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .tool-list button {
+            flex: none;
+        }
+
+        .tool-panel dl,
+        .guards ul,
         .under-list {
             grid-template-columns: 1fr;
         }
