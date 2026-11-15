@@ -124,6 +124,7 @@ mod tests {
     }
 
     /// A lookup that knows one address, which is what a tab gets from its relay.
+    #[cfg(not(target_arch = "wasm32"))]
     fn lookup_of(addr: iroh::EndpointAddr) -> iroh::address_lookup::MemoryLookup {
         let lookup = iroh::address_lookup::MemoryLookup::new();
         lookup.add_endpoint_info(addr);
