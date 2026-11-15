@@ -73,3 +73,39 @@ fn the_page_is_embedded_loads_nothing_from_elsewhere_and_has_no_mock() {
         assert!(!text.contains("https://"), "an outside address");
     }
 }
+
+/// The parts of ADR 0036 point 7 that the page's own text shows: one first-level heading among the
+/// parts that are shown together, a landmark for the folder path, a status region, a name for every
+/// control that has no text, progress with a role and a value, and no motion for a user who asks
+/// for less.
+#[test]
+fn the_page_carries_what_a_keyboard_and_a_screen_reader_need() {
+    let (_, html) = assets::find("/").unwrap();
+    let (_, script) = assets::find("/app.js").unwrap();
+    let (_, style) = assets::find("/app.css").unwrap();
+    assert!(html.contains(r#"<html lang="en">"#));
+    assert!(html.contains("<main"));
+    assert!(html.contains(r#"<h1 class="sr">Sluice</h1>"#));
+    assert!(html.contains(r#"<nav class="crumbs" id="crumbs" aria-label="Folder path">"#));
+    assert!(html.contains(r#"id="say" role="status" aria-live="polite""#));
+    assert!(html.contains(r#"id="send-hint" role="status""#));
+    assert!(html.contains(r#"id="recv-error" role="alert""#));
+    assert!(html.contains(r#"<label for="recv-ticket">"#));
+    assert!(html.contains(r#"<label for="recv-root">"#));
+    assert!(html.contains(r#"id="theme" type="button" aria-label="Switch theme""#));
+    assert!(html.contains(r#"alt="QR code of the ticket""#));
+    for needed in [
+        r#"setAttribute("role", "progressbar")"#,
+        r#"setAttribute("aria-valuenow""#,
+        r#"setAttribute("aria-label", `Cancel: ${title}`)"#,
+        r#"setAttribute("aria-label", `Open ${entry.name}`)"#,
+    ] {
+        assert!(script.contains(needed), "{needed}");
+    }
+    // A row is updated in place: the list is never replaced, which would take the focus away.
+    assert!(!script.contains(r#"$("transfers").replaceChildren"#));
+    assert!(!script.contains("list.replaceChildren(...rows)"));
+    assert!(style.contains(":focus-visible"));
+    assert!(style.contains("prefers-reduced-motion: reduce"));
+    assert!(style.contains("::placeholder { color: var(--mist)"));
+}
