@@ -19,7 +19,7 @@ dependencies_update = false
 # One changelog, written under sluice-cli, which ships the binary. Every other package is off.
 changelog_update = false
 
-# The three crates share the workspace version, so they move together.
+# The crates that ship share the workspace version, so they move together.
 [[package]]
 name = "sluice-cli"
 version_group = "sluice"
@@ -27,7 +27,7 @@ changelog_update = true
 # The root CHANGELOG.md, not crates/sluice-cli/CHANGELOG.md. release-plz reads this key only per
 # package.
 changelog_path = "./CHANGELOG.md"
-changelog_include = ["sluice-core", "sluice-live"]
+changelog_include = ["sluice-core", "sluice-live", "sluice-delta", "sluice-api", "sluice-wasm"]
 
 [[package]]
 name = "sluice-core"
@@ -35,6 +35,23 @@ version_group = "sluice"
 
 [[package]]
 name = "sluice-live"
+version_group = "sluice"
+
+# The three crates the 1.1 stack added: delta is linked into sluice-core, api into the binary and
+# wasm into the page. They take the workspace version like the rest.
+# release-plz rebuilds the workspace at a package's release tag to see what changed since it, so a
+# crate younger than the newest tag is not found there: the release that ships these three is cut by
+# hand (docs/runbooks/releasing.md), and release-plz takes them over from the tag after it.
+[[package]]
+name = "sluice-delta"
+version_group = "sluice"
+
+[[package]]
+name = "sluice-api"
+version_group = "sluice"
+
+[[package]]
+name = "sluice-wasm"
 version_group = "sluice"
 
 # `publish = false` in their manifests: tools and benchmarks, never released and never in the
