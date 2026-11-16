@@ -287,6 +287,22 @@ segment until it stops, because a reader may ask for any of them until then, and
 bounded by its folder going away. Every other store keeps its bytes until the command is done with
 them: a resume store has to outlive the command, and a pack, a manifest or a range is in a folder
 that is removed when the command ends. ADR 0029, ADR 0030.
+**What a crash may take from a store.** A store that keeps its blobs syncs them before it records
+that it holds one (`CrashConsistency::PowerLoss`). Only the partial store beside a destination
+survives the command that made it, and a resumed receive links a blob it recorded into the output
+instead of hashing it again, so that record has to be true through a power loss too. The cost is one
+sync per blob above the inline threshold, which a folder receive pays a few dozen times over a
+transfer: files under 1 MiB travel in packs of at most 64 MiB, so the count is of packs and of large
+files and not of files. On Linux, a store that finds a new boot id also flushes the data filesystem
+once when it opens, so a resume after a power loss can wait for the disk. A store whose blobs are
+throwaway is opened with `CrashConsistency::ProcessCrash`, the cheaper default: the live stores go
+with the command, so syncing them would only slow a stream down. After a power loss such a store
+re-checks each entry against its files when it next loads it and may report less than it has, never
+more. The range and standard-output stores and the manifest store keep their one or two blobs and
+sync them, which is what makes this one rule rather than a second argument every caller has to get
+right. A receiver gets the same thing either way: a finished file is synced before it is named, and
+the bytes of a blob this process fetched were verified against its root before the store recorded
+them.
 **The source can change underneath us.** Size, mtime and inode (file id on Windows) are recorded at
 import and checked again before serving starts. A change after that is caught by the receiver: the
 ticket's root names the version that was hashed, so bytes read from the changed file do not verify

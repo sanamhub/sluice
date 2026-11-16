@@ -4,7 +4,10 @@ use std::{ops::Deref, path::Path, sync::Mutex, time::Duration};
 
 use iroh_blobs::store::{
     GcConfig,
-    fs::{FsStore, options::Options},
+    fs::{
+        FsStore,
+        options::{CrashConsistency, Options},
+    },
 };
 
 use crate::Error;
@@ -201,9 +204,41 @@ async fn open_store(root: &Path, collector: Collector) -> Result<FsStore, Error>
         interval,
         add_protected: None,
     });
+    options.crash_consistency = consistency(collector);
     FsStore::load_with_opts(root.join("blobs.db"), options)
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store at {}: {e}", root.display())))
+}
+
+/// What a crash may take from a store, which is the other thing the caller's [`Collector`] says.
+///
+/// A store that keeps its blobs is one a later step reads them from. The partial store beside a
+/// destination is the one that outlives the command that made it, and a blob it recorded as complete
+/// is linked into an output file instead of being hashed again: [`CrashConsistency::PowerLoss`] is
+/// what makes that record true through a power loss, because `iroh-blobs` syncs a data file before it
+/// records that the store holds the blob. The cost is one sync per blob above the inline threshold.
+/// A folder receive pays it a few dozen times over a transfer: files under 1 MiB travel in packs of
+/// at most 64 MiB, so the count is of packs and of large files and not of files. The range and
+/// standard-output stores and the manifest store cost one or two syncs each, which is what keeps
+/// this a single rule instead of a second argument every caller has to get right: a store that keeps
+/// its blobs syncs them.
+///
+/// A store that collects is one whose blobs are throwaway, and every one of those lives and dies with
+/// the command that opened it: the live stores are removed, and the segments of a live stream cannot
+/// be resumed from a folder that is gone. [`CrashConsistency::ProcessCrash`] is what such a store is
+/// for. It leaves the store consistent after a process crash; after a power loss it re-checks each
+/// entry against its files when it next loads it, and it may report less than it has, never more. On
+/// Linux a store opened with `PowerLoss` that finds a new boot id flushes the data filesystem before
+/// it records the new run, so a resume after a power loss can wait for the disk once.
+///
+/// What a receiver gets is the same either way: a finished file is synced before it is named, and the
+/// bytes of a blob this process fetched were verified against its root before the store recorded
+/// them. `PowerLoss` adds that the same is true of a blob a *previous* process recorded.
+fn consistency(collector: Collector) -> CrashConsistency {
+    match collector {
+        Collector::On => CrashConsistency::ProcessCrash,
+        Collector::Off => CrashConsistency::PowerLoss,
+    }
 }
 
 /// How often a collector sweeps. A unit test sweeps sooner so it does not wait ten seconds for the
@@ -219,7 +254,7 @@ fn gc_interval() -> Duration {
 }
 
 /// [`open_store`] with the collector's interval as an argument, so a test can make one sweep
-/// happen sooner than the constant does.
+/// happen sooner than the constant does. It opens the same kind of store: one that collects.
 #[cfg(test)]
 pub(crate) async fn open_store_after(root: &Path, interval: Duration) -> Result<FsStore, Error> {
     let mut options = Options::new(root);
@@ -227,6 +262,7 @@ pub(crate) async fn open_store_after(root: &Path, interval: Duration) -> Result<
         interval,
         add_protected: None,
     });
+    options.crash_consistency = consistency(Collector::On);
     FsStore::load_with_opts(root.join("blobs.db"), options)
         .await
         .map_err(|e| Error::Storage(format!("cannot open the store at {}: {e}", root.display())))
