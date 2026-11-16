@@ -76,7 +76,8 @@ iroh = { version = "1.4", default-features = false, features = ["metrics", "port
 iroh-relay = { version = "1.4", default-features = false }
 # 0.94.0 to 0.103.0 accept unauthenticated push and are yanked. 0.104.1 is the first release whose
 # collector cannot delete a blob a tag still holds, which is what every store here relies on
-# (ADR 0027).
+# (ADR 0027), and 0.105.0 writes a blob's files before it records that the store holds them, which
+# is what the partial store's `PowerLoss` is worth (docs/design.md, Storage).
 iroh-blobs = "0.105.0"
 # mDNS lookup for the local network, which iroh keeps out of the base crate. Its only iroh
 # dependency is the same 1.x range, so the tree gets no second iroh.
