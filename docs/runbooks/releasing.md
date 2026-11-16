@@ -196,6 +196,24 @@ never skips the checks even if the pull request merged without them.
    Then verify one archive and both images as in [`docs/install.md`](../install.md). The images are
    not files of the release; they are the two ghcr.io packages, each with the three tags below.
 
+## A release that adds a crate
+
+release-plz finds what changed in a package since its release by rebuilding the workspace at that
+package's release tag, so a crate younger than the newest tag is not in that tree: every run stops
+with `cannot find package "<name>" in workspace`. No setting in `release-plz.toml` skips the lookup.
+The release that first ships such a crate is cut by hand:
+
+1. Name the crate in `release-plz.toml` — `version_group = "sluice"`, and its name in
+   `changelog_include` on `sluice-cli` — and merge that like any other change.
+2. In a clone, add `git_only = false` to its `[[package]]` entry and run `release-plz update`, at the
+   version `release-plz.yml` names. It writes the version bump, and the `CHANGELOG.md` section
+   covering every crate that changed with it.
+3. Take that line out again, commit `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md`, and tag as above.
+
+Every release after that one comes from release-plz again. Leaving `git_only = false` in place would
+make it propose a new version on every push, because a package it never finds in a registry never
+counts as released. Run `update` in a clone: it moves the checkout it runs in.
+
 ## Rehearsing a release
 
 Run the whole pipeline once on a pre-release tag before the first release. `v0.1.0-rc.1` is a real
