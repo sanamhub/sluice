@@ -76,8 +76,9 @@ pub fn run() -> anyhow::Result<()> {
     let tracked = tracked(root)?;
     let mut found = problems(&tracked);
     let lengths = source_lengths(root, &tracked)?;
-    found.extend(over_long(&lengths, EXEMPT));
-    found.extend(stale_exemptions(&tracked, &lengths, EXEMPT));
+    let exempt: Vec<(&str, &str)> = EXEMPT.iter().chain(PREVIEWS).copied().collect();
+    found.extend(over_long(&lengths, &exempt));
+    found.extend(stale_exemptions(&tracked, &lengths, &exempt));
     if !found.is_empty() {
         let mut text = found
             .iter()
@@ -162,6 +163,20 @@ fn is_source(path: &str) -> bool {
         .is_some_and(|extension| SOURCES.contains(&extension))
 }
 
+/// Why the previews are one file each: the six compare like for like, and a component tree would
+/// split one direction across files. Each entry below gives this one reason.
+const PREVIEW: &str = "one landing page direction, kept whole so the six compare like for like";
+/// The landing page's six preview directions, and the flight script the fourth one drives.
+const PREVIEWS: &[(&str, &str)] = &[
+    ("site/src/pages/v/1.astro", PREVIEW),
+    ("site/src/pages/v/2.astro", PREVIEW),
+    ("site/src/pages/v/3.astro", PREVIEW),
+    ("site/src/pages/v/4.astro", PREVIEW),
+    ("site/src/pages/v/5.astro", PREVIEW),
+    ("site/src/pages/v/6.astro", PREVIEW),
+    ("site/src/scripts/journey.ts", PREVIEW),
+];
+
 /// The reasons these paths do not belong in the tree, and none when they all do. A path is written
 /// with `/` between its components, as git writes it.
 ///
@@ -217,7 +232,7 @@ fn tracked(root: &Path) -> anyhow::Result<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{EXEMPT, LONGEST, is_source, over_long, problems, stale_exemptions};
+    use super::{EXEMPT, LONGEST, PREVIEWS, is_source, over_long, problems, stale_exemptions};
 
     fn paths(list: &[&str]) -> Vec<String> {
         list.iter().map(|path| (*path).to_string()).collect()
@@ -324,7 +339,7 @@ mod tests {
     /// is caught here rather than by the reader of a diff.
     #[test]
     fn every_exemption_has_a_reason() {
-        for (path, reason) in EXEMPT {
+        for (path, reason) in EXEMPT.iter().chain(PREVIEWS) {
             assert!(
                 is_source(path),
                 "{path} is not a source file the rule reads"
