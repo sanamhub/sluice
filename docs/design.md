@@ -80,8 +80,8 @@ BLAKE3 segments and closes into an ordinary static root; ADR 0004 covers the dif
 |---|---|---|
 | `iroh`, `iroh-relay` | 1.4 | Wire-stable since 1.0. Negotiates ALPNs in `Router` registration order |
 | `noq` | 1.4 | n0's fork of quinn. Cubic, BBRv3 and NewReno ship; we select Cubic today (ADR 0023). GSO and GRO on by default, with a silent fallback |
-| `iroh-blobs` | 0.103.1 or later | Pre-1.0. Versions 0.94.0 to 0.103.0 accept unauthenticated push and are yanked |
-| `bao-tree`, `range-collections` | 0.16, 0.4 | Small and single-author; vendorable in days |
+| `iroh-blobs` | 0.105.0 or later | Pre-1.0. Versions 0.94.0 to 0.103.0 accept unauthenticated push and are yanked |
+| `bao-tree`, `range-collections` | 0.17, 0.4 | Small and single-author; vendorable in days |
 | `rustls` | 0.23.46 or later | Earlier releases leak session secrets through `Debug` |
 | `rmcp` | 3.5 | Official MCP SDK. Releases about every two weeks, so pinned exactly |
 | `turmoil` | 0.7 | Test only. The filesystem simulation sits behind `unstable-fs` |
@@ -558,7 +558,7 @@ The QUIC stack is tested by its own project, so we don't simulate QUIC.
 
 | Concern | Tool |
 |---|---|
-| Toolchain | `rust-toolchain.toml`, Rust 2024 edition. MSRV 1.91 is one CI job, `cargo +1.91 check --all-targets --workspace --exclude sluice-probe`, not a matrix entry: 1.91 is the floor `iroh` 1.4 and `iroh-blobs` 0.103 set, so no older compiler can build the product, and the probe is not a product crate |
+| Toolchain | `rust-toolchain.toml`, Rust 2024 edition. MSRV 1.91 is one CI job, `cargo +1.91 check --all-targets --workspace --exclude sluice-probe`, not a matrix entry: 1.91 is the floor `iroh` 1.4 and `iroh-blobs` 0.105 set, so no older compiler can build the product, and the probe is not a product crate |
 | Tasks | `cargo xtask` |
 | Tests and snapshots | `cargo nextest`, `insta` |
 | Benchmarks | Planned, none run by a workflow: `divan` with CodSpeed for CPU work per pull request, and a self-hosted pair for throughput |
