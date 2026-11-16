@@ -1,0 +1,633 @@
+---
+// Version 4, the journey. The first six screens are one scene that stays in place while the page
+// scrolls: a canal in three dimensions, with the sender at one end and the receiver at the other.
+// Scrolling moves the camera along it, and each screen of scrolling is one stop with one thing to
+// say. After the canal, the page is quiet: the commands, the rest of the tool as a list, and the
+// install box.
+import InstallTabs from "../../components/InstallTabs.astro";
+import Btn from "../../components/preview/Btn.astro";
+import End from "../../components/preview/End.astro";
+import { CLI_README, INSTALL, REPO } from "../../data/links";
+import { FEATURES, QUICK_INSTALL, RUN_RECEIVER, RUN_SENDER } from "../../data/preview";
+import Preview from "../../layouts/Preview.astro";
+
+const stops = [
+    {
+        place: "Sender",
+        title: "Read where it lies",
+        body: "The sender hashes the file in place and prints a ticket. Nothing is uploaded first, and no server holds a copy.",
+        code: "sluice send ./holiday-video",
+    },
+    {
+        place: "Wire",
+        title: "One connection, end to end",
+        body: "QUIC with TLS 1.3 between the two machines, punched through NAT. Every connection has to negotiate the post-quantum exchange X25519MLKEM768, or it is closed.",
+        code: "connected directly",
+    },
+    {
+        place: "Gate",
+        title: "Checked before it lands",
+        body: "Each block is verified against its BLAKE3 root before it is written. A block that does not match is thrown away at the gate, not found later inside the file.",
+        code: "verified 75.3 MiB",
+    },
+    {
+        place: "Receiver",
+        title: "Kept, even if it stops",
+        body: "Only verified bytes reach the folder. Kill the receive at any point and the next run keeps every range it had and fetches the rest.",
+        code: "sluice recv <ticket> --out ./inbox",
+    },
+];
+
+const panes = [
+    { title: "Sending machine", lines: RUN_SENDER, steps: [0, 1, 4, 5, 11] },
+    { title: "Receiving machine", lines: RUN_RECEIVER, steps: [2, 3, 6, 7, 8, 9, 10, 12] },
+];
+
+const facts = ["QUIC", "TLS 1.3", "BLAKE3", "X25519MLKEM768", "No account", "No telemetry", "Resumable", "Open source"];
+---
+
+<Preview
+    title="Sluice: ride along with a file"
+    description="Preview, version 4: scrolling flies a camera down the canal, from the sender through the gate to the receiver."
+    version={4}
+>
+    <div class="progress" aria-hidden="true"></div>
+
+    <div class="journey" data-journey>
+        <div class="stage" data-stage aria-hidden="true">
+            <div class="rail">
+                <i></i>
+                {stops.map((stop, at) => <span style={`--at:${at}`}>{stop.place}</span>)}
+            </div>
+        </div>
+
+        <section class="stop stop-hero" aria-labelledby="v4-title">
+            <div class="wrap">
+                <h1 id="v4-title" data-split>Ride along with a file.</h1>
+                <p class="lede">
+                    Sluice sends files from one computer directly to another. Scroll, and follow
+                    one down the wire.
+                </p>
+                <div class="btn-row">
+                    <Btn href="#v4-install">Install Sluice</Btn>
+                    <Btn href={REPO} quiet>Source on GitHub</Btn>
+                </div>
+            </div>
+            <p class="cue" aria-hidden="true"><i></i>Scroll to leave the dock</p>
+        </section>
+
+        {
+            stops.map((stop, at) => (
+                <section class={`stop stop-${at % 2 ? "left" : "right"}`} aria-labelledby={`v4-stop-${at}`}>
+                    <div class="wrap">
+                        <div class="card">
+                            <p class="card-n">
+                                <b>{at + 1}</b> of 4, {stop.place.toLowerCase()}
+                            </p>
+                            <h2 id={`v4-stop-${at}`}>{stop.title}</h2>
+                            <p>{stop.body}</p>
+                            <code translate="no">{stop.code}</code>
+                        </div>
+                    </div>
+                </section>
+            ))
+        }
+
+        <section class="stop stop-all" aria-labelledby="v4-all">
+            <div class="wrap">
+                <h2 id="v4-all" data-split>Nothing was stored in between.</h2>
+                <p>
+                    No account, no upload, no copy on a server. What left one disk is what reached
+                    the other, block for block.
+                </p>
+            </div>
+        </section>
+    </div>
+
+    <div class="marquee facts" aria-hidden="true">
+        {
+            [0, 1].map(() => (
+                <div>
+                    {facts.map((fact) => (
+                        <span>{fact}</span>
+                    ))}
+                </div>
+            ))
+        }
+    </div>
+
+    <section class="wrap run" aria-labelledby="v4-run" data-replay>
+        <div class="head">
+            <h2 id="v4-run" data-split>The same trip, as two commands</h2>
+            <button class="btn quiet again" type="button" data-replay-again hidden>Replay</button>
+        </div>
+        <div class="panes">
+            {
+                panes.map((pane) => (
+                    <figure class="pane glow" data-tilt="3">
+                        <figcaption>{pane.title}</figcaption>
+                        <pre translate="no" tabindex="0"><code>{pane.lines.map((line, at) => (
+                            <span class={`t-${line.kind}`} data-step={pane.steps[at]} data-kind={line.kind}>{line.text}</span>
+                        ))}</code></pre>
+                    </figure>
+                ))
+            }
+        </div>
+        <p class="note">
+            What the terminal printed for a folder of two videos and a note. The ticket is
+            shortened. The <a href={CLI_README}>CLI reference</a> has every flag.
+        </p>
+    </section>
+
+    <section class="wrap rest" aria-labelledby="v4-rest">
+        <h2 id="v4-rest" data-split>And for the trips that go wrong</h2>
+        <ul class="rows">
+            {
+                FEATURES.map((item) => (
+                    <li class="rise">
+                        <h3>{item.title}</h3>
+                        <p>{item.body}</p>
+                        <code translate="no">{item.code}</code>
+                    </li>
+                ))
+            }
+        </ul>
+    </section>
+
+    <section class="wrap install-section" id="v4-install" aria-labelledby="v4-install-title">
+        <div class="install-copy">
+            <h2 id="v4-install-title" data-split>Your turn at the dock</h2>
+            <p>
+                One small binary for macOS, Linux and Windows. No account to make and nothing to
+                configure before the first send.
+            </p>
+            <p class="more"><a href={INSTALL}>Every install channel</a></p>
+        </div>
+        <InstallTabs name="v4" options={QUICK_INSTALL} />
+    </section>
+
+    <End
+        slot="end"
+        kit
+        title="Send the first one."
+        body="Free and open source. The whole trip you just watched is two commands."
+    />
+</Preview>
+
+<script>
+    import "../../scripts/kit";
+    import "../../scripts/replay";
+
+    // The canal needs WebGL 2 and is not fetched for a reader who asked to save data. With reduced
+    // motion it draws one still frame of the whole canal and the camera never moves.
+    const stage = document.querySelector<HTMLElement>("[data-stage]");
+    const track = document.querySelector<HTMLElement>("[data-journey]");
+    const saving = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
+    let able = false;
+    try {
+        able = document.createElement("canvas").getContext("webgl2") !== null;
+    } catch {
+        able = false;
+    }
+    if (stage && track && able && !saving) {
+        const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+        import("../../scripts/journey").then((scene) => scene.mount(stage, track, still)).catch(() => {
+            // The stops read the same over the plain ground.
+        });
+    }
+</script>
+
+<style>
+    /* The journey: a stage that stays in view, and six stops that scroll over it. */
+    .journey {
+        position: relative;
+    }
+
+    .stage {
+        position: sticky;
+        top: 0;
+        height: 100svh;
+        margin-bottom: -100svh;
+        background:
+            radial-gradient(60% 50% at 70% 60%, var(--water-soft), transparent 70%),
+            radial-gradient(40% 40% at 20% 30%, var(--brass-soft), transparent 70%), var(--basin);
+        overflow: clip;
+    }
+
+    .stage :global(canvas) {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        transition: opacity 900ms ease;
+    }
+
+    .stage[data-live] :global(canvas) {
+        opacity: 1;
+    }
+
+    /* Dark at the edges, so the eye stays in the middle and the header reads. */
+    .stage::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+            linear-gradient(180deg, var(--basin) 0%, transparent 16%, transparent 80%, var(--basin) 100%),
+            radial-gradient(120% 90% at 50% 50%, transparent 55%, color-mix(in srgb, var(--basin-deep) 80%, transparent) 100%);
+        pointer-events: none;
+    }
+
+    /* Where the camera is along the trip. */
+    .rail {
+        position: absolute;
+        inset: auto 0 1.4rem;
+        z-index: 1;
+        width: min(100% - 2 * var(--gutter), 34rem);
+        height: 2.2rem;
+        margin-inline: auto;
+        border-top: 2px solid var(--line);
+        color: var(--mist);
+        font-family: var(--font-code);
+        font-size: 0.75rem;
+    }
+
+    .rail i {
+        position: absolute;
+        inset: -2px 0 auto;
+        height: 2px;
+        background: linear-gradient(90deg, var(--water) 0 60%, var(--brass) 60%);
+        transform-origin: 0 50%;
+        scale: var(--p, 0) 1;
+    }
+
+    .rail span {
+        position: absolute;
+        top: 0.5rem;
+        left: calc((var(--at) + 1) * 20%);
+        translate: -50% 0;
+    }
+
+    .rail span::before {
+        content: "";
+        position: absolute;
+        top: -0.85rem;
+        left: 50%;
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+        background: var(--line-strong);
+        translate: -50% 0;
+    }
+
+    /* With reduced motion the camera stays where it is, so there is no trip to mark. */
+    @media (prefers-reduced-motion: reduce) {
+        .rail,
+        .cue {
+            display: none;
+        }
+    }
+
+    .stop {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        align-items: center;
+        min-height: 100svh;
+        padding-block: 6rem 5rem;
+    }
+
+    .stop-hero {
+        align-items: end;
+        padding-bottom: 7rem;
+    }
+
+    h1 {
+        max-width: 9ch;
+        font-size: clamp(3.2rem, 1.2rem + 8vw, 8.4rem);
+        font-stretch: 125%;
+        font-weight: 800;
+        line-height: 0.88;
+        letter-spacing: -0.05em;
+    }
+
+    .lede {
+        max-width: 30ch;
+        margin-block: var(--space-3) var(--space-4);
+        font-size: clamp(1.2rem, 1rem + 0.8vw, 1.6rem);
+        line-height: 1.35;
+    }
+
+    .cue {
+        position: absolute;
+        right: var(--gutter);
+        bottom: 7rem;
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+        color: var(--mist);
+        font-size: var(--step--1);
+        writing-mode: vertical-rl;
+    }
+
+    .cue i {
+        width: 2px;
+        height: 3.5rem;
+        background: linear-gradient(180deg, var(--water), transparent);
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+        .cue i {
+            animation: drop 1.8s ease-in-out infinite;
+        }
+    }
+
+    @keyframes drop {
+        from {
+            scale: 1 0;
+            transform-origin: 50% 0;
+        }
+
+        50% {
+            scale: 1 1;
+            transform-origin: 50% 0;
+        }
+
+        50.1% {
+            transform-origin: 50% 100%;
+        }
+
+        to {
+            scale: 1 0;
+            transform-origin: 50% 100%;
+        }
+    }
+
+    .stop-right .wrap {
+        display: grid;
+        justify-items: end;
+    }
+
+    .card {
+        display: grid;
+        gap: 0.9rem;
+        width: min(100%, 27rem);
+        padding: var(--space-4) var(--space-3) var(--space-3);
+        border: 1px solid color-mix(in srgb, var(--line-strong) 70%, transparent);
+        border-radius: var(--radius-l);
+        background: color-mix(in srgb, var(--basin) 62%, transparent);
+        box-shadow: 0 30px 60px -30px var(--shadow-color);
+        backdrop-filter: blur(18px) saturate(1.5);
+        -webkit-backdrop-filter: blur(18px) saturate(1.5);
+    }
+
+    .card-n {
+        color: var(--mist);
+        font-family: var(--font-code);
+        font-size: var(--step--1);
+    }
+
+    .card-n b {
+        color: var(--water);
+        font-weight: 600;
+    }
+
+    .stop:nth-of-type(n + 4) .card-n b {
+        color: var(--brass);
+    }
+
+    .card h2 {
+        font-size: clamp(1.9rem, 1.3rem + 2vw, 2.9rem);
+        font-stretch: 112%;
+        font-weight: 750;
+        line-height: 0.98;
+        letter-spacing: -0.035em;
+    }
+
+    .card > p:not(.card-n) {
+        color: color-mix(in srgb, var(--ink) 82%, var(--mist));
+        line-height: 1.5;
+    }
+
+    .card code {
+        justify-self: start;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .stop-all {
+        align-items: start;
+        padding-top: 14svh;
+        text-align: center;
+    }
+
+    .stop-all .wrap {
+        display: grid;
+        justify-items: center;
+        gap: var(--space-3);
+    }
+
+    .stop-all h2 {
+        max-width: 12ch;
+        font-size: clamp(2.8rem, 1.2rem + 7vw, 7.5rem);
+        font-stretch: 122%;
+        font-weight: 800;
+        line-height: 0.9;
+        letter-spacing: -0.05em;
+    }
+
+    .stop-all p {
+        max-width: 40ch;
+        font-size: var(--step-1);
+        line-height: 1.45;
+    }
+
+    /* The quiet half of the page. */
+    .facts {
+        --marquee-gap: 2.5rem;
+        padding-block: var(--space-3);
+        border-block: 1px solid var(--line);
+        font-size: clamp(1.4rem, 1rem + 2vw, 2.6rem);
+        font-stretch: 122%;
+        font-weight: 750;
+        letter-spacing: -0.03em;
+    }
+
+    .facts span {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--marquee-gap);
+        white-space: nowrap;
+    }
+
+    .facts span::after {
+        content: "";
+        width: 0.42em;
+        height: 0.42em;
+        border-radius: 0.1em;
+        background: var(--brass);
+    }
+
+    .facts span:nth-child(odd)::after {
+        background: var(--water);
+    }
+
+    section.wrap {
+        padding-top: var(--section);
+    }
+
+    section.wrap h2 {
+        max-width: 15ch;
+        font-size: clamp(2.2rem, 1.2rem + 4.4vw, 5rem);
+        font-stretch: 118%;
+        font-weight: 780;
+        line-height: 0.96;
+        letter-spacing: -0.04em;
+    }
+
+    .head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: end;
+        justify-content: space-between;
+        gap: var(--space-2);
+        margin-bottom: var(--space-4);
+    }
+
+    .again {
+        min-height: 2.9rem;
+    }
+
+    .again[hidden] {
+        display: none;
+    }
+
+    .pane {
+        border-radius: var(--radius-l);
+        overflow: visible;
+    }
+
+    .run pre span {
+        display: block;
+        min-height: 1.75em;
+        white-space: pre;
+    }
+
+    .run :global(.is-waiting) {
+        opacity: 0;
+    }
+
+    /* The rest of the tool, as rows that open a little under the pointer. */
+    .rows {
+        margin-top: var(--space-4);
+        border-top: 1px solid var(--line);
+    }
+
+    .rows li {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 5fr) minmax(0, 6fr) auto;
+        gap: var(--space-1) var(--space-4);
+        align-items: baseline;
+        padding: var(--space-3) var(--space-2);
+        border-bottom: 1px solid var(--line);
+        transition:
+            padding 360ms cubic-bezier(0.2, 0.8, 0.2, 1),
+            background-color 360ms ease;
+    }
+
+    .rows li::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 3px;
+        background: var(--brass);
+        scale: 1 0;
+        transition: scale 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    @media (hover: hover) {
+        .rows li:hover {
+            padding-left: var(--space-3);
+            background: color-mix(in srgb, var(--stone) 60%, transparent);
+        }
+
+        .rows li:hover::before {
+            scale: 1 1;
+        }
+    }
+
+    .rows h3 {
+        font-size: clamp(1.4rem, 1.1rem + 1.3vw, 2.2rem);
+        font-stretch: 112%;
+        font-weight: 720;
+        letter-spacing: -0.03em;
+    }
+
+    .rows p {
+        color: var(--mist);
+        line-height: 1.5;
+    }
+
+    .rows code {
+        justify-self: end;
+    }
+
+    .install-section {
+        display: grid;
+        grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+        gap: var(--space-4);
+        align-items: end;
+        scroll-margin-top: 4rem;
+    }
+
+    .install-copy {
+        display: grid;
+        gap: var(--space-2);
+    }
+
+    .install-copy p {
+        max-width: 38ch;
+        color: var(--mist);
+        font-size: var(--step-1);
+        line-height: 1.45;
+    }
+
+    .install-copy .more {
+        font-size: var(--step-0);
+    }
+
+    @media (max-width: 62rem) {
+        .rows li {
+            grid-template-columns: 1fr;
+        }
+
+        .rows code {
+            justify-self: start;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+
+        .install-section {
+            grid-template-columns: minmax(0, 1fr);
+        }
+    }
+
+    @media (max-width: 40rem) {
+        .stop {
+            align-items: end;
+        }
+
+        .stop-all {
+            align-items: start;
+        }
+
+        .cue {
+            display: none;
+        }
+
+        .panes {
+            grid-template-columns: minmax(0, 1fr);
+        }
+    }
+</style>

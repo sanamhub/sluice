@@ -7,12 +7,13 @@ import Logo from "../components/Logo.astro";
 import { VERSIONS } from "../data/preview";
 import "../styles/site.css";
 import "../styles/preview.css";
+import "../styles/kit.css";
 
 interface Props {
     title: string;
     description: string;
     /** 0 is the chooser. */
-    version: 0 | 1 | 2 | 3;
+    version: 0 | 1 | 2 | 3 | 4 | 5 | 6;
 }
 
 const { title, description, version } = Astro.props;
@@ -44,7 +45,7 @@ const { title, description, version } = Astro.props;
                     <a href="/v/" aria-current={version === 0 ? "page" : undefined}>All</a>
                     {
                         VERSIONS.map((v) => (
-                            <a href={v.href} aria-current={version === v.id ? "page" : undefined}>
+                            <a href={v.href} aria-current={version === v.id ? "page" : undefined} aria-label={`Version ${v.id}, ${v.name}`}>
                                 <span class="switch-n">{v.id}</span>
                                 <span class="switch-name">{v.name}</span>
                             </a>

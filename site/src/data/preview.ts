@@ -1,5 +1,5 @@
 // What the landing page previews under /v/ share: the list of versions, the install options, the
-// recorded run and the feature list. One copy, so the three pages cannot disagree on a fact.
+// recorded run and the feature list. One copy, so the pages cannot disagree on a fact.
 import { BREW, POWERSHELL_BY_HAND, SCOOP, SHELL } from "./install";
 
 export const VERSIONS = [
@@ -23,6 +23,27 @@ export const VERSIONS = [
     name: "Agents",
     idea: "An agent session that sends a file through real tool calls, beside the same job as a command.",
     for: "People who automate, and the agents they run.",
+  },
+  {
+    id: 4,
+    href: "/v/4/",
+    name: "Journey",
+    idea: "Scrolling flies a camera down the canal: out of the sender, through the gate, into the receiver.",
+    for: "People who want to see how it works before they trust it.",
+  },
+  {
+    id: 5,
+    href: "/v/5/",
+    name: "Swarm",
+    idea: "Thousands of points of light draw the file. They break into a stream, pass a ring, and form again.",
+    for: "People who decide in the first five seconds.",
+  },
+  {
+    id: 6,
+    href: "/v/6/",
+    name: "Play",
+    idea: "The hero is a toy: press a file and watch it cross the water in blocks and land verified.",
+    for: "People who would rather try a thing than read about it.",
   },
 ] as const;
 

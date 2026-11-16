@@ -1,0 +1,297 @@
+/* The motion kit of previews 4 to 6: the button, the pointer pull on it, headlines that rise word
+   by word, cards that lean toward the pointer, a line of text that runs sideways, and the reading
+   progress bar. Everything here is an addition: with no script, without support, or with reduced
+   motion, each piece is simply in place. */
+
+@property --turn {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* Smooth scrolling hands the scroll position to a script, so the browser's own easing is off
+   while it runs. */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-stopped {
+  overflow: clip;
+}
+
+/* The button. A brass key cap: lit from above, a shadow of its own colour beneath, a band of
+   light that crosses it once on hover, and a round knob whose arrow leaves and comes back. */
+.btn {
+  --cap: var(--brass);
+  --cap-ink: var(--brass-ink);
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-height: 3.5rem;
+  padding: 0.45rem 0.5rem 0.45rem 1.6rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--cap) 78%, white) 0%,
+    var(--cap) 52%,
+    color-mix(in oklab, var(--cap) 84%, black) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.5),
+    inset 0 -2px 0 rgb(0 0 0 / 0.2),
+    0 1px 2px rgb(0 0 0 / 0.35),
+    0 16px 36px -14px color-mix(in srgb, var(--cap) 80%, transparent);
+  color: var(--cap-ink);
+  font: inherit;
+  font-size: 1.05rem;
+  font-stretch: 108%;
+  font-weight: 680;
+  line-height: 1.1;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  overflow: clip;
+  translate: var(--tx, 0) var(--ty, 0);
+  transition:
+    translate 380ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    scale 160ms ease,
+    box-shadow 260ms ease;
+}
+
+.btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgb(255 255 255 / 0.55) 50%,
+    transparent 65%
+  );
+  translate: -110% 0;
+  transition: translate 700ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.btn:hover::before,
+.btn:focus-visible::before {
+  translate: 110% 0;
+}
+
+.btn:hover {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.6),
+    inset 0 -2px 0 rgb(0 0 0 / 0.2),
+    0 1px 2px rgb(0 0 0 / 0.35),
+    0 22px 48px -12px color-mix(in srgb, var(--cap) 95%, transparent);
+}
+
+.btn:active {
+  scale: 0.965;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
+  border-radius: var(--radius-pill);
+}
+
+.btn-knob {
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 50%;
+  background: var(--cap-ink);
+  color: var(--cap);
+  overflow: clip;
+}
+
+.btn-knob svg {
+  grid-area: 1 / 1;
+  width: 1.05rem;
+  height: 1.05rem;
+  transition: translate 420ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+
+.btn-knob svg + svg {
+  translate: -2.6rem 0;
+}
+
+.btn:hover .btn-knob svg:first-child,
+.btn:focus-visible .btn-knob svg:first-child {
+  translate: 2.6rem 0;
+}
+
+.btn:hover .btn-knob svg + svg,
+.btn:focus-visible .btn-knob svg + svg {
+  translate: 0 0;
+}
+
+/* The quiet button: glass, with a light that travels round its edge. */
+.btn.quiet {
+  --cap: var(--ink);
+  --cap-ink: var(--basin);
+  padding-inline: 1.5rem;
+  background: color-mix(in srgb, var(--stone) 55%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--ink) 14%, transparent),
+    0 12px 30px -18px var(--shadow-color);
+  color: var(--ink);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+}
+
+.btn.quiet::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  padding: 1.5px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--turn),
+    var(--line-strong) 0deg,
+    var(--line-strong) 250deg,
+    var(--beam, var(--water)) 320deg,
+    var(--line-strong) 360deg
+  );
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+}
+
+.btn.quiet::before {
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    color-mix(in srgb, var(--ink) 16%, transparent) 50%,
+    transparent 65%
+  );
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn.quiet::after {
+    animation: turn 5s linear infinite;
+  }
+}
+
+@keyframes turn {
+  to {
+    --turn: 360deg;
+  }
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+/* A headline that rises word by word when it comes into view. kit.ts wraps the words and adds
+   .split-ready, so the rule never hides text the script did not prepare. */
+.split-ready .w {
+  display: inline-block;
+  padding-bottom: 0.14em;
+  margin-bottom: -0.14em;
+  overflow: clip;
+  vertical-align: bottom;
+}
+
+.split-ready .w > span {
+  display: inline-block;
+  translate: 0 115%;
+  rotate: 4deg;
+  transform-origin: 0 100%;
+  transition:
+    translate 900ms cubic-bezier(0.2, 0.85, 0.2, 1),
+    rotate 900ms cubic-bezier(0.2, 0.85, 0.2, 1);
+  transition-delay: calc(var(--i) * 55ms);
+}
+
+.split-ready.in .w > span {
+  translate: 0 0;
+  rotate: 0deg;
+}
+
+/* A card that leans toward the pointer. kit.ts writes --rx and --ry. */
+[data-tilt] {
+  transform: perspective(60rem) rotateX(var(--rx, 0deg))
+    rotateY(var(--ry, 0deg));
+  transform-style: preserve-3d;
+  transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  will-change: transform;
+}
+
+/* A line that runs sideways for ever. The text is written twice so the loop has no seam. */
+.marquee {
+  display: flex;
+  overflow: clip;
+  user-select: none;
+  mask-image: linear-gradient(
+    90deg,
+    transparent,
+    #000 12%,
+    #000 88%,
+    transparent
+  );
+}
+
+.marquee > * {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--marquee-gap, 3rem);
+  padding-right: var(--marquee-gap, 3rem);
+  min-width: 100%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .marquee > * {
+    animation: marquee var(--marquee-time, 36s) linear infinite;
+  }
+
+  .marquee:hover > * {
+    animation-play-state: paused;
+  }
+}
+
+@keyframes marquee {
+  to {
+    translate: -100% 0;
+  }
+}
+
+/* How far down the page the reader is, where the browser can tie an animation to the scroll. */
+.progress {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 30;
+  height: 3px;
+  background: linear-gradient(90deg, var(--water), var(--brass));
+  transform-origin: 0 50%;
+  scale: 0 1;
+  pointer-events: none;
+}
+
+@supports (animation-timeline: scroll()) {
+  .progress {
+    animation: progress linear both;
+    animation-timeline: scroll(root);
+  }
+}
+
+@keyframes progress {
+  to {
+    scale: 1 1;
+  }
+}
