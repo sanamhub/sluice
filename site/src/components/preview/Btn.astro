@@ -1,0 +1,27 @@
+---
+// The button of previews 4 to 6. The main one is a brass key cap with a round knob; the quiet one
+// is glass with a light that travels round its edge. Both lean toward the pointer.
+interface Props {
+    href: string;
+    quiet?: boolean;
+}
+
+const { href, quiet = false } = Astro.props;
+const arrow = "M4 12h15m-6-6 6 6-6 6";
+---
+
+<a class:list={["btn", { quiet }]} href={href} data-magnet>
+    <span><slot /></span>
+    {
+        !quiet && (
+            <span class="btn-knob" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d={arrow} />
+                </svg>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                    <path d={arrow} />
+                </svg>
+            </span>
+        )
+    }
+</a>

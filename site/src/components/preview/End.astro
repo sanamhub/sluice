@@ -16,13 +16,16 @@ import {
     SPEC,
     THREAT_MODEL,
 } from "../../data/links";
+import Btn from "./Btn.astro";
 
 interface Props {
     title: string;
     body: string;
+    /** Use the key cap buttons of previews 4 to 6. */
+    kit?: boolean;
 }
 
-const { title, body } = Astro.props;
+const { title, body, kit = false } = Astro.props;
 
 const columns = [
     {
@@ -60,10 +63,25 @@ const columns = [
     <div class="wrap end-call">
         <h2>{title}</h2>
         <p>{body}</p>
-        <div class="end-actions">
-            <a class="button primary" href={INSTALL}>Install Sluice</a>
-            <a class="button" href={REPO}>Source on GitHub</a>
-        </div>
+        {
+            kit ? (
+                <div class="end-actions">
+                    <Btn href={INSTALL}>Install Sluice</Btn>
+                    <Btn href={REPO} quiet>
+                        Source on GitHub
+                    </Btn>
+                </div>
+            ) : (
+                <div class="end-actions">
+                    <a class="button primary" href={INSTALL}>
+                        Install Sluice
+                    </a>
+                    <a class="button" href={REPO}>
+                        Source on GitHub
+                    </a>
+                </div>
+            )
+        }
     </div>
     <div class="wrap end-cols">
         {

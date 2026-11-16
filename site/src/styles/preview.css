@@ -5,7 +5,7 @@
 /* The header floats as one capsule over the page instead of spanning it. */
 .preview .top {
   top: 0.75rem;
-  width: min(100% - 1.5rem, 58rem);
+  width: min(100% - 1.5rem, 60rem);
   margin-inline: auto;
   border: 1px solid color-mix(in srgb, var(--line-strong) 60%, transparent);
   border-radius: var(--radius-pill);
@@ -60,14 +60,30 @@
   font-size: 0.8rem;
 }
 
+/* Six versions do not fit with their names, so only the open one shows its name. */
+.switch a:not([aria-current="page"]) .switch-name {
+  display: none;
+}
+
 @media (max-width: 46rem) {
   .switch-name,
   .preview .brand-word {
-    display: none;
+    display: none !important;
+  }
+
+  .switch {
+    gap: 0;
   }
 
   .switch a {
-    padding-inline: 0.7rem;
+    min-width: 1.9rem;
+    justify-content: center;
+    padding-inline: 0.45rem;
+  }
+
+  .preview .top-inner {
+    gap: 0.25rem;
+    padding-inline: 0.7rem 0.3rem;
   }
 }
 

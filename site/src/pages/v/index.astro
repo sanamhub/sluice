@@ -1,22 +1,30 @@
 ---
-// The chooser: the three landing page directions side by side. Each card is set in its own
+// The chooser: the six landing page directions side by side. Each card is set in its own
 // version's ground, colours and headline type, so the difference shows before a click.
 import { VERSIONS } from "../../data/preview";
 import Preview from "../../layouts/Preview.astro";
 
-const lines = ["Files, straight across.", "Any file, straight to their computer.", "Give your agent a way to move files."];
+const lines = [
+    "Files, straight across.",
+    "Any file, straight to their computer.",
+    "Give your agent a way to move files.",
+    "Ride along with a file.",
+    "From your disk to theirs.",
+    "Go on, send one.",
+];
 ---
 
 <Preview
-    title="Sluice landing page: three directions"
-    description="Three versions of the Sluice landing page, side by side, to compare and blend."
+    title="Sluice landing page: six directions"
+    description="Six versions of the Sluice landing page, side by side, to compare and blend."
     version={0}
 >
     <section class="wrap pick">
-        <h1>Three directions</h1>
+        <h1>Six directions</h1>
         <p class="pick-lede">
-            Each is a whole landing page with the same tool and a different reader. Open one, then
-            move between them with the switcher above.
+            Each is a whole landing page for the same tool. The first three differ by reader. The
+            last three are built around motion: a camera flight, a swarm of points, and a toy. Open
+            one, then move between them with the switcher above.
         </p>
         <ul class="pick-grid">
             {
@@ -25,6 +33,9 @@ const lines = ["Files, straight across.", "Any file, straight to their computer.
                         <a class={`card card-${v.id}`} href={v.href}>
                             <span class="stage" aria-hidden="true">
                                 {v.id === 2 && <i class="blob" />}
+                                {v.id === 4 && <i class="ring" />}
+                                {v.id === 5 && <i class="dots" />}
+                                {v.id === 6 && <i class="chips" />}
                                 <span class="headline">{lines[at]}</span>
                             </span>
                             <span class="meta">
@@ -158,6 +169,92 @@ const lines = ["Files, straight across.", "Any file, straight to their computer.
         font-weight: 500;
         line-height: 1.1;
         letter-spacing: -0.055em;
+    }
+
+    /* 4: the ring at the end of the canal. */
+    .card-4 .stage {
+        color-scheme: dark;
+        background:
+            linear-gradient(180deg, transparent 62%, color-mix(in srgb, var(--water) 30%, transparent) 62% 64%, transparent 64%),
+            radial-gradient(60% 60% at 75% 40%, var(--brass-soft), transparent 70%), var(--basin-deep);
+        color: var(--ink);
+    }
+
+    .ring {
+        position: absolute;
+        top: 18%;
+        right: 12%;
+        width: 34%;
+        aspect-ratio: 1;
+        border: 5px solid var(--brass);
+        border-radius: 50%;
+        box-shadow:
+            0 0 40px color-mix(in srgb, var(--brass) 50%, transparent),
+            inset 0 0 30px color-mix(in srgb, var(--brass) 30%, transparent);
+    }
+
+    .card-4 .headline,
+    .card-6 .headline {
+        font-size: clamp(1.7rem, 0.8rem + 2.4vw, 2.9rem);
+        font-stretch: 125%;
+        font-weight: 800;
+        line-height: 0.92;
+        letter-spacing: -0.05em;
+    }
+
+    /* 5: points of light, water on one side and brass on the other. */
+    .card-5 .stage {
+        color-scheme: dark;
+        justify-items: center;
+        align-content: start;
+        background: var(--basin-deep);
+        color: var(--ink);
+        text-align: center;
+    }
+
+    .dots {
+        position: absolute;
+        inset: 40% 6% 10%;
+        background: radial-gradient(circle, var(--water) 1px, transparent 1.7px) 0 0 / 8px 8px;
+        clip-path: polygon(0 0, 50% 40%, 100% 0, 100% 100%, 50% 60%, 0 100%);
+    }
+
+    .dots::after {
+        content: "";
+        position: absolute;
+        inset: 0 0 0 50%;
+        background: radial-gradient(circle, var(--brass) 1px, transparent 1.7px) 0 0 / 8px 8px, var(--basin-deep);
+    }
+
+    .card-5 .headline {
+        font-size: clamp(1.5rem, 0.8rem + 1.9vw, 2.4rem);
+        font-stretch: 125%;
+        font-weight: 800;
+        line-height: 0.95;
+        letter-spacing: -0.05em;
+    }
+
+    /* 6: files waiting on glass over the water. */
+    .card-6 .stage {
+        color-scheme: dark;
+        background:
+            radial-gradient(70% 80% at 80% 20%, color-mix(in srgb, var(--brass) 28%, transparent), transparent 70%),
+            radial-gradient(80% 80% at 10% 60%, color-mix(in srgb, var(--water) 30%, transparent), transparent 70%), var(--basin);
+        color: var(--ink);
+    }
+
+    .chips {
+        position: absolute;
+        top: 12%;
+        right: 8%;
+        width: 46%;
+        height: 2.2rem;
+        border: 1px solid var(--line-strong);
+        border-radius: var(--radius-m);
+        background: color-mix(in srgb, var(--stone) 70%, transparent);
+        box-shadow:
+            0 2.9rem 0 -1px color-mix(in srgb, var(--stone) 70%, transparent),
+            0 2.9rem 0 0 var(--line-strong);
     }
 
     .meta {
