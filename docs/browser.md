@@ -22,7 +22,7 @@ Two measurements, in the order they were made:
 
 1. With `tls-ring`, the build stops inside `ring` 0.17.14, which compiles C for the target. A
    toolchain without `clang` fails with `ToolNotFound: failed to find tool "clang"`.
-2. Without any TLS feature, `iroh` 1.4 and `iroh-blobs` 0.103.1 build for the target, and the module
+2. Without any TLS feature, `iroh` 1.4 and `iroh-blobs` build for the target, and the module
    loads and runs in Node. Binding an endpoint then fails at run time, and the message names why:
 
 ```

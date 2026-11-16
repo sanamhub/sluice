@@ -19,7 +19,7 @@ JSON line from `serve` for every connection that closes, and everything else on 
 
 **Notes:**
 
-- It needs Rust 1.91, because `iroh` 1.4.1 and `iroh-blobs` 0.103.1 do. The msrv job leaves it out.
+- It needs Rust 1.91, because `iroh` 1.4.1 and `iroh-blobs` 0.105.0 do. The msrv job leaves it out.
 - `serve` holds the test data in memory in `blobs` mode unless `--store fs` is given, so `--size`
   has to fit in RAM by default. Raw mode keeps only a 64 MiB block in memory.
 - `raw` mode repeats a 64 MiB block of seeded data to fill each stream. QUIC neither compresses nor
