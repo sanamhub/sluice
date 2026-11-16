@@ -33,6 +33,7 @@ COPY xtask/Cargo.toml xtask/
 
 COPY crates/sluice-cli/build.rs crates/sluice-cli/
 COPY crates/sluice-cli/src crates/sluice-cli/src
+COPY crates/sluice-cli/ui crates/sluice-cli/ui
 COPY crates/sluice-core/src crates/sluice-core/src
 COPY crates/sluice-live/src crates/sluice-live/src
 COPY crates/sluice-api/src crates/sluice-api/src
