@@ -229,10 +229,162 @@ and 190 characters. A Live ticket with the IPv4 pair is 101 bytes and 169 charac
 ticket with no address, no relay and an expiry is 76 bytes and 129 characters. Implementations MUST
 accept tickets up to 4096 bytes of text and MUST NOT write longer ones.
 
-**Short codes.** Where a relay is configured, a ticket MAY be published under a short code. The code
-is a SPAKE2 password; the relay stores only the ciphertext and MUST rate-limit attempts per code.
-Short codes are optional, and the SPAKE2 implementation in use has no independent audit, which
-implementations MUST state in their documentation.
+### 4.1 Short codes
+
+A short code names a **live meeting** at a relay: two connections meet while both sides are
+online, and the relay keeps nothing after either closes. A code is not a stored ticket and MUST NOT
+be treated as one. The relay holds no offline-testable value from which a guess at the words can
+be checked.
+The sender is online because it serves the content; a code is not a mailbox.
+
+#### 4.1.1 The code
+
+```
+code      = nameplate "-" word "-" word
+nameplate = %x31-39 *3DIGIT          ; 1..9999, no leading zero
+word      = the lower-case spelling of one entry of the word list
+```
+
+The word list is the English list of BIP-0039: 2048 words in their published order, MIT licensed,
+whose UTF-8 bytes with one LF after each word have SHA-256
+`2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda`. An implementation MUST ship
+the list and check the digest; `tests/vectors/short-code/words.txt` is the reference copy. A code
+therefore carries 11 bits per word and 22 bits in two words, and an attacker has one guess in
+4 194 304 per code.
+
+A decoder reads a code without regard to case and MUST reject:
+
+1. a nameplate that is empty, longer than 4 digits, has a leading zero, is `0`, or is above 9999
+2. a word that is not one of the 2048 entries, or a code with more or fewer than three parts
+3. any character other than `-`, an ASCII digit and the letters of the words
+
+The encoder writes the lower-case words and the shortest nameplate. A code is secret material: a
+rejected code MUST NOT be written to a log, an error message or a crash report, and the error says
+which rule failed and nothing of the code.
+
+#### 4.1.2 The meeting place
+
+A relay that is configured with a meeting place serves it at `GET /meet`, upgraded to a WebSocket,
+on the same host, port and certificate as its relay endpoint. `https` becomes `wss`; an `http` relay
+uses `ws` for development only. The path is `/meet`; a later incompatible version uses another
+path. A code carries no host: both sides MUST name the same relay, and a join at another relay
+simply finds no such nameplate.
+
+Each WebSocket binary message is one frame. Integers are big-endian. A text frame is refused.
+
+| Frame | Direction | Body |
+|---|---|---|
+| `0x01 Claim` | client to relay | none |
+| `0x02 Join` | client to relay | nameplate as `u32` |
+| `0x03 Spake` | both | one SPAKE2 message |
+| `0x04 Confirm` | both | 32-byte tag |
+| `0x05 Sealed` | sender to relay | nonce and sealed ticket |
+| `0x06 Fail` | both | one reason byte: `1` confirm mismatch, `2` seal failed |
+| `0x07 Done` | receiver to relay | none |
+| `0x81 Claimed` | relay to sender | nameplate as `u32` |
+| `0x82 Joined` | relay to both | role: `0` sender, `1` receiver |
+| `0x83 Spake` | relay to peer | the message |
+| `0x84 Confirm` | relay to peer | the tag |
+| `0x85 Sealed` | relay to receiver | the sealed ticket |
+| `0x86 Burned` | relay to both | none |
+| `0x87 PeerClosed` | relay to receiver | none |
+| `0x88 Done` | relay to sender | none |
+| `0x8f Error` | relay to client | code: `1` no such code, `2` busy, `3` full, `4` expired, `5` too large, `6` bad frame, `7` rate limited |
+
+A frame is at most 4608 bytes. A claimant becomes the sender (`A`); the one connection that joins
+becomes the receiver (`B`). A third connection to a held nameplate is refused with `Busy`. The
+sender's close releases the nameplate; a receiver's close before `Done` burns it. The nameplate is
+released after 10 minutes at most. The relay MUST NOT write a code, nameplate, ticket, SPAKE2
+message or sealed value to a log at any level, and it does not parse the ticket or the words.
+
+#### 4.1.3 SPAKE2, confirmation and the sealed ticket
+
+The password is the two words joined by one `-`, exactly as the code spells them. The sender plays
+SPAKE2 role A and the receiver role B (in the `spake2` crate, `start_a` and `start_b`); the two
+identities are the UTF-8 bytes of
+
+```
+sluice short code v1/nameplate/<nameplate>/sender
+sluice short code v1/nameplate/<nameplate>/receiver
+```
+
+where `<nameplate>` is the shortest decimal spelling. Each SPAKE2 message is 33 bytes.
+
+When `finish` returns the shared key, both sides build the transcript
+
+```
+transcript = "sluice short code v1" || nameplate:u32be
+           || len(A):u32be || A || len(B):u32be || B
+```
+
+where `A` is the sender's SPAKE2 message and `B` the receiver's. The keys are HKDF-SHA256 over the
+SPAKE2 key, with the transcript as salt:
+
+| Info | Value |
+|---|---|
+| `confirm sender` | the sender's 32-byte confirmation tag |
+| `confirm receiver` | the receiver's 32-byte confirmation tag |
+| `ticket` | the 32-byte AEAD key |
+
+Each side sends its own tag in a `Confirm` frame and checks the peer's in constant time. The sender
+MUST NOT send `Sealed` until it has verified the receiver's tag. The sealed value is
+ChaCha20-Poly1305 under the `ticket` key with a fresh random 12-byte nonce, associated data equal
+to the transcript, and the ciphertext written as `nonce || ciphertext || tag`. The ticket text is
+at most 4096 bytes, so the sealed value is at most 4124 bytes.
+
+The receiver opens the sealed value, checks the tag, and only then treats the text as a ticket. It
+sends `Done` after accepting it. The sender treats `Done` as delivery of the ticket and MAY close.
+
+#### 4.1.4 Failure, burn and limits
+
+A code is used once. A failed confirmation, a receiver that closes before `Done`, and a sealed
+value that does not open all end the meeting and burn the nameplate: the relay sends `Burned` to
+both sides and removes the nameplate. A sender that sees `Burned` MUST print that a wrong code was
+tried and MUST make a new code; implementations MUST NOT retry the same code, and MUST NOT offer the
+same ticket under the burned code again. A receiver that sees `Burned` MUST report that the words do
+not match the sender's.
+
+Other failures:
+
+| Event | Sender | Receiver |
+|---|---|---|
+| no configured relay, or the relay has no `/meet` | `send --code` exits non-zero before serving | the join fails with no such code |
+| `NoCode` | not applicable | report that the code was not found at this relay, and that the sender may be using another relay |
+| `Busy` | report that someone is already meeting the code | report that another receiver joined first |
+| `Expired`, `Full`, `RateLimited` | report the relay's answer and exit non-zero before serving | report the relay's answer |
+| `PeerClosed` | not applicable | report that the sender closed |
+| confirmation or AEAD failure | send `Fail`, report `Burned`, make a new code | send `Fail`, report the words do not match |
+
+Limits at the meeting place:
+
+- a per-IP rate for claims and joins, and a per-IP cap on concurrent meeting connections
+- a cap on the number of nameplates held at once
+- a nameplate is released when the sender's connection closes, and after 10 minutes at most
+- frames at most 4608 bytes, tickets at most 4096 bytes of text
+- no logs of codes, nameplates, tickets, messages or sealed values
+
+A relay that serves `/meet` MUST enforce the per-IP rate, the cap and the timeout; a relay that does
+not configure a meeting place answers `/meet` with `404`.
+
+#### 4.1.5 Test vectors
+
+T89 adds `tests/vectors/short-code/`:
+
+| Vector | Contents |
+|---|---|
+| `codes/` | accepted code texts with their parsed nameplate and word indices, and rejected ones for each rule: leading zero, `0`, `10000`, unknown word, missing and extra parts, upper case and wrong separators |
+| `words.txt` | the 2048-word list, checked against its SHA-256 |
+| `transcript/` | fixed nameplate and SPAKE2 messages with the expected transcript bytes |
+| `keys/` | a fixed SPAKE2 shared key and transcript with the expected confirmation tags and `ticket` key, for both roles |
+| `sealed/` | a fixed ticket, key, nonce and transcript with the expected sealed bytes, and a wrong-tag case that MUST fail to open |
+| `frames/` | every frame's bytes, and truncated, oversized or unknown frames that MUST be refused |
+| `meeting/` | a scripted meeting-place state machine: claim, join, third connection refused, wrong-confirm burn, sender close, and timeout |
+
+SPAKE2 messages and keys are random and are not themselves vectors: `keys/` takes the shared key
+as an input, so a third implementation can check the key schedule and the AEAD without reproducing
+a random draw.
+
+
 
 ---
 
