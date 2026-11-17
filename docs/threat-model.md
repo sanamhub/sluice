@@ -6,8 +6,9 @@ vulnerability, see [`SECURITY.md`](../SECURITY.md).
 ## Assets
 
 - **File content**, in transit and in the receiver's partial files.
-- **Tickets.** A ticket names content and lets anyone holding it read that content. It is a
-  capability, not an address.
+- **Tickets.** A ticket names content and lets anyone holding it read that content. A pairing ticket
+  is an invitation instead: whoever redeems it first becomes a paired device, with the grant it
+  carries. It is a capability, not an address.
 - **The identity key**, `$SLUICE_HOME/identity.key`. Whoever holds it can act as that endpoint.
 - **Relay bandwidth**, which costs the operator money.
 
@@ -52,6 +53,11 @@ pipe, a file or a log.
 | Short-code guessing | Short codes use SPAKE2 and are rate-limited per code at the relay |
 | Session secrets in logs | `rustls` 0.23.46 or later, and no log field formats a TLS connection, session or handshake object at any level |
 | An agent tricked into a transfer through MCP | Tool descriptions are fixed in the binary. Peer-supplied strings (paths, link targets, relay URLs, error text) come back in structured fields marked untrusted. Accepting content from a peer, pairing, widening relay mode and rotating identity all need confirmation or a policy allowlist |
+| A stolen pairing ticket that was never used | The ticket expires 10 minutes after it is made and is single use, and the daemon's answer to a pairing attempt is one status byte. A device that redeemed it appears in `sluice devices list` with its endpoint id and the time, so a pairing nobody recognizes is revoked there. The ticket is handled as the secret it is: never logged, and a rejected one is not echoed. Whoever redeems it first gets the grant, which is what a bearer invitation means, so the short life and the visible list are the defense. ADR 0039, `SPEC.md` section 11.2 |
+| A stolen device key | The grant names an endpoint id, so a stolen key acts as that device: with `deliver` it fills the inbox up to the quota, and with `control` it drives the daemon, reads the names under every root and can start a send of any file there to a ticket it holds. The key never leaves its device; it authenticates the handshake. Revoking the device deletes the grant and closes its connections and watch streams at once, and it cannot pair again without a new ticket. `control` is granted deliberately, and the ticket that makes one says what it gives. ADR 0039 |
+| A revoked device that still has a connection open | A revoke deletes the grant and closes that endpoint's connections and watch streams before it answers, and the grant is read again for every call, so a connection that races the close serves nothing. A revoke also forgets the ticket that made the grant, so the device cannot redeem its way back in: a new ticket from the user is the only way. The local socket is untouched by a revoke. ADR 0039, `SPEC.md` sections 11.1 and 11.4 |
+| A `deliver` peer filling the disk | The inbox has a quota, 10 GiB by default, and the daemon reserves the size a ticket states when it accepts, so two deliveries cannot both take the last gigabyte. A delivery that does not fit is refused before its first byte, and a live delivery that states no size runs to the room and fails there. Nothing is evicted to make room, the receive checks the volume for the free space the ticket states before its body, and `deliver` cannot read or delete anything in the inbox. ADR 0039, `SPEC.md` section 11.3 |
+| Grant-file tampering | The grants file is in the private home, opened without following a link, owned by this user, and written as a whole to a temporary file and renamed into place, so a torn list never exists. A file that cannot be read or parsed is no grants: the daemon starts, refuses every paired peer, refuses to pair, and does not overwrite what it could not read. Another local user cannot reach it through the home. A process running as this user can, and it can already drive the daemon through the socket, so the line is the same one this model already holds for the control interface. ADR 0039, `SPEC.md` section 11.1 |
 
 ## Not protected
 

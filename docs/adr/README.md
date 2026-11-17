@@ -47,3 +47,4 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0036](0036-a-browser-page-drives-the-local-daemon.md) | A browser page drives the local daemon over a loopback HTTP listener | Proposed |
 | [0037](0037-the-control-interface-is-grpc-on-a-local-socket.md) | The control interface is gRPC on a socket or pipe only this user can reach | Proposed |
 | [0038](0038-a-daemon-send-copies-into-the-home.md) | A daemon send copies the content into the home, because a path read at serve time is not safe there | Proposed |
+| [0039](0039-paired-devices-and-remote-control.md) | A paired device holds a `deliver` or `control` grant, and remote control serves the same service over iroh | Proposed |

@@ -44,7 +44,10 @@ The transport, NAT traversal, and relay behaviour come from `iroh` and are out o
 | ALPN | Purpose |
 |---|---|
 | `iroh-bytes/...` | Static content. Owned by `iroh-blobs`, version pinned by the release |
-| `sluice/1` | Everything defined in this document |
+| `sluice/1` | Everything else in this document |
+| `sluice/pair/1` | Pairing a device with a daemon, section 11.2 |
+| `sluice/deliver/1` | A paired device hands content to a daemon's inbox, section 11.3 |
+| `sluice/control/1` | The control interface of a daemon, to a paired device, section 11.4 |
 
 On a `sluice/1` connection the dialer opens a control stream and sends `Hello`, and the listener
 replies with `Hello`.
@@ -73,9 +76,12 @@ MUST close the connection with a clear reason string.
 
 A dialer MUST offer exactly one ALPN from this table per connection, so the order in which a
 listener registers or prefers them never decides which protocol runs. Static content and `sluice/1`
-use separate connections. A listener MAY close a connection that offers more than one.
+use separate connections, and so does each of the three ALPNs a daemon serves. A listener MAY close
+a connection that offers more than one.
 
-Wire-breaking changes bump the ALPN to `sluice/2`. Additive changes take a new capability bit.
+Wire-breaking changes bump the ALPN to `sluice/2`. Additive changes take a new capability bit. The
+three ALPNs whose names end in a version carry their own: a wire-breaking change to one of them
+bumps that one and no other.
 
 **Completion close.** The application close code `0x534C0001` on a static content connection means
 "the whole transfer is here". A receiver MUST close its content connection with that code, and a
@@ -109,22 +115,24 @@ result.
 
 ## 4. Ticket
 
-A ticket is the complete address of transferable content. **A ticket is secret material.** Anyone
-holding one can read the content it names.
+A ticket is the complete address of transferable content, or an invitation to pair a device with a
+daemon. **A ticket is secret material.** Anyone holding one can read the content it names, or pair a
+device with the daemon that made it.
 
 ```
 Ticket = {
   version: u8,                 // 1
-  kind: u8,                    // 0 = Static, 1 = Live
-  endpoint_id: [u8; 32],       // Ed25519 public key of the provider
+  kind: u8,                    // 0 = Static, 1 = Live, 2 = Pairing
+  endpoint_id: [u8; 32],       // Ed25519 public key of the provider, or of the daemon
   addrs: [SocketAddr],         // 0..n direct addresses, may be empty
   relay_url: Option<String>,   // relay to reach the provider, may be absent
   expiry: Option<u64>,         // UTC ms, absent means no expiry
-  body: StaticBody | LiveBody,
+  body: StaticBody | LiveBody | PairingBody,
 }
 
-StaticBody = { root: [u8; 32], size: u64, format: u8 }   // format: 0 = raw, 1 = hash sequence
-LiveBody   = { stream_id: [u8; 16], sender_key: [u8; 32] }
+StaticBody  = { root: [u8; 32], size: u64, format: u8 } // format: 0 = raw, 1 = hash sequence
+LiveBody    = { stream_id: [u8; 16], sender_key: [u8; 32] }
+PairingBody = { secret: [u8; 32], grant: u8 }           // grant: 0 = deliver, 1 = control
 ```
 
 **Bytes.** The ticket is written as bytes, then as text. The little-endian rule of section 2 does
@@ -135,18 +143,27 @@ where the table says so:
 | Field | Bytes |
 |---|---|
 | `version` | 1 byte, `0x01` |
-| `kind` | 1 byte, `0x00` for Static or `0x01` for Live |
+| `kind` | 1 byte, `0x00` for Static, `0x01` for Live or `0x02` for Pairing |
 | `endpoint_id` | 32 bytes, no length prefix |
 | `addrs` | the count as a varint, then that many addresses |
 | one address | a tag byte, `0x00` for IPv4 or `0x01` for IPv6, then the 4 or 16 address bytes in network order, then the port as a varint. No flow label and no scope id |
 | `relay_url` | `0x00` if absent. Otherwise `0x01`, the length in bytes as a varint, then that many bytes of UTF-8, which rule 7 below limits to one spelling of an `https` or `http` URL |
-| `expiry` | `0x00` if absent. Otherwise `0x01`, then the value as a varint |
+| `expiry` | `0x00` if absent. Otherwise `0x01`, then the value as a varint. A Pairing body MUST have one |
 | body, Static | `root` as 32 bytes, `size` as a varint, `format` as 1 byte |
 | body, Live | `stream_id` as 16 bytes, then `sender_key` as 32 bytes |
+| body, Pairing | `secret` as 32 bytes, then `grant` as 1 byte |
 
 The body has no tag of its own: `kind` selects it. A varint is LEB128: 7 bits per byte, the lowest
 group first, the high bit set on every byte but the last, and at most 10 bytes for a `u64` and 3 for
 a port. An encoder MUST write the shortest varint that holds the value.
+
+**Pairing tickets.** A pairing ticket's `endpoint_id` is the daemon's, and its `addrs` and
+`relay_url` reach that daemon. `secret` is 32 bytes from a cryptographic random source. `grant` is
+the grant the daemon will write when the ticket is redeemed, as section 11.1 defines it, and the
+daemon records it beside the secret when the ticket is made and writes what it recorded, so the byte
+in a client's copy cannot be changed to widen what the ticket gives. A pairing ticket MUST carry an
+`expiry`, which is a decoding rule because the field is required. Whether the time has passed is not
+one, as **Expiry** below says. It is single use, and section 11.2 says how it is redeemed.
 
 **Text.** The bytes are written as Crockford base32 without padding, after the prefix `sluice1`. The
 alphabet is `0123456789abcdefghjkmnpqrstvwxyz`, which leaves out `i`, `l`, `o` and `u`. Each
@@ -165,7 +182,8 @@ ticket has one spelling apart from case. Crockford's own rules would read `I` an
 2. the prefix is missing, a character is outside the alphabet, the body length is 1, 3 or 6
    characters more than a multiple of 8 (whole bytes cannot give it), or the unused bits of the last
    character are not zero
-3. `version` is not 1, `kind` is not 0 or 1, or `format` is not 0 or 1
+3. `version` is not 1, `kind` is not 0, 1 or 2, a Static body's `format` is not 0 or 1, a Pairing
+   body's `grant` is not 0 or 1, or a Pairing body has no `expiry`
 4. bytes remain after the body, or the bytes end before it does
 5. an `Option` or address tag is not one of the two values in the table, `relay_url` is not UTF-8,
    or a varint is longer than the shortest one for its value or does not fit its integer
@@ -195,10 +213,11 @@ than `expiry`, the same boundary as the `exp` claim of a JWT: at `expiry - 1` it
 at `expiry` it is not. A ticket with no `expiry` never expires. Expiry is not a decoding rule,
 because decoding reads no clock.
 
-**Size.** Two IPv4 addresses on ports from 16384 up, no relay, no expiry and a Static body of
-100 MiB make 90 bytes, which is 151 characters with the prefix. With two IPv6 addresses it is 114
-bytes and 190 characters. A Live ticket with the IPv4 pair is 101 bytes and 169 characters.
-Implementations MUST accept tickets up to 4096 bytes of text and MUST NOT write longer ones.
+**Size.** Two IPv4 addresses on ports from 16384 up, no relay, no expiry and a Static body of 100
+MiB make 90 bytes, which is 151 characters with the prefix. With two IPv6 addresses it is 114 bytes
+and 190 characters. A Live ticket with the IPv4 pair is 101 bytes and 169 characters. A pairing
+ticket with no address, no relay and an expiry is 76 bytes and 129 characters. Implementations MUST
+accept tickets up to 4096 bytes of text and MUST NOT write longer ones.
 
 **Short codes.** Where a relay is configured, a ticket MAY be published under a short code. The code
 is a SPAKE2 password; the relay stores only the ciphertext and MUST rate-limit attempts per code.
@@ -986,13 +1005,15 @@ implementations MUST NOT describe it as proof of delivery.
 ## 11. Control API
 
 The local control interface is defined by `proto/sluice/v1`, governed by `buf`, and served over a
-Unix socket or Windows named pipe. An implementation MAY also serve it over TCP, and then MUST
-require TLS and token authentication. It MAY also serve it as JSON over HTTP on a loopback port, for a
+Unix socket or Windows named pipe. It MAY also be served as JSON over HTTP on a loopback port, for a
 page in a browser that runs on the same computer, and then it MUST bind only a loopback address and
-close a connection from any other peer, MUST require a random key of at least 32 bytes on every call,
-MUST refuse a request whose `Host` or `Origin` is not its own, MUST send no CORS header, MUST accept a
-request body only as JSON of at most 64 KiB, and MUST serve a page that loads nothing from another
-origin. The page carries no file bytes: the server moves them as a peer.
+close a connection from any other peer, MUST require a random key of at least 32 bytes on every
+call, MUST refuse a request whose `Host` or `Origin` is not its own, MUST send no CORS header, MUST
+accept a request body only as JSON of at most 64 KiB, and MUST serve a page that loads nothing from
+another origin. Beyond that loopback listener, it MUST NOT be served over TCP. A daemon MAY also
+serve the same service over iroh to a device it has paired with a `control` grant, on the ALPN
+`/sluice/control/1`, as section 11.4 says. No listener carries file bytes: the server moves them as
+a peer.
 
 It is a control plane. **No file bytes ever traverse this API.** A client asks the engine to move
 bytes and observes progress; it never carries them.
@@ -1007,7 +1028,10 @@ the relay and the seconds waited; it is information and not a failure, and a pat
 after it is reported by `path_changed` like any other move. `dropped` is the one event that is not
 the transfer's: it says that a watcher could not keep up, and how many events of the job it did not
 get. A watcher MUST treat the gap as unknown rather than as nothing having happened, and a server
-MUST never grow a buffer without a bound to avoid one.
+MUST never grow a buffer without a bound to avoid one. A watcher whose queue has been full for 10
+seconds has its call ended rather than served indefinitely: a gRPC call ends with a
+`RESOURCE_EXHAUSTED` status whose message names how many events the client did not get, and a client
+that reads it MUST read `ListJobs` again instead of treating the gap as empty.
 
 `ListRoots` returns the label of each root, which is the name of its folder, and never its path; a
 request names a root by that label or by the name the root was started with. `ListEntries` returns
@@ -1089,6 +1113,119 @@ such promise, so it sends a file that has more than one name.
 
 Store access is single-writer. A client MUST take an exclusive lock on the store directory, and if
 the lock is held by a live process it MUST connect to that process instead of opening the store.
+
+### 11.1 Paired devices and grants
+
+A device is an endpoint id a daemon has a grant for. There are two grants.
+
+| Grant | What its holder may do |
+|---|---|
+| `deliver` | Hand this daemon a ticket and have it received into the inbox, within the quota. Nothing else |
+| `control` | Every call of `proto/sluice/v1`, the three device calls below included |
+
+`control` includes what `deliver` allows. A daemon keeps its grants in one file in its home, and a
+file it cannot read is no grants: every paired peer is refused, a pairing attempt is answered with
+status `0x02`, and the daemon leaves the file as it is. `ListDevices` answers a failure that says
+the file could not be read, rather than an empty list. The file holds no secret.
+
+The local client is not a paired device. The socket or pipe of this section, and the page of ADR
+0036, reach the whole interface as they did before, and a revoke cannot remove that.
+
+`ListDevices` answers the label, endpoint id, grant and pairing time of each device. `RenameDevice`
+changes a label and nothing else. `RevokeDevice` removes a grant and everything it allows. None of
+the three carries a ticket or a secret, and a daemon's own user is not in the answer.
+
+### 11.2 Pairing
+
+A daemon makes a pairing ticket for one device and one grant, as section 4 says: the ticket names
+the daemon's endpoint id with the addresses and relay that reach it, a `secret`, a `grant` and an
+`expiry`. It is secret material and single use, and a daemon MUST NOT write one to a log, an error
+or an event.
+
+The stream:
+
+1. The client dials the ticket's endpoint with the ALPN `/sluice/pair/1` and opens one bidirectional
+   stream.
+2. It writes the 32 bytes of the ticket's `secret` and closes its side.
+3. The daemon reads the stream to its end. Fewer or more than 32 bytes is a refusal.
+4. It compares the 32 bytes in constant time with every ticket it has made, has not forgotten and
+   has not expired, writes one status byte, and closes the stream and the connection.
+
+| Status | Meaning |
+|---|---|
+| `0x00` | Accepted, and the grant is written |
+| `0x01` | Refused: no ticket matches, the ticket expired, the other side wrote fewer or more than 32 bytes, another endpoint id redeemed it, or the grant it made was revoked |
+| `0x02` | The daemon could not read or write its grants file |
+
+Any other byte is reserved, and a client MUST treat it as `0x01`.
+
+The grant is written for the endpoint id of the authenticated connection. A client sends no id, and
+a daemon MUST NOT take one from the stream. The grant is on disk before `0x00` is written, so a
+connection that ends before the byte arrives leaves a grant behind, and that is why a second attempt
+from the same endpoint id answers `0x00` and duplicates nothing.
+
+The daemon keeps a ticket's secret in memory until the ticket expires or its grant is revoked. A
+daemon that restarts forgets every ticket it had not redeemed. A second endpoint id that presents
+the ticket is refused. A revoke forgets the ticket that made the grant, so a retry after a revoke is
+refused and the device needs a new ticket. A rejected ticket is treated as section 4 says.
+
+A daemon accepts at most 4 pairing streams from one endpoint id at once and 16 in total, and closes
+a stream that writes more than 32 bytes or has not ended after 10 seconds. A grant's label is the
+first 8 hex characters of the endpoint id until a user renames it.
+
+### 11.3 A delivery
+
+A device with a `deliver` or a `control` grant may hand a daemon content for its inbox.
+
+1. It dials the daemon's endpoint with the ALPN `/sluice/deliver/1` and opens one bidirectional
+   stream.
+2. It writes a ticket's text (section 4) as a varint length and that many bytes of UTF-8, then a
+   name: `0x00` for none, or `0x01`, a varint length and that many bytes of UTF-8. It closes its
+   side.
+3. The daemon writes one status byte and closes the stream: `0x00` accepted, `0x01` refused, `0x02`
+   the daemon could not start the receive.
+
+A peer with no grant is answered `0x01` and its request is not read, and a stream that has not ended
+after 10 seconds is closed with `0x01`. A ticket that is not Static or Live, or whose text does not
+decode as section 4 says, is refused with `0x01`. A delivery carries a ticket, which is secret
+material, and a daemon MUST NOT write one to a log, an error or an event.
+
+An accepted delivery is a receive the daemon runs. It fetches the content over the static transport
+of section 5 with itself as the receiver, so the refusal of every push in section 5 stands and no
+file byte crosses the delivery connection: a delivery is the user's own act through a device the
+user paired, and no peer pushes into the store. The ticket may name any provider, as a ticket pasted
+into `sluice recv` may; the grant authorizes the delivery, not the source, and the content is
+verified against its root before it lands.
+
+The inbox is a folder the daemon was started with, inside one of its roots. Every path in the
+transfer resolves under a root as this section says, and `name` is the top-level name under the
+inbox: one component, checked by the rules of section 6. Without a name it is the ticket's root in
+lower-case hex. A top-level name that already exists is refused, and nothing in the inbox is ever
+overwritten.
+
+A daemon holds a quota for the inbox, 10 GiB by default, and reserves the size a ticket states when
+it accepts. A delivery that does not fit the room left is refused before its first byte. A ticket
+that states no size, which is a live stream, runs to the room and fails there with a `Policy` error.
+The daemon never deletes a file in the inbox to make room.
+
+### 11.4 Remote control over iroh
+
+A daemon serves the interface on the ALPN `/sluice/control/1` to a device with a `control` grant and
+to no one else.
+
+- The client opens one bidirectional stream on that ALPN and carries gRPC over HTTP/2 on it, as it
+  would over the socket: the same messages, the same `:path` for each call, the same status and the
+  same trailers. The client sends an `:authority` because HTTP/2 requires one, and a daemon MUST
+  ignore it.
+- One stream per connection, and a daemon MUST close a connection that opens a second.
+- The limits are the ones the local listener has: a message of at most 1 MiB, 64 open calls on a
+  connection, and 32 connections. A daemon MUST size its HTTP/2 connection window so that one
+  watcher's full queue does not stall another call.
+- A peer without a grant is closed when it opens the stream, before a call is read, and learns
+  nothing of the grants.
+- The grant is read again for every call, so a connection that outlives a revoke serves nothing.
+- A daemon MUST NOT serve this interface over TCP. The loopback JSON listener of this section is the
+  only TCP listener, and the socket or pipe is the local client's; pairing changes neither.
 
 ---
 
