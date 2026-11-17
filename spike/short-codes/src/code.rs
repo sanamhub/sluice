@@ -89,7 +89,10 @@ mod tests {
 
     #[test]
     fn case_and_leading_zero_are_checked() {
-        assert_eq!(Code::parse("7-ORBIT-Velvet").unwrap().as_string(), "7-orbit-velvet");
+        assert_eq!(
+            Code::parse("7-ORBIT-Velvet").unwrap().as_string(),
+            "7-orbit-velvet"
+        );
         assert_eq!(Code::parse("07-orbit-velvet"), Err(CodeError::Nameplate));
         assert_eq!(Code::parse("0-orbit-velvet"), Err(CodeError::Nameplate));
         assert_eq!(Code::parse("10000-orbit-velvet"), Err(CodeError::Nameplate));
@@ -97,7 +100,14 @@ mod tests {
 
     #[test]
     fn a_bad_shape_is_refused() {
-        for text in ["", "7", "7-orbit", "7-orbit-velvet-x", "7--velvet", "-orbit-velvet"] {
+        for text in [
+            "",
+            "7",
+            "7-orbit",
+            "7-orbit-velvet-x",
+            "7--velvet",
+            "-orbit-velvet",
+        ] {
             assert!(Code::parse(text).is_err(), "{text:?} parsed");
         }
     }

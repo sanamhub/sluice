@@ -102,9 +102,7 @@ impl ClientMsg {
                 Some(Self::Join(u32::from_be_bytes(bytes[1..5].try_into().ok()?)))
             }
             0x03 if bytes.len() > 1 => Some(Self::Spake(bytes[1..].to_vec())),
-            0x04 if bytes.len() == 33 => {
-                Some(Self::Confirm(bytes[1..].try_into().ok()?))
-            }
+            0x04 if bytes.len() == 33 => Some(Self::Confirm(bytes[1..].try_into().ok()?)),
             0x05 if bytes.len() > 13 => Some(Self::Sealed(bytes[1..].to_vec())),
             0x06 if bytes.len() == 2 => Some(Self::Fail(match bytes[1] {
                 1 => FailReason::ConfirmMismatch,
@@ -157,9 +155,9 @@ impl ServerMsg {
             return None;
         }
         match *bytes.first()? {
-            0x81 if bytes.len() == 5 => {
-                Some(Self::Claimed(u32::from_be_bytes(bytes[1..5].try_into().ok()?)))
-            }
+            0x81 if bytes.len() == 5 => Some(Self::Claimed(u32::from_be_bytes(
+                bytes[1..5].try_into().ok()?,
+            ))),
             0x82 if bytes.len() == 2 => Some(Self::Joined(Role::from_wire(bytes[1])?)),
             0x83 if bytes.len() > 1 => Some(Self::Spake(bytes[1..].to_vec())),
             0x84 if bytes.len() == 33 => Some(Self::Confirm(bytes[1..].try_into().ok()?)),

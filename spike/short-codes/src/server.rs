@@ -32,7 +32,8 @@ pub fn self_signed() -> anyhow::Result<(TlsConfig, CertificateDer<'static>)> {
 }
 
 /// The raw server config, for the QUIC-only server and for callers that build their own wrapper.
-pub fn self_signed_config() -> anyhow::Result<(Arc<rustls::ServerConfig>, CertificateDer<'static>)> {
+pub fn self_signed_config() -> anyhow::Result<(Arc<rustls::ServerConfig>, CertificateDer<'static>)>
+{
     let key = rcgen::KeyPair::generate()?;
     let mut params = rcgen::CertificateParams::new(vec!["localhost".to_string()])?;
     params
@@ -106,8 +107,10 @@ pub async fn spawn(
 
 fn meet_handler(
     place: Arc<MeetingPlace>,
-) -> impl Fn(Request<Incoming>, ResponseBuilder) -> HyperResult<Response<BytesBody>> + Send + Sync + 'static
-{
+) -> impl Fn(Request<Incoming>, ResponseBuilder) -> HyperResult<Response<BytesBody>>
++ Send
++ Sync
++ 'static {
     move |req: Request<Incoming>, _builder: ResponseBuilder| {
         let Some(key) = req.headers().get(SEC_WEBSOCKET_KEY).cloned() else {
             return Ok(response(StatusCode::BAD_REQUEST, "expected a WebSocket"));
@@ -156,7 +159,6 @@ fn accept_key(key: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(sha1.finalize())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,7 +175,9 @@ mod tests {
         let mut quic = QuicConfig::new("127.0.0.1:0".parse::<SocketAddr>().unwrap());
         quic.server_config = Some((*config).clone());
         server_config.quic = Some(quic);
-        let server = RelayServer::spawn(server_config).await.expect("QUIC-only server");
+        let server = RelayServer::spawn(server_config)
+            .await
+            .expect("QUIC-only server");
         server.shutdown().await.expect("graceful shutdown");
     }
 }

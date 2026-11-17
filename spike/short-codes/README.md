@@ -58,7 +58,7 @@ the Swift toolchain's clang.
 - plus the relay test above.
 
 `src/crypto.rs` unit tests cover the key schedule, a different word pair, and the AEAD's
-transcript binding. In total: 10 unit tests and 4 integration tests.
+transcript binding. In total: 11 unit tests and 4 integration tests.
 
 ## Sizes
 

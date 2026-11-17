@@ -21,7 +21,13 @@ use url::Url;
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-async fn start(place: Arc<MeetingPlace>, tls: bool) -> (std::net::SocketAddr, Option<rustls::pki_types::CertificateDer<'static>>) {
+async fn start(
+    place: Arc<MeetingPlace>,
+    tls: bool,
+) -> (
+    std::net::SocketAddr,
+    Option<rustls::pki_types::CertificateDer<'static>>,
+) {
     if tls {
         let (acceptor, cert) = server::self_signed().unwrap();
         let addr = server::spawn(([127, 0, 0, 1], 0).into(), place, Some(acceptor))
@@ -29,7 +35,9 @@ async fn start(place: Arc<MeetingPlace>, tls: bool) -> (std::net::SocketAddr, Op
             .unwrap();
         (addr, Some(cert))
     } else {
-        let addr = server::spawn(([127, 0, 0, 1], 0).into(), place, None).await.unwrap();
+        let addr = server::spawn(([127, 0, 0, 1], 0).into(), place, None)
+            .await
+            .unwrap();
         (addr, None)
     }
 }
@@ -51,11 +59,13 @@ async fn connect(
                 .unwrap()
                 .0
         }
-        None => WsBuilder::from_uri(uri.parse().unwrap())
-            .connect()
-            .await
-            .unwrap()
-            .0,
+        None => {
+            WsBuilder::from_uri(uri.parse().unwrap())
+                .connect()
+                .await
+                .unwrap()
+                .0
+        }
     }
 }
 
@@ -77,7 +87,12 @@ async fn recv(ws: &mut Ws) -> ServerMsg {
 
 /// The sender claims, then runs its half. It returns the plate and reports whether the exchange
 /// finished with `Done` or with `Burned`.
-async fn sender(addr: std::net::SocketAddr, tls_cert: Option<rustls::pki_types::CertificateDer<'static>>, ticket: &'static str, plate_tx: tokio::sync::oneshot::Sender<u32>) -> (u32, Result<(), ()>) {
+async fn sender(
+    addr: std::net::SocketAddr,
+    tls_cert: Option<rustls::pki_types::CertificateDer<'static>>,
+    ticket: &'static str,
+    plate_tx: tokio::sync::oneshot::Sender<u32>,
+) -> (u32, Result<(), ()>) {
     let mut ws = connect(addr, tls_cert.as_ref()).await;
     send(&mut ws, ClientMsg::Claim).await;
     let plate = match recv(&mut ws).await {
@@ -88,7 +103,10 @@ async fn sender(addr: std::net::SocketAddr, tls_cert: Option<rustls::pki_types::
     let code = Code::parse(&format!("{plate}-orbit-velvet")).unwrap();
     let _ = plate_tx.send(plate);
     let started = Started::new(Role::Sender, &code);
-    assert!(matches!(recv(&mut ws).await, ServerMsg::Joined(Role::Sender)));
+    assert!(matches!(
+        recv(&mut ws).await,
+        ServerMsg::Joined(Role::Sender)
+    ));
     send(&mut ws, ClientMsg::Spake(started.outbound.clone())).await;
     let peer = match recv(&mut ws).await {
         ServerMsg::Spake(m) => m,
@@ -101,12 +119,27 @@ async fn sender(addr: std::net::SocketAddr, tls_cert: Option<rustls::pki_types::
         other => panic!("expected Confirm, got {other:?}"),
     };
     if keys.verify(Role::Receiver, &tag).is_err() {
-        send(&mut ws, ClientMsg::Fail(short_codes_spike::wire::FailReason::ConfirmMismatch)).await;
+        send(
+            &mut ws,
+            ClientMsg::Fail(short_codes_spike::wire::FailReason::ConfirmMismatch),
+        )
+        .await;
     } else {
-        send(&mut ws, ClientMsg::Sealed(keys.seal(ticket.as_bytes()).unwrap())).await;
+        send(
+            &mut ws,
+            ClientMsg::Sealed(keys.seal(ticket.as_bytes()).unwrap()),
+        )
+        .await;
     }
     let end = recv(&mut ws).await;
-    (plate, if matches!(end, ServerMsg::Done) { Ok(()) } else { Err(()) })
+    (
+        plate,
+        if matches!(end, ServerMsg::Done) {
+            Ok(())
+        } else {
+            Err(())
+        },
+    )
 }
 
 async fn receiver(
@@ -117,7 +150,10 @@ async fn receiver(
 ) -> Result<String, ()> {
     let mut ws = connect(addr, tls_cert).await;
     send(&mut ws, ClientMsg::Join(plate)).await;
-    assert!(matches!(recv(&mut ws).await, ServerMsg::Joined(Role::Receiver)));
+    assert!(matches!(
+        recv(&mut ws).await,
+        ServerMsg::Joined(Role::Receiver)
+    ));
     let code = Code::parse(&format!("{plate}-{}-{}", words[0], words[1])).unwrap();
     let started = Started::new(Role::Receiver, &code);
     send(&mut ws, ClientMsg::Spake(started.outbound.clone())).await;
@@ -126,13 +162,21 @@ async fn receiver(
         other => panic!("expected Spake, got {other:?}"),
     };
     let keys = started.finish(&peer).unwrap();
-    send(&mut ws, ClientMsg::Confirm(keys.confirmation(Role::Receiver))).await;
+    send(
+        &mut ws,
+        ClientMsg::Confirm(keys.confirmation(Role::Receiver)),
+    )
+    .await;
     let tag = match recv(&mut ws).await {
         ServerMsg::Confirm(t) => t,
         other => panic!("expected Confirm, got {other:?}"),
     };
     if keys.verify(Role::Sender, &tag).is_err() {
-        send(&mut ws, ClientMsg::Fail(short_codes_spike::wire::FailReason::ConfirmMismatch)).await;
+        send(
+            &mut ws,
+            ClientMsg::Fail(short_codes_spike::wire::FailReason::ConfirmMismatch),
+        )
+        .await;
         return Err(());
     }
     let sealed = match recv(&mut ws).await {
@@ -179,8 +223,14 @@ async fn wrong_words_burn_the_nameplate_and_the_sender_sees_it() {
 
     let mut bad_ws = connect(addr, None).await;
     send(&mut bad_ws, ClientMsg::Join(plate)).await;
-    assert!(matches!(recv(&mut bad_ws).await, ServerMsg::Joined(Role::Receiver)));
-    assert!(matches!(recv(&mut sender_ws).await, ServerMsg::Joined(Role::Sender)));
+    assert!(matches!(
+        recv(&mut bad_ws).await,
+        ServerMsg::Joined(Role::Receiver)
+    ));
+    assert!(matches!(
+        recv(&mut sender_ws).await,
+        ServerMsg::Joined(Role::Sender)
+    ));
     let bad_started = Started::new(Role::Receiver, &bad);
 
     // The SPAKE2 messages cross through the meeting place.
@@ -196,15 +246,27 @@ async fn wrong_words_burn_the_nameplate_and_the_sender_sees_it() {
     };
     let keys_a = sender.finish(&peer_a).unwrap();
     let keys_b = bad_started.finish(&peer_b).unwrap();
-    send(&mut sender_ws, ClientMsg::Confirm(keys_a.confirmation(Role::Sender))).await;
-    send(&mut bad_ws, ClientMsg::Confirm(keys_b.confirmation(Role::Receiver))).await;
+    send(
+        &mut sender_ws,
+        ClientMsg::Confirm(keys_a.confirmation(Role::Sender)),
+    )
+    .await;
+    send(
+        &mut bad_ws,
+        ClientMsg::Confirm(keys_b.confirmation(Role::Receiver)),
+    )
+    .await;
 
     let tag_b = match recv(&mut sender_ws).await {
         ServerMsg::Confirm(t) => t,
         other => panic!("expected Confirm, got {other:?}"),
     };
     assert!(keys_a.verify(Role::Receiver, &tag_b).is_err());
-    send(&mut sender_ws, ClientMsg::Fail(short_codes_spike::wire::FailReason::ConfirmMismatch)).await;
+    send(
+        &mut sender_ws,
+        ClientMsg::Fail(short_codes_spike::wire::FailReason::ConfirmMismatch),
+    )
+    .await;
     match recv(&mut sender_ws).await {
         ServerMsg::Burned => {}
         other => panic!("the sender expected Burned, got {other:?}"),
@@ -242,7 +304,10 @@ async fn a_third_connection_to_a_held_nameplate_is_refused() {
     };
     let mut second = connect(addr, None).await;
     send(&mut second, ClientMsg::Join(plate)).await;
-    assert!(matches!(recv(&mut second).await, ServerMsg::Joined(Role::Receiver)));
+    assert!(matches!(
+        recv(&mut second).await,
+        ServerMsg::Joined(Role::Receiver)
+    ));
     let mut third = connect(addr, None).await;
     send(&mut third, ClientMsg::Join(plate)).await;
     match recv(&mut third).await {
