@@ -13,6 +13,7 @@ a browser with nothing installed, and a desktop app, are planned for 1.2 and are
 - [Send a file](https://sluicedrop.com/#send): the four steps with a local daemon and its page, today.
 - [Three ways in](https://sluicedrop.com/#ways): people, developers, AI agents.
 - [How it works](https://sluicedrop.com/#how): the channel, the blocks, and the ticket.
+- [For developers](https://sluicedrop.com/developers/): the commands, a real run, and install.
 - [For AI agents](https://sluicedrop.com/agents/): the MCP server, its setup and its seven tools.
 
 ## Commands and install
