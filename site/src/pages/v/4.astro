@@ -3,12 +3,12 @@
 // scrolls: a canal in three dimensions, with the sender at one end and the receiver at the other.
 // Scrolling moves the camera along it, and each screen of scrolling is one stop with one thing to
 // say. After the canal, the page is quiet: the commands, the rest of the tool as a list, and the
-// install box.
+// install box. The footer is a route map: one line with a station for each way aboard, and the
+// timetable of everything else under it.
 import InstallTabs from "../../components/InstallTabs.astro";
 import Btn from "../../components/preview/Btn.astro";
-import End from "../../components/preview/End.astro";
-import { CLI_README, INSTALL, REPO } from "../../data/links";
-import { FEATURES, QUICK_INSTALL, RUN_RECEIVER, RUN_SENDER } from "../../data/preview";
+import { CLI_README, INSTALL } from "../../data/links";
+import { END_LINKS, FEATURES, QUICK_INSTALL, RUN_RECEIVER, RUN_SENDER, WAYS } from "../../data/preview";
 import Preview from "../../layouts/Preview.astro";
 
 const stops = [
@@ -69,8 +69,8 @@ const facts = ["QUIC", "TLS 1.3", "BLAKE3", "X25519MLKEM768", "No account", "No 
                     one down the wire.
                 </p>
                 <div class="btn-row">
-                    <Btn href="#v4-install">Install Sluice</Btn>
-                    <Btn href={REPO} quiet>Source on GitHub</Btn>
+                    <Btn href={WAYS.people.href}>Send a file</Btn>
+                    <Btn href="#v4-install" quiet>Install Sluice</Btn>
                 </div>
             </div>
             <p class="cue" aria-hidden="true"><i></i>Scroll to leave the dock</p>
@@ -166,12 +166,46 @@ const facts = ["QUIC", "TLS 1.3", "BLAKE3", "X25519MLKEM768", "No account", "No 
         <InstallTabs name="v4" options={QUICK_INSTALL} />
     </section>
 
-    <End
-        slot="end"
-        kit
-        title="Send the first one."
-        body="Free and open source. The whole trip you just watched is two commands."
-    />
+    <footer class="route" slot="end">
+        <div class="wrap">
+            <h2 class="route-title">Where to next</h2>
+            <ul class="line">
+                {
+                    [WAYS.people, WAYS.developers, WAYS.agents].map((way) => (
+                        <li class="station">
+                            <i aria-hidden="true"></i>
+                            <p class="station-who">{way.who}</p>
+                            <a class="station-name" href={way.href}>{way.name}</a>
+                            <p class="station-now">{way.now.replaceAll("`", "")}</p>
+                        </li>
+                    ))
+                }
+            </ul>
+            <div class="timetable">
+                {
+                    (
+                        [
+                            ["Use it", END_LINKS.use],
+                            ["Understand it", END_LINKS.understand],
+                            ["The project", END_LINKS.project],
+                        ] as const
+                    ).map(([name, links]) => (
+                        <nav aria-label={name}>
+                            <p>{name}</p>
+                            <ul>
+                                {links.map(([text, href]) => (
+                                    <li>
+                                        <a href={href}>{text}</a>
+                                    </li>
+                                ))}
+                            </ul>
+                        </nav>
+                    ))
+                }
+            </div>
+            <p class="route-note">Free and open source. The whole trip you just watched is two commands.</p>
+        </div>
+    </footer>
 </Preview>
 
 <script>
@@ -628,6 +662,153 @@ const facts = ["QUIC", "TLS 1.3", "BLAKE3", "X25519MLKEM768", "No account", "No 
 
         .panes {
             grid-template-columns: minmax(0, 1fr);
+        }
+    }
+
+    /* The footer: a route map. One line, three stations, and the timetable under it. */
+    .route {
+        position: relative;
+        margin-top: var(--section);
+        padding-block: var(--space-5) var(--space-4);
+        border-top: 1px solid var(--line);
+        background: var(--basin-deep);
+    }
+
+    .route-title {
+        font-size: clamp(1.8rem, 1.2rem + 2.6vw, 3.2rem);
+    }
+
+    .line {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-3);
+        margin-top: var(--space-4);
+        padding-top: 2.4rem;
+        list-style: none;
+    }
+
+    /* The line itself runs from the first station to the last, water into brass. */
+    .line::before {
+        content: "";
+        position: absolute;
+        top: 0.55rem;
+        left: 0.6rem;
+        right: 0;
+        height: 4px;
+        border-radius: 2px;
+        background: linear-gradient(90deg, var(--water), var(--brass));
+    }
+
+    .station {
+        position: relative;
+        display: grid;
+        gap: 0.4rem;
+        align-content: start;
+    }
+
+    .station i {
+        position: absolute;
+        top: -2.4rem;
+        left: 0;
+        width: 1.3rem;
+        height: 1.3rem;
+        border: 4px solid var(--basin-deep);
+        border-radius: 50%;
+        background: var(--ink);
+        box-shadow: 0 0 0 2px var(--ink);
+    }
+
+    .station-who {
+        color: var(--mist);
+        font-family: var(--font-code);
+        font-size: 0.8rem;
+    }
+
+    .station-name {
+        justify-self: start;
+        color: var(--ink);
+        font-size: var(--step-2);
+        font-weight: 700;
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+        text-decoration: none;
+    }
+
+    .station-name:hover,
+    .station-name:focus-visible {
+        color: var(--brass);
+    }
+
+    .station:hover i {
+        background: var(--brass);
+        box-shadow: 0 0 0 2px var(--brass);
+    }
+
+    .station-now {
+        max-width: 32ch;
+        color: var(--mist);
+        font-size: var(--step--1);
+        line-height: 1.5;
+    }
+
+    .timetable {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-3);
+        margin-top: var(--space-5);
+        padding-top: var(--space-3);
+        border-top: 1px dashed var(--line-strong);
+    }
+
+    .timetable p {
+        margin-bottom: 0.6rem;
+        color: var(--mist);
+        font-family: var(--font-code);
+        font-size: 0.8rem;
+    }
+
+    .timetable ul {
+        display: grid;
+        gap: 0.35rem;
+        list-style: none;
+    }
+
+    .timetable a {
+        color: var(--ink);
+        text-decoration-color: var(--line-strong);
+    }
+
+    .route-note {
+        margin-top: var(--space-4);
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    @media (max-width: 52rem) {
+        .line {
+            grid-template-columns: 1fr;
+            padding-top: 0;
+            padding-left: 2.6rem;
+        }
+
+        .line::before {
+            top: 0.6rem;
+            bottom: 0;
+            left: 0.55rem;
+            right: auto;
+            width: 4px;
+            height: auto;
+            background: linear-gradient(180deg, var(--water), var(--brass));
+        }
+
+        .station i {
+            top: 0;
+            left: -2.6rem;
+        }
+
+        .timetable {
+            grid-template-columns: 1fr 1fr;
         }
     }
 </style>

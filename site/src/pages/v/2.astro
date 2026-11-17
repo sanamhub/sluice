@@ -4,13 +4,14 @@
 // the check at the end. The step buttons under it jump to any moment. No protocol names until
 // someone opens a question that needs one.
 //
-// Type: Archivo wide and heavy for the few big statements, normal width for everything else. The
-// ground is a slow drift of the two brand colours behind glass panels.
+// Type: Bricolage Grotesque, a friendly grotesque with ink traps, for everything a person reads;
+// Plex Mono only where a command has to be copied. A light sky ground, white rooms with large
+// soft corners, and a warm sun yellow for the one thing to press. Everything is centred, like a
+// letter. The footer is a last, plain answer to "where do I start?".
 import InstallTabs from "../../components/InstallTabs.astro";
 import Cmd from "../../components/preview/Cmd.astro";
-import End from "../../components/preview/End.astro";
-import { INSTALL, THREAT_MODEL } from "../../data/links";
-import { QUICK_INSTALL } from "../../data/preview";
+import { INSTALL, ROADMAP, THREAT_MODEL } from "../../data/links";
+import { END_LINKS, QUICK_INSTALL, WAYS } from "../../data/preview";
 import Preview from "../../layouts/Preview.astro";
 
 const files = [
@@ -37,24 +38,6 @@ const qr = Array.from({ length: QR * QR }, (_, n) => {
     const y = Math.floor(n / QR);
     return corner(x, y) || (x * 7 + y * 13 + x * y) % 5 < 2;
 });
-
-const ways = [
-    {
-        title: "In your browser",
-        body: "A page on your own computer. Pick files, copy the ticket or show its QR code, and watch transfers move.",
-        code: "sluice ui",
-    },
-    {
-        title: "In a terminal",
-        body: "One command to send and one to receive. Folders, pipes and files that are still growing work the same way.",
-        code: "sluice send ./holiday-video",
-    },
-    {
-        title: "Through your AI assistant",
-        body: "Ask it to send a folder or fetch a ticket. It works only inside the folders you allow.",
-        code: "sluice mcp",
-    },
-];
 
 const promises = [
     {
@@ -117,8 +100,8 @@ const questions = [
                 Nothing is uploaded, nothing is stored along the way, and there is no account.
             </p>
             <p class="actions">
-                <a class="button primary" href="#install">Get Sluice</a>
-                <a class="button" href="#questions">How it stays private</a>
+                <a class="button primary" href="#install">Send a file</a>
+                <a class="button" href="#v2-ways">Other ways in</a>
             </p>
 
             <div class="demo" data-demo data-stage="5">
@@ -199,14 +182,19 @@ const questions = [
     </section>
 
     <section class="wrap ways" aria-labelledby="v2-ways">
-        <h2 id="v2-ways">Use it the way you like</h2>
-        <ul>
+        <h2 id="v2-ways">However you like to work</h2>
+        <ul class="rooms">
             {
-                ways.map((way) => (
-                    <li class="way glow rise">
-                        <h3>{way.title}</h3>
-                        <p>{way.body}</p>
-                        <code translate="no">{way.code}</code>
+                [
+                    { ...WAYS.people, tone: "sun" },
+                    { ...WAYS.developers, tone: "sky" },
+                    { ...WAYS.agents, tone: "leaf" },
+                ].map((way) => (
+                    <li class={`room room-${way.tone}`}>
+                        <p class="room-who">{way.who}</p>
+                        <h3>{way.name}</h3>
+                        <p>{way.now.replaceAll("`", "")}</p>
+                        <a href={way.href}>{way.action}</a>
                     </li>
                 ))
             }
@@ -228,7 +216,11 @@ const questions = [
     </section>
 
     <section class="wrap steps" id="install" aria-labelledby="v2-steps">
-        <h2 id="v2-steps">Ready in three steps</h2>
+        <h2 id="v2-steps">Send a file today</h2>
+        <p class="steps-lede">
+            Today the page opens with two short commands. The desktop app in 1.2 replaces them with a
+            double click, and the <a href={ROADMAP}>roadmap</a> says when.
+        </p>
         <ol>
             <li>
                 <div class="step-body">
@@ -239,17 +231,19 @@ const questions = [
             </li>
             <li>
                 <div class="step-body">
-                    <h3>Send</h3>
-                    <p>Open the page and pick files, or name them in a terminal. You get a ticket.</p>
+                    <h3>Open the page</h3>
+                    <p>Start Sluice with the folder it may use, then open its page in your browser.</p>
+                    <Cmd lines={["sluice daemon --ui --root ~/Sluice"]} />
                     <Cmd lines={["sluice ui"]} />
-                    <Cmd lines={["sluice send ./holiday-video"]} />
                 </div>
             </li>
             <li>
                 <div class="step-body">
-                    <h3>Receive</h3>
-                    <p>On the other computer, paste the ticket and choose where the files go.</p>
-                    <Cmd lines={["sluice recv <ticket> --out ./inbox"]} />
+                    <h3>Pick, send, hand over the ticket</h3>
+                    <p>
+                        Press Send and copy the ticket or show its QR code. On the other computer,
+                        open the page the same way, paste the ticket and choose where the files go.
+                    </p>
                 </div>
             </li>
         </ol>
@@ -272,11 +266,21 @@ const questions = [
         </p>
     </section>
 
-    <End
-        slot="end"
-        title="Send the big one."
-        body="Free and open source. No analytics, no cookies, and nothing sent home."
-    />
+    <footer class="letter" slot="end">
+        <div class="wrap letter-inner">
+            <h2>Where would you like to start?</h2>
+            <p class="letter-lede">Pick the one that sounds like you. You can always switch later.</p>
+            <p class="letter-doors">
+                <a class="button primary" href={WAYS.people.href}>I have a file to send</a>
+                <a class="button" href={WAYS.developers.href}>I use a terminal</a>
+                <a class="button" href={WAYS.agents.href}>I run an AI assistant</a>
+            </p>
+            <nav class="letter-links" aria-label="More">
+                {[...END_LINKS.understand, ...END_LINKS.project].map(([text, href]) => <a href={href}>{text}</a>)}
+            </nav>
+            <p class="letter-sign">Free and open source. No analytics, no cookies, and nothing sent home.</p>
+        </div>
+    </footer>
 </Preview>
 
 <script>
@@ -739,39 +743,77 @@ const questions = [
         display: none;
     }
 
-    /* Three ways in. */
-    .ways ul {
+    /* Three ways in: three rooms, each with its own wash of colour. */
+    .rooms {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: var(--space-2);
+        gap: var(--space-3);
         margin-top: var(--space-4);
+        text-align: center;
     }
 
-    .way {
+    .room {
         display: flex;
         flex-direction: column;
-        gap: 0.7rem;
-        min-height: 16rem;
-        padding: var(--space-3);
-        border: 1px solid var(--line);
-        border-radius: var(--radius-l);
+        align-items: center;
+        gap: 0.8rem;
+        padding: clamp(1.75rem, 3vw, 2.5rem) var(--space-3);
+        border-radius: 2rem;
         background: var(--stone);
     }
 
-    .way h3 {
+    .room-sun {
+        background: #fff4d6;
+    }
+
+    .room-sky {
+        background: #dcebfb;
+    }
+
+    .room-leaf {
+        background: #dff3e6;
+    }
+
+    .room-who {
+        padding: 0.3rem 0.9rem;
+        border-radius: var(--radius-pill);
+        background: var(--stone);
+        color: var(--mist);
+        font-size: var(--step--1);
+        font-weight: 600;
+    }
+
+    .room h3 {
         font-size: var(--step-2);
         font-weight: 700;
         letter-spacing: -0.03em;
     }
 
-    .way p {
+    .room p:not(.room-who) {
+        max-width: 30ch;
         color: var(--mist);
         line-height: 1.5;
     }
 
-    .way code {
-        align-self: start;
+    .room a {
         margin-top: auto;
+        padding: 0.6rem 1.3rem;
+        border-radius: var(--radius-pill);
+        background: var(--ink);
+        color: var(--stone);
+        font-weight: 650;
+        text-decoration: none;
+    }
+
+    .room a:hover {
+        background: var(--water-deep);
+    }
+
+    .steps-lede {
+        max-width: 50ch;
+        margin: var(--space-2) auto 0;
+        color: var(--mist);
+        text-align: center;
     }
 
     /* Four statements, set large, one after another. */
@@ -921,18 +963,78 @@ const questions = [
         color: var(--mist);
     }
 
+    /* The footer: one sunlit panel that asks the last question plainly. */
+    .letter {
+        padding: var(--section) 0 var(--space-4);
+    }
+
+    .letter-inner {
+        display: grid;
+        justify-items: center;
+        gap: var(--space-2);
+        padding: clamp(2.5rem, 6vw, 5rem) var(--space-3) var(--space-3);
+        border-radius: 2.5rem;
+        background: var(--ink);
+        color: var(--stone);
+        text-align: center;
+    }
+
+    .letter h2 {
+        max-width: 14ch;
+        color: inherit;
+    }
+
+    .letter-lede {
+        color: #b9c8de;
+        font-size: var(--step-1);
+    }
+
+    .letter-doors {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: var(--space-2);
+        margin-top: var(--space-2);
+    }
+
+    .letter-doors .button:not(.primary) {
+        border-color: #4f6380;
+        background: transparent;
+        color: var(--stone);
+    }
+
+    .letter-links {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.4rem 1.4rem;
+        margin-top: var(--space-4);
+        padding-top: var(--space-3);
+        border-top: 1px solid #2c4060;
+        font-size: var(--step--1);
+    }
+
+    .letter-links a {
+        color: #b9c8de;
+    }
+
+    .letter-links a:hover {
+        color: var(--stone);
+    }
+
+    .letter-sign {
+        color: #8ea0bb;
+        font-size: var(--step--1);
+    }
+
     @media (max-width: 52rem) {
         .windows,
-        .ways ul {
+        .rooms {
             grid-template-columns: 1fr;
         }
 
         .window {
             min-height: 20rem;
-        }
-
-        .way {
-            min-height: 0;
         }
 
         .promises li {
@@ -969,5 +1071,38 @@ const questions = [
         .ticket-row {
             grid-template-columns: 5.5rem minmax(0, 1fr);
         }
+    }
+</style>
+
+<style is:global>
+    /* Version 2's own ground: a light sky, white rooms, and a sun yellow for the thing to press. */
+    body.preview-2 {
+        color-scheme: light;
+        --basin: #e6f0fa;
+        --basin-deep: #d6e5f5;
+        --stone: #fff;
+        --stone-2: #f4f8fd;
+        --line: #c9d8ea;
+        --line-strong: #93a8c4;
+        --ink: #142640;
+        --mist: #4f6380;
+        --link: #1d4f91;
+        --water: #2f6fd0;
+        --water-deep: #1d4f91;
+        --water-soft: rgb(47 111 208 / 0.1);
+        --brass: #ffc53d;
+        --brass-ink: #142640;
+        --brass-soft: rgb(255 197 61 / 0.2);
+        --glass: rgb(230 240 250 / 0.82);
+        --shadow-color: rgb(20 38 64 / 0.22);
+        --radius-m: 14px;
+        --radius-l: 28px;
+        --font-body: var(--font-friendly), system-ui, sans-serif;
+        background: var(--basin);
+    }
+
+    body.preview-2 :is(h1, h2, h3) {
+        font-family: var(--font-friendly), system-ui, sans-serif;
+        font-stretch: normal;
     }
 </style>

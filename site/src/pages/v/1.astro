@@ -4,12 +4,13 @@
 // a channel that fills as the page scrolls, a replay of a recorded run, and the rest of what the
 // tool does as a grid.
 //
-// Type: the headline opens from Archivo's narrowest width to its widest once, like a gate. The
-// palette is the site's own.
+// Type: a timing sheet. Archivo at its narrowest and heaviest for every figure and headline, Plex
+// Mono for units and labels. Paper ground, graphite ink, and one signal orange that only ever
+// marks a measured value or the action. The footer is the finish line: a tick rule and the links
+// as a results table.
 import InstallTabs from "../../components/InstallTabs.astro";
-import End from "../../components/preview/End.astro";
 import { CLI_README, INSTALL, PERFORMANCE, REPO } from "../../data/links";
-import { QUICK_INSTALL, RUN_RECEIVER, RUN_SENDER, feature } from "../../data/preview";
+import { END_LINKS, QUICK_INSTALL, RUN_RECEIVER, RUN_SENDER, WAYS, feature } from "../../data/preview";
 import Preview from "../../layouts/Preview.astro";
 
 // The order the lines appeared in across the two terminals.
@@ -73,11 +74,12 @@ const relay = feature("relay");
                     Sluice sends files from one computer directly to another over QUIC, verifies
                     every block with BLAKE3 as it lands, and stores nothing in between.
                 </p>
-                <div class="hero-install">
-                    <InstallTabs name="v1" options={QUICK_INSTALL} />
+                <div class="hero-act">
+                    <a class="go" href={WAYS.people.href}>Send a file</a>
+                    <a class="go quiet" href="#v1-numbers-title">Read the numbers</a>
                     <p class="more">
-                        <a href={INSTALL}>Every install channel</a>. Free and open source on
-                        <a href={REPO}>GitHub</a>.
+                        Free and open source on <a href={REPO}>GitHub</a>. No account, nothing stored
+                        in between.
                     </p>
                 </div>
             </div>
@@ -85,7 +87,7 @@ const relay = feature("relay");
     </section>
 
     <section class="wrap numbers" aria-labelledby="v1-numbers">
-        <h2 id="v1-numbers" class="visually-hidden">The numbers</h2>
+        <h2 id="v1-numbers-title" class="visually-hidden">The numbers</h2>
         <dl>
             {
                 numbers.map((n) => (
@@ -105,6 +107,38 @@ const relay = feature("relay");
             <a href={PERFORMANCE}>docs/performance.md</a>, beside the iperf3 and fio ceilings of the
             same path.
         </p>
+    </section>
+
+    <section class="wrap lanes" aria-labelledby="v1-lanes">
+        <h2 id="v1-lanes">Three lanes, one engine</h2>
+        <table class="lane-table">
+            <thead>
+                <tr>
+                    <th scope="col">Lane</th>
+                    <th scope="col">Way in</th>
+                    <th scope="col">What you do</th>
+                    <th scope="col"><span class="visually-hidden">Start</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                {
+                    [WAYS.people, WAYS.developers, WAYS.agents].map((way, at) => (
+                        <tr>
+                            <td class="lane-n">{at + 1}</td>
+                            <th scope="row">
+                                {way.name}
+                                <small>{way.who}</small>
+                            </th>
+                            <td>{way.now.replaceAll("`", "")}</td>
+                            <td>
+                                <a href={way.href}>{way.action}</a>
+                            </td>
+                        </tr>
+                    ))
+                }
+            </tbody>
+        </table>
+        <p class="note">{WAYS.people.soon}</p>
     </section>
 
     <section class="wrap route" aria-labelledby="v1-route">
@@ -190,11 +224,35 @@ const relay = feature("relay");
         </ul>
     </section>
 
-    <End
-        slot="end"
-        title="Open the gate."
-        body="One small binary for macOS, Linux and Windows. No account to make and nothing to configure before the first send."
-    />
+    <section class="wrap install-v1" id="install" aria-labelledby="v1-install">
+        <h2 id="v1-install">Install, for the command line</h2>
+        <InstallTabs name="v1" options={QUICK_INSTALL} />
+        <p class="more"><a href={INSTALL}>Every install channel</a>, and how to verify a download.</p>
+    </section>
+
+    <footer class="finish" slot="end">
+        <div class="ticks" aria-hidden="true"></div>
+        <div class="wrap finish-inner">
+            <p class="finish-word" aria-hidden="true">Sluice</p>
+            <div class="sheet">
+                {
+                    Object.entries({ Use: END_LINKS.use, Understand: END_LINKS.understand, Project: END_LINKS.project }).map(([title, links]) => (
+                        <nav aria-label={title}>
+                            <h2>{title}</h2>
+                            <ol>
+                                {links.map(([text, href]) => (
+                                    <li>
+                                        <a href={href}>{text}</a>
+                                    </li>
+                                ))}
+                            </ol>
+                        </nav>
+                    ))
+                }
+            </div>
+            <p class="finish-note">Apache-2.0 or MIT. No telemetry, no account, no copy kept.</p>
+        </div>
+    </footer>
 </Preview>
 
 <script>
@@ -700,6 +758,266 @@ const relay = feature("relay");
         .cell {
             grid-column: span 6;
             min-height: 0;
+        }
+    }
+</style>
+
+<style is:global>
+    /* The timing sheet: paper, graphite and one signal orange for a measured value or the action. */
+    body.preview-1 {
+        color-scheme: light;
+        --basin: #f2f3f1;
+        --basin-deep: #e6e8e5;
+        --stone: #ffffff;
+        --stone-2: #f8f9f7;
+        --line: #d3d7d2;
+        --line-strong: #9aa19a;
+        --ink: #161a1d;
+        --mist: #5c6560;
+        --link: #161a1d;
+        --water: #2b6f7c;
+        --water-deep: #1e5560;
+        --water-soft: rgb(43 111 124 / 0.08);
+        --brass: #e2470f;
+        --brass-ink: #ffffff;
+        --brass-soft: rgb(226 71 15 / 0.1);
+        --glass: rgb(242 243 241 / 0.82);
+        --shadow-color: rgb(22 26 29 / 0.18);
+        --radius-m: 3px;
+        --radius-l: 4px;
+        background: var(--basin);
+    }
+</style>
+
+<style>
+    /* The headline and every figure share one cut: Archivo at its narrowest, heaviest width. */
+    h1,
+    section > h2,
+    .run-head h2 {
+        font-stretch: 62%;
+        font-weight: 850;
+        letter-spacing: -0.01em;
+    }
+
+    h1 {
+        font-size: min(13vw, 12rem);
+        line-height: 0.86;
+    }
+
+    @keyframes open {
+        from {
+            font-stretch: 125%;
+            opacity: 0;
+        }
+    }
+
+    .hero-act {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        align-items: center;
+    }
+
+    .hero-act .more {
+        flex-basis: 100%;
+    }
+
+    .go {
+        display: inline-flex;
+        align-items: center;
+        min-height: 3.25rem;
+        padding: 0 1.6rem;
+        border: 2px solid var(--brass);
+        border-radius: 2px;
+        background: var(--brass);
+        color: var(--brass-ink);
+        font-weight: 700;
+        font-size: 1.05rem;
+        text-decoration: none;
+        transition: background-color 140ms ease, color 140ms ease;
+    }
+
+    .go:hover {
+        background: transparent;
+        color: var(--brass);
+    }
+
+    .go.quiet {
+        border-color: var(--ink);
+        background: transparent;
+        color: var(--ink);
+    }
+
+    .go.quiet:hover {
+        background: var(--ink);
+        color: var(--basin);
+    }
+
+    .go:focus-visible {
+        outline: 3px solid var(--ink);
+        outline-offset: 3px;
+    }
+
+    /* Three lanes as a results table: the lane number, the way in, what a person does, the start. */
+    .lane-table {
+        width: 100%;
+        margin-top: var(--space-4);
+        border-collapse: collapse;
+        font-size: var(--step-0);
+    }
+
+    .lane-table thead th {
+        padding: 0 0 var(--space-1);
+        border-bottom: 2px solid var(--ink);
+        color: var(--mist);
+        font-family: var(--font-code);
+        font-size: var(--step--1);
+        font-weight: 400;
+        text-align: left;
+    }
+
+    .lane-table td,
+    .lane-table tbody th {
+        padding: var(--space-3) var(--space-2) var(--space-3) 0;
+        border-bottom: 1px solid var(--line-strong);
+        text-align: left;
+        vertical-align: top;
+    }
+
+    .lane-table tbody th {
+        font-size: var(--step-1);
+        font-stretch: 62%;
+        font-weight: 800;
+        line-height: 1.1;
+    }
+
+    .lane-table small {
+        display: block;
+        margin-top: 0.3rem;
+        color: var(--mist);
+        font-family: var(--font-code);
+        font-size: var(--step--1);
+        font-weight: 400;
+    }
+
+    .lane-n {
+        width: 3ch;
+        color: var(--brass);
+        font-size: var(--step-2);
+        font-stretch: 62%;
+        font-weight: 850;
+        line-height: 1;
+    }
+
+    .lane-table a {
+        color: var(--ink);
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .install-v1 {
+        display: grid;
+        gap: var(--space-3);
+        padding-bottom: var(--section);
+    }
+
+    /* The finish line: a tick rule across the page, then the links as a results sheet. */
+    .finish {
+        margin-top: var(--section);
+        border-top: 2px solid var(--ink);
+        background: var(--stone);
+    }
+
+    .ticks {
+        height: 18px;
+        background: repeating-linear-gradient(90deg, var(--ink) 0 2px, transparent 2px 24px);
+        mask-image: linear-gradient(180deg, #000 0 60%, transparent 60%);
+    }
+
+    .finish-inner {
+        display: grid;
+        gap: var(--space-4);
+        padding-block: var(--space-4) var(--space-5);
+    }
+
+    .finish-word {
+        margin: 0;
+        font-size: min(26vw, 22rem);
+        font-stretch: 62%;
+        font-weight: 900;
+        line-height: 0.78;
+        letter-spacing: -0.02em;
+    }
+
+    .sheet {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-4);
+    }
+
+    .sheet h2 {
+        margin: 0 0 var(--space-1);
+        padding-bottom: var(--space-1);
+        border-bottom: 2px solid var(--ink);
+        font-size: var(--step-1);
+        font-stretch: 62%;
+        font-weight: 800;
+    }
+
+    .sheet ol {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+    }
+
+    .sheet li {
+        display: flex;
+        gap: var(--space-1);
+        padding-block: 0.45rem;
+        border-bottom: 1px solid var(--line);
+    }
+
+    .sheet a {
+        color: var(--ink);
+        text-decoration: none;
+    }
+
+    .sheet a:hover {
+        color: var(--brass);
+        text-decoration: underline;
+    }
+
+    .finish-note {
+        margin: 0;
+        color: var(--mist);
+        font-family: var(--font-code);
+        font-size: var(--step--1);
+    }
+
+    @media (max-width: 760px) {
+        .sheet {
+            grid-template-columns: 1fr;
+        }
+
+        .lane-table thead {
+            display: none;
+        }
+
+        .lane-table tr {
+            display: grid;
+            grid-template-columns: 3ch 1fr;
+            border-bottom: 1px solid var(--line-strong);
+            padding-block: var(--space-2);
+        }
+
+        .lane-table td,
+        .lane-table tbody th {
+            border: 0;
+            padding: 0.2rem 0;
+        }
+
+        .lane-table td:nth-child(n + 3) {
+            grid-column: 2;
         }
     }
 </style>

@@ -1,6 +1,20 @@
 // What the landing page previews under /v/ share: the list of versions, the install options, the
 // recorded run and the feature list. One copy, so the pages cannot disagree on a fact.
 import { BREW, POWERSHELL_BY_HAND, SCOOP, SHELL } from "./install";
+import {
+  AGENTS,
+  CHANGELOG,
+  DESIGN,
+  DEVELOPERS,
+  INSTALL,
+  PERFORMANCE,
+  RELAY_README,
+  REPO,
+  ROADMAP,
+  SECURITY,
+  SPEC,
+  THREAT_MODEL,
+} from "./links";
 
 export const VERSIONS = [
   {
@@ -152,3 +166,55 @@ export type FeatureId = (typeof FEATURES)[number]["id"];
 
 export const feature = (id: FeatureId) =>
   FEATURES.find((item) => item.id === id)!;
+
+/**
+ * The three ways in, as facts every version states in its own words and layout. `now` is what a
+ * reader can do today; nothing here offers what 1.2 has not shipped.
+ */
+export const WAYS = {
+  people: {
+    who: "Never opened a terminal",
+    name: "The page in your browser",
+    now: "Sluice opens a page on your own computer. Pick the file there and hand over the ticket it gives you.",
+    href: "/#send",
+    action: "Send a file",
+    soon: "A desktop app, and sending from a browser with nothing installed, come in 1.2.",
+  },
+  developers: {
+    who: "Engineer",
+    name: "The command line",
+    now: "One binary for Linux, macOS and Windows, a container image, and a control API for scripts.",
+    href: DEVELOPERS,
+    action: "See the commands",
+  },
+  agents: {
+    who: "AI agent",
+    name: "Model Context Protocol",
+    now: "`sluice mcp` gives an assistant seven tools over standard input and output, inside the folders you name.",
+    href: AGENTS,
+    action: "Set it up",
+  },
+} as const;
+
+/** The links every footer carries, each version in its own arrangement. */
+export const END_LINKS = {
+  use: [
+    ["Send a file", "/#send"],
+    ["For developers", DEVELOPERS],
+    ["For AI agents", AGENTS],
+    ["Install guide", INSTALL],
+    ["Run a relay", RELAY_README],
+  ],
+  understand: [
+    ["Design", DESIGN],
+    ["Specification", SPEC],
+    ["Performance", PERFORMANCE],
+    ["Threat model", THREAT_MODEL],
+  ],
+  project: [
+    ["Source on GitHub", REPO],
+    ["Roadmap", ROADMAP],
+    ["Changelog", CHANGELOG],
+    ["Report a vulnerability", SECURITY],
+  ],
+} as const;
