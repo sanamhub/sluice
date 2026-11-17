@@ -3,11 +3,14 @@
 // through a ring as a stream and draws the file again on the other side. Below it: the usual way
 // of sending a big file beside this one, as two lanes; the rest of the tool as a reel that scrolls
 // sideways; and the install box.
+//
+// Its own sky: midnight blue at night and a pale dawn by day, ice for what leaves and a rose star
+// for what arrives. Headings are Archivo at its widest and lightest, so the light carries the
+// weight. The footer is the ring again, with the three ways in standing around it.
 import InstallTabs from "../../components/InstallTabs.astro";
 import Btn from "../../components/preview/Btn.astro";
-import End from "../../components/preview/End.astro";
-import { INSTALL, REPO } from "../../data/links";
-import { FEATURES, QUICK_INSTALL } from "../../data/preview";
+import { INSTALL } from "../../data/links";
+import { END_LINKS, FEATURES, QUICK_INSTALL, WAYS } from "../../data/preview";
 import Preview from "../../layouts/Preview.astro";
 ---
 
@@ -32,8 +35,8 @@ import Preview from "../../layouts/Preview.astro";
                 it lands, and nothing is stored in between.
             </p>
             <div class="btn-row">
-                <Btn href="#v5-install">Install Sluice</Btn>
-                <Btn href={REPO} quiet>Source on GitHub</Btn>
+                <Btn href={WAYS.people.href}>Send a file</Btn>
+                <Btn href="#v5-install" quiet>Install Sluice</Btn>
             </div>
         </div>
     </section>
@@ -98,12 +101,29 @@ import Preview from "../../layouts/Preview.astro";
         <InstallTabs name="v5" options={QUICK_INSTALL} />
     </section>
 
-    <End
-        slot="end"
-        kit
-        title="Send it across."
-        body="Free and open source. Nothing to sign up for, and nothing left behind on a server."
-    />
+    <footer class="orbit" slot="end">
+        <div class="wrap orbit-grid">
+            <div class="ring" aria-hidden="true"></div>
+            <h2 class="orbit-title">Send it across.</h2>
+            {
+                [
+                    { ...WAYS.people, at: "a" },
+                    { ...WAYS.developers, at: "b" },
+                    { ...WAYS.agents, at: "c" },
+                ].map((way) => (
+                    <a class={`body body-${way.at}`} href={way.href}>
+                        <span class="body-who">{way.who}</span>
+                        <span class="body-name">{way.name}</span>
+                        <span class="body-go">{way.action}</span>
+                    </a>
+                ))
+            }
+        </div>
+        <nav class="wrap orbit-links" aria-label="Everything else">
+            {[...END_LINKS.use.slice(3), ...END_LINKS.understand, ...END_LINKS.project].map(([text, href]) => <a href={href}>{text}</a>)}
+        </nav>
+        <p class="wrap orbit-note">Free and open source. Nothing to sign up for, and nothing left behind on a server.</p>
+    </footer>
 </Preview>
 
 <script>
@@ -152,7 +172,7 @@ import Preview from "../../layouts/Preview.astro";
     h1 {
         font-size: clamp(2.6rem, 1rem + 5.4vw, 5.6rem);
         font-stretch: 125%;
-        font-weight: 800;
+        font-weight: 250;
         line-height: 0.92;
         letter-spacing: -0.05em;
     }
@@ -562,5 +582,168 @@ import Preview from "../../layouts/Preview.astro";
         .node.mid {
             font-size: 0.75rem;
         }
+    }
+
+    /* The footer: the ring from the hero, and the three ways in standing around it. */
+    .orbit {
+        position: relative;
+        margin-top: var(--section);
+        padding-block: var(--space-5) var(--space-4);
+        overflow: clip;
+    }
+
+    .orbit-grid {
+        position: relative;
+        display: grid;
+        grid-template-columns: 1fr minmax(16rem, 26rem) 1fr;
+        grid-template-areas:
+            "a ring b"
+            ". c .";
+        align-items: center;
+        gap: var(--space-3);
+    }
+
+    .ring {
+        grid-area: ring;
+        aspect-ratio: 1;
+        border: 1px solid color-mix(in srgb, var(--water) 60%, transparent);
+        border-radius: 50%;
+        box-shadow:
+            0 0 60px -10px var(--water-soft),
+            inset 0 0 80px -20px var(--brass-soft);
+    }
+
+    .orbit-title {
+        grid-area: ring;
+        justify-self: center;
+        max-width: 8ch;
+        font-size: clamp(2rem, 1.2rem + 2.8vw, 3.4rem);
+        font-stretch: 125%;
+        font-weight: 250;
+        line-height: 1;
+        text-align: center;
+    }
+
+    .body {
+        display: grid;
+        gap: 0.3rem;
+        padding: var(--space-2) 0;
+        color: var(--ink);
+        text-decoration: none;
+    }
+
+    .body-a {
+        grid-area: a;
+        justify-items: end;
+        text-align: right;
+    }
+
+    .body-b {
+        grid-area: b;
+    }
+
+    .body-c {
+        grid-area: c;
+        justify-items: center;
+        text-align: center;
+    }
+
+    .body-who {
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    .body-name {
+        font-size: var(--step-2);
+        font-stretch: 125%;
+        font-weight: 300;
+        line-height: 1.1;
+    }
+
+    .body-go {
+        color: var(--water);
+        font-size: var(--step--1);
+        font-weight: 600;
+    }
+
+    .body:hover .body-go,
+    .body:focus-visible .body-go {
+        color: var(--brass);
+    }
+
+    .orbit-links {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.4rem 1.6rem;
+        margin-top: var(--space-5);
+        font-size: var(--step--1);
+    }
+
+    .orbit-links a {
+        color: var(--mist);
+    }
+
+    .orbit-links a:hover {
+        color: var(--ink);
+    }
+
+    .orbit-note {
+        margin-top: var(--space-2);
+        color: var(--mist);
+        font-size: var(--step--1);
+        text-align: center;
+    }
+
+    @media (max-width: 52rem) {
+        .orbit-grid {
+            grid-template-columns: 1fr;
+            grid-template-areas:
+                "ring"
+                "a"
+                "b"
+                "c";
+        }
+
+        .ring {
+            width: min(100%, 18rem);
+            justify-self: center;
+        }
+
+        .body-a,
+        .body-b,
+        .body-c {
+            justify-items: center;
+            text-align: center;
+        }
+    }
+</style>
+
+<style is:global>
+    /* Version 5's own sky: midnight at night, a pale dawn by day. */
+    body.preview-5 {
+        --basin: light-dark(#eef1fb, #0b1230);
+        --basin-deep: light-dark(#e2e7f7, #070c22);
+        --stone: light-dark(#ffffff, #111a3d);
+        --stone-2: light-dark(#f6f8fe, #172150);
+        --line: light-dark(#cfd6ee, #24305f);
+        --line-strong: light-dark(#97a3cc, #3c4a85);
+        --ink: light-dark(#0b1230, #e9edff);
+        --mist: light-dark(#4e5a85, #9ba7d8);
+        --link: light-dark(#2a4bb8, #a9c8ff);
+        --water: light-dark(#2a6fd6, #7cc4ff);
+        --water-deep: light-dark(#1d4f9e, #4a9be0);
+        --water-soft: light-dark(rgb(42 111 214 / 0.1), rgb(124 196 255 / 0.12));
+        --brass: light-dark(#d23f78, #ff8fb8);
+        --brass-ink: light-dark(#fff, #0b1230);
+        --brass-soft: light-dark(rgb(210 63 120 / 0.1), rgb(255 143 184 / 0.12));
+        --glass: light-dark(rgb(238 241 251 / 0.78), rgb(11 18 48 / 0.7));
+        --glow: var(--water);
+        background: var(--basin);
+    }
+
+    body.preview-5 :is(h2, h3) {
+        font-stretch: 125%;
+        font-weight: 300;
     }
 </style>

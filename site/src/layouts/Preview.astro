@@ -2,6 +2,7 @@
 // The shell of the landing page previews under /v/. Every page here is marked noindex and has no
 // canonical link or social card, so none of them can be taken for the live page. The header holds
 // the switcher that moves between the versions.
+import { Font } from "astro:assets";
 import Fonts from "../components/Fonts.astro";
 import Logo from "../components/Logo.astro";
 import { VERSIONS } from "../data/preview";
@@ -30,6 +31,7 @@ const { title, description, version } = Astro.props;
         <meta name="robots" content="noindex, nofollow" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <Fonts />
+        {version === 2 && <Font cssVariable="--font-friendly" preload />}
         <meta name="theme-color" content="#081820" media="(prefers-color-scheme: dark)" />
         <meta name="theme-color" content="#eef3f1" media="(prefers-color-scheme: light)" />
     </head>

@@ -5,12 +5,12 @@
 // the three front ends, and the contract a script can rely on.
 //
 // This version proposes its own palette and type: neutral graphite in place of the canal colours,
-// violet for anything an agent does, and IBM Plex Mono for the headings.
+// violet for anything an agent does, and IBM Plex Mono for the headings. The footer is the
+// project's own manifest, every key a link, the way an agent would read it.
 import InstallTabs from "../../components/InstallTabs.astro";
 import Cmd from "../../components/preview/Cmd.astro";
-import End from "../../components/preview/End.astro";
 import { CLI_README, INSTALL, SPEC } from "../../data/links";
-import { QUICK_INSTALL } from "../../data/preview";
+import { END_LINKS, QUICK_INSTALL, WAYS } from "../../data/preview";
 import Preview from "../../layouts/Preview.astro";
 
 const config = `{
@@ -168,6 +168,10 @@ const under = [
                 <p>Add it to an MCP client:</p>
                 <pre translate="no" tabindex="0"><code>{config}</code></pre>
             </div>
+            <p class="also">
+                No agent? <a href={WAYS.people.href}>Send a file from the page</a>, or
+                <a href={WAYS.developers.href}>use the command line</a>.
+            </p>
         </div>
 
         <div class="session" data-replay>
@@ -355,11 +359,36 @@ const under = [
         </div>
     </section>
 
-    <End
-        slot="end"
-        title="One binary. Every caller."
-        body="No account to provision and no service to sign up for before an agent can use it."
-    />
+    <footer class="manifest" slot="end">
+        <div class="wrap">
+            <p class="manifest-file" translate="no">sluice.json</p>
+            <nav class="manifest-body" aria-label="Everything else" translate="no">
+                <span class="brace">{"{"}</span>
+                <div class="pair"><span class="key">"name"</span>: <span class="str">"sluice"</span>,</div>
+                <div class="pair"><span class="key">"license"</span>: <span class="str">"Apache-2.0 OR MIT"</span>,</div>
+                <div class="pair"><span class="key">"telemetry"</span>: <span class="lit">null</span>,</div>
+                {
+                    (Object.entries(END_LINKS) as [string, readonly (readonly [string, string])[]][]).map(([group, links], gi, all) => (
+                        <div class="pair group">
+                            <span class="key">"{group}"</span>: <span class="brace">{"{"}</span>
+                            <ul>
+                                {links.map(([text, href], li) => (
+                                    <li>
+                                        <a href={href}><span class="key">"{text}"</span></a>{li < links.length - 1 ? "," : ""}
+                                    </li>
+                                ))}
+                            </ul>
+                            <span class="brace">{"}"}</span>{gi < all.length - 1 ? "," : ""}
+                        </div>
+                    ))
+                }
+                <span class="brace">{"}"}</span>
+            </nav>
+            <p class="manifest-note">
+                No account to provision and nothing to sign up for before an agent can use it.
+            </p>
+        </div>
+    </footer>
 </Preview>
 
 <script>
@@ -974,6 +1003,87 @@ const under = [
         .guards ul,
         .under-list {
             grid-template-columns: 1fr;
+        }
+    }
+
+    .also {
+        margin-top: var(--space-2);
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    /* The footer: the project's manifest, each key a link. */
+    .manifest {
+        margin-top: var(--section);
+        padding-block: var(--space-5) var(--space-4);
+        border-top: 1px solid var(--line);
+        background: var(--stone);
+        font-family: var(--font-code);
+    }
+
+    .manifest-file {
+        display: inline-block;
+        padding: 0.3rem 0.8rem;
+        border: 1px solid var(--line);
+        border-bottom: 0;
+        border-radius: 6px 6px 0 0;
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    .manifest-body {
+        display: block;
+        padding: var(--space-3);
+        border: 1px solid var(--line);
+        border-radius: 0 6px 6px;
+        background: var(--basin);
+        font-size: clamp(0.9rem, 0.85rem + 0.3vw, 1.05rem);
+        line-height: 1.8;
+    }
+
+    .pair {
+        padding-left: 2ch;
+    }
+
+    .group ul {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0 2ch;
+        padding-left: 2ch;
+    }
+
+    .key {
+        color: var(--agent);
+    }
+
+    .str {
+        color: var(--ink);
+    }
+
+    .lit,
+    .brace {
+        color: var(--mist);
+    }
+
+    .manifest a {
+        text-decoration: none;
+    }
+
+    .manifest a:hover .key,
+    .manifest a:focus-visible .key {
+        text-decoration: underline;
+        text-underline-offset: 0.2em;
+    }
+
+    .manifest-note {
+        margin-top: var(--space-3);
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    @media (max-width: 36rem) {
+        .group ul {
+            flex-direction: column;
         }
     }
 </style>

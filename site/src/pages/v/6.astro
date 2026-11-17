@@ -3,12 +3,14 @@
 // pressing one sends it across in blocks, through the gate, to the other side. Below it: four
 // cards that stack as the page scrolls, each one a reason the file stays yours; the three ways to
 // hold the tool; and the install box.
+//
+// Its own toy box: mint ground, deep green ink, tomato for the thing to press, and every block
+// drawn with a thick ink outline and a hard offset shadow, like something cut from card. The
+// footer is a keyboard: three big keys for the ways in, and a row of small keys for the rest.
 import InstallTabs from "../../components/InstallTabs.astro";
 import Btn from "../../components/preview/Btn.astro";
-import Cmd from "../../components/preview/Cmd.astro";
-import End from "../../components/preview/End.astro";
-import { INSTALL, REPO } from "../../data/links";
-import { QUICK_INSTALL } from "../../data/preview";
+import { INSTALL } from "../../data/links";
+import { END_LINKS, QUICK_INSTALL, WAYS } from "../../data/preview";
 import Preview from "../../layouts/Preview.astro";
 
 const files = [
@@ -41,24 +43,6 @@ const reasons = [
     },
 ];
 
-const ways = [
-    {
-        title: "In your browser",
-        body: "A page on your own machine: pick files, show the ticket as a QR code, watch transfers move.",
-        lines: ["sluice ui"],
-    },
-    {
-        title: "In a terminal",
-        body: "Two commands, pipes, JSON output and stable exit codes for scripts.",
-        lines: ["sluice send ./holiday-video"],
-    },
-    {
-        title: "Through your AI assistant",
-        body: "A Model Context Protocol server in the same binary, with seven tools and no open port.",
-        lines: ["sluice mcp --root ~/Transfers"],
-    },
-];
-
 const words = ["No account", "No upload", "No waiting on a server", "No copy left behind", "No telemetry"];
 ---
 
@@ -79,8 +63,8 @@ const words = ["No account", "No upload", "No waiting on a server", "No copy lef
                     watch what it does with it.
                 </p>
                 <div class="btn-row">
-                    <Btn href="#v6-install">Install Sluice</Btn>
-                    <Btn href={REPO} quiet>Source on GitHub</Btn>
+                    <Btn href={WAYS.people.href}>Send a file</Btn>
+                    <Btn href="#v6-install" quiet>Install Sluice</Btn>
                 </div>
             </div>
 
@@ -171,11 +155,12 @@ const words = ["No account", "No upload", "No waiting on a server", "No copy lef
         <h2 id="v6-ways" data-split>Hold it the way you like</h2>
         <ul class="ways">
             {
-                ways.map((way) => (
-                    <li class="glow" data-tilt="5">
-                        <h3>{way.title}</h3>
-                        <p>{way.body}</p>
-                        <Cmd lines={way.lines} />
+                [WAYS.people, WAYS.developers, WAYS.agents].map((way) => (
+                    <li>
+                        <p class="way-who">{way.who}</p>
+                        <h3>{way.name}</h3>
+                        <p>{way.now.replaceAll("`", "")}</p>
+                        <a href={way.href}>{way.action}</a>
                     </li>
                 ))
             }
@@ -194,12 +179,32 @@ const words = ["No account", "No upload", "No waiting on a server", "No copy lef
         <InstallTabs name="v6" options={QUICK_INSTALL} />
     </section>
 
-    <End
-        slot="end"
-        kit
-        title="Your turn."
-        body="Free and open source. The toy above is a drawing; the real thing is two commands."
-    />
+    <footer class="keys" slot="end">
+        <div class="wrap">
+            <h2 class="keys-title">Your turn.</h2>
+            <div class="big-keys">
+                {
+                    [
+                        ["I have a file to send", WAYS.people.href],
+                        ["I use a terminal", WAYS.developers.href],
+                        ["I run an AI assistant", WAYS.agents.href],
+                    ].map(([text, href]) => (
+                        <a class="key big" href={href}>
+                            {text}
+                        </a>
+                    ))
+                }
+            </div>
+            <nav class="small-keys" aria-label="Everything else">
+                {[...END_LINKS.use.slice(3), ...END_LINKS.understand, ...END_LINKS.project].map(([text, href]) => (
+                    <a class="key" href={href}>
+                        {text}
+                    </a>
+                ))}
+            </nav>
+            <p class="keys-note">Free and open source. The toy above is a drawing; the real thing is two commands.</p>
+        </div>
+    </footer>
 </Preview>
 
 <script>
@@ -274,12 +279,10 @@ const words = ["No account", "No upload", "No waiting on a server", "No copy lef
         gap: var(--space-2);
         min-height: 19.5rem;
         padding: var(--space-2) var(--space-3) var(--space-3);
-        border: 1px solid color-mix(in srgb, var(--line-strong) 70%, transparent);
-        border-radius: var(--radius-l);
-        background: color-mix(in srgb, var(--basin) 58%, transparent);
-        box-shadow:
-            inset 0 1px 0 color-mix(in srgb, var(--ink) 10%, transparent),
-            0 40px 70px -40px var(--shadow-color);
+        border: 3px solid var(--ink);
+        border-radius: 18px;
+        background: color-mix(in srgb, var(--basin) 70%, transparent);
+        box-shadow: 6px 6px 0 var(--ink);
         backdrop-filter: blur(20px) saturate(1.5);
         -webkit-backdrop-filter: blur(20px) saturate(1.5);
     }
@@ -629,7 +632,7 @@ const words = ["No account", "No upload", "No waiting on a server", "No copy lef
     .ways {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: var(--space-2);
+        gap: var(--space-3);
         margin-top: var(--space-4);
     }
 
@@ -638,25 +641,68 @@ const words = ["No account", "No upload", "No waiting on a server", "No copy lef
         flex-direction: column;
         gap: 0.8rem;
         padding: var(--space-3);
-        border: 1px solid var(--line);
-        border-radius: var(--radius-l);
-        background: linear-gradient(165deg, var(--stone), color-mix(in srgb, var(--stone) 45%, transparent));
+        border: 3px solid var(--ink);
+        border-radius: 18px;
+        background: var(--stone);
+        box-shadow: 6px 6px 0 var(--ink);
+    }
+
+    .ways li:nth-child(2) {
+        background: color-mix(in srgb, var(--water) 22%, var(--stone));
+        rotate: 1deg;
+    }
+
+    .ways li:nth-child(3) {
+        background: color-mix(in srgb, var(--brass) 18%, var(--stone));
+        rotate: -1deg;
+    }
+
+    .way-who {
+        align-self: start;
+        padding: 0.15rem 0.6rem;
+        border: 2px solid var(--ink);
+        border-radius: var(--radius-pill);
+        font-size: var(--step--1);
+        font-weight: 700;
     }
 
     .ways h3 {
         font-size: var(--step-2);
-        font-stretch: 112%;
-        font-weight: 740;
+        font-stretch: 125%;
+        font-weight: 900;
+        line-height: 1;
         letter-spacing: -0.03em;
     }
 
-    .ways p {
+    .ways p:not(.way-who) {
         color: var(--mist);
         line-height: 1.5;
     }
 
-    .ways :global(.cmd) {
+    .ways a {
+        align-self: start;
         margin-top: auto;
+        padding: 0.55rem 1.1rem;
+        border: 3px solid var(--ink);
+        border-radius: 12px;
+        background: var(--brass);
+        color: var(--brass-ink);
+        font-weight: 800;
+        text-decoration: none;
+        box-shadow: 3px 3px 0 var(--ink);
+        transition:
+            translate 120ms ease,
+            box-shadow 120ms ease;
+    }
+
+    .ways a:hover {
+        translate: -1px -1px;
+        box-shadow: 4px 4px 0 var(--ink);
+    }
+
+    .ways a:active {
+        translate: 3px 3px;
+        box-shadow: 0 0 0 var(--ink);
     }
 
     .install-section {
@@ -732,5 +778,138 @@ const words = ["No account", "No upload", "No waiting on a server", "No copy lef
         .sheet code {
             grid-column: auto;
         }
+    }
+
+    /* The footer: a keyboard. Keys press down when pressed. */
+    .keys {
+        margin-top: var(--section);
+        padding-block: var(--space-5) var(--space-4);
+        border-top: 3px solid var(--ink);
+        background: color-mix(in srgb, var(--water) 18%, var(--basin));
+    }
+
+    .keys-title {
+        font-size: clamp(3rem, 1.4rem + 6vw, 7rem);
+        font-stretch: 125%;
+        font-weight: 900;
+        line-height: 0.9;
+        letter-spacing: -0.05em;
+    }
+
+    .big-keys {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-2);
+        margin-top: var(--space-4);
+    }
+
+    .key {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.5rem 0.9rem;
+        border: 3px solid var(--ink);
+        border-radius: 12px;
+        background: var(--stone);
+        color: var(--ink);
+        font-weight: 700;
+        text-decoration: none;
+        box-shadow: 0 5px 0 var(--ink);
+        transition:
+            translate 100ms ease,
+            box-shadow 100ms ease;
+    }
+
+    .key:hover {
+        background: var(--brass-soft);
+    }
+
+    .key:active {
+        translate: 0 5px;
+        box-shadow: 0 0 0 var(--ink);
+    }
+
+    .key.big {
+        min-height: 6.5rem;
+        align-items: flex-end;
+        padding: var(--space-2);
+        border-radius: 18px;
+        font-size: var(--step-1);
+        font-stretch: 115%;
+        font-weight: 900;
+        line-height: 1.1;
+        box-shadow: 0 8px 0 var(--ink);
+    }
+
+    .key.big:first-child {
+        background: var(--brass);
+        color: var(--brass-ink);
+    }
+
+    .key.big:active {
+        translate: 0 8px;
+    }
+
+    .small-keys {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.9rem 0.7rem;
+        margin-top: var(--space-4);
+        font-size: var(--step--1);
+    }
+
+    .keys-note {
+        margin-top: var(--space-4);
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    @media (max-width: 56rem) {
+        .big-keys {
+            grid-template-columns: 1fr;
+        }
+
+        .key.big {
+            min-height: 0;
+        }
+
+        .ways li:nth-child(n) {
+            rotate: none;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .key,
+        .ways a {
+            transition: none;
+        }
+    }
+</style>
+
+<style is:global>
+    /* Version 6's own toy box: mint and deep green, tomato for the thing to press. */
+    body.preview-6 {
+        --basin: light-dark(#d8f5e6, #0e2a1c);
+        --basin-deep: light-dark(#c4ecd7, #08200f);
+        --stone: light-dark(#ffffff, #163a28);
+        --stone-2: light-dark(#f2fbf6, #1c4631);
+        --line: light-dark(#9fd3b8, #2c5a42);
+        --line-strong: light-dark(#0e2a1c, #8fe3b8);
+        --ink: light-dark(#0e2a1c, #d8f5e6);
+        --mist: light-dark(#35594a, #a6cfb8);
+        --link: var(--ink);
+        --water: light-dark(#2fbf8a, #4fe0a6);
+        --water-deep: light-dark(#1d8a62, #2fbf8a);
+        --water-soft: light-dark(rgb(47 191 138 / 0.14), rgb(79 224 166 / 0.12));
+        --brass: #ff5e3a;
+        --brass-ink: light-dark(#fff, #0e2a1c);
+        --brass-soft: light-dark(rgb(255 94 58 / 0.14), rgb(255 94 58 / 0.18));
+        --glass: light-dark(rgb(216 245 230 / 0.82), rgb(14 42 28 / 0.75));
+        --glow: var(--brass);
+        background: var(--basin);
+    }
+
+    body.preview-6 :is(h1, h2) {
+        font-stretch: 125%;
+        font-weight: 900;
     }
 </style>

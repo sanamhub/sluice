@@ -1,4 +1,4 @@
-// The two families the page sets, read from the pinned fontsource packages so the files, weights
+// The families the pages set, read from the pinned fontsource packages so the files, weights
 // and unicode ranges always match the package version. Astro writes the @font-face rules, copies
 // the files under /_astro and generates metric-matched fallbacks, so text does not move when a
 // face arrives. Both families are self-hosted: the page requests no other origin.
@@ -69,6 +69,21 @@ export const fonts = [
                 "100 900",
                 "normal",
                 "62% 125%",
+            ),
+        ],
+        ["sans-serif"],
+    ),
+    // Only preview 2 sets it: a friendly grotesque for the version written for everyone.
+    family(
+        "Bricolage Grotesque",
+        "--font-friendly",
+        [
+            variant(
+                "@fontsource-variable/bricolage-grotesque",
+                "index.css",
+                "latin",
+                "200 800",
+                "normal",
             ),
         ],
         ["sans-serif"],
