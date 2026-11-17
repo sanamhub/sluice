@@ -32,8 +32,8 @@ fn an_alpn_case_must_match_the_registration_order_and_what_is_served() {
     let cases = [
         (0, "/iroh-bytes/4", true),
         (1, "sluice/1", true),
-        (2, "/sluice/pair/1", false),
-        (3, "/sluice/deliver/1", false),
+        (2, "/sluice/pair/1", true),
+        (3, "/sluice/deliver/1", true),
         (4, "/sluice/control/1", false),
     ];
     let body: Vec<String> = cases
@@ -60,8 +60,8 @@ fn an_alpn_case_must_match_the_registration_order_and_what_is_served() {
     );
 
     let served = body.join(", ").replace(
-        r#"{ "index": 2, "alpn": "/sluice/pair/1", "served": false }"#,
         r#"{ "index": 2, "alpn": "/sluice/pair/1", "served": true }"#,
+        r#"{ "index": 2, "alpn": "/sluice/pair/1", "served": false }"#,
     );
     let dir = TempDir::new("alpn-served");
     dir.write(
@@ -71,7 +71,7 @@ fn an_alpn_case_must_match_the_registration_order_and_what_is_served() {
     let report = check(dir.path()).expect("run");
     assert_eq!(report.failed, 1, "{:?}", report.lines);
     assert!(
-        report.lines.join("\n").contains("is served: false"),
+        report.lines.join("\n").contains("is served: true"),
         "{:?}",
         report.lines
     );

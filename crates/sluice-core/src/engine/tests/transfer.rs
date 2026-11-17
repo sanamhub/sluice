@@ -194,6 +194,7 @@ async fn a_stdin_send_leaves_none_of_its_bytes_in_the_home() {
     let root = match outgoing.ticket.body() {
         Body::Static { root, .. } => *root,
         Body::Live { .. } => panic!("a live ticket"),
+        Body::Pairing { .. } => panic!("a pairing ticket"),
     };
     let (serve_tx, _serve_rx) = tokio::sync::mpsc::unbounded_channel();
     let serve = tokio::spawn(async move { outgoing.serve(Keep::One, &serve_tx).await });

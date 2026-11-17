@@ -26,6 +26,7 @@ pub(super) fn refuse_receipt_without_a_whole_transfer(
     }
     let why = match ticket.body() {
         Body::Live { .. } => Some("a live ticket has no root for a receipt to name"),
+        Body::Pairing { .. } => Some("a pairing ticket names no content"),
         Body::Static { .. } if args.out.as_path() == std::path::Path::new("-") => {
             Some("standard output carries the content, and a receipt goes to a file")
         }
@@ -57,6 +58,7 @@ pub(super) fn refuse_delta_without_a_transfer(
     };
     let why = match ticket.body() {
         Body::Live { .. } => Some("a live stream is not a file to rebuild"),
+        Body::Pairing { .. } => Some("a pairing ticket names no content"),
         Body::Static { .. } if args.out.as_path() == std::path::Path::new("-") => {
             Some("standard output carries the content, and nothing is assembled for it")
         }

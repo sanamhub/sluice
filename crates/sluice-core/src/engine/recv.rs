@@ -368,6 +368,9 @@ fn static_root(ticket: &Ticket) -> Result<[u8; 32], Error> {
         Body::Live { .. } => Err(Error::Policy(
             "this is a live ticket, not supported yet".to_string(),
         )),
+        Body::Pairing { .. } => Err(Error::Policy(
+            "a pairing ticket names no content to receive".to_string(),
+        )),
     }
 }
 

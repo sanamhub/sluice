@@ -106,6 +106,9 @@ async fn stream(
         Body::Live { .. } => Err(Error::Policy(
             "this is a live ticket, not supported yet".to_string(),
         )),
+        Body::Pairing { .. } => Err(Error::Policy(
+            "a pairing ticket names no content to receive".to_string(),
+        )),
     }
 }
 

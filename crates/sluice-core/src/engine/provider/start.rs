@@ -156,22 +156,31 @@ impl Provider {
         let (receivers, receivers_rx) = unbounded_channel();
         let ids = Arc::new(ConnIds::default());
         let places = Arc::new(Mutex::new(policy::Places::default()));
-        let completion = endpoint::Completion {
-            sender: receivers.clone(),
-            ids: Arc::clone(&ids),
+        // A send in a process that started the daemon's listener installs its protocols there, so
+        // the daemon has one endpoint id whether or not a send is running. Every other send binds
+        // an endpoint of its own.
+        let (endpoint, attached) = match crate::engine::paired::attach_for(home).await? {
+            Some(attached) => (attached.endpoint().clone(), Some(attached)),
+            None => {
+                let completion = endpoint::Completion {
+                    sender: receivers.clone(),
+                    ids: Arc::clone(&ids),
+                };
+                let endpoint = open_endpoint(home, &relay, congestion, port, completion).await?;
+                if let Some(port) = endpoint
+                    .bound_sockets()
+                    .first()
+                    .map(std::net::SocketAddr::port)
+                {
+                    home.save_port(port);
+                }
+                if !matches!(relay, RelayModeChoice::Disabled | RelayModeChoice::Loopback) {
+                    endpoint::wait_for_online(&endpoint).await?;
+                }
+                endpoint::wait_for_direct_addr(&endpoint).await?;
+                (endpoint, None)
+            }
         };
-        let endpoint = open_endpoint(home, &relay, congestion, port, completion).await?;
-        if let Some(port) = endpoint
-            .bound_sockets()
-            .first()
-            .map(std::net::SocketAddr::port)
-        {
-            home.save_port(port);
-        }
-        if !matches!(relay, RelayModeChoice::Disabled | RelayModeChoice::Loopback) {
-            endpoint::wait_for_online(&endpoint).await?;
-        }
-        endpoint::wait_for_direct_addr(&endpoint).await?;
         let (done, done_rx) = unbounded_channel();
         let allowed_for_delta = Arc::clone(&allowed);
         let policy = policy::start_shared(
@@ -197,12 +206,21 @@ impl Provider {
             )
         });
         let sluice = SluiceProtocol::serving(live, Arc::clone(&receipts), delta.clone());
-        let router = Router::builder(endpoint.clone())
-            .accept(iroh_blobs::ALPN, blobs)
-            .accept(ALPN, sluice)
-            .spawn();
+        let router = match &attached {
+            Some(attached) => {
+                attached.install(blobs, sluice)?;
+                None
+            }
+            None => Some(
+                Router::builder(endpoint.clone())
+                    .accept(iroh_blobs::ALPN, blobs)
+                    .accept(ALPN, sluice)
+                    .spawn(),
+            ),
+        };
         Ok(Self {
-            router: Some(router),
+            router,
+            attached,
             endpoint,
             store,
             policy,

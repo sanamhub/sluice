@@ -15,6 +15,7 @@ use std::fmt;
 use std::net::SocketAddr;
 
 use crate::Error;
+use crate::device::Grant;
 
 /// The text every ticket starts with. A decoder ignores its case.
 const PREFIX: &str = "sluice1";
@@ -103,6 +104,13 @@ pub enum Body {
         /// The Ed25519 key that signs the stream.
         sender_key: [u8; 32],
     },
+    /// An invitation to pair a device with a daemon, `kind` 2. `SPEC.md` section 4.
+    Pairing {
+        /// The credential the pairing stream carries, 32 bytes from a cryptographic source.
+        secret: [u8; 32],
+        /// The grant the daemon writes when the ticket is redeemed.
+        grant: Grant,
+    },
 }
 
 impl fmt::Debug for Body {
@@ -110,6 +118,7 @@ impl fmt::Debug for Body {
         match self {
             Body::Static { .. } => f.write_str("Static(<redacted>)"),
             Body::Live { .. } => f.write_str("Live(<redacted>)"),
+            Body::Pairing { .. } => f.write_str("Pairing(<redacted>)"),
         }
     }
 }
@@ -191,6 +200,11 @@ impl Ticket {
                  serializes it, such as https://relay.example/",
                 fault.describe()
             )));
+        }
+        if matches!(&body, Body::Pairing { .. }) && expiry.is_none() {
+            return Err(refuse(
+                "is a pairing ticket with no expiry, and every pairing ticket expires",
+            ));
         }
         key::check(&endpoint_id, &body)?;
         let ticket = Self {
@@ -317,6 +331,7 @@ impl fmt::Debug for Ticket {
         let kind = match self.body {
             Body::Static { .. } => "static",
             Body::Live { .. } => "live",
+            Body::Pairing { .. } => "pairing",
         };
         let id: String = self
             .endpoint_id

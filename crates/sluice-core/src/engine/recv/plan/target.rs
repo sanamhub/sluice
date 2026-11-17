@@ -18,6 +18,7 @@ pub(in crate::engine) fn check_promised(ticket: &Ticket, bytes: u64) -> Result<(
     let promised = match ticket.body() {
         Body::Static { size, .. } => *size,
         Body::Live { .. } => 0,
+        Body::Pairing { .. } => 0,
     };
     if promised != bytes {
         return Err(Error::Policy(format!(

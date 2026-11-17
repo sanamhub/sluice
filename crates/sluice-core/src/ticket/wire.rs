@@ -10,6 +10,7 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use super::{Body, Format, Ticket, VERSION, key, refuse, relay};
 use crate::Error;
+use crate::device::Grant;
 
 /// The shortest address: a tag byte, 4 address bytes and a one-byte port.
 const SHORTEST_ADDR: usize = 6;
@@ -39,6 +40,10 @@ pub(super) fn write(ticket: &Ticket) -> Vec<u8> {
             put(&mut out, stream_id);
             put(&mut out, sender_key);
         }
+        Body::Pairing { secret, grant } => {
+            put(&mut out, secret);
+            put(&mut out, &grant.wire());
+        }
     }
     out
 }
@@ -56,6 +61,7 @@ fn kind_byte(body: &Body) -> u8 {
     match body {
         Body::Static { .. } => 0,
         Body::Live { .. } => 1,
+        Body::Pairing { .. } => 2,
     }
 }
 
@@ -70,18 +76,25 @@ pub(super) fn read(bytes: &[u8]) -> Result<Ticket, Error> {
     let mut reader = Reader { rest: bytes };
     let _version: u8 = reader.take()?;
     let kind: u8 = reader.take()?;
-    if kind > 1 {
-        return Err(refuse("kind is not 0 or 1"));
+    if kind > 2 {
+        return Err(refuse("kind is not 0, 1 or 2"));
     }
     let endpoint_id = reader.take()?;
     let addrs = reader.addrs()?;
     let relay_url: Option<String> = reader.take()?;
-    let expiry = reader.take()?;
-    let body = if kind == 0 {
-        reader.static_body()?
-    } else {
-        reader.live_body()?
+    let expiry: Option<u64> = reader.take()?;
+    let body = match kind {
+        0 => reader.static_body()?,
+        1 => reader.live_body()?,
+        _ => reader.pairing_body()?,
     };
+    if matches!(&body, Body::Pairing { .. }) && expiry.is_none() {
+        // Rule 3: the field is required for a Pairing body, so its absence is a decoding rule and
+        // not the clock's.
+        return Err(refuse(
+            "is a pairing ticket with no expiry, which rule 3 requires",
+        ));
+    }
     if !reader.rest.is_empty() {
         return Err(refuse("has bytes after the body"));
     }
@@ -147,5 +160,12 @@ impl Reader<'_> {
             stream_id,
             sender_key,
         })
+    }
+
+    fn pairing_body(&mut self) -> Result<Body, Error> {
+        let secret = self.take()?;
+        let grant =
+            Grant::from_wire(self.take::<u8>()?).ok_or_else(|| refuse("grant is not 0 or 1"))?;
+        Ok(Body::Pairing { secret, grant })
     }
 }

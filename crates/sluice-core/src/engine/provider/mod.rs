@@ -32,6 +32,8 @@ const SETTLE: Duration = Duration::from_millis(250);
 /// A listening provider. It holds the store open and answers only its allowed hashes.
 pub struct Provider {
     router: Option<Router>,
+    /// The daemon endpoint's claim, for a send that attached there instead of binding its own.
+    attached: Option<super::paired::Attached>,
     endpoint: Endpoint,
     store: FsStore,
     policy: policy::Policy,
@@ -75,7 +77,7 @@ impl Drop for Provider {
     /// holds is handed to the next command in this process, which closes it before it opens its
     /// own, so the database is free for the next send that imports into the same home.
     fn drop(&mut self) {
-        if self.router.is_some() {
+        if self.router.is_some() || self.attached.is_some() {
             storage::hand_on(Some(self.store.clone()), self._dir.take());
         }
     }
@@ -260,6 +262,9 @@ impl Provider {
     }
 
     async fn shutdown_router(&mut self) -> Result<(), Error> {
+        // Dropping the claim clears the daemon endpoint's slots, which drops the protocols and
+        // closes the store with them.
+        drop(self.attached.take());
         if let Some(router) = self.router.take() {
             router
                 .shutdown()

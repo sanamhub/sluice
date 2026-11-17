@@ -26,6 +26,7 @@ noq.workspace = true
 postcard.workspace = true
 rustls.workspace = true
 serde.workspace = true
+subtle.workspace = true
 serde_json.workspace = true
 sluice-delta = { path = "../sluice-delta" }
 sluice-live = { path = "../sluice-live" }

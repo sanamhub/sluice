@@ -16,7 +16,7 @@ use crate::Error;
 ///
 /// The file keeps the access of the folder it is in on Windows. Use [`write_atomic_secret`] for a
 /// file that must not.
-pub(super) fn write_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), Error> {
+pub(crate) fn write_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), Error> {
     write_with(dir, name, bytes, |_| Ok(()))
 }
 

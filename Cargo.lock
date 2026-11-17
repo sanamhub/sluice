@@ -4352,6 +4352,7 @@ dependencies = [
  "serde_json",
  "sluice-delta",
  "sluice-live",
+ "subtle",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",

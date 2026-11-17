@@ -13,6 +13,7 @@ mod inspect;
 mod live;
 mod net;
 mod object;
+mod paired;
 mod policy;
 mod rate;
 mod receipts;
@@ -45,6 +46,7 @@ pub use object::reparse_tag;
 pub use object::{
     Facts, ObjectId, Pins, facts, is_link, is_name_surrogate_tag, open_file, open_folder, volume_of,
 };
+pub use paired::{Attached, InboxFolder, Listener, PairTicket, attach_for};
 pub use policy::access_modes;
 pub use rate::Rate;
 pub use receipts::parse_request;
