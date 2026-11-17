@@ -1,0 +1,11 @@
+{
+  "description": "The iroh-blobs event mask a provider registers, SPEC.md section 5: one case per event, with the mode of a send that has no rate limit and the mode of one that has one",
+  "cases": [
+    { "event": "connected", "mode": "notify" },
+    { "event": "get", "mode": "intercept_log" },
+    { "event": "get_many", "mode": "intercept" },
+    { "event": "observe", "mode": "intercept" },
+    { "event": "push", "mode": "disabled" },
+    { "event": "throttle", "mode": "none", "mode_when_limited": "intercept" }
+  ]
+}

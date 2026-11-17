@@ -14,6 +14,8 @@ disagrees, and `cargo nextest run` runs the same check.
 
 ```
 tests/vectors/
+  alpn/         the order a listener registers its ALPNs in, SPEC.md section 3
+  access/       the iroh-blobs event mask a provider registers, SPEC.md section 5
   paths/        manifest path rules, SPEC.md section 8
   tickets/      ticket text and bytes, SPEC.md section 4
   manifests/    directory manifests as bytes, SPEC.md section 8
@@ -397,6 +399,47 @@ folder is a clash unless the caller asked to replace it or the transfer is resum
 Only the top-level name is a rule of this kind. A nested path is accepted here; its ancestors and
 its own target are checked against the output folder, which needs a file system and is covered by
 the engine tests.
+
+## `alpn/`
+
+These vectors pin the order a listener registers its ALPNs in, which is the order iroh negotiates
+by: a connection that offers several takes the first name in this order that the listener serves. A
+case is one position of that order:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `index` | integer | The position in the registration order, from 0 |
+| `alpn` | string | The ALPN at that position, as its bytes |
+| `served` | boolean | Whether this release serves it |
+
+A listener serves every case with `served` true and none with `served` false, and a connection that
+offers only a `served` false ALPN is closed at the handshake. The three names ADR 0039 adds are
+listed before they exist, so the order is fixed once. Every position of the implementation's order
+has one case, and the runner fails when the lengths differ.
+
+To check an implementation: read its registration order and compare every case. A dialer that
+follows `SPEC.md` section 3 offers one ALPN, so this order decides only a peer that offers more than
+one; a listener MAY close such a connection.
+
+## `access/`
+
+These vectors pin the `iroh-blobs` event mask a provider registers, so no request type is outside
+the policy of `SPEC.md` section 5. A case is one event:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `event` | string | The event's field in the mask: `connected`, `get`, `get_many`, `observe`, `push` or `throttle` |
+| `mode` | string | The mode with no rate limit: `none`, `notify`, `intercept`, `intercept_log` or `disabled` |
+| `mode_when_limited` | string | The mode when the send has a rate limit. Absent means the same as `mode` |
+
+The words are `iroh-blobs`'s: `disabled` means the crate refuses every request of that kind before
+the policy sees it, `intercept` means the policy answers each request, and `intercept_log` also
+delivers the request's update events, which is how a `get` is counted. `notify` and `none` are the
+modes without a decision.
+
+To check an implementation: read the mask it registers and compare every case. The vector must name
+every event of the mask and no other, and the runner fails when the two lists differ, so an event
+added to the mask cannot leave this file behind.
 
 ## `receipts/`
 

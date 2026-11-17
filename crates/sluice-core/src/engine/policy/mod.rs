@@ -6,7 +6,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use iroh_blobs::{Hash, provider::events::EventSender, store::fs::FsStore};
+use iroh_blobs::{
+    Hash,
+    provider::events::{ConnectMode, EventSender, ObserveMode, RequestMode, ThrottleMode},
+    store::fs::FsStore,
+};
 use n0_future::task::AbortOnDropHandle;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -124,6 +128,74 @@ pub fn start_shared(
         totals,
         asked,
         _task: task,
+    }
+}
+
+/// The event mask a provider registers, event by event: the mode of a send with no rate limit, and
+/// the mode of one with a limit. The `access/` vectors are this list, and the conformance runner
+/// compares them with the mask [`start_shared`] really registers, so a change here cannot leave
+/// `SPEC.md` section 5 behind.
+pub fn access_modes() -> [(&'static str, &'static str, &'static str); 6] {
+    let plain = mask(false);
+    let limited = mask(true);
+    [
+        (
+            "connected",
+            connect_mode(plain.connected),
+            connect_mode(limited.connected),
+        ),
+        ("get", request_mode(plain.get), request_mode(limited.get)),
+        (
+            "get_many",
+            request_mode(plain.get_many),
+            request_mode(limited.get_many),
+        ),
+        (
+            "observe",
+            observe_mode(plain.observe),
+            observe_mode(limited.observe),
+        ),
+        ("push", request_mode(plain.push), request_mode(limited.push)),
+        (
+            "throttle",
+            throttle_mode(plain.throttle),
+            throttle_mode(limited.throttle),
+        ),
+    ]
+}
+
+fn connect_mode(mode: ConnectMode) -> &'static str {
+    match mode {
+        ConnectMode::None => "none",
+        ConnectMode::Notify => "notify",
+        ConnectMode::Intercept => "intercept",
+    }
+}
+
+fn request_mode(mode: RequestMode) -> &'static str {
+    match mode {
+        RequestMode::None => "none",
+        RequestMode::Notify => "notify",
+        RequestMode::Intercept => "intercept",
+        RequestMode::NotifyLog => "notify_log",
+        RequestMode::InterceptLog => "intercept_log",
+        RequestMode::Disabled => "disabled",
+    }
+}
+
+fn observe_mode(mode: ObserveMode) -> &'static str {
+    match mode {
+        ObserveMode::None => "none",
+        ObserveMode::Notify => "notify",
+        ObserveMode::Intercept => "intercept",
+        ObserveMode::Disabled => "disabled",
+    }
+}
+
+fn throttle_mode(mode: ThrottleMode) -> &'static str {
+    match mode {
+        ThrottleMode::None => "none",
+        ThrottleMode::Intercept => "intercept",
     }
 }
 
