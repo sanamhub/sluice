@@ -7,10 +7,10 @@ use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio_websockets::{Message, WebSocketStream};
 
-use crate::wire::{ClientMsg, ErrorCode, Role, ServerMsg, MAX_FRAME};
+use crate::wire::{ClientMsg, ErrorCode, MAX_FRAME, Role, ServerMsg};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -348,10 +348,10 @@ where
         }
     }
 
-    if let (Some(p), Some(r)) = (plate, role) {
-        if attached {
-            place.disconnected(p, r);
-        }
+    if let (Some(p), Some(r)) = (plate, role)
+        && attached
+    {
+        place.disconnected(p, r);
     }
     place.disconnect_conn(ip);
 }

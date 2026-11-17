@@ -4,10 +4,10 @@
 //! through HKDF-SHA256 with the transcript as salt; two confirmation tags and one AEAD key come out.
 
 use ring::aead::{self, Aad, LessSafeKey, Nonce, UnboundKey};
-use subtle::ConstantTimeEq;
 use ring::hkdf::{self, KeyType, Salt};
 use ring::rand::{SecureRandom, SystemRandom};
 use spake2::{Ed25519Group, Identity, Password, Spake2};
+use subtle::ConstantTimeEq;
 
 use crate::code::Code;
 use crate::wire::Role;
@@ -34,8 +34,10 @@ impl Started {
     pub fn new(role: Role, code: &Code) -> Self {
         let plate = code.nameplate;
         let password = Password::new(code.password().as_bytes());
-        let sender = Identity::new(format!("sluice short code v1/nameplate/{plate}/sender").as_bytes());
-        let receiver = Identity::new(format!("sluice short code v1/nameplate/{plate}/receiver").as_bytes());
+        let sender =
+            Identity::new(format!("sluice short code v1/nameplate/{plate}/sender").as_bytes());
+        let receiver =
+            Identity::new(format!("sluice short code v1/nameplate/{plate}/receiver").as_bytes());
         let (state, outbound) = match role {
             Role::Sender => Spake2::<Ed25519Group>::start_a(&password, &sender, &receiver),
             Role::Receiver => Spake2::<Ed25519Group>::start_b(&password, &sender, &receiver),
@@ -91,12 +93,18 @@ impl Keys {
     /// Constant-time check of the tag the other side sent for its role.
     pub fn verify(&self, role: Role, tag: &[u8; 32]) -> Result<(), CryptoError> {
         let expected = self.confirmation(role);
-        if expected.ct_eq(tag).into() { Ok(()) } else { Err(CryptoError::WrongTag) }
+        if expected.ct_eq(tag).into() {
+            Ok(())
+        } else {
+            Err(CryptoError::WrongTag)
+        }
     }
 
     pub fn seal(&self, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let mut nonce = [0u8; 12];
-        SystemRandom::new().fill(&mut nonce).map_err(|_| CryptoError::Rng)?;
+        SystemRandom::new()
+            .fill(&mut nonce)
+            .map_err(|_| CryptoError::Rng)?;
         let key = LessSafeKey::new(
             UnboundKey::new(&aead::CHACHA20_POLY1305, &self.aead).map_err(|_| CryptoError::Aead)?,
         );
@@ -179,8 +187,16 @@ mod tests {
         let b_keys = b.finish(&a_msg).unwrap();
         assert_eq!(a_keys.confirm_sender, b_keys.confirm_sender);
         assert_eq!(a_keys.confirm_receiver, b_keys.confirm_receiver);
-        assert!(b_keys.verify(Role::Sender, &a_keys.confirmation(Role::Sender)).is_ok());
-        assert!(a_keys.verify(Role::Receiver, &b_keys.confirmation(Role::Receiver)).is_ok());
+        assert!(
+            b_keys
+                .verify(Role::Sender, &a_keys.confirmation(Role::Sender))
+                .is_ok()
+        );
+        assert!(
+            a_keys
+                .verify(Role::Receiver, &b_keys.confirmation(Role::Receiver))
+                .is_ok()
+        );
     }
 
     #[test]
@@ -190,7 +206,11 @@ mod tests {
         let (a_msg, b_msg) = (a.outbound.clone(), b.outbound.clone());
         let a_keys = a.finish(&b_msg).unwrap();
         let b_keys = b.finish(&a_msg).unwrap();
-        assert!(a_keys.verify(Role::Receiver, &b_keys.confirmation(Role::Receiver)).is_err());
+        assert!(
+            a_keys
+                .verify(Role::Receiver, &b_keys.confirmation(Role::Receiver))
+                .is_err()
+        );
     }
 
     #[test]
