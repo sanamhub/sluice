@@ -55,7 +55,10 @@ a self-hosted meeting point that carries none of the file. Every at-rest budget 
 - In-process bindings for Python, Node, Swift and Kotlin, and the C header.
 - Delta transfers.
 - Mount on Linux and Windows, and on macOS through FSKit if it is ready.
-- Short codes, paired devices, signed receipts.
+- Short codes, and signed receipts.
+- Paired devices: a daemon keeps the endpoint ids it trusts, each with a `deliver` or `control`
+  grant, so one computer sends into another's inbox without a ticket, and a second computer drives
+  the daemon. [ADR 0039](adr/0039-paired-devices-and-remote-control.md)
 - Fan-out to several receivers, and fetching from several providers at once.
 - The TCP bulk path, if the transport measurement left it out of 1.0.
 
