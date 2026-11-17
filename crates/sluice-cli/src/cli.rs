@@ -7,12 +7,14 @@ use sluice_core::engine::Congestion;
 use crate::colour::ColorWhen;
 use crate::completions;
 use crate::daemon;
+use crate::deliver;
 use crate::doctor;
 use crate::id;
 use crate::inspect;
 use crate::mcp;
 use crate::output::Format;
 use crate::page;
+use crate::pair;
 use crate::{receipt, recv, send};
 
 /// The congestion controller as the command line spells it.
@@ -118,6 +120,17 @@ pub enum Command {
     /// holds the home's lock, so a command that opens the same home, `send` among them, is refused
     /// while it runs. `status` and `stop` call a daemon that runs.
     Daemon(daemon::DaemonArgs),
+    /// Pair a device with a running daemon, redeem a ticket, or list the daemons this device
+    /// paired with
+    ///
+    /// Without `--redeem` or `--list`, the daemon makes one ticket for one device and one grant.
+    /// The ticket is a secret: give it to the device, which redeems it once before it expires.
+    /// `--redeem` runs on that device, and keeps the daemon under a name here.
+    Pair(pair::PairArgs),
+    /// List, rename or revoke the devices a running daemon has granted
+    Devices(pair::DevicesArgs),
+    /// Hand a file or folder to a daemon this device paired with, which receives it into its inbox
+    Deliver(deliver::DeliverArgs),
     /// Serve the tools of Sluice to an MCP client over standard input and output
     ///
     /// The tools send, receive, inspect, list jobs, report a job, cancel and run the doctor. They
@@ -189,5 +202,25 @@ mod tests {
     #[test]
     fn an_unknown_controller_is_refused() {
         assert!(Cli::try_parse_from(["sluice", "send", "--congestion", "vegas", "a.bin"]).is_err());
+    }
+
+    /// A pairing ticket and the list of paired daemons are two different questions, so one command
+    /// asks one of them.
+    #[test]
+    fn pair_takes_a_ticket_or_a_list_and_no_other_grant_is_spelled() {
+        use super::Cli as Whole;
+        use crate::pair::GrantArg;
+
+        assert!(
+            Whole::try_parse_from(["sluice", "pair", "--list", "--redeem", "sluice1abc"]).is_err()
+        );
+        let cli =
+            Whole::try_parse_from(["sluice", "pair", "--grant", "control", "--ttl", "60"]).unwrap();
+        let Command::Pair(args) = cli.command else {
+            panic!("pair");
+        };
+        assert_eq!(args.grant, GrantArg::Control);
+        assert_eq!(args.ttl, Some(60));
+        assert!(Whole::try_parse_from(["sluice", "pair", "--grant", "admin"]).is_err());
     }
 }

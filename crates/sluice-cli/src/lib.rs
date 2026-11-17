@@ -6,6 +6,7 @@ mod cli;
 mod colour;
 mod completions;
 mod daemon;
+mod deliver;
 mod doctor;
 mod events;
 mod exit;
@@ -15,6 +16,7 @@ mod mcp;
 mod network;
 mod output;
 mod page;
+mod pair;
 mod qr;
 mod queue;
 mod receipt;
@@ -105,7 +107,7 @@ fn execute(command: Command, output: &Output) -> Result<u8, sluice_core::Error> 
     // nothing, and `id` and `completions` never make one. Best effort, and tried again next time.
     if matches!(
         &command,
-        Command::Send(_) | Command::Recv(_) | Command::Inspect(_)
+        Command::Send(_) | Command::Recv(_) | Command::Inspect(_) | Command::Deliver(_)
     ) {
         let _ = sluice_core::engine::sweep_temporary_store(std::time::SystemTime::now());
     }
@@ -118,6 +120,9 @@ fn execute(command: Command, output: &Output) -> Result<u8, sluice_core::Error> 
         Command::Receipt(args) => receipt::run(&args)?,
         Command::Doctor(args) => doctor::run(&args)?,
         Command::Daemon(args) => return daemon::run(&args, output),
+        Command::Pair(args) => return pair::run_pair(&args, output),
+        Command::Devices(args) => return pair::run_devices(&args, output),
+        Command::Deliver(args) => return deliver::run(&args, output),
         Command::Mcp(args) => return mcp::run(&args, output),
         Command::Ui(args) => return page::run(&args, output),
     };

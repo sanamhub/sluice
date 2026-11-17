@@ -7,9 +7,7 @@
 
 use std::{
     collections::BTreeMap,
-    fmt,
     path::{Path, PathBuf},
-    str::FromStr,
     sync::{Arc, Mutex},
 };
 
@@ -24,104 +22,26 @@ const FILE: &str = "devices.json";
 /// The version of that file this release writes and reads.
 const VERSION: u8 = 1;
 
+mod grant;
+pub use grant::Grant;
+
 /// The longest label `devices rename` accepts, in characters. A label is shown in a list and never
 /// used to find a device, so the bound is for the person reading it.
 pub const MAX_LABEL: usize = 64;
 
-/// What a paired device may do, as `SPEC.md` section 11.1 defines it. `control` includes what
-/// `deliver` allows.
-///
-/// # Examples
-///
-/// ```
-/// use sluice_core::device::Grant;
-///
-/// assert!(Grant::Control.includes(Grant::Deliver));
-/// assert!(!Grant::Deliver.includes(Grant::Control));
-/// assert_eq!(Grant::from_wire(0), Some(Grant::Deliver));
-/// assert_eq!(Grant::from_wire(2), None);
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Grant {
-    /// Hand the daemon a ticket and have it received into the inbox. The default.
-    Deliver,
-    /// Every call of the control interface, which includes what `deliver` allows.
-    Control,
-}
-
-impl Grant {
-    /// The byte a pairing ticket carries for this grant. `SPEC.md` section 4 gives the values.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use sluice_core::device::Grant;
-    ///
-    /// assert_eq!(Grant::Deliver.wire(), 0);
-    /// assert_eq!(Grant::Control.wire(), 1);
-    /// ```
-    pub fn wire(self) -> u8 {
-        match self {
-            Self::Deliver => 0,
-            Self::Control => 1,
-        }
+/// The label as it is stored: trimmed, 1 to [`MAX_LABEL`] characters, with no control character. A
+/// pairing ticket may name the device's label when it is made, and a rename may change it later.
+pub fn check_label(label: &str) -> Result<String, Error> {
+    let label = label.trim();
+    if label.is_empty() || label.chars().count() > MAX_LABEL {
+        return Err(Error::Policy(format!(
+            "a label is 1 to {MAX_LABEL} characters"
+        )));
     }
-
-    /// The grant a pairing ticket's byte names, or `None` for a byte no grant uses.
-    pub fn from_wire(byte: u8) -> Option<Self> {
-        match byte {
-            0 => Some(Self::Deliver),
-            1 => Some(Self::Control),
-            _ => None,
-        }
+    if label.chars().any(char::is_control) {
+        return Err(Error::Policy("a label has no control characters".into()));
     }
-
-    /// Whether this grant allows what `wanted` allows.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use sluice_core::device::Grant;
-    ///
-    /// assert!(Grant::Deliver.includes(Grant::Deliver));
-    /// assert!(Grant::Control.includes(Grant::Deliver));
-    /// assert!(!Grant::Deliver.includes(Grant::Control));
-    /// ```
-    pub fn includes(self, wanted: Self) -> bool {
-        matches!(
-            (self, wanted),
-            (Self::Control, _) | (Self::Deliver, Self::Deliver)
-        )
-    }
-
-    /// The word a list and a pairing command print.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Deliver => "deliver",
-            Self::Control => "control",
-        }
-    }
-}
-
-impl fmt::Display for Grant {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for Grant {
-    type Err = String;
-
-    fn from_str(text: &str) -> Result<Self, Self::Err> {
-        match text {
-            "deliver" => Ok(Self::Deliver),
-            "control" => Ok(Self::Control),
-            other => Err(format!(
-                "{other} is not a grant; the grants are deliver and control"
-            )),
-        }
-    }
+    Ok(label.to_string())
 }
 
 /// One device the daemon has a grant for.
@@ -261,14 +181,20 @@ impl Devices {
     }
 
     /// Writes a grant for `endpoint_id`, or keeps the one it has when that grant already includes
-    /// `grant`. The file is written before this returns, so a pairing that answered success is on
-    /// disk.
+    /// `grant`. `label` names a device that is new to the list, and a device that is already there
+    /// keeps the label it has. The file is written before this returns, so a pairing that answered
+    /// success is on disk.
     pub fn grant_to(
         &self,
         endpoint_id: [u8; 32],
         grant: Grant,
         paired_ms: u64,
+        label: Option<&str>,
     ) -> Result<Device, Error> {
+        let label = match label {
+            Some(label) => Some(check_label(label)?),
+            None => None,
+        };
         let mut state = self.lock();
         if state.broken {
             return Err(unreadable(&self.dir));
@@ -280,7 +206,7 @@ impl Devices {
         }
         let device = Device {
             endpoint_id,
-            label: default_label(&endpoint_id),
+            label: label.unwrap_or_else(|| default_label(&endpoint_id)),
             grant,
             paired_ms,
         };
@@ -301,20 +227,12 @@ impl Devices {
     /// let dir = std::env::temp_dir().join(format!("sluice-rename-{}", std::process::id()));
     /// std::fs::create_dir_all(&dir)?;
     /// let devices = Devices::open(&dir);
-    /// devices.grant_to([2; 32], Grant::Deliver, 1)?;
+    /// devices.grant_to([2; 32], Grant::Deliver, 1, None)?;
     /// assert_eq!(devices.rename(&[2; 32], "laptop")?.label, "laptop");
     /// # Ok::<(), sluice_core::Error>(())
     /// ```
     pub fn rename(&self, endpoint_id: &[u8; 32], label: &str) -> Result<Device, Error> {
-        let label = label.trim();
-        if label.is_empty() || label.chars().count() > MAX_LABEL {
-            return Err(Error::Policy(format!(
-                "a label is 1 to {MAX_LABEL} characters"
-            )));
-        }
-        if label.chars().any(char::is_control) {
-            return Err(Error::Policy("a label has no control characters".into()));
-        }
+        let label = check_label(label)?;
         let mut state = self.lock();
         if state.broken {
             return Err(unreadable(&self.dir));
@@ -325,10 +243,7 @@ impl Devices {
                 default_label(endpoint_id)
             )));
         };
-        let renamed = Device {
-            label: label.to_string(),
-            ..device
-        };
+        let renamed = Device { label, ..device };
         let mut next = state.devices.clone();
         next.insert(*endpoint_id, renamed.clone());
         self.save(&next)?;
@@ -448,116 +363,4 @@ fn unhex(text: &str) -> Result<[u8; 32], Error> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use super::{Devices, Grant, MAX_LABEL, default_label};
-
-    /// A folder of its own for one test, removed when it goes.
-    struct Dir(std::path::PathBuf);
-
-    impl Dir {
-        fn new(name: &str) -> Self {
-            let path =
-                std::env::temp_dir().join(format!("sluice-device-{name}-{}", std::process::id()));
-            let _ = fs::remove_dir_all(&path);
-            fs::create_dir_all(&path).expect("a folder");
-            Self(path)
-        }
-    }
-
-    impl Drop for Dir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    /// A label starts as eight hex characters and a rename changes only the label.
-    #[test]
-    fn a_grant_is_written_with_its_default_label_and_survives_a_reopen() {
-        let dir = Dir::new("label");
-        let devices = Devices::open(&dir.0);
-        let device = devices.grant_to([0xab; 32], Grant::Deliver, 7).unwrap();
-        assert_eq!(device.label, "abababab");
-        assert_eq!(default_label(&[0xab; 32]), device.label);
-
-        let reopened = Devices::open(&dir.0);
-        assert_eq!(reopened.grant(&[0xab; 32]), Some(Grant::Deliver));
-        assert_eq!(reopened.list().unwrap()[0].paired_ms, 7);
-
-        let renamed = reopened.rename(&[0xab; 32], "  laptop ").unwrap();
-        assert_eq!(renamed.label, "laptop");
-        assert_eq!(renamed.grant, Grant::Deliver);
-        assert_eq!(Devices::open(&dir.0).list().unwrap()[0].label, "laptop");
-    }
-
-    /// A second redemption keeps the grant it has, and a wider one widens it, without a second
-    /// entry.
-    #[test]
-    fn a_second_grant_keeps_one_entry_and_never_narrows_it() {
-        let dir = Dir::new("again");
-        let devices = Devices::open(&dir.0);
-        let first = devices.grant_to([3; 32], Grant::Deliver, 1).unwrap();
-        let again = devices.grant_to([3; 32], Grant::Deliver, 2).unwrap();
-        assert_eq!(again, first);
-        assert_eq!(devices.list().unwrap().len(), 1);
-
-        let wider = devices.grant_to([3; 32], Grant::Control, 3).unwrap();
-        assert_eq!(wider.grant, Grant::Control);
-        assert!(devices.allows(&[3; 32], Grant::Deliver));
-        assert!(devices.allows(&[3; 32], Grant::Control));
-    }
-
-    /// A revoke removes the grant, and a file that cannot be read admits nobody and is left as it
-    /// is.
-    #[test]
-    fn a_revoke_forgets_the_grant_and_a_broken_file_admits_nobody() {
-        let dir = Dir::new("revoke");
-        let devices = Devices::open(&dir.0);
-        devices.grant_to([4; 32], Grant::Deliver, 1).unwrap();
-        assert!(devices.revoke(&[4; 32]).unwrap().is_some());
-        assert!(!devices.allows(&[4; 32], Grant::Deliver));
-        assert!(devices.revoke(&[4; 32]).unwrap().is_none());
-
-        let broken = Dir::new("broken");
-        let path = broken.0.join("devices.json");
-        fs::write(&path, b"not json").unwrap();
-        let devices = Devices::open(&broken.0);
-        assert!(devices.is_broken());
-        assert!(!devices.allows(&[5; 32], Grant::Deliver));
-        assert!(devices.list().is_err());
-        assert!(devices.grant_to([5; 32], Grant::Deliver, 1).is_err());
-        assert_eq!(fs::read(&path).unwrap(), b"not json");
-    }
-
-    /// A label with a control character or over the bound is refused before anything is written.
-    #[test]
-    fn a_label_is_one_line_and_bounded() {
-        let dir = Dir::new("labels");
-        let devices = Devices::open(&dir.0);
-        devices.grant_to([6; 32], Grant::Deliver, 1).unwrap();
-        assert!(devices.rename(&[6; 32], "two\nlines").is_err());
-        assert!(
-            devices
-                .rename(&[6; 32], &"x".repeat(MAX_LABEL + 1))
-                .is_err()
-        );
-        assert!(devices.rename(&[6; 32], "  ").is_err());
-        assert_eq!(devices.list().unwrap()[0].label, "06060606");
-    }
-
-    /// A duplicate id in a hand-edited file is a file the daemon cannot read, not one that wins a
-    /// race.
-    #[test]
-    fn a_duplicate_endpoint_id_is_a_broken_file() {
-        let dir = Dir::new("duplicate");
-        let id = "07".repeat(32);
-        let text = format!(
-            r#"{{"version":1,"devices":[
-                {{"endpoint_id":"{id}","label":"a","grant":"deliver","paired_ms":1}},
-                {{"endpoint_id":"{id}","label":"b","grant":"control","paired_ms":2}}]}}"#
-        );
-        fs::write(dir.0.join("devices.json"), text).unwrap();
-        assert!(Devices::open(&dir.0).is_broken());
-    }
-}
+mod tests;

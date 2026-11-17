@@ -1,0 +1,34 @@
+---
+source: crates/sluice-cli/tests/it/help.rs
+expression: "help(&[\"deliver\", \"--help\"])"
+---
+Hand a file or folder to a daemon this device paired with, which receives it into its inbox
+
+Usage: sluice deliver [OPTIONS] <DEVICE> <PATH>
+
+Arguments:
+  <DEVICE>
+          The paired daemon's name, or a prefix of its endpoint id
+
+  <PATH>
+          The file or folder to deliver
+
+Options:
+      --json
+          Print JSON, one object per line, instead of text. A failure is then a JSON line on stderr
+
+      --name <NAME>
+          The top-level name the content takes under the daemon's inbox. Without it the delivery is named by the ticket's root in hex
+
+      --color <WHEN>
+          When to colour help, errors and other output. NO_COLOR set to anything turns it off
+
+          Possible values:
+          - auto:   Colour a stream only when it is a terminal
+          - always: Colour always, unless `NO_COLOR` is set
+          - never:  Never colour
+          
+          [default: auto]
+
+  -h, --help
+          Print help (see a summary with '-h')

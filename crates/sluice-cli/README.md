@@ -4,6 +4,13 @@ The `sluice` command is the program you run. It sends and receives files, prints
 checks your setup with `doctor`, and prints shell completions. It owns the subcommands, human and
 `--json` output, man pages and progress display.
 
+`sluice pair` makes a pairing ticket on a running daemon, redeems one on this device with
+`--redeem`, or shows the daemons this device has paired with with `--list`. `sluice devices` lists,
+renames and revokes the devices a daemon has granted, and `sluice deliver` hands a file or folder to
+a daemon this device paired with, which receives it into its inbox. A pairing ticket is a bearer
+invitation: it is a secret until it expires, it works once, and the ticket is the only line a pairing
+writes to standard output.
+
 A release ships the binary, and it builds from a checkout with `cargo build -p sluice-cli`. A
 transfer between two folders on one machine, or two machines that can reach each other, works
 today. Speeds have not been measured on a real network, only on loopback.

@@ -5,6 +5,7 @@ pub mod engine;
 mod error;
 mod home;
 pub mod manifest;
+pub mod paired;
 pub mod queue;
 pub mod range;
 pub mod receipt;

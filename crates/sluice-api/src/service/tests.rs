@@ -8,7 +8,10 @@ fn service(roots: &[std::path::PathBuf]) -> (tempfile::TempDir, Service) {
     let dir = tempfile::tempdir().unwrap();
     let home = Home::open(&dir.path().join("home")).unwrap();
     let roots = Roots::open(roots).unwrap();
-    (dir, Service::new(home, roots, RelayModeChoice::Disabled))
+    (
+        dir,
+        Service::new(home, roots, RelayModeChoice::Disabled, None),
+    )
 }
 
 fn at(root: &std::path::Path, path: &str) -> Option<RootPath> {
@@ -266,7 +269,7 @@ async fn a_cancel_during_the_preparing_ends_the_job_and_leaves_nothing_in_the_ho
     let home = Home::open(&dir.path().join("home")).unwrap();
     let temporary = home.temporary_folder().unwrap();
     let roots = Roots::open(std::slice::from_ref(&root)).unwrap();
-    let service = Service::new(home, roots, RelayModeChoice::Loopback);
+    let service = Service::new(home, roots, RelayModeChoice::Loopback, None);
 
     let id = service
         .begin_send(StartSendRequest {
@@ -307,3 +310,5 @@ async fn a_job_that_ends_no_longer_gives_its_ticket() {
     job.finish(JobState::Done, String::new(), false);
     assert!(service.job_detail(&job.id).unwrap().secret_ticket.is_none());
 }
+
+mod devices;

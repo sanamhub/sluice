@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sluice_core::Home;
-use sluice_core::engine::RelayModeChoice;
+use sluice_core::engine::{Listener, RelayModeChoice};
 use sluice_core::manifest::Limits;
 use tokio::sync::{Semaphore, watch};
 
@@ -21,6 +21,8 @@ mod inspect;
 mod list;
 mod run;
 mod start;
+
+mod devices;
 
 /// How many tickets are inspected at once.
 const MAX_INSPECTS: usize = 4;
@@ -58,11 +60,20 @@ struct Inner {
     jobs: Table,
     inspects: Semaphore,
     stop: watch::Sender<bool>,
+    /// The daemon's identity endpoint, when its home has an identity key. Pairing, delivery and the
+    /// device calls need it; a service built without one refuses them.
+    listener: Option<Arc<Listener>>,
 }
 
 impl Service {
-    /// A service over `home`, with the folders it may use and the relay its transfers use.
-    pub fn new(home: Home, roots: Roots, relay: RelayModeChoice) -> Self {
+    /// A service over `home`, with the folders it may use and the relay its transfers use. `listener`
+    /// is the daemon's identity endpoint, or `None` for a service that serves no pairing.
+    pub fn new(
+        home: Home,
+        roots: Roots,
+        relay: RelayModeChoice,
+        listener: Option<Arc<Listener>>,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 home,
@@ -71,6 +82,7 @@ impl Service {
                 jobs: Table::default(),
                 inspects: Semaphore::new(MAX_INSPECTS),
                 stop: watch::channel(false).0,
+                listener,
             }),
         }
     }
@@ -178,6 +190,24 @@ impl Service {
         };
         let _ = tokio::time::timeout(limit, wait).await;
         running.len()
+    }
+
+    /// The daemon's identity endpoint, or the refusal a daemon without one gives.
+    fn listener(&self) -> Result<&Arc<Listener>, ApiError> {
+        self.inner.listener.as_ref().ok_or_else(|| {
+            ApiError::Refused(
+                "this daemon serves no pairing: its home has no identity.key, and one is made by \
+                 `sluice id` or a send or receive"
+                    .to_string(),
+            )
+        })
+    }
+
+    /// Stops taking sends on the daemon's endpoint, so a later send binds its own.
+    pub fn stop_listener(&self) {
+        if let Some(listener) = &self.inner.listener {
+            listener.stop();
+        }
     }
 
     fn limits() -> Limits {

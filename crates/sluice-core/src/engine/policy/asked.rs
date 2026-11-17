@@ -66,6 +66,16 @@ impl Asked {
             .values()
             .any(|record| &record.peer.endpoint == peer && record.roots.contains(&hash))
     }
+
+    /// The endpoint ids that asked for content on a connection the policy let in. A test asserts
+    /// that a delivery's receive used an endpoint of its own and not the daemon's.
+    #[cfg(test)]
+    pub(crate) fn peers(&self) -> BTreeSet<[u8; 32]> {
+        self.by
+            .values()
+            .map(|record| record.peer.endpoint)
+            .collect()
+    }
 }
 
 #[cfg(test)]

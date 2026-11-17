@@ -46,7 +46,10 @@ pub use object::reparse_tag;
 pub use object::{
     Facts, ObjectId, Pins, facts, is_link, is_name_surrogate_tag, open_file, open_folder, volume_of,
 };
-pub use paired::{Attached, InboxFolder, Listener, PairTicket};
+pub use paired::{
+    Attached, DEFAULT_INBOX_QUOTA, InboxFolder, Listener, PairOutcome, PairTicket, deliver_to,
+    redeem,
+};
 pub use policy::access_modes;
 pub use rate::Rate;
 pub use receipts::parse_request;

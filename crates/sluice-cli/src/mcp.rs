@@ -61,7 +61,7 @@ async fn serve(args: &McpArgs, output: &Output) -> Result<u8, Error> {
         .refuse_home(home.path())
         .map_err(crate::daemon::refused)?;
     let names = args.root.iter().map(|r| r.display().to_string()).collect();
-    let service = Service::new(home, roots, relay);
+    let service = Service::new(home, roots, relay, None);
     // A line of input is a request, and a request is a few paths or a ticket, so a line past a quarter
     // of a megabyte is dropped and not buffered.
     let (input, out) = rmcp::transport::stdio();

@@ -17,6 +17,7 @@ mod interrupt;
 mod live;
 mod mcp;
 mod mcp_line;
+mod paired;
 mod pipes;
 mod queue;
 mod ranges;

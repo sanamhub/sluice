@@ -1,5 +1,5 @@
 ---
-source: crates/sluice-cli/tests/help.rs
+source: crates/sluice-cli/tests/it/help.rs
 expression: "help(&[\"--help\"])"
 ---
 Usage: sluice [OPTIONS] <COMMAND>
@@ -13,6 +13,9 @@ Commands:
   receipt      Check a receipt: the sender's signed statement that it offered some content
   doctor       Check the home, who can reach it, its lock and identity key, and say how to fix a problem
   daemon       Serve the control interface on a socket or pipe only this user can reach, or ask the one that runs
+  pair         Pair a device with a running daemon, redeem a ticket, or list the daemons this device paired with
+  devices      List, rename or revoke the devices a running daemon has granted
+  deliver      Hand a file or folder to a daemon this device paired with, which receives it into its inbox
   mcp          Serve the tools of Sluice to an MCP client over standard input and output
   ui           Open the page of the daemon that is running
   help         Print this message or the help of the given subcommand(s)

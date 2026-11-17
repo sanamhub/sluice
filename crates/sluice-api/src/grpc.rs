@@ -132,6 +132,34 @@ impl ControlService for Grpc {
         ))
     }
 
+    async fn create_pairing(
+        &self,
+        request: Request<proto::CreatePairingRequest>,
+    ) -> Result<Response<proto::CreatePairingResponse>, Status> {
+        Ok(Response::new(self.0.create_pairing(request.into_inner())?))
+    }
+
+    async fn list_devices(
+        &self,
+        _request: Request<proto::ListDevicesRequest>,
+    ) -> Result<Response<proto::ListDevicesResponse>, Status> {
+        Ok(Response::new(self.0.list_devices()?))
+    }
+
+    async fn rename_device(
+        &self,
+        request: Request<proto::RenameDeviceRequest>,
+    ) -> Result<Response<proto::RenameDeviceResponse>, Status> {
+        Ok(Response::new(self.0.rename_device(request.into_inner())?))
+    }
+
+    async fn revoke_device(
+        &self,
+        request: Request<proto::RevokeDeviceRequest>,
+    ) -> Result<Response<proto::RevokeDeviceResponse>, Status> {
+        Ok(Response::new(self.0.revoke_device(request.into_inner())?))
+    }
+
     async fn shutdown(
         &self,
         _request: Request<proto::ShutdownRequest>,

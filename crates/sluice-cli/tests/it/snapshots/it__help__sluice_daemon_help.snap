@@ -1,5 +1,5 @@
 ---
-source: crates/sluice-cli/tests/help.rs
+source: crates/sluice-cli/tests/it/help.rs
 expression: "help(&[\"daemon\", \"--help\"])"
 ---
 Serve the control interface on a socket or pipe only this user can reach, or ask the one that runs
@@ -30,6 +30,14 @@ Options:
 
       --root <DIR>
           A folder the daemon may send from and receive into, written as a client names it; repeat for more. Without one the daemon refuses every send and every receive
+
+      --inbox <DIR>
+          Receive deliveries into this folder, which must be inside a root. Without it the daemon makes pairing tickets but takes no delivery
+
+      --inbox-quota <BYTES>
+          The most content the inbox may hold, in bytes (default 10 GiB)
+          
+          [default: 10737418240]
 
       --relay <URL>
           The relay that carries a transfer when a direct path fails

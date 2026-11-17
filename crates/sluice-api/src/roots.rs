@@ -100,6 +100,18 @@ impl Roots {
         self.roots.is_empty()
     }
 
+    /// Whether `path`, which must exist, lies inside one of the roots. The inbox is such a folder:
+    /// every path in a delivery resolves under a root as section 11 says.
+    pub(crate) fn contains(&self, path: &Path) -> bool {
+        let Ok(path) = std::fs::canonicalize(path) else {
+            return false;
+        };
+        let path = fold(&plain(path));
+        self.roots
+            .iter()
+            .any(|root| path.starts_with(fold(&root.path)))
+    }
+
     /// Opens the path a request names, one component at a time from its root's handle, or says why
     /// it is refused.
     pub(crate) fn resolve(&self, at: Option<&RootPath>, usage: Use) -> Result<Opened, ApiError> {
@@ -221,16 +233,18 @@ impl Root {
 /// Whether one path is the other or is inside it, in either direction. Windows file names are
 /// compared without regard to case.
 fn overlaps(a: &Path, b: &Path) -> bool {
-    let fold = |p: &Path| {
-        let text = p.to_string_lossy();
-        PathBuf::from(if cfg!(windows) {
-            text.to_lowercase()
-        } else {
-            text.into_owned()
-        })
-    };
     let (a, b) = (fold(a), fold(b));
     a.starts_with(&b) || b.starts_with(&a)
+}
+
+/// A path folded to the comparison the platform means: Windows file names are not case sensitive.
+fn fold(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    PathBuf::from(if cfg!(windows) {
+        text.to_lowercase()
+    } else {
+        text.into_owned()
+    })
 }
 
 /// The path without the verbatim prefix `canonicalize` gives on Windows, which the engine's own

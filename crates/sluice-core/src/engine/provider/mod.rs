@@ -95,12 +95,6 @@ impl Provider {
         self.policy.served(hash)
     }
 
-    /// The signature state, for a test that counts the lists served or serves its own bytes.
-    #[cfg(test)]
-    pub(crate) fn delta(&self) -> Option<&Arc<super::delta::Delta>> {
-        self.delta.as_ref()
-    }
-
     /// The receipt state, for a test that puts a record in place of the signed one.
     #[cfg(test)]
     pub(crate) fn receipts(&self) -> &Arc<super::receipts::Receipts> {

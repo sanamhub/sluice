@@ -37,6 +37,8 @@ pub(super) struct Pairing {
 struct Pending {
     grant: Grant,
     expires_ms: u64,
+    /// The label the ticket's maker gave the device, if it gave one.
+    label: Option<String>,
     /// The endpoint id that redeemed it, once one has.
     redeemed_by: Option<[u8; 32]>,
 }
@@ -71,12 +73,19 @@ impl Pairing {
     }
 
     /// Remembers a ticket's secret until it expires or its grant is revoked.
-    pub(super) fn remember(&self, secret: [u8; 32], grant: Grant, expires_ms: u64) {
+    pub(super) fn remember(
+        &self,
+        secret: [u8; 32],
+        grant: Grant,
+        expires_ms: u64,
+        label: Option<String>,
+    ) {
         lock(&self.tickets).insert(
             secret,
             Pending {
                 grant,
                 expires_ms,
+                label,
                 redeemed_by: None,
             },
         );
@@ -108,9 +117,10 @@ impl Pairing {
             None => {}
         }
         let grant = pending.grant;
+        let label = pending.label.clone();
         // The lock is held across the write so two peers that present one secret at the same time
         // cannot both be granted it.
-        match self.devices.grant_to(peer, grant, now) {
+        match self.devices.grant_to(peer, grant, now, label.as_deref()) {
             Ok(_) => {
                 if let Some(pending) = tickets.get_mut(&key) {
                     pending.redeemed_by = Some(peer);

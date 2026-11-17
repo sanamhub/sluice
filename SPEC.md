@@ -1237,8 +1237,9 @@ overwritten.
 
 A daemon holds a quota for the inbox, 10 GiB by default, and reserves the size a ticket states when
 it accepts. A delivery that does not fit the room left is refused before its first byte. A ticket
-that states no size, which is a live stream, runs to the room and fails there with a `Policy` error.
-The daemon never deletes a file in the inbox to make room.
+that states no size, which is a live stream, is refused with `0x01` before any byte: there is no
+size to reserve, and a stream that ran to the room would leave a partial file in the inbox. The
+daemon never deletes a file in the inbox to make room.
 
 ### 11.4 Remote control over iroh
 

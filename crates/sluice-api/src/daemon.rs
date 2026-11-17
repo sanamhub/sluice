@@ -2,9 +2,11 @@
 //! client asks it to stop.
 
 use std::future::Future;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use sluice_core::Home;
-use sluice_core::engine::RelayModeChoice;
+use sluice_core::engine::{InboxFolder, Listener, RelayModeChoice};
 
 use crate::error::ApiError;
 use crate::grpc::{self, Grpc};
@@ -23,12 +25,20 @@ pub struct Daemon {
 
 impl Daemon {
     /// Makes the listener for the home `home` holds, and builds the service over it. Nothing is
-    /// served until [`Daemon::serve`].
-    pub fn bind(home: Home, roots: Roots, relay: RelayModeChoice) -> Result<Self, ApiError> {
+    /// served until [`Daemon::serve`]. The identity endpoint starts when the home has an
+    /// `identity.key`, and delivery is served only when `inbox` is given.
+    pub async fn bind(
+        home: Home,
+        roots: Roots,
+        relay: RelayModeChoice,
+        inbox: Option<PathBuf>,
+        inbox_quota: u64,
+    ) -> Result<Self, ApiError> {
         roots.refuse_home(home.path())?;
         let (incoming, guard, location) = platform::listen(home.path())?;
+        let listener = start_listener(&home, &roots, &relay, inbox, inbox_quota).await?;
         Ok(Self {
-            service: Service::new(home, roots, relay),
+            service: Service::new(home, roots, relay, listener),
             incoming,
             guard,
             location,
@@ -85,7 +95,53 @@ impl Daemon {
             () = forced => Ok(()),
         };
         service.stop_jobs(STOP_WAIT).await;
+        // The endpoint stops taking sends before the daemon's process goes, so a send started in
+        // that moment binds its own endpoint instead of attaching to one that is closing.
+        service.stop_listener();
         drop(accepting);
         result
     }
+}
+
+/// Starts the daemon's identity endpoint when the home has an identity key, and serves delivery
+/// only when `inbox` is given.
+async fn start_listener(
+    home: &Home,
+    roots: &Roots,
+    relay: &RelayModeChoice,
+    inbox: Option<PathBuf>,
+    inbox_quota: u64,
+) -> Result<Option<Arc<Listener>>, ApiError> {
+    if !home.path().join("identity.key").is_file() {
+        if inbox.is_some() {
+            return Err(ApiError::Refused(
+                "the home has no identity.key, so the daemon cannot receive deliveries; run \
+                 `sluice id` first"
+                    .to_string(),
+            ));
+        }
+        return Ok(None);
+    }
+    let inbox = match inbox {
+        Some(path) => {
+            std::fs::create_dir_all(&path).map_err(|e| {
+                ApiError::Refused(format!("cannot make the inbox {}: {e}", path.display()))
+            })?;
+            if !roots.contains(&path) {
+                return Err(ApiError::Refused(format!(
+                    "the inbox {} is not inside a root the daemon was started with",
+                    path.display()
+                )));
+            }
+            Some(InboxFolder {
+                path,
+                quota: inbox_quota,
+            })
+        }
+        None => None,
+    };
+    Listener::bind(home, relay.clone(), inbox)
+        .await
+        .map(Some)
+        .map_err(|error| ApiError::from_core(&error, ""))
 }
