@@ -225,7 +225,7 @@ impl Devices {
     /// use sluice_core::device::{Devices, Grant};
     ///
     /// let dir = std::env::temp_dir().join(format!("sluice-rename-{}", std::process::id()));
-    /// std::fs::create_dir_all(&dir)?;
+    /// std::fs::create_dir_all(&dir).unwrap();
     /// let devices = Devices::open(&dir);
     /// devices.grant_to([2; 32], Grant::Deliver, 1, None)?;
     /// assert_eq!(devices.rename(&[2; 32], "laptop")?.label, "laptop");
