@@ -3,6 +3,19 @@
 What 1.0 includes, what comes after, and what Sluice does not build. Dates are deliberately absent:
 a release ships when its exit criteria pass.
 
+## Who Sluice is for
+
+Anyone who needs to move a file, with three ways in that all reach the same engine:
+
+| Who | Way in | What they need to know |
+|---|---|---|
+| Someone who has never opened a terminal | The website, or the desktop app | Where the file is, and who gets it |
+| An engineer | The CLI, the container image, the bindings | The flags, or the API |
+| An AI agent | `sluice mcp` and the control API | The tool list |
+
+No way in is the main one. The README, the website and the docs lead with sending a file and offer
+all three, and the app and the website need no command to start.
+
 ## Before 1.0: measure the transport
 
 `noq` has no published throughput numbers, and two open iroh issues report it well below link speed:
@@ -67,21 +80,66 @@ a self-hosted meeting point that carries none of the file. Every at-rest budget 
 - An agent moves a 40 GB dataset over MCP with no shell access.
 - A delta resend of 50 GB with 1% changed moves under 3% of the bytes.
 
-## 1.2: reach
+## Alongside 1.1: the front door
 
-- The browser build and the Svelte PWA.
-- The Tauri desktop app on the same UI.
+Work that needs no new engine feature, done while 1.1 is built:
+
+- The README and the website start with sending a file, show the three ways in side by side, and
+  put the CLI under "For developers". They say plainly that the app and the website send are coming,
+  and link the page a person can use today.
+- A page for AI agents: how to add `sluice mcp` to an assistant, with the tool list, and an
+  `llms.txt` on the website.
+- A post-quantum handshake in the browser build. The browser build uses `ring`, which has no ML-KEM,
+  so a tab cannot pass the check of ADR 0018 and cannot be a peer. A spike builds `X25519MLKEM768`
+  for `wasm32` from RustCrypto's `ml-kem` and `ring`'s `X25519`, and measures the handshake time,
+  the `.wasm` size and the transfer rate against the classical build. Its result decides whether the
+  website sends in 1.2 (below).
+
+## 1.2: for everyone
+
+- **The desktop app.** Tauri, on the Svelte UI of ADR 0009 that the daemon's page already uses, with
+  the engine in the same process. Opening the app is the whole setup: no terminal, no `sluice ui`, no
+  separate daemon to start. It stays in the tray to receive from paired devices (ADR 0039), and it
+  can add `sluice mcp` to a local AI assistant with one button.
+- **Installers that a beginner can open.** No signing certificate is bought:
+  - Windows: the Microsoft Store, where the store signs the package, and `winget`.
+  - macOS: a `.dmg` signed ad hoc and not notarized, with the "Open Anyway" steps on the download
+    page. The website is the way to send from a Mac with nothing installed.
+  - Linux: Flathub, an AppImage and a `.deb`.
+- **Sending and receiving in a tab, if the spike above passes.** The tab is a peer with the same
+  post-quantum handshake as the native build, so no transfer is weaker for involving a browser. A tab
+  cannot connect directly (ADR 0011), so every byte goes through a relay: the website uses one relay
+  that the project runs on a free host, with a per-visitor rate and size cap, and anyone can point it
+  at their own. The website says when a file is large enough that the app is faster. If the spike
+  fails, the website drives a local app or daemon and asks a visitor without one to install the app.
+- **The PWA.** The same UI installed from the website, for phones until the mobile apps exist.
+- **A first run that explains itself.** Pick or drop files, get a link and a QR code, see "direct"
+  or "relayed" and why, with no word a beginner has to look up. The link opens the website with the
+  ticket in its fragment, which a browser never sends to a server, and the website offers to open
+  the app when one is installed.
+- **Accessibility.** The UI meets WCAG 2.2 AA, checked with a screen reader on each platform.
+
+**Exit:**
+
+- Three people who have never used a terminal each install the app from its store or download page
+  and send a 5 GB folder from Windows to macOS, with no help and no command. Where they get stuck is
+  published, and fixed.
+- A 1 GB transfer from Chrome, Firefox and Safari, with nothing installed, to a desktop app, through
+  the website's relay, published with each browser's rate.
+- A 20 GB transfer from Chrome, Firefox and Safari to a native peer through a self-hosted relay,
+  published with each browser's ceiling and the relay's specification.
+
+## 1.3: reach
+
 - Go and C# bindings, and generated clients for the remaining languages.
 - A Helm chart for the relay.
-
-**Exit:** a 20 GB transfer from Chrome, Firefox and Safari to a native peer through a self-hosted
-relay, published with each browser's ceiling and the relay's specification.
 
 ## Later, if measurements ask for it
 
 - io_uring through `compio`, if a profile shows disk in the path.
 - Forward error correction (RaptorQ), if measured loss justifies it.
 - Mobile apps through Tauri, stating iOS background limits up front.
+- A notarized macOS build, when someone sponsors the Apple developer fee.
 - Parking a transfer for when both sides are offline.
 - Post-quantum signatures (ML-DSA) once the ecosystem supports them.
 - A multi-user control service with policy and audit, as its own proposal, once there is demand for
@@ -94,7 +152,8 @@ needs a discussion first.
 
 - A QUIC stack, NAT traversal, a relay protocol, or a content-addressed store. iroh has them.
 - Folder sync. Syncthing does it well.
-- A hosted service, accounts, or any telemetry.
+- A hosted service, accounts, or any telemetry. The one relay the website uses carries encrypted
+  bytes it cannot read, stores nothing, and keeps no record of who sent what.
 - Any API that carries file bytes.
 - A second UI codebase.
 
@@ -129,4 +188,7 @@ It has to be settled before the spec gets test vectors for it.
 | Resume corrupts a file | The barrier model, `turmoil` torn-write tests, fuzzing, and hand review of the resume code |
 | Small-file workloads look slow | Packing, with its own target |
 | Operators expect the internet path to need nothing | The connectivity table is in the README, and `doctor` explains the user's case |
-| The browser is unusable without a relay | The web UI names its relay on first run, and the relay is one `docker run` in the quickstart |
+| The browser is unusable without a relay | The website uses the project's relay by default and names it, and a self-hosted relay is one `docker run` in the quickstart |
+| The website's relay is abused or outgrows its free host | A per-visitor rate and size cap through the guard (ADR 0019), the app named as the way for large files, and the relay replaceable in one setting |
+| A beginner meets an operating system warning on install | The Microsoft Store signs the Windows package; the macOS download page shows the "Open Anyway" steps; the website sends with nothing installed |
+| The browser cannot do the post-quantum handshake | The spike decides it before 1.2 work starts; if it fails, the website drives a local app instead of being a peer, and no classical handshake is accepted |
