@@ -4,6 +4,7 @@
 import {
     ADRS,
     AGENTS,
+    DEVELOPERS,
     CHANGELOG,
     CONTRIBUTING,
     DESIGN,
@@ -48,6 +49,7 @@ const columns = [
         links: [
             ["Send a file", "/#send"],
             ["Ways in", "/#ways"],
+            ["For developers", DEVELOPERS],
             ["AI agents", AGENTS],
             ["How it works", "/#how"],
             ["Design", DESIGN],
@@ -114,8 +116,9 @@ const columns = [
                     <a href="/#send">Send a file</a>
                     <a href="/#ways">Ways in</a>
                     <a href="/#how">How it works</a>
-                    <a href="/#install">Install</a>
+                    <a href="/developers/">Developers</a>
                     <a href="/agents/">Agents</a>
+                    <a href="/#install">Install</a>
                     <a href="/#security">Security</a>
                     <a class="top-repo" href={REPO}>
                         <svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"

@@ -4,19 +4,29 @@
 import { CLI_README } from "../data/links";
 import Prose from "./Prose.astro";
 
+// "people" names what each job does for a person and shows no command; "developers" shows the
+// command and the flag. The landing page uses the first, `/developers/` the second.
+interface Props {
+    mode?: "people" | "developers";
+}
+const { mode = "developers" } = Astro.props;
+
 const tasks = [
     {
         title: "Whole folders",
+        plain: "Send a folder and it arrives as a folder, every file checked on the way in.",
         body: "A folder arrives inside a folder of its own name, as a file manager copies it. Links are recreated as entries and never followed.",
         code: "sluice send ./photos",
     },
     {
         title: "Part of a folder",
+        plain: "See what a transfer offers, then take only the parts you need.",
         body: "Match the ticket's own paths and fetch only those. `inspect` shows what would come first.",
         code: "sluice recv <ticket> --include 'photos/2025/**'",
     },
     {
         title: "A file still being written",
+        plain: "Start sending a recording or an export before it is finished. The other side reads it as it grows.",
         body: "Live mode seals the file in segments as it grows, and the receiver reads each one while the writer keeps going.",
         code: "sluice send --live ./recording.mkv",
     },
@@ -27,21 +37,25 @@ const tasks = [
     },
     {
         title: "Several tickets at once",
+        plain: "Several transfers wait in one queue, and you choose which one goes first.",
         body: "One queue receives them, three at a time by default, and `--priority` decides which starts first.",
         code: "sluice recv <t1> <t2> <t3> --out ./inbox",
     },
     {
         title: "A gentle rate",
+        plain: "Cap the speed, so a big transfer leaves room for a video call.",
         body: "Cap the bytes per second on either side, so a big transfer leaves room for everything else.",
         code: "sluice recv <ticket> --limit-rate 50M",
     },
     {
         title: "One ticket, a few people",
+        plain: "Offer one transfer to a few people. Each gets a copy, and nobody else can take one.",
         body: "`--keep N` offers N places. Each receiver takes one, and anyone else is refused before a byte is sent.",
         code: "sluice send --keep 3 ./dataset",
     },
     {
         title: "Look before you fetch",
+        plain: "See the names, the number of files and the size before a single byte arrives.",
         body: "`inspect` reads the ticket's manifest: names, counts and size, and no content.",
         code: "sluice inspect <ticket>",
     },
@@ -51,26 +65,43 @@ const tasks = [
         code: "sluice doctor --network",
     },
 ];
+const shown = mode === "people" ? tasks.filter((task) => task.plain) : tasks;
 ---
 
 <section class="section tasks" aria-labelledby="tasks-title">
     <div class="wrap">
         <div class="section-head">
             <h2 id="tasks-title">More than one file</h2>
-            <p>
-                The same two commands cover folders, live files, pipes and shared tickets. The
-                <a href={CLI_README}>CLI reference</a> has every flag, exit code and JSON field.
-            </p>
+            {
+                mode === "people" ? (
+                    <p>
+                        The same transfer covers whole folders, files that are still growing, and a
+                        copy for each of a few people.
+                    </p>
+                ) : (
+                    <p>
+                        The same two commands cover folders, live files, pipes and shared tickets.
+                        The <a href={CLI_README}>CLI reference</a> has every flag, exit code and
+                        JSON field.
+                    </p>
+                )
+            }
         </div>
         <ul class="task-list">
             {
-                tasks.map((task) => (
+                shown.map((task) => (
                     <li class="task">
                         <h3>{task.title}</h3>
-                        <p>
-                            <Prose text={task.body} />
-                        </p>
-                        <code translate="no">{task.code}</code>
+                        {mode === "people" ? (
+                            <p>{task.plain}</p>
+                        ) : (
+                            <>
+                                <p>
+                                    <Prose text={task.body} />
+                                </p>
+                                <code translate="no">{task.code}</code>
+                            </>
+                        )}
                     </li>
                 ))
             }

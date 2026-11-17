@@ -9,7 +9,6 @@ import Relay from "../components/Relay.astro";
 import Security from "../components/Security.astro";
 import Send from "../components/Send.astro";
 import Tasks from "../components/Tasks.astro";
-import Transcript from "../components/Transcript.astro";
 import Base from "../layouts/Base.astro";
 ---
 
@@ -18,11 +17,10 @@ import Base from "../layouts/Base.astro";
     description="Sluice sends a file or a folder straight from one computer to another, checks every block as it lands, and keeps no copy in between. No account, no size plan."
 >
     <Hero />
-    <Send />
     <Doors />
+    <Send />
     <HowItWorks />
-    <Transcript />
-    <Tasks />
+    <Tasks mode="people" />
     <Compare />
     <Security />
     <Relay />

@@ -1,0 +1,55 @@
+---
+// The page for the second way in: the command line, the container image and the control API. The
+// landing page says what Sluice does in plain words; this page shows the commands that do it.
+import InstallAll from "../components/InstallAll.astro";
+import Tasks from "../components/Tasks.astro";
+import Transcript from "../components/Transcript.astro";
+import Base from "../layouts/Base.astro";
+import { CLI_IMAGE_README, CLI_README, SPEC } from "../data/links";
+---
+
+<Base
+    title="Sluice for developers: one binary, a container image and a control API"
+    description="The sluice command line for Linux, macOS and Windows: send, inspect and recv, folders, live files, pipes, rate caps and shared tickets, with every flag in the CLI reference."
+>
+    <section class="section dev-hero" aria-labelledby="dev-title">
+        <div class="wrap">
+            <h1 id="dev-title">Two commands, and a ticket between them.</h1>
+            <p class="lede">
+                <code translate="no">sluice send</code> prints a ticket and serves the file.
+                <code translate="no">sluice recv</code> takes the ticket on the other computer and
+                writes what arrives, once every block has been checked. One binary for Linux, macOS
+                and Windows, the same binary in a container image, and a control API for anything
+                that needs to script a transfer.
+            </p>
+            <ul class="dev-links">
+                <li><a href={CLI_README}>CLI reference</a>: every command, flag, exit code and JSON field</li>
+                <li><a href={CLI_IMAGE_README}>Container image</a>: the same binary on Linux</li>
+                <li><a href={SPEC}>SPEC.md</a>: the wire format and the control API, section 11</li>
+                <li><a href="#install">Install</a>: every channel, and how to verify a download</li>
+            </ul>
+        </div>
+    </section>
+    <Transcript />
+    <Tasks mode="developers" />
+    <InstallAll />
+</Base>
+
+<style>
+    .dev-hero h1 {
+        margin: 0 0 var(--space-3);
+        max-width: 20ch;
+    }
+
+    .dev-hero .lede {
+        max-width: var(--measure);
+    }
+
+    .dev-links {
+        display: grid;
+        gap: var(--space-1);
+        margin: var(--space-3) 0 0;
+        padding-left: 1.2em;
+        max-width: var(--measure);
+    }
+</style>

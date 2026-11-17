@@ -19,6 +19,7 @@ export const SECURITY = `${BLOB}/SECURITY.md`;
 export const LICENSES = `${REPO}#license`;
 export const IROH = "https://github.com/n0-computer/iroh";
 export const AGENTS = "/agents/";
+export const DEVELOPERS = "/developers/";
 export const LLMS = "/llms.txt";
 export const IROH_BLOBS = "https://github.com/n0-computer/iroh-blobs";
 
