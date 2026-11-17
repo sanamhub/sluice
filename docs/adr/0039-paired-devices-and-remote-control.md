@@ -71,9 +71,10 @@ is an application, not a library, so nothing here depends on it.
      written.
    - A file that cannot be read is no grants. The daemon starts, refuses every paired peer, refuses
      to pair, and leaves the file alone for its user to fix.
-   - A daemon has to be pairable, so this listener is on whenever the daemon runs. It accepts at
-     most 4 streams from one endpoint at once and 16 in total, and closes a stream that writes more
-     than 32 bytes, so a stranger who knows the endpoint id costs 4 streams and 132 bytes.
+   - A daemon has to be pairable, so this listener is on whenever the daemon runs.
+   - It accepts at most 4 streams from one endpoint at once and 16 in total, and closes a stream
+     that writes more than 32 bytes, so a stranger who knows the endpoint id costs 4 streams and
+     132 bytes.
 
 2. **A pairing ticket is single use and expires.**
    - The default lifetime is 10 minutes. `sluice pair --ttl SECONDS` may set up to one hour, and the
@@ -108,17 +109,22 @@ is an application, not a library, so nothing here depends on it.
      serves over the socket, with the wire rules in `SPEC.md` section 11.4. The generated client and
      the existing `ControlService` are used unchanged. The transport is a `Channel` whose connector
      returns the stream, and a server that hands each accepted stream to the same service.
+   - A client SHOULD put `WatchEvents` on a connection of its own, a second `Channel` from the same
+     connector, and keep its other calls on the first. Two `Channel` values need no new client code,
+     and a cancel then has flow control of its own, so a watch that is not being read cannot hold it
+     up. A watch is the one call that can sit for minutes with bytes in flight.
    - The alternative was one stream per call, with the same `prost` messages and the gRPC framing
-     but no HTTP/2. It gives each call its own flow control, its own reset and its own cancellation,
-     so a slow watcher cannot get in front of `CancelJob`. It also costs a second client: the
-     generated stubs speak HTTP/2, so every binding that drives a daemon remotely would write its
-     own framing and its own streaming for `WatchEvents`, which is the cost ADR 0037 chose gRPC to
-     avoid.
-   - The cost we accept: HTTP/2's multiplexer nested inside QUIC's, one lost packet delays every
-     call on that connection by one round trip, a cancel included, and the HTTP/2 connection window
-     is shared. The daemon caps a watcher's queue at 256 events, reports `dropped`, and closes a
-     watcher whose queue has been full for 10 seconds, so the shared window is not what holds a call
-     up.
+     but no HTTP/2. It gives every call its own flow control, its own reset and its own
+     cancellation, where the rule above gives it to the one call that needs it. It also costs a
+     second client: the generated stubs speak HTTP/2, so every binding that drives a daemon remotely
+     would write its own framing and its own streaming for `WatchEvents`, which is the cost ADR 0037
+     chose gRPC to avoid.
+   - The cost we accept: HTTP/2's multiplexer nested inside QUIC's, one lost packet delays the other
+     calls on that stream by a round trip, and the HTTP/2 connection window is shared. The
+     two-connection rule takes the case that mattered out of it, a cancel behind a stalled watch,
+     and leaves head-of-line delay among unary calls, which are one short request and one short
+     answer. The daemon caps a watcher's queue at 256 events, reports `dropped`, and closes a
+     watcher whose queue has been full for 10 seconds, so a watch cannot hold the window either.
    - The TCP clause of `SPEC.md` section 11 goes. A token on a port is a shared secret, a
      certificate story and a reachable port, and it names no device. The iroh connection names a
      device at the handshake, post-quantum, and its grant is per device. That also empties the last
@@ -139,7 +145,8 @@ is an application, not a library, so nothing here depends on it.
      carries content.
    - The ticket may name any provider, as a ticket pasted into `sluice recv` may. The grant
      authorizes the delivery, not the source, and the content is verified against its root before it
-     lands.
+     lands. The receive binds a key of its own (decision 8), so that provider learns nothing that
+     links one delivery to another.
    - The inbox is a folder the daemon was started with, inside a root. No inbox means no `deliver`
      ticket and no delivery listener. The listener runs while at least one grant can use it, which
      is any `deliver` or `control` grant.
@@ -167,12 +174,22 @@ is an application, not a library, so nothing here depends on it.
    - A `control` peer can read the names under every root with `ListEntries`. That is one reason
      `deliver` is the default, and why the device list shows each device's grant.
 
-8. **The daemon's endpoint is its identity.**
+8. **The daemon's endpoint is its identity, and a receive keeps its own key.**
    - The daemon binds one endpoint for the life of the process with `$SLUICE_HOME/identity.key`, and
-     the three ALPNs of this record live on it. Its transfers run on it too: a job attaches its
-     handlers to that endpoint while it runs and removes them when it ends, so one id and one set of
-     addresses answer for the daemon whether or not a transfer is running. A one-shot `sluice send`
-     or `sluice recv` binds its own endpoint, as it does today.
+     the three ALPNs of this record live on it.
+   - A send's handlers attach to that endpoint while the send runs and are removed when it ends, so
+     one id and one set of addresses answer for the daemon's identity whether or not a send is
+     running.
+   - A receive keeps what it has today: it binds a key made for that one receive, so the provider it
+     fetches from sees an id that answers for nothing else. A delivery is a receive, so it does the
+     same, and the provider a delivered ticket names learns nothing that links one delivery to
+     another.
+   - Only the listeners need the stable id, and fetching does not. A receive on the identity
+     endpoint would tell every provider a daemon fetches from that the fetch is that daemon's, and
+     two providers that compare the ids they saw could link its receives. That is a correlation
+     handle nobody asked for. The listeners need one id because a peer has to reach the daemon
+     before any grant exists, and a pairing ticket names it anyway.
+   - A one-shot `sluice send` or `sluice recv` binds its own endpoint, as it does today.
    - A pairing ticket carries that endpoint id with the addresses and relay a content ticket
      carries, so a phone off the LAN needs the daemon to have a relay.
    - A daemon bound to loopback cannot pair with another computer: its ticket has no address another
@@ -186,8 +203,9 @@ is an application, not a library, so nothing here depends on it.
 
 - **A ticket that works until the daemon stops**, as iroh-share has. Refused in decision 2: an
   unused ticket is a standing key, and a restart is not a boundary anyone can see.
-- **One stream per call for remote control.** Refused in decision 4: it wins per-call cancellation
-  and costs a second client in every binding.
+- **One stream per call for remote control.** Refused in decision 4: it gives every call its own
+  cancellation, where the two-connection rule wins the case that matters, and it costs a second
+  client in every binding.
 - **TCP with TLS and a token**, which `SPEC.md` section 11 allows today. Refused: a second
   authentication story for a peer that can be named at the handshake, and a shared token is not a
   device.
@@ -266,9 +284,10 @@ snapshot on the wire.
   The limits in decision 1 bound that, and a peer without a grant learns nothing.
 - The daemon's endpoint id becomes stable and appears in every pairing ticket. It was never secret,
   which the threat model already says, and the grant list is what admits a device.
-- The daemon holds one endpoint for its whole life, and each job's handlers attach to it, where
-  every job binds an endpoint of its own today. One id then has one set of addresses, whatever is
-  running.
+- The daemon holds one endpoint for its whole life for its identity and its listeners, and its
+  sends attach to it, where every job binds an endpoint of its own today. A receive still binds one,
+  so the id a provider sees for a fetch is not the daemon's, and the identity has one set of
+  addresses whatever is running.
 - Two new files in the home, `$SLUICE_HOME/devices.json` for the grants and
   `$SLUICE_HOME/paired.json` for the daemons this computer may drive. Neither holds a secret, and
   losing either loses the record, not a key: a device pairs again with a new ticket.
@@ -284,6 +303,6 @@ snapshot on the wire.
   command prints it once and no log line holds one.
 - A content ticket is unchanged. Pairing adds a kind to the same envelope, and a send or a receive
   with a ticket works whether or not a device is paired.
-- Revisit the transport if a cancel has to arrive while a watch stream is stalled, or if watch
+- Revisit the transport if a binding cannot give a watch a connection of its own, or if watch
   traffic ever dominates a connection. Revisit the 10-minute expiry if a workflow needs a ticket to
   survive a lunch break. Revisit two-step pairing if people pair the same two computers often.

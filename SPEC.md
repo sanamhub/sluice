@@ -1218,6 +1218,9 @@ to no one else.
   same trailers. The client sends an `:authority` because HTTP/2 requires one, and a daemon MUST
   ignore it.
 - One stream per connection, and a daemon MUST close a connection that opens a second.
+- A client SHOULD send `WatchEvents` on a connection of its own, a second `Channel` from the same
+  connector, and keep its other calls on the first: a cancel then has flow control of its own and is
+  not held up by a watch that is not being read.
 - The limits are the ones the local listener has: a message of at most 1 MiB, 64 open calls on a
   connection, and 32 connections. A daemon MUST size its HTTP/2 connection window so that one
   watcher's full queue does not stall another call.
