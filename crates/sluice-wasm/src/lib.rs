@@ -320,3 +320,21 @@ fn sender_id(text: &str) -> Result<EndpointId, Bad> {
 fn to_js(error: Bad) -> JsValue {
     JsValue::from_str(&error.0)
 }
+
+/// Spike only (T88): a probe that uses SPAKE2 so the linker cannot drop the crate. It returns the
+/// two derived keys concatenated, and only the size of the module that contains it is of interest.
+#[cfg(feature = "short-code-probe")]
+#[wasm_bindgen]
+pub fn short_code_probe(plate: u32, password: &str) -> Vec<u8> {
+    use spake2::{Ed25519Group, Identity, Password, Spake2};
+    let sender = Identity::new(format!("sluice short code v1/nameplate/{plate}/sender").as_bytes());
+    let receiver =
+        Identity::new(format!("sluice short code v1/nameplate/{plate}/receiver").as_bytes());
+    let (a, a_msg) =
+        Spake2::<Ed25519Group>::start_a(&Password::new(password.as_bytes()), &sender, &receiver);
+    let (b, b_msg) =
+        Spake2::<Ed25519Group>::start_b(&Password::new(password.as_bytes()), &sender, &receiver);
+    let mut out = a.finish(&b_msg).unwrap();
+    out.extend_from_slice(&b.finish(&a_msg).unwrap());
+    out
+}
