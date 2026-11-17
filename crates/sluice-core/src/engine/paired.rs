@@ -22,8 +22,11 @@ use iroh::{
     protocol::{AcceptError, ProtocolHandler, Router},
 };
 use iroh_blobs::BlobsProtocol;
-use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
+use n0_future::task::AbortOnDropHandle;
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, broadcast, mpsc::UnboundedSender};
 
+use super::conn::ConnIds;
+use super::endpoint::Receiver;
 use super::paired::limits::{Held, Limits};
 use super::paired::pair::{DEFAULT_TTL, MAX_TTL, PairHandler, Pairing};
 use super::{
@@ -38,6 +41,10 @@ use deliver::{DeliverHandler, Deliverer, Inbox};
 mod deliver;
 mod limits;
 mod pair;
+
+/// How many connection reports the daemon holds for an attached send that has fallen behind. A
+/// report is a few bytes and a send reads them as they arrive, so this is far more than it needs.
+const REPORTS_BUFFER: usize = 256;
 
 pub use deliver::Inbox as InboxFolder;
 
@@ -60,6 +67,14 @@ pub struct Listener {
     /// Held while a send's handlers are installed, so two sends cannot share the content ALPNs.
     send_lock: Arc<AsyncMutex<()>>,
     slots: Slots,
+    /// The ids of this endpoint's content connections, shared with every send that attaches: a
+    /// request is credited to the connection the daemon's own handshake reported.
+    ids: Arc<ConnIds>,
+    /// Every content connection's open and close, to the sends that are attached now. A report
+    /// with no subscriber is dropped, because no send can use a connection it is not serving.
+    reports: broadcast::Sender<Receiver>,
+    /// The task that reads the endpoint's reports and broadcasts them, stopped with the listener.
+    _reports_task: AbortOnDropHandle<()>,
     stopped: AtomicBool,
 }
 
@@ -73,12 +88,44 @@ impl Listener {
     ) -> Result<Arc<Self>, Error> {
         let seed = home.identity()?.secret_seed();
         let saved = home.saved_port();
-        let endpoint = match endpoint::bind(Some(seed), &relay, Congestion::Cubic, saved).await {
+        // The daemon's endpoint reports every content connection, and each attached send gets those
+        // reports: a limited send places its receivers from them, and one send is attached at a
+        // time, so every report belongs to it.
+        let ids = Arc::new(ConnIds::default());
+        let (reports, _) = broadcast::channel(REPORTS_BUFFER);
+        let (completed, mut completed_rx) = tokio::sync::mpsc::unbounded_channel();
+        let reports_for_task = reports.clone();
+        let reports_task = AbortOnDropHandle::new(n0_future::task::spawn(async move {
+            while let Some(report) = completed_rx.recv().await {
+                // No subscriber is a daemon with no send attached, and it is not an error.
+                let _ = reports_for_task.send(report);
+            }
+        }));
+        let completion = endpoint::Completion {
+            sender: completed,
+            ids: Arc::clone(&ids),
+        };
+        let endpoint = match endpoint::bind_with_completion(
+            Some(seed),
+            &relay,
+            Congestion::Cubic,
+            saved,
+            completion.clone(),
+        )
+        .await
+        {
             Ok(endpoint) => endpoint,
             // A port a previous send saved can be taken. A daemon that cannot start is worse than
             // one on another port, and its pairing ticket carries whatever port it got.
             Err(_) if saved.is_some() => {
-                endpoint::bind(Some(seed), &relay, Congestion::Cubic, None).await?
+                endpoint::bind_with_completion(
+                    Some(seed),
+                    &relay,
+                    Congestion::Cubic,
+                    None,
+                    completion,
+                )
+                .await?
             }
             Err(e) => return Err(e),
         };
@@ -131,6 +178,9 @@ impl Listener {
             held,
             send_lock: Arc::default(),
             slots,
+            ids,
+            reports,
+            _reports_task: reports_task,
             stopped: AtomicBool::new(false),
         });
         Ok(listener)
@@ -215,13 +265,32 @@ impl Listener {
         &self.endpoint
     }
 
-    /// The place a send's content handlers go.
-    async fn attach(&self) -> Attached {
+    /// The place a send's content handlers go, with its reports forwarded to `to`.
+    async fn attach(&self, to: UnboundedSender<Receiver>) -> Attached {
         let guard = Arc::clone(&self.send_lock).lock_owned().await;
+        let mut reports = self.reports.subscribe();
+        let forward = AbortOnDropHandle::new(n0_future::task::spawn(async move {
+            loop {
+                match reports.recv().await {
+                    Ok(report) => {
+                        if to.send(report).is_err() {
+                            break;
+                        }
+                    }
+                    // A send that falls behind loses the oldest reports. The next connection's
+                    // open is still delivered, and a report for one that closed before the send
+                    // attached means nothing to it.
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }));
         Attached {
             _guard: guard,
             endpoint: self.endpoint.clone(),
             slots: self.slots.clone(),
+            ids: Arc::clone(&self.ids),
+            _forward: forward,
         }
     }
 }
@@ -243,12 +312,21 @@ pub struct Attached {
     _guard: OwnedMutexGuard<()>,
     endpoint: Endpoint,
     slots: Slots,
+    ids: Arc<ConnIds>,
+    /// Reads this send's copy of the endpoint's connection reports, stopped with the claim.
+    _forward: AbortOnDropHandle<()>,
 }
 
 impl Attached {
     /// The endpoint a send attaches to.
     pub fn endpoint(&self) -> &Endpoint {
         &self.endpoint
+    }
+
+    /// The connection ids of the daemon's endpoint, which the send's policy reads so a request is
+    /// credited to the connection the daemon's handshake gave an id.
+    pub(crate) fn ids(&self) -> Arc<ConnIds> {
+        Arc::clone(&self.ids)
     }
 
     /// Installs the two content handlers for as long as this value lives, and refuses when another
@@ -265,10 +343,14 @@ impl Drop for Attached {
 }
 
 /// A send started for a home with a registered listener attaches to it, so one endpoint id answers
-/// for the daemon. Every other send binds its own endpoint, as it always did.
-pub async fn attach_for(home: &Home) -> Result<Option<Attached>, Error> {
+/// for the daemon. Every other send binds its own endpoint, as it always did. The reports go to
+/// `to`, which is the send's own channel of receiver events.
+pub(super) async fn attach_for(
+    home: &Home,
+    to: UnboundedSender<Receiver>,
+) -> Result<Option<Attached>, Error> {
     match listener_for(home) {
-        Some(listener) => Ok(Some(listener.attach().await)),
+        Some(listener) => Ok(Some(listener.attach(to).await)),
         None => Ok(None),
     }
 }

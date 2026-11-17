@@ -38,6 +38,7 @@ pub struct Policy {
     /// How many requests are still being accounted for, so a test that reads [`Policy::served`]
     /// waits for that count instead of racing the task that writes it. A request's updates are
     /// read by a task of its own, which runs after the receiver already holds the bytes.
+    #[cfg(test)]
     accounting: Arc<Accounting>,
     /// What each connection asked for, so the provider can check a completion code against it.
     asked: Arc<Mutex<Asked>>,
@@ -171,6 +172,7 @@ pub fn start_shared(
         events,
         #[cfg(test)]
         totals,
+        #[cfg(test)]
         accounting,
         asked,
         _task: task,
