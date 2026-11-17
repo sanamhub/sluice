@@ -1,6 +1,6 @@
 # 0040. A tab is a peer with the same post-quantum handshake, through one relay the website names
 
-**Status:** Proposed **Date:** 2026-11-17 **Relates to:** ADR 0011, ADR 0014, ADR 0018, ADR 0036
+**Status:** Accepted **Date:** 2026-11-17 **Approved by:** @sanamhub **Relates to:** ADR 0011, ADR 0014, ADR 0018, ADR 0036
 **Supersedes:** ADR 0018's point 5
 
 ## Context

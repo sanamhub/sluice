@@ -26,7 +26,7 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0015](0015-bbrv3-by-default.md) | BBRv3 is the default congestion controller | Accepted |
 | [0016](0016-parallel-connections-and-tcp-bulk-path.md) | Shard large transfers across connections, with a TCP bulk path for direct peers | Accepted |
 | [0017](0017-bindings-in-one-repository.md) | Bindings for every language, generated, in this repository | Accepted |
-| [0018](0018-post-quantum-is-checked-at-the-handshake.md) | Post-quantum key exchange is checked at the handshake | Accepted |
+| [0018](0018-post-quantum-is-checked-at-the-handshake.md) | Post-quantum key exchange is checked at the handshake | Accepted, point 5 superseded by 0040 |
 | [0019](0019-relay-starts-through-a-guard.md) | The relay image starts through a guard that refuses an open config | Accepted, extended by 0020 |
 | [0020](0020-guard-closes-more-defaults-and-guards-rendezvous.md) | The guard closes three more open defaults, pins the file it checked, and guards rendezvous | Accepted, extended by 0021, rendezvous mode superseded by 0032 |
 | [0021](0021-guard-hands-over-a-sealed-copy.md) | The guard hands iroh-relay a sealed copy, and a relay without TLS needs a flag | Accepted |
@@ -48,4 +48,4 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0037](0037-the-control-interface-is-grpc-on-a-local-socket.md) | The control interface is gRPC on a socket or pipe only this user can reach | Proposed |
 | [0038](0038-a-daemon-send-copies-into-the-home.md) | A daemon send copies the content into the home, because a path read at serve time is not safe there | Proposed |
 | [0039](0039-paired-devices-and-remote-control.md) | A paired device holds a `deliver` or `control` grant, and remote control serves the same service over iroh | Accepted |
-| [0040](0040-a-tab-is-a-post-quantum-peer.md) | A tab is a peer with the same post-quantum handshake, through one relay the website names | Proposed, supersedes 0018 point 5 |
+| [0040](0040-a-tab-is-a-post-quantum-peer.md) | A tab is a peer with the same post-quantum handshake, through one relay the website names | Accepted, supersedes 0018 point 5 |

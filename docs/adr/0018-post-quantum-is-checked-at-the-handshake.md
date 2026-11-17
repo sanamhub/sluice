@@ -1,6 +1,7 @@
 # 0018. Post-quantum key exchange is checked at the handshake
 
 **Status:** Accepted **Date:** 2026-10-19 **Approved by:** @sanamhub **Supersedes:** ADR 0012
+**Point 5 superseded by:** ADR 0040
 
 ## Context
 
