@@ -35,16 +35,59 @@ pub struct Policy {
     /// Payload served per connection and blob, so a test can see what a request moved.
     #[cfg(test)]
     totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>>,
+    /// How many requests are still being accounted for, so a test that reads [`Policy::served`]
+    /// waits for that count instead of racing the task that writes it. A request's updates are
+    /// read by a task of its own, which runs after the receiver already holds the bytes.
+    accounting: Arc<Accounting>,
     /// What each connection asked for, so the provider can check a completion code against it.
     asked: Arc<Mutex<Asked>>,
     /// Aborted when the provider goes away, so no event task outlives it.
     pub _task: AbortOnDropHandle<()>,
 }
 
+/// The requests whose byte count a task has not finished writing, and a test-only wait for them.
+/// An update is queued before a receiver can hold the last byte, so the wait ends as soon as the
+/// task is given a turn.
+#[derive(Debug, Default)]
+pub(super) struct Accounting {
+    pending: std::sync::atomic::AtomicUsize,
+}
+
+impl Accounting {
+    /// One more request whose events a task will read.
+    pub(super) fn begin(&self) {
+        self.pending
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// That request's task has read its last update and written what it counted.
+    pub(super) fn end(&self) {
+        self.pending
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Waits, briefly, until every request's count has been written. Bounded, because a request
+    /// that ends without an update has its channel closed instead, and a broken test should fail
+    /// on its own assertion rather than hang.
+    #[cfg(test)]
+    fn wait(&self) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while self.pending.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+            if std::time::Instant::now() >= deadline {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+}
+
 impl Policy {
-    /// Payload this provider sent of `hash`, over every connection, since it started.
+    /// Payload this provider sent of `hash`, over every connection, since it started. Waits for a
+    /// request whose updates are still being counted, so a test that has just received every byte
+    /// sees them.
     #[cfg(test)]
     pub fn served(&self, hash: Hash) -> u64 {
+        self.accounting.wait();
         lock(&self.totals)
             .iter()
             .filter(|((_, served), _)| *served == hash)
@@ -103,6 +146,7 @@ pub fn start_shared(
 ) -> Policy {
     let (events, mut rx) = EventSender::channel(32, mask(rate.is_some()));
     let totals: Arc<Mutex<BTreeMap<(u64, Hash), u64>>> = Arc::default();
+    let accounting: Arc<Accounting> = Arc::default();
     let asked: Arc<Mutex<Asked>> = Arc::default();
     let gate = Gate::new(
         allowed,
@@ -116,6 +160,7 @@ pub fn start_shared(
         rate,
         Arc::clone(&places),
         receivers,
+        Arc::clone(&accounting),
     );
     let task = AbortOnDropHandle::new(n0_future::task::spawn(async move {
         while let Some(message) = rx.recv().await {
@@ -126,6 +171,7 @@ pub fn start_shared(
         events,
         #[cfg(test)]
         totals,
+        accounting,
         asked,
         _task: task,
     }

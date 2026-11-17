@@ -49,6 +49,8 @@ pub(super) struct Gate {
     /// Where a place or a refusal is reported, on the same channel as a connection's open and close
     /// so the three keep their order.
     receivers: UnboundedSender<Receiver>,
+    /// The requests whose byte count is still being written, so a test can wait for them.
+    accounting: Arc<super::Accounting>,
 }
 
 impl Gate {
@@ -66,6 +68,7 @@ impl Gate {
         rate: Option<Arc<crate::engine::Rate>>,
         places: Arc<Mutex<Places>>,
         receivers: UnboundedSender<Receiver>,
+        accounting: Arc<super::Accounting>,
     ) -> Self {
         Self {
             allowed,
@@ -79,6 +82,7 @@ impl Gate {
             rate,
             places,
             receivers,
+            accounting,
         }
     }
 
@@ -126,6 +130,8 @@ impl Gate {
         let served = Arc::clone(&self.served);
         let places = Arc::clone(&self.places);
         let endpoint = peer.map(|peer| peer.endpoint);
+        let accounting = Arc::clone(&self.accounting);
+        accounting.begin();
         n0_future::task::spawn(async move {
             let sent = Sent {
                 store: &store,
@@ -149,6 +155,7 @@ impl Gate {
                 }
                 break;
             }
+            accounting.end();
         });
     }
 
