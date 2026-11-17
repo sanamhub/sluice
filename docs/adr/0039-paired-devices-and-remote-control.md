@@ -1,6 +1,6 @@
 # 0039. A paired device holds a grant, and remote control serves the same service over iroh
 
-**Status:** Proposed **Date:** 2026-11-17 **Relates to:** ADR 0018, ADR 0036, ADR 0037, ADR 0038
+**Status:** Accepted **Date:** 2026-11-17 **Approved by:** @sanamhub **Relates to:** ADR 0018, ADR 0036, ADR 0037, ADR 0038
 
 ## Context
 
