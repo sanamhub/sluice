@@ -16,6 +16,8 @@
 use std::time::Duration;
 
 mod fetch;
+pub mod pq;
+mod spike;
 
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMap, RelayMode, RelayUrl,
@@ -295,7 +297,7 @@ pub async fn fetch_blob(
 /// a `u64` holds is refused, because the size a ticket names is one. `2^64` is refused too: `u64`
 /// holds nothing above `2^64 - 1`, and rounding that bound up to a `f64` would turn a size of `2^64`
 /// into a count of its own.
-fn byte_count(size: f64) -> Result<u64, Bad> {
+pub(crate) fn byte_count(size: f64) -> Result<u64, Bad> {
     if !size.is_finite() || size < 0.0 || size.fract() != 0.0 || size >= u64::MAX as f64 {
         return Err(Bad("a ticket's size is a whole number of bytes".to_string()));
     }
@@ -303,7 +305,7 @@ fn byte_count(size: f64) -> Result<u64, Bad> {
 }
 
 /// The endpoint id a ticket names, from its 64 hex characters.
-fn sender_id(text: &str) -> Result<EndpointId, Bad> {
+pub(crate) fn sender_id(text: &str) -> Result<EndpointId, Bad> {
     let bad = || Bad("a sender is 64 hex characters".to_string());
     if text.len() != 64 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(bad());
@@ -317,6 +319,6 @@ fn sender_id(text: &str) -> Result<EndpointId, Bad> {
 }
 
 /// A refusal as the value a page catches.
-fn to_js(error: Bad) -> JsValue {
+pub(crate) fn to_js(error: Bad) -> JsValue {
     JsValue::from_str(&error.0)
 }

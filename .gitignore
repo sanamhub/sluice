@@ -25,6 +25,8 @@ web/sluice_wasm_bg.wasm.d.ts
 .sluice/
 bench/results/local/
 *.log
+# The spike's generated module: wasm-bindgen's output, written beside its page.
+crates/sluice-wasm/spike/out/
 
 # The guard and its fuzz crate are workspaces of their own, so the /target above does not cover
 # their builds.

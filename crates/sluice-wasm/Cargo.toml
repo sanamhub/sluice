@@ -23,6 +23,18 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 iroh = { version = "1.4", default-features = false, features = ["tls-ring"] }
 iroh-blobs = { version = "0.105.0", default-features = false }
+# The post-quantum half of the hybrid key exchange, for the spike in `src/pq.rs`. Pure Rust and
+# `no_std`-capable, so it builds for the target where `aws-lc-rs` has no build; `ring` supplies the
+# classical half. `alloc` is the default feature and `zeroize` wipes a decapsulation key when it
+# drops.
+ml-kem = { version = "0.3.4", default-features = false, features = ["alloc", "zeroize"] }
+# The provider the spike adds a group to, and the group's name. `ring` is the only provider `iroh`
+# has for the target, and its `wasm32_unknown_unknown_js` feature is what gives it an entropy source
+# there: without it a tab has a provider and no random.
+rustls = { version = "0.23.46", default-features = false, features = ["std", "ring"] }
+ring = { version = "0.17.14", features = ["wasm32_unknown_unknown_js"] }
+# The generator trait `ml-kem` takes, which `ring`'s entropy is wrapped in.
+rand_core = "0.10"
 # The timeout a fetch waits for its relay, which is the same one the native build uses and works on
 # the target as well as on the host.
 n0-future.workspace = true
@@ -31,6 +43,11 @@ n0-future.workspace = true
 wasm-bindgen = { workspace = true }
 # The version the lock resolves beside that `wasm-bindgen`, which is what an async export needs.
 wasm-bindgen-futures = "=0.4.79"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The page's clock, for a handshake time the spike measures inside the tab. `std::time` has no clock
+# on this target.
+js-sys = "0.3"
 
 # Runs the loopback test on the host, where the browser transport is not compiled in. The crate
 # itself has no async runtime of its own: a page's promise is the whole of its concurrency. It is

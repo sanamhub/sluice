@@ -1,0 +1,34 @@
+[package]
+name = "sluice-wasm-spike"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The native half of the wasm post-quantum spike: a peer that says which group it agreed on"
+publish = false
+
+[[bin]]
+name = "pq-spike"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+# The workspace's provider, which is `aws-lc-rs`: the native half of the interop proof must be the
+# implementation the product uses, not the one the tab carries.
+iroh.workspace = true
+iroh-blobs.workspace = true
+rustls.workspace = true
+tokio.workspace = true
+# The probe and the wrapper the tab uses, so both ends of a handshake are read the same way.
+sluice-wasm = { path = "../sluice-wasm" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+# Not released: dist builds only the `sluice` binary of sluice-cli (dist-workspace.toml).
+[package.metadata.dist]
+dist = false

@@ -21,6 +21,10 @@ crates/**
 !crates/sluice-delta/**
 !crates/sluice-wasm
 !crates/sluice-wasm/**
+!crates/sluice-wasm-spike
+!crates/sluice-wasm-spike/Cargo.toml
+!crates/sluice-wasm-spike/src
+!crates/sluice-wasm-spike/src/**
 !bench
 bench/**
 !bench/probe
