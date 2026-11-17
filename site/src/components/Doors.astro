@@ -1,0 +1,153 @@
+---
+// The three ways in, side by side, each with one next step a reader can take today. The gates are
+// the page's own figure: a sluice has three, and each one opens onto the same water.
+import { AGENTS, CLI_README, ROADMAP } from "../data/links";
+---
+
+<section class="section ways" id="ways" aria-labelledby="ways-title">
+    <div class="wrap">
+        <div class="section-head">
+            <h2 id="ways-title">Three ways in</h2>
+            <p>
+                All three reach the same engine, and none is the main one. Pick the one that matches
+                how you work, and you can move to another later without moving your files.
+            </p>
+        </div>
+        <ol class="gates">
+            <li class="gate">
+                <p class="who">Never opened a terminal</p>
+                <h3>The page in your browser</h3>
+                <p class="what">
+                    Sluice opens a page on your own computer. Pick the file there, send the ticket
+                    it gives you, and the other computer takes it.
+                </p>
+                <a class="way" href="#send">The four steps</a>
+            </li>
+            <li class="gate">
+                <p class="who">Engineer</p>
+                <h3>The command line</h3>
+                <p class="what">
+                    One binary for Linux, macOS and Windows, a container image, and a control API
+                    for anything that needs to script a transfer.
+                </p>
+                <a class="way" href="#install">Install</a>
+                <a class="way quiet" href={CLI_README}>CLI reference</a>
+            </li>
+            <li class="gate">
+                <p class="who">AI agent</p>
+                <h3>Model Context Protocol</h3>
+                <p class="what">
+                    <code translate="no">sluice mcp</code> hands the same engine to an assistant as
+                    seven tools, over standard input and output, with no listener of its own.
+                </p>
+                <a class="way" href={AGENTS}>Set it up</a>
+            </li>
+        </ol>
+        <p class="coming">
+            The desktop app, and sending from a browser with nothing installed, are coming. The
+            <a href={ROADMAP}>roadmap</a> says what each one waits on.
+        </p>
+    </div>
+</section>
+
+<style>
+    .gates {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: var(--space-3);
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: gate;
+    }
+
+    .gate {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        padding: var(--space-4) var(--space-3) var(--space-3);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-m);
+        background: linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--stone) 88%, transparent),
+            color-mix(in srgb, var(--stone-2) 70%, transparent)
+        );
+        box-shadow: var(--shadow);
+        overflow: clip;
+    }
+
+    /* The gate itself: a brass sill across the top, and a seam the pointer lifts. */
+    .gate::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        height: 3px;
+        background: linear-gradient(
+            90deg,
+            transparent,
+            color-mix(in srgb, var(--brass) 70%, transparent) 20%,
+            var(--brass) 50%,
+            color-mix(in srgb, var(--brass) 70%, transparent) 80%,
+            transparent
+        );
+    }
+
+    .gate::after {
+        content: counter(gate, decimal-leading-zero);
+        counter-increment: gate;
+        position: absolute;
+        inset: var(--space-3) var(--space-3) auto auto;
+        font-family: var(--font-code);
+        font-size: var(--step--1);
+        color: var(--mist);
+    }
+
+    .who {
+        margin: 0;
+        font-family: var(--font-code);
+        font-size: var(--step--1);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--water-deep);
+    }
+
+    .gate h3 {
+        margin: 0;
+        font-size: var(--step-1);
+    }
+
+    .what {
+        margin: 0;
+        color: var(--mist);
+    }
+
+    .way {
+        align-self: flex-start;
+        margin-top: auto;
+        font-weight: 620;
+    }
+
+    .way.quiet {
+        margin-top: 0;
+        font-weight: 400;
+        font-size: var(--step--1);
+    }
+
+    .way + .way {
+        margin-top: calc(var(--space-1) * -1);
+    }
+
+    .coming {
+        margin: var(--space-3) 0 0;
+        color: var(--mist);
+        font-size: var(--step--1);
+    }
+
+    @media (max-width: 60rem) {
+        .gates {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>

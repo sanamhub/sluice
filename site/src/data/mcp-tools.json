@@ -1,0 +1,30 @@
+[
+  {
+    "name": "cancel_job",
+    "description": "Stop a job. A receive keeps its partial store, so receiving the same ticket again resumes it."
+  },
+  {
+    "name": "doctor",
+    "description": "Run the local checks of the Sluice home and say what each found."
+  },
+  {
+    "name": "inspect",
+    "description": "Read what a ticket offers without downloading any content: how many files and folders, how large, and the names, which are returned escaped in untrusted_names."
+  },
+  {
+    "name": "job_status",
+    "description": "Report one job: its state, how many bytes are done of how many, and for a receive whether a partial store is kept."
+  },
+  {
+    "name": "list_jobs",
+    "description": "List the jobs this server knows about, newest last, with their state and progress."
+  },
+  {
+    "name": "receive",
+    "description": "Start receiving what a ticket names into a folder inside a root, and return a job id at once. A cancelled receive keeps its partial store, so receiving the same ticket again resumes it."
+  },
+  {
+    "name": "send",
+    "description": "Start sending files or folders that are inside a root, and return a job id at once. The send is prepared in the background; job_status gives its ticket as secret_ticket once it is ready. The ticket is a secret: anyone who holds it can take the files."
+  }
+]

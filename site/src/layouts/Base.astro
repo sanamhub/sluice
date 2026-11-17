@@ -3,6 +3,7 @@
 // the scripts add the theme button, the install tabs and the hero scene.
 import {
     ADRS,
+    AGENTS,
     CHANGELOG,
     CONTRIBUTING,
     DESIGN,
@@ -45,6 +46,9 @@ const columns = [
     {
         title: "Learn",
         links: [
+            ["Send a file", "/#send"],
+            ["Ways in", "/#ways"],
+            ["AI agents", AGENTS],
             ["How it works", "/#how"],
             ["Design", DESIGN],
             ["Specification", SPEC],
@@ -107,8 +111,11 @@ const columns = [
                     <span>Sluice</span>
                 </a>
                 <nav class="top-nav" aria-label="Main">
+                    <a href="/#send">Send a file</a>
+                    <a href="/#ways">Ways in</a>
                     <a href="/#how">How it works</a>
                     <a href="/#install">Install</a>
+                    <a href="/agents/">Agents</a>
                     <a href="/#security">Security</a>
                     <a class="top-repo" href={REPO}>
                         <svg viewBox="0 0 16 16" aria-hidden="true" width="16" height="16"

@@ -18,6 +18,8 @@ export const CONTRIBUTING = `${BLOB}/CONTRIBUTING.md`;
 export const SECURITY = `${BLOB}/SECURITY.md`;
 export const LICENSES = `${REPO}#license`;
 export const IROH = "https://github.com/n0-computer/iroh";
+export const AGENTS = "/agents/";
+export const LLMS = "/llms.txt";
 export const IROH_BLOBS = "https://github.com/n0-computer/iroh-blobs";
 
 /** A section of the install guide, by its heading. */

@@ -1,28 +1,27 @@
 ---
-import { BREW, POWERSHELL_BY_HAND, SCOOP, SHELL } from "../data/install";
-import { INSTALL, REPO } from "../data/links";
+// The first screen. The action is the page a person can use today, not a command to paste: the
+// steps behind it are one click away, and a reader who wants the command line has its own door.
+import { ROADMAP } from "../data/links";
 import HeroStill from "./HeroStill.astro";
-import InstallTabs from "./InstallTabs.astro";
-
-const quick = [
-    { id: "unix", label: "macOS and Linux", commands: [{ lines: SHELL }] },
-    { id: "windows", label: "Windows", commands: [{ lines: SCOOP }, POWERSHELL_BY_HAND] },
-    { id: "brew", label: "Homebrew", commands: [{ lines: BREW }] },
-];
+import Btn from "./preview/Btn.astro";
 ---
 
 <section class="hero" aria-labelledby="hero-title">
     <div class="wrap hero-grid">
         <div class="hero-copy">
-            <h1 id="hero-title">Send big files straight to another computer.</h1>
+            <h1 id="hero-title">Send a file straight to another computer.</h1>
             <p class="lede">
-                Sluice opens a direct channel between two machines and checks every block as it
-                lands. Nothing waits on a server in between, and there is no account to make.
+                Sluice opens a channel between the two machines and checks every block as it lands.
+                Nothing waits on a server in between, there is no account to make, and no copy is
+                left behind.
             </p>
-            <InstallTabs name="hero" options={quick} />
+            <div class="hero-actions">
+                <Btn href="#send">Send a file now</Btn>
+                <Btn href="#install" quiet>Install Sluice</Btn>
+            </div>
             <p class="hero-more">
-                Also <a href="#install">Scoop, winget, the AUR, a container image</a>{" "}
-                and <a href={INSTALL}>source</a>. Free and open source, on <a href={REPO}>GitHub</a>.
+                A desktop app, and sending from a browser with nothing installed, are
+                <a href={ROADMAP}>coming</a>. Free and open source, and it never phones home.
             </p>
         </div>
         <div class="hero-art" data-hero-scene>
@@ -30,6 +29,15 @@ const quick = [
         </div>
     </div>
 </section>
+
+<style>
+    .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        margin-top: var(--space-3);
+    }
+</style>
 
 <script>
     import "../scripts/hero";
