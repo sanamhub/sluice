@@ -40,7 +40,9 @@ fn the_checked_in_vectors_pass() {
             && report.passed_in("tickets") >= 40
             && report.passed_in("manifests") >= 60
             && report.passed_in("packs") >= 20
-            && report.passed_in("live") >= 60,
+            && report.passed_in("live") >= 60
+            && report.passed_in("alpn") >= 5
+            && report.passed_in("access") >= 6,
         "{}",
         report.lines.join("\n")
     );

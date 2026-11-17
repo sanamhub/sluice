@@ -45,9 +45,9 @@ The transport, NAT traversal, and relay behaviour come from `iroh` and are out o
 |---|---|
 | `iroh-bytes/...` | Static content. Owned by `iroh-blobs`, version pinned by the release |
 | `sluice/1` | Everything else in this document |
-| `sluice/pair/1` | Pairing a device with a daemon, section 11.2 |
-| `sluice/deliver/1` | A paired device hands content to a daemon's inbox, section 11.3 |
-| `sluice/control/1` | The control interface of a daemon, to a paired device, section 11.4 |
+| `/sluice/pair/1` | Pairing a device with a daemon, section 11.2 |
+| `/sluice/deliver/1` | A paired device hands content to a daemon's inbox, section 11.3 |
+| `/sluice/control/1` | The control interface of a daemon, to a paired device, section 11.4 |
 
 On a `sluice/1` connection the dialer opens a control stream and sends `Hello`, and the listener
 replies with `Hello`.
@@ -78,6 +78,16 @@ A dialer MUST offer exactly one ALPN from this table per connection, so the orde
 listener registers or prefers them never decides which protocol runs. Static content and `sluice/1`
 use separate connections, and so does each of the three ALPNs a daemon serves. A listener MAY close
 a connection that offers more than one.
+
+**Registration order.** A listener registers the names of the table in the order the table gives
+them, skipping any it does not serve: static content, `sluice/1`, `/sluice/pair/1`,
+`/sluice/deliver/1`, `/sluice/control/1`. iroh passes the registered names to the endpoint in the
+order of registration, and a connection that offers more than one takes the first name in that order
+that the listener serves. A dialer that obeys the rule above offers one, and reaches only that
+protocol, so this order decides only a peer that offers several, which a listener MAY instead close.
+The three names ADR 0039 adds are in the order above from this release, and a build that does not
+serve one does not register it, so a connection that offers only that name is closed at the
+handshake.
 
 Wire-breaking changes bump the ALPN to `sluice/2`. Additive changes take a new capability bit. The
 three ALPNs whose names end in a version carry their own: a wire-breaking change to one of them
@@ -232,7 +242,7 @@ Delegated to `iroh-blobs`: BLAKE3 content addressing, 16 KiB chunk groups, verif
 and hash sequences for collections. This specification pins the exact `iroh-blobs` protocol version
 per release and does not restate it.
 
-Two rules are ours:
+Four rules are ours:
 
 1. A range response MUST be verifiable against the root before any byte is exposed to the caller,
    either through the application API or through a mounted filesystem.
@@ -242,6 +252,26 @@ Two rules are ours:
    because its own user added it.
 4. A provider MUST apply one access policy to `get`, `get_many` and `observe`. A request that one of
    them would refuse, the other two refuse as well, so no request type is a way around the policy.
+
+**The mask.** A provider MUST register the `iroh-blobs` event mask of this table. There is no
+request type outside rule 4 or refused by rule 3:
+
+| Event | Mode | Why |
+|---|---|---|
+| `connected` | `notify` | `iroh-blobs` reports a connection's close only when this is not `none`, and a send ends its wait on that report |
+| `get` | `intercept_log` | Rule 4 answers the request, and the update events say how many bytes went out |
+| `get_many` | `intercept` | Rule 4 answers the request, and it is allowed only when every hash in it is |
+| `observe` | `intercept` | Rule 4 answers the request |
+| `push` | `disabled` | `iroh-blobs` refuses every push before a policy sees it, which is rule 3 |
+| `throttle` | `intercept` with a rate limit, `none` without | Pacing only, and a request it lets through is not refused by it |
+
+`intercept` means the policy answers the request, `intercept_log` means it answers it and also
+receives its update events, `disabled` means `iroh-blobs` refuses it with no policy answer, and
+`notify` and `none` take no decision. A refused request is answered with the `Permission` abort
+reason, so a peer tells a policy refusal from a network fault. A `get` the policy allows is watched
+to its completed or aborted update, which is what a send counts to stop after a download or a
+completion code; `get_many` and `observe` are answered and not watched, because the answer is all
+the policy has to say about them.
 
 ---
 
@@ -347,7 +377,9 @@ A frame is checked in this order:
    `seq`, is a repeat. The receiver drops it without checking its signature, and nothing changes
 7. a frame whose `seq` is below the next one, with another `LogEntry`, is checked by rule 3. If it
    verifies, the sender signed two histories, through a leaked key or a bug, and the receiver
-   aborts the stream at that `seq`. This is the fork rule
+   aborts the stream at that `seq`. This is the fork rule: two validly signed frames for one `seq`
+   are never both accepted, and the receiver chooses neither, so the entry it accepted at that `seq`
+   is dropped with the new one and nothing at or after that `seq` is kept
 
 A frame at the next `seq` is checked by rule 3, and the receiver aborts the stream at that `seq`
 when the frame verifies and:
@@ -1243,6 +1275,8 @@ to no one else.
 | `packs/` | Files in manifest order with their sizes, and the `loc` of each and the size of each pack that section 9 gives. Some also give the contents, the pack roots and the manifest root |
 | `sequences/` | A manifest and the hash sequence a ticket for it must name |
 | `live/` | A ticket's `stream_id` and `sender_key`, the records of section 6 in the order a receiver gets them, the receiver's answer to each, and the state of the stream at the end, including streams that MUST be refused or aborted |
+| `alpn/` | The ALPNs a listener registers, in the order iroh negotiates them, and which of them the release serves |
+| `access/` | The `iroh-blobs` event mask a provider registers, event by event, with the mode of a send with a rate limit and one without |
 | `delta/` | File pairs with expected chunk boundaries and resulting need-ranges |
 | `delta-requests/` | Request streams a provider reads as a request for signatures, and ones it MUST answer with nothing |
 | `need-ranges/` | Encoded need-ranges messages with the root and the ranges they name, including sets that MUST be refused |

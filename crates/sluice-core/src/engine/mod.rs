@@ -1,6 +1,7 @@
 //! The session layer: endpoints, the provider's access policy, the `sluice/1` greeting and the
 //! events a transfer reports. Commands start a runtime; this module only provides futures.
 
+mod alpns;
 mod conn;
 mod delta;
 mod endpoint;
@@ -24,6 +25,7 @@ mod storage;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub use alpns::{ALPN_BLOBS, ALPN_CONTROL, ALPN_DELIVER, ALPN_PAIR, ALPN_REGISTERED};
 pub use delta::{DeltaReport, parse_request as parse_delta_request};
 pub use endpoint::{Congestion, N0_WARNING, RelayModeChoice};
 pub use events::{Event, PathKind, emit, watch_path};
@@ -43,6 +45,7 @@ pub use object::reparse_tag;
 pub use object::{
     Facts, ObjectId, Pins, facts, is_link, is_name_surrogate_tag, open_file, open_folder, volume_of,
 };
+pub use policy::access_modes;
 pub use rate::Rate;
 pub use receipts::parse_request;
 pub use recv::{ReceiptTarget, ReceiveOptions, Received, receive, receive_checked, top_level_rule};

@@ -172,10 +172,6 @@ needs a discussion first.
    - drop the rule and accept 0.4%, which is about 800 MB on a 200 GB file
 
 It has to be settled before the spec gets test vectors for it.
-5. Three `SPEC.md` rules that still need writing, each with test vectors:
-   - push disabled, and the `get`, `get_many` and `observe` access modes set together
-   - the order ALPNs are registered in, which iroh negotiates by
-   - what a receiver does with two validly signed live frames for the same `seq`
 
 ## Risks
 

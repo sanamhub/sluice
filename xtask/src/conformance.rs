@@ -1,6 +1,8 @@
 //! `cargo xtask conformance`: runs every vector under `tests/vectors/` against this implementation
 //! and exits non-zero if one disagrees. The format is in `tests/vectors/README.md`.
 
+mod access;
+mod alpn;
 mod delta;
 mod delta_requests;
 mod gear;
@@ -13,6 +15,8 @@ mod packs;
 mod paths;
 mod receipt_requests;
 mod receipts;
+#[cfg(test)]
+mod rules_tests;
 mod sequences;
 #[cfg(test)]
 mod tests;
@@ -91,6 +95,8 @@ pub fn check(root: &Path) -> Result<Report> {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         match kind.as_str() {
+            "access" => access::run(&dir, &mut report)?,
+            "alpn" => alpn::run(&dir, &mut report)?,
             "delta" => delta::run(&dir, &mut report)?,
             "delta-requests" => delta_requests::run(&dir, &mut report)?,
             "gear" => gear::run(&dir, &mut report)?,
