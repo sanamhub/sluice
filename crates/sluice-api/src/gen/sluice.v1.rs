@@ -381,6 +381,74 @@ pub struct DirEntry {
     #[prost(uint64, tag = "3")]
     pub size: u64,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreatePairingRequest {
+    /// The grant the ticket gives. Only GRANT_DELIVER is served in 1.1; GRANT_CONTROL is refused.
+    #[prost(enumeration = "Grant", tag = "1")]
+    pub grant: i32,
+    /// How long the ticket works, in seconds from now. Zero is the default of 10 minutes; the most is
+    /// one hour.
+    #[prost(uint64, tag = "2")]
+    pub ttl_seconds: u64,
+    /// The label the daemon writes for the device when the ticket is redeemed. Empty is the default,
+    /// the first 8 hex characters of the endpoint id.
+    #[prost(string, tag = "3")]
+    pub label: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct CreatePairingResponse {
+    /// The pairing ticket. A secret, and the only answer that carries one.
+    #[prost(message, optional, tag = "1")]
+    pub ticket: ::core::option::Option<Ticket>,
+    /// When the ticket stops working, in UTC milliseconds since the Unix epoch.
+    #[prost(uint64, tag = "2")]
+    pub expires_ms: u64,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListDevicesRequest {}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListDevicesResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub devices: ::prost::alloc::vec::Vec<DeviceInfo>,
+}
+/// One device the daemon has a grant for. It holds no secret.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeviceInfo {
+    /// The endpoint id the device authenticated with, as 64 lower-case hex characters.
+    #[prost(string, tag = "1")]
+    pub endpoint_id: ::prost::alloc::string::String,
+    /// The label a person knows it by, never a name the device chose about itself.
+    #[prost(string, tag = "2")]
+    pub label: ::prost::alloc::string::String,
+    #[prost(enumeration = "Grant", tag = "3")]
+    pub grant: i32,
+    /// When it paired, in UTC milliseconds since the Unix epoch.
+    #[prost(uint64, tag = "4")]
+    pub paired_ms: u64,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RenameDeviceRequest {
+    #[prost(string, tag = "1")]
+    pub endpoint_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub label: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RenameDeviceResponse {
+    #[prost(message, optional, tag = "1")]
+    pub device: ::core::option::Option<DeviceInfo>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RevokeDeviceRequest {
+    #[prost(string, tag = "1")]
+    pub endpoint_id: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RevokeDeviceResponse {
+    /// Whether a grant was there to revoke.
+    #[prost(bool, tag = "1")]
+    pub revoked: bool,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
 pub enum JobKind {
@@ -540,6 +608,38 @@ impl EntryKind {
             "ENTRY_KIND_FILE" => Some(Self::File),
             "ENTRY_KIND_FOLDER" => Some(Self::Folder),
             "ENTRY_KIND_LINK" => Some(Self::Link),
+            _ => None,
+        }
+    }
+}
+/// What a paired device may do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum Grant {
+    Unspecified = 0,
+    /// Hand this daemon a ticket and have it received into the inbox, within the quota.
+    Deliver = 1,
+    /// Every call of this interface, including the device calls and Shutdown. Not served in 1.1.
+    Control = 2,
+}
+impl Grant {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "GRANT_UNSPECIFIED",
+            Self::Deliver => "GRANT_DELIVER",
+            Self::Control => "GRANT_CONTROL",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "GRANT_UNSPECIFIED" => Some(Self::Unspecified),
+            "GRANT_DELIVER" => Some(Self::Deliver),
+            "GRANT_CONTROL" => Some(Self::Control),
             _ => None,
         }
     }
@@ -884,6 +984,107 @@ pub mod control_service_client {
                 .insert(GrpcMethod::new("sluice.v1.ControlService", "ListEntries"));
             self.inner.unary(req, path, codec).await
         }
+        /// Makes a pairing ticket for one device and one grant. The ticket is secret material, and this
+        /// answer is the only place it appears.
+        pub async fn create_pairing(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CreatePairingRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CreatePairingResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/sluice.v1.ControlService/CreatePairing",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("sluice.v1.ControlService", "CreatePairing"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// The devices this daemon has granted, with their labels and pairing times.
+        pub async fn list_devices(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListDevicesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListDevicesResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/sluice.v1.ControlService/ListDevices",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("sluice.v1.ControlService", "ListDevices"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// Changes one device's label and nothing else.
+        pub async fn rename_device(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RenameDeviceRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RenameDeviceResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/sluice.v1.ControlService/RenameDevice",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("sluice.v1.ControlService", "RenameDevice"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// Removes a device's grant and closes its connections. A ticket cannot restore it.
+        pub async fn revoke_device(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RevokeDeviceRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RevokeDeviceResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/sluice.v1.ControlService/RevokeDevice",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("sluice.v1.ControlService", "RevokeDevice"));
+            self.inner.unary(req, path, codec).await
+        }
         /// Stops the daemon. Running jobs end as cancelled and a receive keeps its partial store, then the
         /// socket or pipe is removed. The answer is sent before the daemon stops listening.
         pub async fn shutdown(
@@ -1004,6 +1205,39 @@ pub mod control_service_server {
             request: tonic::Request<super::ListEntriesRequest>,
         ) -> std::result::Result<
             tonic::Response<super::ListEntriesResponse>,
+            tonic::Status,
+        >;
+        /// Makes a pairing ticket for one device and one grant. The ticket is secret material, and this
+        /// answer is the only place it appears.
+        async fn create_pairing(
+            &self,
+            request: tonic::Request<super::CreatePairingRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CreatePairingResponse>,
+            tonic::Status,
+        >;
+        /// The devices this daemon has granted, with their labels and pairing times.
+        async fn list_devices(
+            &self,
+            request: tonic::Request<super::ListDevicesRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListDevicesResponse>,
+            tonic::Status,
+        >;
+        /// Changes one device's label and nothing else.
+        async fn rename_device(
+            &self,
+            request: tonic::Request<super::RenameDeviceRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RenameDeviceResponse>,
+            tonic::Status,
+        >;
+        /// Removes a device's grant and closes its connections. A ticket cannot restore it.
+        async fn revoke_device(
+            &self,
+            request: tonic::Request<super::RevokeDeviceRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RevokeDeviceResponse>,
             tonic::Status,
         >;
         /// Stops the daemon. Running jobs end as cancelled and a receive keeps its partial store, then the
@@ -1529,6 +1763,186 @@ pub mod control_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = ListEntriesSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/sluice.v1.ControlService/CreatePairing" => {
+                    #[allow(non_camel_case_types)]
+                    struct CreatePairingSvc<T: ControlService>(pub Arc<T>);
+                    impl<
+                        T: ControlService,
+                    > tonic::server::UnaryService<super::CreatePairingRequest>
+                    for CreatePairingSvc<T> {
+                        type Response = super::CreatePairingResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CreatePairingRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ControlService>::create_pairing(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = CreatePairingSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/sluice.v1.ControlService/ListDevices" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListDevicesSvc<T: ControlService>(pub Arc<T>);
+                    impl<
+                        T: ControlService,
+                    > tonic::server::UnaryService<super::ListDevicesRequest>
+                    for ListDevicesSvc<T> {
+                        type Response = super::ListDevicesResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListDevicesRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ControlService>::list_devices(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListDevicesSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/sluice.v1.ControlService/RenameDevice" => {
+                    #[allow(non_camel_case_types)]
+                    struct RenameDeviceSvc<T: ControlService>(pub Arc<T>);
+                    impl<
+                        T: ControlService,
+                    > tonic::server::UnaryService<super::RenameDeviceRequest>
+                    for RenameDeviceSvc<T> {
+                        type Response = super::RenameDeviceResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RenameDeviceRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ControlService>::rename_device(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = RenameDeviceSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/sluice.v1.ControlService/RevokeDevice" => {
+                    #[allow(non_camel_case_types)]
+                    struct RevokeDeviceSvc<T: ControlService>(pub Arc<T>);
+                    impl<
+                        T: ControlService,
+                    > tonic::server::UnaryService<super::RevokeDeviceRequest>
+                    for RevokeDeviceSvc<T> {
+                        type Response = super::RevokeDeviceResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RevokeDeviceRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as ControlService>::revoke_device(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = RevokeDeviceSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

@@ -241,3 +241,23 @@ impl Provider {
         })
     }
 }
+
+impl Provider {
+    /// The endpoint this provider serves on. A delivery dials its daemon from it, so the daemon
+    /// sees the identity its grant names.
+    pub fn endpoint(&self) -> &Endpoint {
+        &self.endpoint
+    }
+
+    /// The signature state, for a test that counts the lists served or serves its own bytes.
+    #[cfg(test)]
+    pub(crate) fn delta(&self) -> Option<&Arc<crate::engine::delta::Delta>> {
+        self.delta.as_ref()
+    }
+
+    /// What connections asked for, for a test that checks which endpoint received the content.
+    #[cfg(test)]
+    pub(crate) fn asked(&self) -> Arc<std::sync::Mutex<crate::engine::policy::Asked>> {
+        self.policy.asked_handle()
+    }
+}

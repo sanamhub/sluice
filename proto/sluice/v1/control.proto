@@ -42,6 +42,19 @@ service ControlService {
   // listed and never followed, and no file content is in the answer.
   rpc ListEntries(ListEntriesRequest) returns (ListEntriesResponse);
 
+  // Makes a pairing ticket for one device and one grant. The ticket is secret material, and this
+  // answer is the only place it appears.
+  rpc CreatePairing(CreatePairingRequest) returns (CreatePairingResponse);
+
+  // The devices this daemon has granted, with their labels and pairing times.
+  rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse);
+
+  // Changes one device's label and nothing else.
+  rpc RenameDevice(RenameDeviceRequest) returns (RenameDeviceResponse);
+
+  // Removes a device's grant and closes its connections. A ticket cannot restore it.
+  rpc RevokeDevice(RevokeDeviceRequest) returns (RevokeDeviceResponse);
+
   // Stops the daemon. Running jobs end as cancelled and a receive keeps its partial store, then the
   // socket or pipe is removed. The answer is sent before the daemon stops listening.
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
@@ -365,4 +378,66 @@ enum EntryKind {
   ENTRY_KIND_FILE = 1;
   ENTRY_KIND_FOLDER = 2;
   ENTRY_KIND_LINK = 3;
+}
+
+// What a paired device may do.
+enum Grant {
+  GRANT_UNSPECIFIED = 0;
+  // Hand this daemon a ticket and have it received into the inbox, within the quota.
+  GRANT_DELIVER = 1;
+  // Every call of this interface, including the device calls and Shutdown. Not served in 1.1.
+  GRANT_CONTROL = 2;
+}
+
+message CreatePairingRequest {
+  // The grant the ticket gives. Only GRANT_DELIVER is served in 1.1; GRANT_CONTROL is refused.
+  Grant grant = 1;
+  // How long the ticket works, in seconds from now. Zero is the default of 10 minutes; the most is
+  // one hour.
+  uint64 ttl_seconds = 2;
+  // The label the daemon writes for the device when the ticket is redeemed. Empty is the default,
+  // the first 8 hex characters of the endpoint id.
+  string label = 3;
+}
+
+message CreatePairingResponse {
+  // The pairing ticket. A secret, and the only answer that carries one.
+  Ticket ticket = 1;
+  // When the ticket stops working, in UTC milliseconds since the Unix epoch.
+  uint64 expires_ms = 2;
+}
+
+message ListDevicesRequest {}
+
+message ListDevicesResponse {
+  repeated DeviceInfo devices = 1;
+}
+
+// One device the daemon has a grant for. It holds no secret.
+message DeviceInfo {
+  // The endpoint id the device authenticated with, as 64 lower-case hex characters.
+  string endpoint_id = 1;
+  // The label a person knows it by, never a name the device chose about itself.
+  string label = 2;
+  Grant grant = 3;
+  // When it paired, in UTC milliseconds since the Unix epoch.
+  uint64 paired_ms = 4;
+}
+
+message RenameDeviceRequest {
+  string endpoint_id = 1;
+  string label = 2;
+}
+
+message RenameDeviceResponse {
+  DeviceInfo device = 1;
+}
+
+message RevokeDeviceRequest {
+  string endpoint_id = 1;
+}
+
+message RevokeDeviceResponse {
+  // Whether a grant was there to revoke.
+  bool revoked = 1;
 }

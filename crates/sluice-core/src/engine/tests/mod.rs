@@ -29,6 +29,7 @@ use crate::{
 
 mod cancel;
 mod checks;
+mod delivery;
 mod delta;
 mod delta_audit;
 mod delta_flows;
@@ -54,6 +55,7 @@ mod reports;
 mod resume;
 mod rules;
 mod select;
+mod sends;
 mod server;
 mod transfer;
 

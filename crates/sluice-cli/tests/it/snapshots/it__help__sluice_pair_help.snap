@@ -1,0 +1,47 @@
+---
+source: crates/sluice-cli/tests/it/help.rs
+expression: "help(&[\"pair\", \"--help\"])"
+---
+Pair a device with a running daemon, redeem a ticket, or list the daemons this device paired with
+
+Without `--redeem` or `--list`, the daemon makes one ticket for one device and one grant. The ticket is a secret: give it to the device, which redeems it once before it expires. `--redeem` runs on that device, and keeps the daemon under a name here.
+
+Usage: sluice pair [OPTIONS]
+
+Options:
+      --grant <GRANT>
+          The grant the ticket gives
+
+          Possible values:
+          - deliver: Hand the daemon content for its inbox, and nothing else
+          - control: Every call of the control interface. Reserved for 1.2, and refused today
+          
+          [default: deliver]
+
+      --json
+          Print JSON, one object per line, instead of text. A failure is then a JSON line on stderr
+
+      --color <WHEN>
+          When to colour help, errors and other output. NO_COLOR set to anything turns it off
+
+          Possible values:
+          - auto:   Colour a stream only when it is a terminal
+          - always: Colour always, unless `NO_COLOR` is set
+          - never:  Never colour
+          
+          [default: auto]
+
+      --ttl <SECONDS>
+          How long the ticket works, in seconds; the default is 10 minutes and the most is one hour
+
+      --name <NAME>
+          A name. For a ticket, the label the daemon writes for the device that redeems it; for a redemption, what this device calls the daemon; for a rename, the new label
+
+      --redeem <TICKET>
+          Redeem this ticket from the daemon that printed it
+
+      --list
+          Show the daemons this device has paired with, and what they granted
+
+  -h, --help
+          Print help (see a summary with '-h')

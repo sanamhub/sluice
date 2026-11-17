@@ -23,6 +23,17 @@ pub struct DaemonArgs {
     /// repeat for more. Without one the daemon refuses every send and every receive
     #[arg(long, value_name = "DIR")]
     pub root: Vec<PathBuf>,
+    /// Receive deliveries into this folder, which must be inside a root. Without it the daemon
+    /// makes pairing tickets but takes no delivery
+    #[arg(long, value_name = "DIR")]
+    pub inbox: Option<PathBuf>,
+    /// The most content the inbox may hold, in bytes (default 10 GiB)
+    #[arg(
+        long,
+        value_name = "BYTES",
+        default_value_t = sluice_core::engine::DEFAULT_INBOX_QUOTA
+    )]
+    pub inbox_quota: u64,
     /// The relay that carries a transfer when a direct path fails
     #[arg(long, value_name = "URL")]
     pub relay: Option<String>,
@@ -83,7 +94,9 @@ async fn serve(args: &DaemonArgs, output: &Output) -> Result<u8, Error> {
     if roots.is_empty() {
         output.write_stderr(&format!("sluice: {NO_ROOTS}\n"));
     }
-    let daemon = Daemon::bind(home, roots, relay).map_err(refused)?;
+    let daemon = Daemon::bind(home, roots, relay, args.inbox.clone(), args.inbox_quota)
+        .await
+        .map_err(refused)?;
     let page = start_page(args, &daemon).await?;
     tracing::info!("listening on {}", daemon.location());
     output.write_stdout(&listening_line(output, daemon.location()))?;

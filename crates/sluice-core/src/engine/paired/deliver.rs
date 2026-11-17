@@ -56,21 +56,34 @@ impl Deliverer {
     }
 
     /// Checks the grant, the ticket and the room, reserves the size, starts the receive, and
-    /// answers the status byte. A refusal is decided before any content arrives.
-    pub(super) fn start(self: &Arc<Self>, peer: [u8; 32], text: &str) -> u8 {
+    /// answers the status byte. A refusal is decided before any content arrives. The delivery lands
+    /// in a top-level entry of the inbox named by `name`, or by the ticket's root when it has none.
+    pub(super) fn start(self: &Arc<Self>, peer: [u8; 32], text: &str, name: Option<&str>) -> u8 {
         if !self.devices.allows(&peer, Grant::Deliver) {
             return 0x01;
         }
         let Ok(ticket) = Ticket::decode(text) else {
             return 0x01;
         };
-        let size = match ticket.body() {
-            Body::Static { size, .. } => *size,
-            // A live stream states no size, and this release does not receive one into an inbox:
-            // it would have to stop at the quota and leave a partial file. Refused before any
-            // byte, which is the same answer a full inbox gives.
+        let (root, size) = match ticket.body() {
+            Body::Static { root, size, .. } => (*root, *size),
+            // A live stream states no size, and this release does not receive one into an inbox: it
+            // would have to stop at the quota and leave a partial file. Refused before any byte,
+            // which is the same answer a full inbox gives.
             Body::Live { .. } | Body::Pairing { .. } => return 0x01,
         };
+        let Some(placement) = placement(name, &root) else {
+            return 0x01;
+        };
+        // The top-level entry is made here and not by the receive: `create_dir` refuses a name that
+        // is already there, so two deliveries cannot share one, and nothing in the inbox is ever
+        // overwritten.
+        let out = self.inbox.path.join(&placement);
+        match std::fs::create_dir(&out) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return 0x01,
+            Err(_) => return 0x02,
+        }
         let mut reserved = lock(&self.reserved);
         let used = used(&self.inbox.path);
         let room = self
@@ -79,6 +92,8 @@ impl Deliverer {
             .saturating_sub(used)
             .saturating_sub(*reserved);
         if size > room {
+            drop(reserved);
+            let _ = std::fs::remove_dir(&out);
             return 0x01;
         }
         *reserved = reserved.saturating_add(size);
@@ -88,11 +103,35 @@ impl Deliverer {
         let text = text.to_string();
         n0_future::task::spawn(async move {
             let (events, _received) = tokio::sync::mpsc::unbounded_channel();
-            let _ = crate::engine::receive(&text, &options(&this.inbox.path), &events).await;
+            let refused =
+                crate::engine::receive(&text, &options(&this.inbox.path.join(&placement)), &events)
+                    .await
+                    .is_err();
+            if refused {
+                // A receive that failed before it wrote anything leaves no trace, so the name can
+                // be used by a later delivery. A partial transfer keeps its folder and its bytes.
+                let _ = std::fs::remove_dir(&out);
+            }
             let mut reserved = lock(&this.reserved);
             *reserved = reserved.saturating_sub(size);
         });
         0x00
+    }
+}
+
+/// The one component a delivery lands under: the `name` the request gave, checked by the path rules
+/// of SPEC.md section 6, or the ticket's root in lower-case hex. `None` is a name the rules refuse.
+fn placement(name: Option<&str>, root: &[u8; 32]) -> Option<String> {
+    match name {
+        Some(name) => {
+            let path = crate::manifest::path::ManifestPath::parse(name).ok()?;
+            // A delivery names one entry under the inbox, not a path below one.
+            if path.as_str().contains('/') {
+                return None;
+            }
+            Some(path.as_str().to_string())
+        }
+        None => Some(root.iter().map(|byte| format!("{byte:02x}")).collect()),
     }
 }
 
@@ -191,11 +230,8 @@ impl DeliverHandler {
             return 0x01;
         };
         match request(&bytes) {
-            // A name is not honoured yet: the receive keeps the top-level name the sender's
-            // manifest gives, and a request that asks for another is refused rather than answered
-            // with a file under a name nobody asked for.
-            Some((text, None)) => self.deliver.start(peer, &text),
-            Some((_, Some(_))) | None => 0x01,
+            Some((text, name)) => self.deliver.start(peer, &text, name.as_deref()),
+            None => 0x01,
         }
     }
 }

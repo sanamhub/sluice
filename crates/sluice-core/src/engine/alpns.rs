@@ -8,10 +8,10 @@ use super::ALPN;
 /// Static content, owned by `iroh-blobs`, whose release pins the number.
 pub const ALPN_BLOBS: &[u8] = iroh_blobs::ALPN;
 
-/// Pairing a device with a daemon. ADR 0039, `SPEC.md` section 11.2. Not served yet.
+/// Pairing a device with a daemon. ADR 0039, `SPEC.md` section 11.2. A daemon whose home has an`n/// identity key serves it.
 pub const ALPN_PAIR: &[u8] = b"/sluice/pair/1";
 
-/// A paired device hands the daemon a ticket. ADR 0039, `SPEC.md` section 11.3. Not served yet.
+/// A paired device hands the daemon a ticket. ADR 0039, `SPEC.md` section 11.3. A daemon serves it`n/// only when it was started with an inbox.
 pub const ALPN_DELIVER: &[u8] = b"/sluice/deliver/1";
 
 /// Remote control of a daemon. ADR 0039, `SPEC.md` section 11.4. Not served yet.

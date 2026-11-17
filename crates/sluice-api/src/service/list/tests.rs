@@ -6,7 +6,10 @@ fn service(roots: &[std::path::PathBuf]) -> (tempfile::TempDir, Service) {
     let dir = tempfile::tempdir().unwrap();
     let home = Home::open(&dir.path().join("home")).unwrap();
     let roots = Roots::open(roots).unwrap();
-    (dir, Service::new(home, roots, RelayModeChoice::Disabled))
+    (
+        dir,
+        Service::new(home, roots, RelayModeChoice::Disabled, None),
+    )
 }
 
 fn at(root: &std::path::Path, path: &str) -> Option<RootPath> {

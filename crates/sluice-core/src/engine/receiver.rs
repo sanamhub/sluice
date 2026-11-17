@@ -29,7 +29,18 @@ impl std::fmt::Debug for Receiver {
 impl Receiver {
     /// Binds a receiver. It takes no lock, so it runs beside a `send`.
     pub async fn open(relay: RelayModeChoice, congestion: Congestion) -> Result<Self, Error> {
-        let endpoint = endpoint::bind(None, &relay, congestion, None).await?;
+        Self::open_with(None, relay, congestion).await
+    }
+
+    /// [`Receiver::open`] with an identity. A pairing redemption and a delivery authenticate with
+    /// the device's own key, so the daemon's grant names an id the device can present again; a
+    /// content receive uses a fresh key and passes `None`.
+    pub async fn open_with(
+        secret: Option<[u8; 32]>,
+        relay: RelayModeChoice,
+        congestion: Congestion,
+    ) -> Result<Self, Error> {
+        let endpoint = endpoint::bind(secret, &relay, congestion, None).await?;
         if !matches!(relay, RelayModeChoice::Disabled | RelayModeChoice::Loopback) {
             let wait = Duration::from_secs(iroh::NET_REPORT_TIMEOUT);
             tokio::time::timeout(wait, endpoint.online())
@@ -87,26 +98,27 @@ impl Receiver {
                 "the ticket has expired; ask the sender for a new one".to_string(),
             ));
         }
-        let id = PublicKey::from_bytes(ticket.endpoint_id())
-            .map_err(|_| Error::Policy("the ticket names an unreadable endpoint".to_string()))?;
-        let mut addr = EndpointAddr::new(id);
-        for direct in ticket.addrs() {
-            addr.addrs.insert(TransportAddr::Ip(*direct));
-        }
-        if let Some(text) = ticket.relay_url() {
-            let relay = text
-                .parse::<RelayUrl>()
-                .map_err(|_| Error::Policy("the ticket relay URL cannot be read".to_string()))?;
-            addr.addrs.insert(TransportAddr::Relay(relay));
-        }
-        let conn = self.endpoint.connect(addr, alpn).await.map_err(|e| {
-            Error::Network(format!("cannot reach the provider: {}", crate::plain(&e)))
-        })?;
-        // Every connection this process dials is checked here, before its first request: a
-        // provider that offered only classical groups has answered nothing of ours.
-        endpoint::require_post_quantum(&conn)?;
-        let _watch = events::watch_path(conn.clone(), events);
-        Ok(conn)
+        self.connect_to(
+            *ticket.endpoint_id(),
+            ticket.addrs(),
+            ticket.relay_url(),
+            alpn,
+            events,
+        )
+        .await
+    }
+
+    /// Connects to the endpoint `id` at `addrs`, through `relay` when one is named, on `alpn`. It is
+    /// the dial a ticket makes, for a caller whose peer is known from something other than a ticket.
+    pub async fn connect_to(
+        &self,
+        id: [u8; 32],
+        addrs: &[std::net::SocketAddr],
+        relay: Option<&str>,
+        alpn: &[u8],
+        events: UnboundedSender<Event>,
+    ) -> Result<Connection, Error> {
+        dial(&self.endpoint, id, addrs, relay, alpn, events).await
     }
 
     /// Closes the endpoint cleanly. It takes `&self` so a caller can close it early and still run
@@ -120,4 +132,35 @@ impl Receiver {
         }
         Ok(())
     }
+}
+
+/// Dials `id` at `addrs`, through `relay` when one is named, on `alpn`, from `endpoint`. Every
+/// connection this process dials is checked for the post-quantum group before its first request.
+pub(super) async fn dial(
+    endpoint: &Endpoint,
+    id: [u8; 32],
+    addrs: &[std::net::SocketAddr],
+    relay: Option<&str>,
+    alpn: &[u8],
+    events: UnboundedSender<Event>,
+) -> Result<Connection, Error> {
+    let id = PublicKey::from_bytes(&id)
+        .map_err(|_| Error::Policy("the peer names an unreadable endpoint".to_string()))?;
+    let mut addr = EndpointAddr::new(id);
+    for direct in addrs {
+        addr.addrs.insert(TransportAddr::Ip(*direct));
+    }
+    if let Some(text) = relay {
+        let relay = text
+            .parse::<RelayUrl>()
+            .map_err(|_| Error::Policy("the relay URL cannot be read".to_string()))?;
+        addr.addrs.insert(TransportAddr::Relay(relay));
+    }
+    let conn = endpoint
+        .connect(addr, alpn)
+        .await
+        .map_err(|e| Error::Network(format!("cannot reach the provider: {}", crate::plain(&e))))?;
+    endpoint::require_post_quantum(&conn)?;
+    let _watch = events::watch_path(conn.clone(), events);
+    Ok(conn)
 }
