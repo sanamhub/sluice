@@ -1,0 +1,42 @@
+# Sluice
+
+> Sluice sends a file or a folder straight from one computer to another over QUIC, checks every
+> block against its BLAKE3 root before writing it, and keeps no copy in between. No account, no
+> hosted storage, no telemetry. Free and open source, Apache-2.0 or MIT.
+
+Sluice is one engine with three ways in: a command line, a page in a browser that drives a daemon on
+the same computer, and a Model Context Protocol server for an AI assistant. Sending and receiving in
+a browser with nothing installed, and a desktop app, are planned for 1.2 and are not available.
+
+## Start here
+
+- [Send a file](https://sluicedrop.com/#send): the four steps with a local daemon and its page, today.
+- [Three ways in](https://sluicedrop.com/#ways): people, developers, AI agents.
+- [How it works](https://sluicedrop.com/#how): the channel, the blocks, and the ticket.
+- [For AI agents](https://sluicedrop.com/agents/): the MCP server, its setup and its seven tools.
+
+## Commands and install
+
+- [CLI reference](https://github.com/sanamhub/sluice/blob/main/crates/sluice-cli/README.md): every
+  command, flag, exit code and JSON field.
+- [Install guide](https://github.com/sanamhub/sluice/blob/main/docs/install.md): every channel, the
+  checks that verify a download, upgrade and uninstall.
+
+## For programs
+
+- [Control API](https://github.com/sanamhub/sluice/blob/main/SPEC.md#11-control-api),
+  `proto/sluice/v1`: the gRPC calls that the page, the MCP server and scripts use.
+- [MCP tools](https://sluicedrop.com/agents/#tools): `sluice mcp --root <folder>`, seven tools over
+  standard input and output.
+- [Wire specification](https://github.com/sanamhub/sluice/blob/main/SPEC.md): tickets, manifests,
+  content, live mode, the control API, and test vectors for a compatible implementation.
+
+## Background
+
+- [Design](https://github.com/sanamhub/sluice/blob/main/docs/design.md): architecture, data model and
+  storage rules.
+- [Threat model](https://github.com/sanamhub/sluice/blob/main/docs/threat-model.md): what is
+  protected, what is not, and the known weaknesses.
+- [Decision records](https://github.com/sanamhub/sluice/tree/main/docs/adr): why each choice was made.
+- [Roadmap](https://github.com/sanamhub/sluice/blob/main/docs/roadmap.md) and
+  [changelog](https://github.com/sanamhub/sluice/blob/main/CHANGELOG.md).

@@ -4,7 +4,7 @@
 
 <h1 align="center">Sluice</h1>
 
-<p align="center">Sluice sends a file straight from one computer to another. Nothing is stored in between.</p>
+<p align="center">Sluice sends a file or a folder straight from one computer to another. Nothing is stored in between.</p>
 
 <p align="center"><a href="https://sluicedrop.com">sluicedrop.com</a></p>
 
@@ -19,14 +19,96 @@
   <img src="https://img.shields.io/badge/status-pre--1.0-orange" alt="Status: pre-1.0">
 </p>
 
-Sluice is a command-line tool for sending files and folders between two computers. It is built for
-large files, slow links and connections that drop. There is no account, no hosted storage and no
-telemetry. A transfer goes directly when the two machines can reach each other, and through a relay
-you run when they cannot.
+Sluice moves a file or a folder from one computer to another without leaving a copy anywhere in
+between. It is built for large files, slow links and connections that drop, and it checks every block
+before it is written. There is no account, no hosted storage and no telemetry. A transfer goes
+directly when the two machines can reach each other, and through a relay you run when they cannot.
 
-## Quick start
+## Three ways in
 
-Install on Linux or macOS:
+All three reach the same engine, and none is the main one. Pick the one that matches how you work.
+
+### Send a file
+
+The shortest way today is the page a local daemon serves. It needs no account, and every step is one
+line to copy:
+
+1. Install Sluice on both computers. [Every channel is below](#install).
+2. On the computer that has the file, start the daemon and its page. `<folder>` is the one folder it
+   may send from and receive into:
+
+   ```sh
+   sluice daemon --ui --root <folder>
+   ```
+
+3. In a second terminal, open the page:
+
+   ```sh
+   sluice ui
+   ```
+
+   It opens in your browser. `sluice ui --print` prints the address instead, for a browser on
+   another machine or for a bookmark.
+
+4. Press Send, then copy the ticket or show its QR code. On the other computer, run the same two
+   commands, paste the ticket under Receive, look at what it offers, and choose where to save it.
+
+A ticket is a secret: anyone who holds it can take the files while the transfer is open, so send it
+the way you would send a password. The page talks only to the daemon on that computer, and the
+address holds a key that only your user can read.
+
+A desktop app, and sending from a browser with nothing installed, are coming in 1.2.
+[The roadmap](docs/roadmap.md) says what each one waits on.
+
+### For developers
+
+The command line does the same thing without a daemon, and it is one binary for Linux, macOS and
+Windows. [Install it](#install), then:
+
+```sh
+sluice send ./report.pdf          # prints a ticket, then serves the file
+sluice inspect <ticket>           # what the ticket offers, and no content
+sluice recv <ticket> --out ./inbox
+```
+
+The container image runs the same binary on Linux:
+
+```sh
+docker pull ghcr.io/sanamhub/sluice:0.1.0
+```
+
+[`crates/sluice-cli/README.md`](crates/sluice-cli/README.md) has every command, exit code and JSON
+field. [Common tasks](#common-tasks) below has folders, live files, pipes, resume and receipts.
+
+### For AI agents
+
+`sluice mcp` is a Model Context Protocol server in the same binary. It hands the engine to an
+assistant as seven tools over standard input and output (`send`, `receive`, `inspect`, `list_jobs`,
+`job_status`, `cancel_job`, `doctor`), with no socket and no listener of its own. Add it to a client
+and give it the folders it may use:
+
+```json
+{
+  "mcpServers": {
+    "sluice": {
+      "command": "sluice",
+      "args": ["mcp", "--root", "<folder>"]
+    }
+  }
+}
+```
+
+A tool call starts a job and returns its id at once, so a long transfer does not hold a conversation
+open. A path outside the folders the server was started with is refused, and text another computer
+chose comes back in fields whose names begin `untrusted_`.
+
+[sluicedrop.com/agents](https://sluicedrop.com/agents/) has the setup for common clients, the tool
+list and what the server will not do. [`crates/sluice-cli/README.md`](crates/sluice-cli/README.md)
+has the fields each tool takes and returns.
+
+## Install
+
+Linux and macOS:
 
 ```sh
 curl --proto '=https' --tlsv1.2 -LsSf \
@@ -39,7 +121,7 @@ Or with Homebrew:
 brew install sanamhub/tap/sluice
 ```
 
-On Windows:
+On Windows, in PowerShell:
 
 ```powershell
 irm https://github.com/sanamhub/sluice/releases/latest/download/sluice-cli-installer.ps1 | iex
@@ -56,7 +138,13 @@ scoop install sluice
 winget install --id sanamhub.sluice -e
 ```
 
-The container image is a fourth way, for Linux:
+On Arch Linux, from the AUR:
+
+```sh
+yay -S sluice-bin
+```
+
+The container image is another channel, for Linux:
 
 ```sh
 docker pull ghcr.io/sanamhub/sluice:0.1.0
@@ -64,34 +152,6 @@ docker pull ghcr.io/sanamhub/sluice:0.1.0
 
 [`docs/install.md`](docs/install.md) has every channel, the archive names, the checks that verify a
 download, and the upgrade and uninstall command for each.
-
-Send a file from one machine:
-
-```sh
-sluice send ./report.pdf
-```
-
-It prints a ticket on one line and then serves the file. Send the ticket to the other machine, any
-way you like, and run:
-
-```sh
-sluice inspect <ticket>
-sluice recv <ticket> --out ./inbox
-```
-
-`inspect` prints what the ticket offers, with the number of files and folders, the size and the
-names, and fetches no content. `recv` prints progress, verifies each block as it arrives, and ends
-with a line that names the path it wrote. The sender stops after that one complete download.
-
-A phone can take the ticket from the screen. `--qr` draws the same ticket as a QR code on standard
-error, so the ticket line stays the one a script reads:
-
-```sh
-sluice send --qr ./report.pdf
-```
-
-The code is the ticket, so a camera that can see the screen can take the file while the ticket
-lasts.
 
 ## What makes it different
 
@@ -215,78 +275,6 @@ sluice doctor
 sluice doctor --network
 ```
 
-The [CLI README](crates/sluice-cli/README.md) lists the exit codes, the JSON shapes and every
-`doctor` check that scripts may rely on.
-
-### The daemon
-
-`sluice daemon` runs transfers for local programs. It serves the control interface of
-[`proto/sluice/v1`](proto/sluice/v1/control.proto), a gRPC service, on a Unix socket in a folder of
-mode 0700 inside the home, or on Windows a named pipe whose access list names only the current user,
-`SYSTEM` and `Administrators`. It never listens on a TCP port, and it refuses a connection whose
-process runs as another user.
-
-```sh
-sluice daemon --root ~/Transfers --root ~/Outbox
-sluice daemon status
-sluice daemon stop
-```
-
-A client names a root and a path below it, and the daemon sends from and receives into those
-folders and nowhere else. A daemon started with no `--root` refuses every send and receive and says
-how to allow one. A path with a `..`, an absolute path or a link in it is refused. The daemon
-returns a ticket only to the call that made it, and no log line, error, event or job list holds one.
-A daemon send copies the files it sends into the home's temporary area, so it needs as much free
-space there as they take and refuses to start without it; a one-shot `send` still reads its files
-where they live. At most 16 jobs run at once, a watcher that falls behind is told how many events it
-missed, and a message is at most 1 MiB.
-
-`SIGINT`, `SIGTERM` or `SIGHUP`, a console `Ctrl+C`, `Ctrl+Break`, close, logoff or shutdown on
-Windows, or `sluice daemon stop` ends running jobs as cancelled. A receive keeps its partial store,
-so receiving the same ticket again resumes it. The daemon holds the home's lock, so a command that
-opens the same home, `send` among them, is refused until it stops, unless it uses another
-`SLUICE_HOME`. `--loopback` makes the daemon's transfers use `127.0.0.1` only, with no relay, which
-no other computer can reach. It cannot be combined with `--relay` or `--n0-relays`.
-
-### MCP
-
-`sluice mcp` serves the tools of Sluice to a Model Context Protocol client over standard input and
-output, in the same binary. It calls the same service the daemon does, in process: it opens no
-socket and no port, and it ends when its input closes, cancelling what still runs and keeping the
-partial stores of receives. A client config looks like this:
-
-```json
-{
-  "mcpServers": {
-    "sluice": {
-      "command": "sluice",
-      "args": ["mcp", "--root", "/home/me/Transfers"]
-    }
-  }
-}
-```
-
-The tools are `send`, `receive`, `inspect`, `list_jobs`, `job_status`, `cancel_job` and `doctor`.
-A send or receive returns a job id at once, before any file is copied, and `job_status` reports its
-progress. For a send, `job_status` gives the ticket as `secret_ticket` once the send is prepared.
-Sends and receives work only inside a `--root` folder, with none they are refused, and no tool
-changes the identity, the relay or the roots. Every answer is a structured value, and a refusal or
-failure is marked as an error. Text a peer chose, such as file names or the reason a job failed,
-comes back only in fields whose names begin `untrusted_`, escaped, and never inside a sentence the
-tool writes. The ticket is returned only in `secret_ticket`, so the client's transcript then holds
-it: anyone who can read the transcript can take the files while the send runs. A line of input over
-256 KiB is dropped.
-
-### Use the page
-
-`sluice daemon --ui --root FOLDER` also serves a page in a browser on a loopback port. `sluice ui`
-opens it, and `sluice ui --print` prints its address instead. The address holds a random key in its
-fragment, which the page takes out of it and sends with every call, so anyone who can read the
-address can control the daemon. The page picks files from the roots, shows a ticket and its QR code,
-inspects a ticket, receives into a root and lists transfers as they move. It carries no file bytes:
-the daemon sends and receives them. Only a page of the daemon's own address may call it, a request is
-JSON of at most 64 KiB, and no answer allows another site.
-
 ## How it works
 
 Sluice uses [iroh](https://github.com/n0-computer/iroh) for QUIC, address discovery and hole
@@ -333,8 +321,9 @@ and its network modes.
 ## Project status
 
 0.1.0 is the first release. It ships the `sluice` binary for six targets, the shell and PowerShell
-installers, Homebrew, Scoop, winget, the AUR, and the tool and relay images. The desktop and browser
-clients described in the [roadmap](docs/roadmap.md) do not exist yet.
+installers, Homebrew, Scoop, winget, the AUR, and the tool and relay images. The desktop app, the
+installers for a store, and sending from a browser with nothing installed are described in the
+[roadmap](docs/roadmap.md) and do not exist yet.
 
 Before 1.0 the command line and the wire format may change. [`SPEC.md`](SPEC.md) is the wire
 contract, with test vectors for anyone writing a compatible implementation.

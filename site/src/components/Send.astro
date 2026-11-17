@@ -1,0 +1,154 @@
+---
+// The one path that works today with no terminal knowledge beyond copying two lines: the local
+// daemon, its page, and the ticket. Every step here is in `sluice --help` at 0.1.0.
+import { INSTALL, ROADMAP } from "../data/links";
+import Cmd from "./preview/Cmd.astro";
+---
+
+<section class="section send" id="send" aria-labelledby="send-title">
+    <div class="wrap">
+        <div class="section-head">
+            <h2 id="send-title">Send a file</h2>
+            <p>
+                Two commands on each computer, and the rest happens in a page in your browser. There
+                is nothing to sign up for, and the page answers only this computer.
+            </p>
+        </div>
+        <ol class="steps">
+            <li>
+                <h3>Install Sluice on both computers</h3>
+                <p>
+                    One binary, no account. Every channel is below, and the
+                    <a href={INSTALL}>install guide</a> shows how to verify a download.
+                </p>
+            </li>
+            <li>
+                <h3>Start the daemon with its page, on the computer that has the file</h3>
+                <Cmd lines={["sluice daemon --ui --root <folder>"]} />
+                <p>
+                    <code translate="no">&lt;folder&gt;</code> is the folder you send from and
+                    receive into, and it is the daemon's whole permission: everything it can read or
+                    write is inside it. Leave the command running while you send.
+                </p>
+            </li>
+            <li>
+                <h3>Open the page</h3>
+                <Cmd lines={["sluice ui"]} />
+                <p>
+                    It opens in your browser. <code translate="no">sluice ui --print</code> prints
+                    the address instead, for a browser on another machine or for a bookmark. The
+                    address holds a key that only this user can read, and the page takes no request
+                    from anywhere else.
+                </p>
+            </li>
+            <li>
+                <h3>Pick the files, then hand over the ticket</h3>
+                <p>
+                    Press Send and the page gives you a ticket and its QR code. On the other
+                    computer, run the same two commands, paste the ticket under Receive, look at
+                    what it offers, and choose where to save it. The ticket is a secret: anyone who
+                    has it can take the files while the transfer is open, so send it the way you
+                    would send a password.
+                </p>
+            </li>
+        </ol>
+        <p class="later">
+            A desktop app that needs no command, and sending from a browser with nothing installed,
+            are coming in 1.2. The <a href={ROADMAP}>roadmap</a> says what each one waits on, and
+            until then this page is the shortest way.
+        </p>
+    </div>
+</section>
+
+<style>
+    .steps {
+        display: grid;
+        gap: var(--space-3);
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: step;
+    }
+
+    .steps > li {
+        position: relative;
+        padding-left: 3.4rem;
+        counter-increment: step;
+    }
+
+    /* The water line down the run of steps, and a gate marker on each one. */
+    .steps > li::before {
+        content: "";
+        position: absolute;
+        inset: 2.6rem auto -1.6rem 0.95rem;
+        width: 2px;
+        background: linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--water) 55%, transparent),
+            color-mix(in srgb, var(--water) 12%, transparent)
+        );
+    }
+
+    .steps > li:last-child::before {
+        content: none;
+    }
+
+    .steps > li::after {
+        content: counter(step);
+        position: absolute;
+        inset: 0 auto auto 0;
+        display: grid;
+        place-items: center;
+        width: 2rem;
+        height: 2rem;
+        border: 1px solid color-mix(in srgb, var(--water) 55%, transparent);
+        border-radius: 50%;
+        background: var(--stone);
+        color: var(--water-deep);
+        font-family: var(--font-code);
+        font-size: var(--step--1);
+    }
+
+    .steps h3 {
+        margin: 0 0 var(--space-1);
+        font-size: var(--step-0);
+    }
+
+    .steps p {
+        margin: 0;
+        max-width: var(--measure);
+        color: var(--mist);
+    }
+
+    .steps :global(.install-code) {
+        margin: 0 0 var(--space-2);
+        max-width: 34rem;
+        padding: 0.6rem 0.8rem;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-s);
+        background: color-mix(in srgb, var(--stone-2) 70%, transparent);
+    }
+
+    .later {
+        margin: var(--space-4) 0 0;
+        padding: var(--space-3);
+        border: 1px dashed var(--line-strong);
+        border-radius: var(--radius-m);
+        max-width: var(--measure);
+        color: var(--mist);
+    }
+
+    @media (max-width: 40rem) {
+        .steps > li {
+            padding-left: 2.9rem;
+        }
+
+        .steps :global(.install-code) {
+            grid-template-columns: 1fr;
+        }
+
+        .steps :global(.copy) {
+            justify-self: start;
+        }
+    }
+</style>

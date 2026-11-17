@@ -127,6 +127,31 @@ async fn the_tool_list_is_what_the_snapshot_says() {
     insta::assert_snapshot!(serde_json::to_string_pretty(&tools).unwrap());
 }
 
+/// The agents page shows the same list, generated from this server by
+/// `site/scripts/mcp-tools.mjs`. A rename or a change of description has to move both files, so a
+/// page cannot promise a tool the binary does not have.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_site_lists_the_tools_this_server_has() {
+    let f = folders();
+    let client = connect(&f.sender_home, &f.outgoing).await;
+    let mut tools: Vec<Value> = client
+        .list_all_tools()
+        .await
+        .unwrap()
+        .iter()
+        .map(|tool| json!({ "name": tool.name, "description": tool.description }))
+        .collect();
+    tools.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../site/src/data/mcp-tools.json");
+    let text = std::fs::read_to_string(&path).expect("the site's tool list is readable");
+    let listed: Value = serde_json::from_str(&text).expect("the site's tool list is JSON");
+    assert_eq!(
+        listed,
+        Value::Array(tools),
+        "the site's tool list is stale: run `node site/scripts/mcp-tools.mjs`"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_send_and_a_receive_between_two_servers_finish_verified() {
     let f = folders();

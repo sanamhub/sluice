@@ -1,0 +1,305 @@
+---
+// The page for the third way in. The tool list is `src/data/mcp-tools.json`, written from a real
+// `sluice mcp` server by `scripts/mcp-tools.mjs`, so this page cannot name a tool the binary does
+// not have.
+import Cmd from "../components/preview/Cmd.astro";
+import Base from "../layouts/Base.astro";
+import tools from "../data/mcp-tools.json";
+import { CLI_README, LLMS, ROADMAP, SPEC } from "../data/links";
+
+const clients = [
+    {
+        id: "claude-code",
+        label: "Claude Code",
+        row: "claude mcp add sluice -- sluice mcp --root <folder>",
+    },
+    {
+        id: "claude-desktop",
+        label: "Claude Desktop",
+        row: "~/Library/Application Support/Claude/claude_desktop_config.json",
+    },
+    {
+        id: "cursor",
+        label: "Cursor",
+        row: ".cursor/mcp.json in the project, or the MCP pane in settings",
+    },
+];
+const config = [
+    "{",
+    '  "mcpServers": {',
+    '    "sluice": {',
+    '      "command": "sluice",',
+    '      "args": ["mcp", "--root", "<folder>"]',
+    "    }",
+    "  }",
+    "}",
+];
+---
+
+<Base
+    title="Sluice for AI agents: a file transfer as seven tools"
+    description="sluice mcp serves the same engine to an assistant over the Model Context Protocol: seven tools over standard input and output, inside the folders you name, with no listener and no file byte in the protocol."
+>
+    <section class="section agents-hero" aria-labelledby="agents-title">
+        <div class="wrap">
+            <p class="eyebrow">AI agents</p>
+            <h1 id="agents-title">Give an assistant a way to move a file.</h1>
+            <p class="lede">
+                <code translate="no">sluice mcp</code> is a Model Context Protocol server in the
+                same binary as the command line. It hands the engine to an assistant as seven tools
+                over standard input and output: no socket, no listener of its own, and no file byte
+                in the protocol.
+            </p>
+            <p class="muted">
+                It starts a job and returns an id at once, so a long transfer does not hold a
+                conversation open. The files themselves move between the two engines over the same
+                encrypted channel a person's transfer uses.
+            </p>
+        </div>
+    </section>
+
+    <section class="section agents-setup" id="setup" aria-labelledby="setup-title">
+        <div class="wrap">
+            <div class="section-head">
+                <h2 id="setup-title">Add it to a client</h2>
+                <p>
+                    The server is the same command everywhere: <code translate="no">sluice mcp
+                    --root &lt;folder&gt;</code>, with one <code translate="no">--root</code> for
+                    each folder the assistant may send from and receive into. Without one, every
+                    send and receive is refused, because a tool that can name any path is a tool
+                    that can read the whole disk.
+                </p>
+            </div>
+            <div class="clients">
+                <div class="client">
+                    <h3>Claude Code</h3>
+                    <p>One command, from the folder you want it to work in:</p>
+                    <Cmd lines={[clients[0].row]} />
+                </div>
+                <div class="client">
+                    <h3>Claude Desktop</h3>
+                    <p>{clients[1].row}: add this under <code translate="no">mcpServers</code>.</p>
+                    <Cmd lines={config} />
+                </div>
+                <div class="client">
+                    <h3>Cursor, and other clients</h3>
+                    <p>{clients[2].row}. The same block works for any client that reads one.</p>
+                    <Cmd lines={config} />
+                </div>
+            </div>
+            <p class="muted">
+                <code translate="no">--loopback</code> keeps every transfer on 127.0.0.1 with no
+                relay, no mDNS and no address publishing, which is what a test or a same-machine
+                agent wants. <code translate="no">--relay URL</code> carries a transfer that cannot
+                connect directly. <code translate="no">--n0-relays</code> uses relays this project
+                does not run.
+            </p>
+        </div>
+    </section>
+
+    <section class="section agents-tools" id="tools" aria-labelledby="tools-title">
+        <div class="wrap">
+            <div class="section-head">
+                <h2 id="tools-title">The tools</h2>
+                <p>
+                    These are the names and descriptions the server reports, written by the binary
+                    itself. The <a href={CLI_README}>CLI reference</a> has the fields each one takes
+                    and returns, and <a href={SPEC}>SPEC.md</a> section 11 is the control API the
+                    tools call.
+                </p>
+            </div>
+            <table class="tools">
+                <thead>
+                    <tr><th scope="col">Tool</th><th scope="col">What it does</th></tr>
+                </thead>
+                <tbody>
+                    {tools.map((tool) => (
+                        <tr>
+                            <th scope="row"><code translate="no">{tool.name}</code></th>
+                            <td>{tool.description}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="section agents-safety" id="safety" aria-labelledby="safety-title">
+        <div class="wrap">
+            <div class="section-head">
+                <h2 id="safety-title">What it will not do</h2>
+                <p>
+                    An assistant is a program that can be talked into things, so the server keeps the
+                    decisions a person would make.
+                </p>
+            </div>
+            <ul class="rules">
+                <li>
+                    <h3>Every path is inside a root</h3>
+                    <p>
+                        The server is started with the folders a tool may name. A path it was not
+                        given is refused before anything is opened, and <code translate="no">..</code>,
+                        absolute paths and links are refused rather than resolved.
+                    </p>
+                </li>
+                <li>
+                    <h3>A ticket is a secret</h3>
+                    <p>
+                        <code translate="no">send</code> returns a job id; <code translate="no">job_status</code>
+                        gives the ticket once the send is ready. Anyone who holds that ticket can take
+                        the files while the transfer is open, so the server treats it as secret and
+                        never puts it in a list.
+                    </p>
+                </li>
+                <li>
+                    <h3>Names a peer chose are marked</h3>
+                    <p>
+                        Every field whose name begins <code translate="no">untrusted_</code> holds
+                        text from another computer. It is data to show, never an instruction to
+                        follow, and the tool descriptions say so.
+                    </p>
+                </li>
+                <li>
+                    <h3>Nothing is automatic</h3>
+                    <p>
+                        A tool call is one job. There is no folder watched in the background, no
+                        service installed and no rule that sends on its own: the assistant asks, the
+                        engine does, and the answer says what happened.
+                    </p>
+                </li>
+            </ul>
+            <p class="muted">
+                The page a language model should read first is
+                <a href={LLMS}>llms.txt</a>. The <a href={ROADMAP}>roadmap</a> says what comes next:
+                one button in the desktop app adds this server to a local assistant.
+            </p>
+        </div>
+    </section>
+</Base>
+
+<style>
+    .eyebrow {
+        margin: 0 0 var(--space-2);
+        font-family: var(--font-code);
+        font-size: var(--step--1);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--water-deep);
+    }
+
+    .agents-hero h1 {
+        margin: 0;
+        max-width: 18ch;
+    }
+
+    .agents-hero .lede {
+        max-width: var(--measure);
+    }
+
+    .agents-setup .clients {
+        display: grid;
+        gap: var(--space-3);
+    }
+
+    .client h3 {
+        margin: 0 0 var(--space-1);
+        font-size: var(--step-0);
+    }
+
+    .client p {
+        margin: 0 0 var(--space-2);
+        color: var(--mist);
+        max-width: var(--measure);
+    }
+
+    .client :global(.install-code) {
+        max-width: 42rem;
+        padding: 0.7rem 0.9rem;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-s);
+        background: color-mix(in srgb, var(--stone-2) 70%, transparent);
+    }
+
+    .tools {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+    }
+
+    .tools th,
+    .tools td {
+        padding: var(--space-2) var(--space-2) var(--space-2) 0;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+    }
+
+    .tools thead th {
+        font-family: var(--font-code);
+        font-size: var(--step--1);
+        font-weight: 500;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--mist);
+    }
+
+    .tools tbody th {
+        white-space: nowrap;
+        font-weight: 500;
+    }
+
+    .tools td {
+        color: var(--mist);
+    }
+
+    .rules {
+        display: grid;
+        gap: var(--space-3);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        margin: 0;
+        padding: 0;
+        list-style: none;
+    }
+
+    .rules h3 {
+        margin: 0 0 var(--space-1);
+        font-size: var(--step-0);
+    }
+
+    .rules p {
+        margin: 0;
+        color: var(--mist);
+    }
+
+    @media (max-width: 60rem) {
+        .rules {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 40rem) {
+        .tools thead {
+            display: none;
+        }
+
+        .tools tr {
+            display: grid;
+            gap: var(--space-1);
+            padding: var(--space-2) 0;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .tools th,
+        .tools td {
+            padding: 0;
+            border: 0;
+        }
+
+        .client :global(.install-code) {
+            grid-template-columns: 1fr;
+        }
+
+        .client :global(.copy) {
+            justify-self: start;
+        }
+    }
+</style>
