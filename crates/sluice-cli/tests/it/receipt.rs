@@ -34,6 +34,7 @@ fn of_ticket(text: &str) -> ([u8; 32], u64) {
     match ticket.body() {
         Body::Static { root, size, .. } => (*root, *size),
         Body::Live { .. } => panic!("a live ticket names no manifest"),
+        Body::Pairing { .. } => panic!("a pairing ticket names no manifest"),
     }
 }
 

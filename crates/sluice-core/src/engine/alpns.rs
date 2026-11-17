@@ -18,12 +18,12 @@ pub const ALPN_DELIVER: &[u8] = b"/sluice/deliver/1";
 pub const ALPN_CONTROL: &[u8] = b"/sluice/control/1";
 
 /// Every ALPN of `SPEC.md` section 3, in registration order, and whether this build serves it.
-/// The three that ADR 0039 adds are listed before they exist so the order is fixed once, and a
-/// listener that serves none of them closes a connection that offers one at the handshake.
+/// Pairing and delivery are served; the control listener ships in 1.2, and until then a
+/// connection that offers only its name is closed at the handshake.
 pub const ALPN_REGISTERED: [(&[u8], bool); 5] = [
     (ALPN_BLOBS, true),
     (ALPN, true),
-    (ALPN_PAIR, false),
-    (ALPN_DELIVER, false),
+    (ALPN_PAIR, true),
+    (ALPN_DELIVER, true),
     (ALPN_CONTROL, false),
 ];

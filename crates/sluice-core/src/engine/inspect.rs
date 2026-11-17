@@ -129,6 +129,11 @@ pub async fn inspect_with(
             return Ok(Offering::Live);
         }
         Body::Static { size, format, .. } => (*size, *format),
+        Body::Pairing { .. } => {
+            return Err(Error::Policy(
+                "a pairing ticket names no content to inspect".to_string(),
+            ));
+        }
     };
     if format == Format::Raw {
         // A raw blob has no names; its size is the whole of what the ticket says.

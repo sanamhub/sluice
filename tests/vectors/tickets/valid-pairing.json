@@ -1,0 +1,25 @@
+{
+  "description": "Pairing tickets, SPEC.md section 4: kind 2, a 32-byte secret and a grant, and the expiry rule 3 requires",
+  "cases": [
+    {
+      "ticket": "sluice10411248h248h248h248h248h248h248h248h248h248h248h248h2480000yg1s248h248h248h248h248h248h248h248h248h248h248h248h24800",
+      "valid": true,
+      "canonical": "sluice10411248h248h248h248h248h248h248h248h248h248h248h248h2480000yg1s248h248h248h248h248h248h248h248h248h248h248h248h24800",
+      "fields": {
+        "version": 1,
+        "kind": "pairing",
+        "endpoint_id": "1111111111111111111111111111111111111111111111111111111111111111",
+        "addrs": [],
+        "relay_url": null,
+        "expiry_ms": "1000",
+        "secret": "2222222222222222222222222222222222222222222222222222222222222222",
+        "grant": "deliver"
+      }
+    },
+    {
+      "ticket": "sluice10411248h248h248h248h248h248h248h248h248h248h248h248h2480000248h248h248h248h248h248h248h248h248h248h248h248h248g0",
+      "valid": false,
+      "reason": "a Pairing body has no expiry, which rule 3 requires"
+    }
+  ]
+}

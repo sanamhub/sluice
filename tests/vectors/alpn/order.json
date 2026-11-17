@@ -1,10 +1,10 @@
 {
-  "description": "The ALPNs a listener registers, in the order iroh negotiates them, SPEC.md section 3: the two this build serves, then the three ADR 0039 adds, which it does not serve yet",
+  "description": "The ALPNs a listener registers, in the order iroh negotiates them, SPEC.md section 3: the two content ALPNs, the pairing and delivery listeners ADR 0039 adds, and the control listener that 1.2 ships",
   "cases": [
     { "index": 0, "alpn": "/iroh-bytes/4", "served": true },
     { "index": 1, "alpn": "sluice/1", "served": true },
-    { "index": 2, "alpn": "/sluice/pair/1", "served": false },
-    { "index": 3, "alpn": "/sluice/deliver/1", "served": false },
+    { "index": 2, "alpn": "/sluice/pair/1", "served": true },
+    { "index": 3, "alpn": "/sluice/deliver/1", "served": true },
     { "index": 4, "alpn": "/sluice/control/1", "served": false }
   ]
 }

@@ -55,6 +55,11 @@ impl Receiver {
         let alpn = match ticket.body() {
             Body::Static { .. } => iroh_blobs::ALPN,
             Body::Live { .. } => ALPN,
+            Body::Pairing { .. } => {
+                return Err(Error::Policy(
+                    "a pairing ticket is redeemed on its own ALPN, not as content".to_string(),
+                ));
+            }
         };
         self.connect_alpn(ticket, alpn, events).await
     }

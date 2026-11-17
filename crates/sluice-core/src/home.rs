@@ -1,7 +1,7 @@
 //! The store's home on disk: the folder, its layout version, the one-writer lock and the identity
 //! key. Nothing here reads a config or touches the network, so opening a home is cheap.
 
-mod atomic;
+pub(crate) mod atomic;
 pub mod doctor;
 mod folder;
 mod identity;

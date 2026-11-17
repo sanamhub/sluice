@@ -111,6 +111,7 @@ impl Outgoing {
             match self.ticket.body() {
                 Body::Static { root, .. } => vec![*root],
                 Body::Live { .. } => Vec::new(),
+                Body::Pairing { .. } => Vec::new(),
             }
         } else {
             self.roots.clone()

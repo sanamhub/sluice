@@ -97,16 +97,26 @@ fn an_unknown_version_kind_or_format_is_refused() {
             "{version}"
         );
     }
-    for kind in [2u8, 3, 255] {
+    for kind in [3u8, 255] {
         let parts = Parts {
             kind,
             ..Parts::valid()
         };
         assert!(
-            refusal_of(&parts.bytes()).contains("kind is not 0 or 1"),
+            refusal_of(&parts.bytes()).contains("kind is not 0, 1 or 2"),
             "{kind}"
         );
     }
+    // Kind 2 is a pairing body, so the bytes of a static body are not one. Whatever rule refuses
+    // them, the ticket is refused and not read as a static one.
+    let parts = Parts {
+        kind: 2,
+        ..Parts::valid()
+    };
+    assert!(
+        !refusal_of(&parts.bytes()).is_empty(),
+        "a static body behind kind 2 is refused"
+    );
     for format in [2u8, 3, 255] {
         let mut parts = Parts::valid();
         *parts.body.last_mut().unwrap() = format;

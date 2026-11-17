@@ -6,6 +6,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use serde::Deserialize;
+use sluice_core::device::Grant;
 use sluice_core::ticket::{Body, Format, Ticket};
 
 use super::{Report, run_kind, shown};
@@ -35,6 +36,8 @@ struct Fields {
     format: Option<String>,
     stream_id: Option<String>,
     sender_key: Option<String>,
+    secret: Option<String>,
+    grant: Option<String>,
 }
 
 pub fn run(dir: &Path, report: &mut Report) -> Result<()> {
@@ -95,6 +98,14 @@ fn expected(f: &Fields) -> Result<Ticket, String> {
         "live" => Body::Live {
             stream_id: hex(f.stream_id.as_deref().ok_or("no stream_id")?)?,
             sender_key: hex(f.sender_key.as_deref().ok_or("no sender_key")?)?,
+        },
+        "pairing" => Body::Pairing {
+            secret: hex(f.secret.as_deref().ok_or("no secret")?)?,
+            grant: match f.grant.as_deref() {
+                Some("deliver") => Grant::Deliver,
+                Some("control") => Grant::Control,
+                other => return Err(format!("grant {other:?}")),
+            },
         },
         other => return Err(format!("kind {other}")),
     };

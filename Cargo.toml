@@ -82,6 +82,9 @@ iroh-blobs = "0.105.0"
 # mDNS lookup for the local network, which iroh keeps out of the base crate. Its only iroh
 # dependency is the same 1.x range, so the tree gets no second iroh.
 iroh-mdns-address-lookup = "0.6.1"
+# Constant-time comparison of a pairing ticket's 32-byte secret. Already in the tree through
+# ed25519-dalek, so no new version.
+subtle = "2.6"
 # iroh re-exports neither the congestion controllers nor the rustls handshake data.
 noq = { version = "1.4", default-features = false, features = ["rustls"] }
 # Only for StreamExt on iroh-blobs' GetProgress stream. The version Cargo.lock already resolves

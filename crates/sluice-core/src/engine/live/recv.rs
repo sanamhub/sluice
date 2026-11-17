@@ -54,6 +54,7 @@ fn live_ids(ticket: &Ticket) -> Result<([u8; 16], [u8; 32]), Error> {
             sender_key,
         } => Ok((*stream_id, *sender_key)),
         Body::Static { .. } => Err(Error::Policy("this ticket is not live".to_string())),
+        Body::Pairing { .. } => Err(Error::Policy("this ticket is not live".to_string())),
     }
 }
 

@@ -26,6 +26,10 @@ pub fn run(text: &str) -> anyhow::Result<()> {
             println!("kind live");
             println!("stream {}", hex(stream_id));
         }
+        Body::Pairing { grant, .. } => {
+            println!("kind pairing");
+            println!("grant {grant}");
+        }
     }
     Ok(())
 }

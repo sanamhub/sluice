@@ -161,6 +161,7 @@ fn refuse_include_without_entries(
     }
     let why = match ticket.body() {
         Body::Live { .. } => "a live ticket has no names to choose from",
+        Body::Pairing { .. } => "a pairing ticket has no names to choose from",
         Body::Static {
             format: Format::Raw,
             ..

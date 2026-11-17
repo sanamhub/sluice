@@ -42,6 +42,7 @@ mod lifecycle;
 mod live;
 mod names;
 mod pack;
+mod paired;
 mod places;
 mod provider;
 mod receipt_file;
