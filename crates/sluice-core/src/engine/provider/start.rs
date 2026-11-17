@@ -154,33 +154,39 @@ impl Provider {
         rate: Option<Arc<Rate>>,
     ) -> Result<Self, Error> {
         let (receivers, receivers_rx) = unbounded_channel();
-        let ids = Arc::new(ConnIds::default());
+        let own_ids = Arc::new(ConnIds::default());
         let places = Arc::new(Mutex::new(policy::Places::default()));
         // A send in a process that started the daemon's listener installs its protocols there, so
-        // the daemon has one endpoint id whether or not a send is running. Every other send binds
-        // an endpoint of its own.
-        let (endpoint, attached) = match crate::engine::paired::attach_for(home).await? {
-            Some(attached) => (attached.endpoint().clone(), Some(attached)),
-            None => {
-                let completion = endpoint::Completion {
-                    sender: receivers.clone(),
-                    ids: Arc::clone(&ids),
-                };
-                let endpoint = open_endpoint(home, &relay, congestion, port, completion).await?;
-                if let Some(port) = endpoint
-                    .bound_sockets()
-                    .first()
-                    .map(std::net::SocketAddr::port)
-                {
-                    home.save_port(port);
+        // the daemon has one endpoint id whether or not a send is running. That endpoint's own
+        // handshake ids and connection reports are shared with the send, so a limited send still
+        // knows which receiver took which place. Every other send binds an endpoint of its own.
+        let (endpoint, attached, ids) =
+            match crate::engine::paired::attach_for(home, receivers.clone()).await? {
+                Some(attached) => {
+                    let ids = attached.ids();
+                    (attached.endpoint().clone(), Some(attached), ids)
                 }
-                if !matches!(relay, RelayModeChoice::Disabled | RelayModeChoice::Loopback) {
-                    endpoint::wait_for_online(&endpoint).await?;
+                None => {
+                    let completion = endpoint::Completion {
+                        sender: receivers.clone(),
+                        ids: Arc::clone(&own_ids),
+                    };
+                    let endpoint =
+                        open_endpoint(home, &relay, congestion, port, completion).await?;
+                    if let Some(port) = endpoint
+                        .bound_sockets()
+                        .first()
+                        .map(std::net::SocketAddr::port)
+                    {
+                        home.save_port(port);
+                    }
+                    if !matches!(relay, RelayModeChoice::Disabled | RelayModeChoice::Loopback) {
+                        endpoint::wait_for_online(&endpoint).await?;
+                    }
+                    endpoint::wait_for_direct_addr(&endpoint).await?;
+                    (endpoint, None, own_ids)
                 }
-                endpoint::wait_for_direct_addr(&endpoint).await?;
-                (endpoint, None)
-            }
-        };
+            };
         let (done, done_rx) = unbounded_channel();
         let allowed_for_delta = Arc::clone(&allowed);
         let policy = policy::start_shared(

@@ -338,3 +338,55 @@ async fn a_device_without_a_grant_is_refused() {
         Some(0x01)
     );
 }
+
+/// A send that attaches to the daemon serves a receiver who takes a place: the daemon's own
+/// connection ids and its open and close reports reach the send's policy, which is how a limited
+/// send knows which receiver took the place it offered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_attached_limited_send_serves_one_receiver_to_completion() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = vec![7u8; 32 << 10];
+    let source = dir.path().join("limited.bin");
+    std::fs::write(&source, &body).unwrap();
+    let home = Home::open(&dir.path().join("home")).unwrap();
+    let listener = Listener::bind(&home, RelayModeChoice::Loopback, None)
+        .await
+        .unwrap();
+    listener.register();
+
+    let mut outgoing = prepare_send(
+        &home,
+        &source,
+        RelayModeChoice::Loopback,
+        Congestion::Cubic,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    outgoing.reserve(Keep::Receivers(1));
+    let text = outgoing.ticket.encode();
+    assert_eq!(Ticket::decode(&text).unwrap().endpoint_id(), &listener.id());
+    let (events, _received) = tokio::sync::mpsc::unbounded_channel();
+    let serving = tokio::spawn(async move { outgoing.serve(Keep::Receivers(1), &events).await });
+
+    let out = dir.path().join("out");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let inbound = out.clone();
+    let receiving =
+        tokio::spawn(async move { super::receive(&text, &options(&inbound), &tx).await });
+    let received = tokio::time::timeout(Duration::from_secs(30), receiving)
+        .await
+        .expect("the receive ended")
+        .unwrap()
+        .unwrap();
+    assert_eq!(received.files, 1);
+    let end = tokio::time::timeout(Duration::from_secs(30), serving)
+        .await
+        .expect("the send did not end")
+        .unwrap()
+        .unwrap();
+    assert_eq!(end, StopEnd::Downloaded);
+    assert_eq!(std::fs::read(out.join("limited.bin")).unwrap(), body);
+    listener.stop();
+}
