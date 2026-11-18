@@ -136,7 +136,8 @@ The 0.4.0 `start_a`, `start_b` and `finish` calls, the 33-byte messages and the 
 same as the pre-release's, so the transcript, the HKDF schedule and the AEAD above do not change.
 `spake2` has no independent audit, by its own README; the docs and the threat model say so. The
 choice of the stable release over the pre-release is deliberate: a security path that protects a
-ticket should not ride on an unaudited pre-release for 20 KB of `.wasm`.
+ticket should not ride on an unaudited pre-release, even though that would save 20 330 bytes raw
+and 992 with brotli. The stable release costs 56 650 bytes raw and 9 432 with brotli in the module.
 
 ### 4. The meeting place lives with the relay and speaks WebSocket over HTTPS
 
