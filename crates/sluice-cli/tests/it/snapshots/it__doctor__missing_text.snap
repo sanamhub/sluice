@@ -1,5 +1,5 @@
 ---
-source: crates/sluice-cli/tests/doctor.rs
+source: crates/sluice-cli/tests/it/doctor.rs
 expression: "redact(&stdout_text(&text), &home)"
 ---
 ok       version    sluice <version> for <target>, running on <os>
@@ -10,4 +10,6 @@ skipped  layout     not checked, because the home is not there
 skipped  lock       not checked, because the home is not there
 skipped  key        not checked, because the home is not there
 skipped  space      not checked, because the home is not there
+skipped  meet       no relay is configured; a short code needs a relay with a meeting place
+                    fix: pass --relay URL on both sides, or send without --code
 skipped  transport  pass --network to check UDP, the relay, the public address, NAT and port mapping

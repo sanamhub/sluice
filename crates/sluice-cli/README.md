@@ -130,9 +130,24 @@ signed as it fills, and a receiver can fetch it while the writer keeps going. Th
 after the file has not grown for two seconds; `--close-after SECONDS` changes that. A live ticket
 carries a stream id and the sender's key, not a file name.
 
+**Short codes.** `send --code` also meets a receiver at the relay's `/meet` and prints a code beside
+the ticket, on the next line in text or in the same JSON object as `code`. It needs `--relay`; the
+code is `<nameplate>-<word>-<word>` from BIP-0039 and is secret like the ticket. The meeting place
+is the relay the sender names, and `send --code` without one exits 6 with
+`--code needs a relay with a meeting place, and no relay is configured; set --relay or send without --code`;
+a relay that serves no `/meet` exits 6 with the matching sentence. The transfer itself is unchanged:
+the code only tells the receiver where to meet, and the ticket travels sealed over it.
+
+`recv CODE --relay URL` recognizes the three-part code form and joins that nameplate; any other
+argument is a ticket as before. Both sides must name the same relay, because the code carries no
+host. A code that is not at that relay says so and suggests the sender may be using another relay.
+A wrong word pair burns the code, and both sides say so; a third receiver is refused as busy, a
+closed sender as closed, and the limits as the relay reports them. A code is never reused.
+
 **`sluice recv`**
 
-`recv TICKET...` takes one or more tickets, or `-` to read one ticket from standard input.
+`recv TICKET...` takes one or more tickets, or a short code with `--relay URL`, or `-` to read one
+ticket from standard input. The relay flag is used only for a code.
 `--out DIR` names the folder (the current one by default), or `-` writes a single file's bytes to
 standard output; a live ticket has no name, so its `--out` is the file to write. `--force` replaces a
 file or link that is already there, `--allow-hidden` accepts a top-level name starting with `.`,

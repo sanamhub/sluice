@@ -22,6 +22,7 @@ mod queue;
 mod receipt;
 mod recv;
 mod send;
+pub mod short_code;
 mod ui;
 
 use std::ffi::OsString;

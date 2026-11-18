@@ -78,10 +78,28 @@ pub struct RecvArgs {
     /// that file; the path is only read
     #[arg(long, value_name = "PATH")]
     pub delta_from: Option<PathBuf>,
+    /// The relay that holds the meeting place, for a short code. A code carries no host, so it has
+    /// to be the relay the sender named
+    #[arg(long, value_name = "URL")]
+    pub relay: Option<String>,
 }
 
 pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
-    let tickets = tickets_text(&args.tickets)?;
+    let mut tickets = tickets_text(&args.tickets)?;
+    if tickets.len() == 1
+        && let Ok(code) = sluice_meet::Code::parse(&tickets[0])
+    {
+        let Some(relay) = args.relay.as_deref() else {
+            return Err(Error::Policy(
+                "a code needs the relay the sender used: pass --relay URL".to_string(),
+            ));
+        };
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| Error::Storage(format!("cannot start the meeting runtime: {e}")))?;
+        tickets[0] = runtime.block_on(crate::short_code::resolve(relay, code))?;
+    }
     let rate = args.limit_rate.as_deref().map(Rate::parse).transpose()?;
     let include = (!args.include.is_empty())
         .then(|| Selection::new(&args.include))
@@ -146,7 +164,6 @@ pub fn run(args: &RecvArgs, output: &Output) -> Result<u8, Error> {
     }
     receive_one(args, output, &ticket, rate, include)
 }
-
 /// Refuses a selection on a ticket that lists no entries to choose between: a live stream carries no
 /// names, a raw blob has one and no tree, and a byte range or standard output names one file. A
 /// ticket that turns out to hold one file is refused after its manifest is read, where the file
