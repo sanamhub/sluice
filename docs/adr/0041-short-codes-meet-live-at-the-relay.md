@@ -1,6 +1,6 @@
 # 0041. A short code is a live meeting at the relay, and a wrong guess burns it
 
-**Status:** Proposed **Date:** 2026-11-17 **Relates to:** ADR 0001, ADR 0011, ADR 0019, ADR 0028, ADR 0032, ADR 0039, ADR 0040
+**Status:** Accepted **Date:** 2026-11-18 **Approved by:** @sanamhub **Relates to:** ADR 0001, ADR 0011, ADR 0019, ADR 0028, ADR 0032, ADR 0039, ADR 0040
 
 ## Context
 
