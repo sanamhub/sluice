@@ -49,4 +49,4 @@ and testable. Consequences include what it costs and what would make us revisit 
 | [0038](0038-a-daemon-send-copies-into-the-home.md) | A daemon send copies the content into the home, because a path read at serve time is not safe there | Proposed |
 | [0039](0039-paired-devices-and-remote-control.md) | A paired device holds a `deliver` or `control` grant, and remote control serves the same service over iroh | Accepted |
 | [0040](0040-a-tab-is-a-post-quantum-peer.md) | A tab is a peer with the same post-quantum handshake, through one relay the website names | Accepted, supersedes 0018 point 5 |
-| [0041](0041-short-codes-meet-live-at-the-relay.md) | A short code is a live SPAKE2 meeting at the relay, and a wrong guess burns it | Proposed |
+| [0041](0041-short-codes-meet-live-at-the-relay.md) | A short code is a live SPAKE2 meeting at the relay, and a wrong guess burns it | Accepted |
