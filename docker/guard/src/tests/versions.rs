@@ -22,24 +22,23 @@ fn locked(lock: &str, name: &str) -> Vec<String> {
         .collect()
 }
 
-/// The one `cargo install` of iroh-relay in each Dockerfile, which must take its version from the
-/// argument and not name one of its own.
-const INSTALL: &str = "RUN cargo install iroh-relay --version \"=${IROH_RELAY_VERSION}\" --locked \
-                       --features server --root /out";
-
 #[test]
-fn the_dockerfile_builds_the_release_the_schema_was_written_for() {
+fn the_dockerfile_builds_the_relay_workspace_that_pins_the_schema() {
     let dockerfile = read(&relay_dir().join("Dockerfile"));
-    let args: Vec<&str> = dockerfile
-        .lines()
-        .filter_map(|line| line.strip_prefix("ARG IROH_RELAY_VERSION="))
-        .collect();
-    assert_eq!(args, [IROH_RELAY_VERSION], "docker/relay/Dockerfile");
-    let installs: Vec<&str> = dockerfile
-        .lines()
-        .filter(|line| line.contains("cargo install") && line.contains("iroh-relay"))
-        .collect();
-    assert_eq!(installs, [INSTALL], "docker/relay/Dockerfile");
+    assert!(
+        dockerfile.contains("docker/relay-server/Cargo.toml"),
+        "docker/relay/Dockerfile"
+    );
+    assert!(
+        dockerfile.contains("crates/sluice-meet"),
+        "the meeting-place library is not in the build context"
+    );
+    // The binary is ours now, built from the workspace whose lock names 1.4.1. A `cargo install
+    // iroh-relay` would ship upstream's binary and drop /meet.
+    assert!(
+        !dockerfile.contains("cargo install iroh-relay"),
+        "docker/relay/Dockerfile"
+    );
 }
 
 #[test]

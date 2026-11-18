@@ -11,7 +11,7 @@
 mod access;
 mod messages;
 
-use crate::schema::{AccessConfig, Config};
+use crate::schema::{AccessConfig, CertMode, Config};
 use crate::{Mode, Refusal};
 
 /// The whole check of a config's text.
@@ -46,7 +46,50 @@ pub(crate) fn check(
     }
     check_tls(&config, behind_proxy)?;
     check_metrics(&config)?;
+    check_meet(&config)?;
     check_access(&config, mode)
+}
+
+/// `[meet]` is off unless it says `enable = true`. When it is on, the three limits are required
+/// and must be inside the ranges ADR 0041 sets, and the certificate has to be Manual: the meeting
+/// place is served on the relay's TLS listener, and T89 does not carry ACME into that binary.
+fn check_meet(config: &Config) -> Result<(), Refusal> {
+    let Some(meet) = &config.meet else {
+        return Ok(());
+    };
+    if !meet.enable {
+        return Ok(());
+    }
+    let (Some(rate), Some(plates), Some(ttl)) =
+        (meet.rate_per_ip, meet.max_plates, meet.ttl_seconds)
+    else {
+        return Err(Refusal::new(
+            "`[meet] enable = true` needs `rate_per_ip`, `max_plates` and `ttl_seconds`: add all \
+             three, or set `enable = false`",
+        ));
+    };
+    if !(1..=600).contains(&rate) {
+        return Err(Refusal::new(
+            "`meet.rate_per_ip` must be from 1 to 600 claims and joins per minute",
+        ));
+    }
+    if !(1..=9999).contains(&plates) {
+        return Err(Refusal::new("`meet.max_plates` must be from 1 to 9999"));
+    }
+    if !(60..=600).contains(&ttl) {
+        return Err(Refusal::new("`meet.ttl_seconds` must be from 60 to 600"));
+    }
+    if config
+        .tls
+        .as_ref()
+        .is_some_and(|tls| matches!(tls.cert_mode, CertMode::LetsEncrypt))
+    {
+        return Err(Refusal::new(
+            "`cert_mode = \"LetsEncrypt\"` cannot be used with `[meet] enable = true`: ACME is not \
+             supported with the meeting place yet; use `cert_mode = \"Manual\"`",
+        ));
+    }
+    Ok(())
 }
 
 /// What the operator is told to compare a config with: the README of the image.

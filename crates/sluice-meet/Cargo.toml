@@ -1,37 +1,43 @@
 [package]
 name = "sluice-meet"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.91"
+license = "Apache-2.0 OR MIT"
 description = "Short codes: the words, the SPAKE2 exchange, the frames, and the meeting-place state"
-homepage.workspace = true
-repository.workspace = true
+homepage = "https://github.com/sanamhub/sluice"
+repository = "https://github.com/sanamhub/sluice"
 readme = "README.md"
 keywords = ["p2p", "file-transfer", "spake2", "short-code", "websocket"]
 categories = ["network-programming", "cryptography"]
 
 # No network, filesystem, clock or runtime: the CLI, the relay and later the browser drive this crate
-# with bytes and with the time their transport gives them.
+# with bytes and with the time their transport gives them. The versions are written out rather than
+# inherited, so the relay's own workspace can depend on this folder without the main workspace's
+# manifest.
 [dependencies]
 # The AEAD and the KDF, which the browser already carries for TLS. The 0.17 release is the one in the
 # tree through iroh-relay.
-ring = { workspace = true }
+ring = "0.17"
 # The newest stable release, pinned exactly by ADR 0041 decision 3. It has no independent audit, and
 # the crate README and `SPEC.md` say so. The `getrandom` feature gives its start functions entropy;
 # the browser build enables that backend for this dependency.
 spake2 = { version = "=0.4.0", features = ["getrandom"] }
-subtle.workspace = true
-thiserror.workspace = true
-zeroize.workspace = true
+subtle = "2.6"
+thiserror = "2"
+zeroize = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
-proptest.workspace = true
+proptest = { version = "1.12", default-features = false, features = ["std"] }
 # Reads the vectors' JSON in the crate tests, so a vector can be checked here as well as by xtask.
-serde_json.workspace = true
+serde_json = "1"
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
 
 # Not released: dist builds only the `sluice` binary of sluice-cli.
 [package.metadata.dist]

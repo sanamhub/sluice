@@ -26,3 +26,12 @@ cert_mode = "Manual"
 # Mount a directory holding default.crt and default.key here. The certificate has to name the host
 # the clients dial, and it is read once at start, so restart the container after a renewal.
 cert_dir = "/etc/relay/certs"
+
+# The short-code meeting place (ADR 0041), distinct from the "meeting point" relay recipe above.
+# It is served at /meet on this same host, port and certificate; the limits are claims and joins per
+# IP per minute, plates held at once, and how long a plate lives.
+[meet]
+enable = true
+rate_per_ip = 30
+max_plates = 256
+ttl_seconds = 600

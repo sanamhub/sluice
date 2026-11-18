@@ -195,7 +195,7 @@ handover() {
     docker rm -f "$container" > /dev/null
     return
   fi
-  want="/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0 "
+  want="/usr/local/bin/sluice-relay --config-path=/proc/self/fd/0 "
   if ! cmdline="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2> "$work/stderr")"; then
     fail "handover: /proc/$pid/cmdline cannot be read: $(head -n 1 "$work/stderr")"
     docker rm -f "$container" > /dev/null
@@ -222,9 +222,8 @@ handover() {
   docker rm -f "$container" > /dev/null
 }
 
-# iroh-relay stops on SIGINT and not on SIGTERM (main.rs:610-614), so an image with no STOPSIGNAL
-# makes `docker stop` wait out its 30-second grace period and kill the process. The Dockerfile
-# says STOPSIGNAL SIGINT, so the stop returns in about a second with iroh-relay's own exit code.
+# The server stops on SIGINT and SIGTERM. The Dockerfile says STOPSIGNAL SIGINT, so `docker stop`
+# returns in about a second with the server's own exit code instead of waiting out its grace period.
 stops() {
   local container start end elapsed code started=no
   container="$(next_name)"
@@ -297,8 +296,92 @@ allow='[access]\nallowlist = []\n'
 tls='[tls]\nquic_bind_addr = "0.0.0.0:7842"\ncert_mode = "Manual"\n'
 upper="$(printf 'AB%.0s' $(seq 1 32))"
 
+# A meeting over `/meet`, on the same published port and certificate as `/relay`: claim a
+# nameplate, join it from a second connection, and see the two `Joined` frames. The WebSocket is
+# spoken by python3's standard library, so the image needs no client of ours.
+meets() {
+  local container port
+  container="$(next_name)"
+  docker run -d --read-only --name "$container" --network "$name" \
+    -p 127.0.0.1::80 -p 127.0.0.1::443 \
+    -v "$work/certs:$etc/certs:ro" "$image" > /dev/null
+  local ok=no
+  for _ in $(seq 1 50); do
+    if up "$container"; then ok=yes; break; fi
+    sleep 0.2
+  done
+  if [ "$ok" != yes ]; then
+    fail "meet: the container did not come up"
+    docker logs "$container" 2>&1 | tail -n 5
+    docker rm -f "$container" > /dev/null
+    return
+  fi
+  port="$(docker port "$container" 443/tcp | head -n 1 | cut -d: -f2)"
+  if python3 - "$port" <<'PY'
+import base64, os, socket, ssl, struct, sys
+
+port = int(sys.argv[1])
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+
+def connect():
+    raw = socket.create_connection(("127.0.0.1", port), timeout=10)
+    sock = ctx.wrap_socket(raw, server_hostname="127.0.0.1")
+    key = base64.b64encode(os.urandom(16)).decode()
+    sock.sendall((
+        "GET /meet HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\n"
+        "Connection: Upgrade\r\nSec-WebSocket-Key: " + key + "\r\n"
+        "Sec-WebSocket-Version: 13\r\n\r\n").encode())
+    head = b""
+    while b"\r\n\r\n" not in head:
+        head += sock.recv(4096)
+    assert head.split(b"\r\n", 1)[0].endswith(b"101 Switching Protocols"), head
+    return sock
+
+def send(sock, payload):
+    mask = os.urandom(4)
+    header = b"\x82"
+    header += bytes([0x80 | len(payload)])
+    sock.sendall(header + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+def recv(sock):
+    head = sock.recv(2)
+    length = head[1] & 0x7f
+    if length == 126:
+        length = struct.unpack(">H", sock.recv(2))[0]
+    elif length == 127:
+        length = struct.unpack(">Q", sock.recv(8))[0]
+    body = b""
+    while len(body) < length:
+        body += sock.recv(length - len(body))
+    return body
+
+sender = connect()
+send(sender, b"\x01")
+claimed = recv(sender)
+assert claimed == b"\x81\x00\x00\x00\x01", claimed
+plate = struct.unpack(">I", claimed[1:])[0]
+
+receiver = connect()
+send(receiver, b"\x02" + struct.pack(">I", plate))
+assert recv(sender) == b"\x82\x00", "the sender did not see Joined"
+assert recv(receiver) == b"\x82\x01", "the receiver did not see Joined"
+sender.close()
+receiver.close()
+PY
+  then
+    pass "meet: claim and join over /meet on the relay's port"
+  else
+    fail "meet: claim and join over /meet failed"
+    docker logs "$container" 2>&1 | tail -n 5
+  fi
+  docker rm -f "$container" > /dev/null
+}
+
 relay() {
   starts "the shipped image"
+  meets
   stops
   starts "open.toml with --open" --open --config-path /etc/relay/open.toml
   handover
@@ -343,6 +426,11 @@ relay_configs() {
     -v "$(config upper "${metrics}[access]\nallowlist = [\"$upper\"]\n" relay.toml)" "$image"
   refuses "shared_token = []" "\`access.shared_token\` is empty" \
     -v "$(config tokens "${metrics}[access]\nshared_token = []\n" relay.toml)" "$image"
+  refuses "a meeting place without its limits" "needs \`rate_per_ip\`, \`max_plates\` and \`ttl_seconds\`" \
+    -v "$(config meet_nolimits "${metrics}${allow}${tls}[meet]\nenable = true\n" relay.toml)" "$image"
+  refuses "LetsEncrypt with a meeting place" "ACME is not supported with the meeting place yet" \
+    -v "$(config meet_acme "${metrics}${allow}[meet]\nenable = true\nrate_per_ip = 10\nmax_plates = 10\nttl_seconds = 600\n[tls]\ncert_mode = \"LetsEncrypt\"\n" relay.toml)" \
+    "$image"
 }
 
 case "$kind" in

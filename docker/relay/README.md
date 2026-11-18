@@ -1,111 +1,78 @@
 # relay
 
-The `relay` image runs `iroh-relay` 1.4.1 with both halves on: address discovery over QUIC, and the
-relay over HTTPS that carries the traffic of two peers that cannot reach each other directly.
-Two peers behind NATs coordinate their hole punch through it, so across the internet it is needed
-even when the file goes direct. It runs one of two ways (ADR 0028):
+The `relay` image runs `sluice-relay`, our binary around `iroh-relay` 1.4.1. It serves the relay at
+`/relay` and the short-code **meeting place** at `GET /meet` on one HTTPS listener, the plain-HTTP
+captive-portal check on port 80, QUIC address discovery on UDP 7842, and metrics only when the
+config asks for them. It starts through [`sluice-relay-guard`](../guard/README.md), which refuses a
+config that would open the relay by mistake (ADR 0019, ADR 0020, ADR 0021).
 
-- **as a meeting point**, with [meeting-point.toml](meeting-point.toml): each client may send at
-  most 64 KiB/s into it, enough to coordinate and too slow to carry files. A pair that cannot punch
-  a hole still connects, at that rate. See [Meeting point](#meeting-point).
-- **as a full relay**, with [relay.toml](relay.toml) and a per-client limit you set: every relayed
-  byte of a transfer passes through the host, in and out again, and the host pays for both.
+The image runs closed (`docs/design.md`, **Relays run closed**). Only the endpoint ids on its
+allowlist may relay through it, and the image ships with that list empty. An operator adds the id
+`sluice id` prints and restarts.
 
-`iroh-relay` is the upstream binary, built from crates.io with `--locked`, at the version
-`Cargo.lock` resolves for `iroh`, on two base images pinned by digest. It runs as uid 65532 on
-`gcr.io/distroless/cc-debian13:nonroot`, which has no shell, and the metrics server is off. It
-starts through [the guard](#the-guard), the one program of ours in the image, which refuses a
-config that would open the relay by mistake.
+## Two words that are not one thing
 
-The relay runs closed (`docs/design.md`, **Relays run closed**). Only the endpoint ids on its
-allowlist may relay through it, and the image ships with that list empty, so it lets nobody in until
-the operator adds an id.
+- A **meeting point** is the ADR 0028 relay recipe: a relay with a small per-client byte rate, so
+  two peers can coordinate a hole punch through it and then transfer directly. It is the relay.
+- A **meeting place** is ADR 0041's `/meet`: two live WebSocket connections that run SPAKE2 on a
+  short code, and the relay forwards a few frames between them. It stores nothing. It is configured
+  by `[meet]` and is not a second relay.
+
+Both may be on in one process; neither replaces the other.
+
+## The meeting place
+
+`[meet]` in `relay.toml`:
+
+```toml
+[meet]
+enable = true
+rate_per_ip = 30
+max_plates = 256
+ttl_seconds = 600
+```
+
+`rate_per_ip` is claims and joins per minute from one IP, 1..=600; `max_plates` is the number held
+at once, 1..=9999; `ttl_seconds` is a plate's life, 60..=600. The guard refuses `enable = true`
+without all three, or with one outside those ranges. A config without `[meet]` serves `/relay` only
+and answers `/meet` with `404`.
+
+The server never parses a code, a word, a ticket, a SPAKE2 message or a sealed value. A refusal is
+logged by its error code only; the nameplate is not in the line. `/meet` and `/relay` share the
+host, port and certificate, so the browser tab of ADR 0040 can reach the same URL with `wss`.
+
+`cert_mode = "LetsEncrypt"` is refused when `[meet]` is enabled: ACME is not carried into
+`sluice-relay` yet. The shipped recipes use `cert_mode = "Manual"`.
 
 ## The guard
 
-The entry point is [`sluice-relay-guard`](../guard/README.md) (ADR 0019), and the default command
-is `--config-path /etc/relay/relay.toml`. It opens the config, checks it, copies the checked bytes
-into a sealed `memfd`, puts that copy on descriptor 0, and then replaces itself with
-`iroh-relay --config-path=/proc/self/fd/0` (ADR 0021). The relay so reads a file that cannot be
-written, renamed over or truncated after the check, and it is PID 1 and gets the container's
-signals.
+The entry point is [`sluice-relay-guard`](../guard/README.md). It opens the config, checks it, copies
+the checked bytes into a sealed `memfd`, puts that copy on descriptor 0, and replaces itself with
+`sluice-relay --config-path=/proc/self/fd/0` (ADR 0021). The server reads a file that cannot be
+written, renamed over or truncated after the check, and is PID 1 with the container's signals.
 
-Checked on 2026-10-23 in WSL with Docker 29.1.3, by [smoke-test.sh](../smoke-test.sh): PID 1, read
-from the host, is `/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0`, and its descriptor 0
-is a `memfd:` whose bytes are the shipped `relay.toml`. The relay presented the certificate that
-was mounted, on HTTPS 443, logged `QUIC server listening`, and had port 9090 closed. Those three
-are what only that config asks for: with no config, iroh-relay 1.4.1 serves plain HTTP on 80, which
-answers `/generate_204` all the same, and metrics on 9090, and no HTTPS or QUIC.
-
-`iroh-relay` 1.4.1 runs open, with no byte limit and nothing in its log, when `access` is left out,
-when a key is misspelled (it ignores keys it does not know), and when the config file is missing.
-The guard refuses each of these, and any config that lets in ids nobody listed, unless the
-operator passes `--open` and the config sets a per-client byte limit. A refusal is one line on
-stderr that names the key or the rule, and the container exits with 64. Two of them, as the image
-prints them:
-
-| Started with | stderr |
-|---|---|
-| a mounted `relay.toml` that says `[acess]` | ``sluice-relay-guard: line 1: unknown key `acess`: iroh-relay 1.4.1 has no such setting, and would ignore it; check the spelling against docker/relay/README.md`` |
-| `--config-path /etc/relay/open.toml` | ``sluice-relay-guard: `access` is "everyone", which lets anyone relay: list the ids that may relay in `[access] allowlist`, or start with --open to run it open on purpose`` |
-
-It also refuses `--dev`, every argument but `--open`, `--behind-proxy` and `--config-path`,
-`--open` with a closed config, and an allowlist entry that is not 64 hex digits. Since ADR 0020 it
-refuses `dangerous_http_only = true`, a config with no `enable_metrics` line, an
-`access.http.url` with a user name, password, query or fragment in it, and `enable_relay = false`,
-because the relay half would then carry nothing. Since ADR 0021 it refuses a config with no `[tls]`
-unless `--behind-proxy` is given. The [guard's README](../guard/README.md) lists every rule. No
-message prints a value from the config, since a token may be one.
-
-One exception is the maintainer's: a key name made only of 1 to 32 lower-case letters and `_` is
-printed, because no rule can tell it from a setting's name. A `--config-path` value is printed only
-when it starts with `/` or `./`, is at most 200 characters, and uses only `[A-Za-z0-9._/-]`; any
-other becomes "the config file given to --config-path".
-
-**Overriding the entry point skips the guard.** `docker run --entrypoint /usr/local/bin/iroh-relay`
-runs the server with whatever it is given, open default included. Name `sluice-relay-guard` instead,
-or leave the entry point alone.
-
-## Environment variables
-
-`iroh-relay` 1.4.1 reads four variables that change what the config says (`src/main.rs`, lines
-41-47 and where each is read). A `docker run -e` sets them past the file the guard checked.
-
-| Variable | What it changes |
-|---|---|
-| `IROH_RELAY_ACCESS_TOKEN` | replaces the whole `access.shared_token` list with this one token, when `access` is shared tokens (main.rs:238). The guard reads it as iroh-relay does: set, it passes an empty list; set but empty, it is refused |
-| `IROH_RELAY_HTTP_BEARER_TOKEN` | replaces `access.http.bearer_token`, the token sent to the HTTP access check (main.rs:230) |
-| `IROH_RELAY_ACME_URL` | replaces the LetsEncrypt directory with another ACME server, for `cert_mode = "LetsEncrypt"` (main.rs:653) |
-| `IROH_RELAY_ACME_CA` | adds a CA that the ACME server's own TLS certificate may chain to, for `cert_mode = "LetsEncrypt"` (main.rs:665) |
-
-A token belongs in one of the first two rather than in the file, so that a copy of the config
-holds no secret.
-
-**`RUST_LOG` at `debug` or `trace` prints the config, tokens included.** At start iroh-relay logs
-the whole server config at `debug` (main.rs:606). Its `RelayConfig` derives `Debug` with the access
-check in it (`src/server.rs:126` and `147`), and that check derives `Debug` over every shared
-token and the HTTP check's bearer token. This was read from the source and not run. The image sets
-`RUST_LOG=info`. Keep it at `info` or above on a relay with tokens, or treat its log as a secret.
+**Overriding the entry point skips the guard.** `docker run --entrypoint /usr/local/bin/sluice-relay`
+runs the server with whatever it is given. Name `sluice-relay-guard` instead, or leave the entry
+point alone.
 
 ## Ports
 
 | Port | What |
 |---|---|
-| TCP 443 | the relay, over HTTPS and WebSocket |
-| TCP 80 | plain HTTP, serving only the captive portal check `/generate_204` that iroh clients make |
+| TCP 443 | `/relay` and `/meet`, over HTTPS and WebSocket |
+| TCP 80 | plain HTTP, serving only `/generate_204` when TLS is on |
 | UDP 7842 | address discovery over QUIC |
-
-Checked by running the image: those three listeners and no other, and `/generate_204` answers 204.
+| TCP 9090 | metrics, only when `enable_metrics = true` |
 
 ## Build and run
 
+Build from the repository root, which holds `crates/sluice-meet` as well as both workspaces:
+
 ```
-docker build -f docker/relay/Dockerfile -t sluice-relay docker
+docker build -f docker/relay/Dockerfile -t sluice-relay .
 ```
 
-The default command runs [relay.toml](relay.toml), which reads `default.crt` and `default.key` from
-`/etc/relay/certs`. For a test, make a self-signed certificate. It has to say `CA:FALSE`, or the
-client refuses it as a server certificate:
+For a test, make a self-signed certificate that says `CA:FALSE`:
 
 ```
 mkdir certs && cd certs
@@ -114,121 +81,48 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
   -addext 'subjectAltName=DNS:relay.example.net' \
   -addext 'basicConstraints=critical,CA:FALSE' \
   -addext 'keyUsage=digitalSignature' -addext 'extendedKeyUsage=serverAuth'
-sudo chown 65532:65532 default.key && chmod 600 default.key
+chmod 644 default.key
 cd ..
 docker run -d --name relay -p 443:443 -p 80:80 -p 7842:7842/udp \
   -v "$PWD/certs:/etc/relay/certs:ro" sluice-relay
 ```
 
-The key belongs to uid 65532, the user the server runs as, and no one else can read it. The server
-reads the certificate once at start, so restart the container after a renewal.
-
-## Let an endpoint in
-
-The allowlist holds endpoint ids, the 64 hex characters that `sluice id` prints on each machine that
-should use the relay, and the guard refuses an entry that is not 64 hex digits. The two below are
-examples, the public halves of keys made for the check and thrown away. Copy
-[relay.toml](relay.toml) next to the certificates, add the ids, mount it over the one in the image,
-and restart:
-
-```toml
-[access]
-allowlist = [
-  "68852edc24884118b7c22e87f75094674a9b3268ba83b3005e4da869de4ed964",
-  "f0b7855c2e023a888cb42a8934999b57949acf835ad8755bfd61cb5a8548e1c0",
-]
-```
-
-```
-docker rm -f relay
-docker run -d --name relay -p 443:443 -p 80:80 -p 7842:7842/udp \
-  -v "$PWD/certs:/etc/relay/certs:ro" -v "$PWD/relay.toml:/etc/relay/relay.toml:ro" sluice-relay
-```
-
-An endpoint off the list gets `The relay denied our authentication (not authorized)` when it
-connects, and the server logs a warning with the client's address. The list controls relaying only.
-Address discovery on UDP 7842 answers anyone.
-
-**How this was checked**, on 2026-10-22 in WSL with Docker 29.1.3, with a throwaway client built on
-`iroh-relay` 1.4.1's own `ClientBuilder` and three random keys:
-
-- with the image as shipped, the first key was refused with the line above;
-- with the first two keys on the list, the first sent a datagram to the second through the relay
-  and the second received it, and the third key was refused;
-- with `--open --config-path /etc/relay/open.toml`, the third key connected and relayed a datagram.
-
-It was run again through the guard, with new keys, and came out the same, with `iroh-relay` as the
-container's PID 1. On 2026-10-23 it was run a third time with the config handed over and the
-container's root read-only, and came out the same again, with `iroh-relay` started as
-`--config-path=/dev/stdin` as the guard did then; ADR 0021 moved that to a sealed copy read through
-`/proc/self/fd/0`. [smoke-test.sh](../smoke-test.sh) checks the guard's refusals, that the image
-starts as the config it was given with a read-only root, what PID 1 is, and that `docker stop`
-returns in under a second with exit 0, because the Dockerfile sends SIGINT. CI runs it on every
-build of the image.
-
-## Meeting point
-
-[meeting-point.toml](meeting-point.toml) is [relay.toml](relay.toml) with a per-client limit of
-64 KiB/s and a burst of 256 KiB. Mount it over the shipped config:
+`relay.toml` is the closed recipe and ships empty. [meeting-point.toml](meeting-point.toml) adds the
+ADR 0028 per-client rate. [open.toml](open.toml) lets anyone relay at 2 MiB/s; it is used only with
+`--open`:
 
 ```
 docker run -d --name relay -p 443:443 -p 80:80 -p 7842:7842/udp \
   -v "$PWD/certs:/etc/relay/certs:ro" \
-  -v "$PWD/docker/relay/meeting-point.toml:/etc/relay/relay.toml:ro" sluice-relay
+  -v "$PWD/docker/relay/open.toml:/etc/relay/relay.toml:ro" sluice-relay \
+  --open --config-path /etc/relay/relay.toml
 ```
 
-It is closed, so the allowlist works as described above. The two numbers are chosen, not measured:
-coordination takes a few kilobytes per connection. A transfer that finds no direct path 10 seconds
-in prints one line naming the relay and goes on at 64 KiB/s. For a usable speed on those pairs, run
-a full relay instead, with `bytes_per_second` set from the host's bandwidth, keeping in mind that a
-relayed transfer crosses the host twice.
+## Access
 
-## Open mode
+`[access] allowlist` holds 64 lower-case hex characters, the endpoint ids `sluice id` prints. The
+guard refuses anything else. `access = "everyone"` needs `--open` and a per-client byte limit under
+`[limits.client.rx]`. Shared tokens, an HTTP check and a denylist are the other forms iroh-relay
+1.4.1 has; the guard's README lists the rules.
 
-[open.toml](open.toml) lets anyone relay, and each client may send at most 2 MiB/s into the relay,
-with bursts of up to 8 MiB. It is used only when the operator names it on the command line, with
-`--open` to say it is meant:
+`RUST_LOG` at `debug` or `trace` makes iroh-relay print its whole server config, tokens included.
+The image sets `RUST_LOG=info`; keep it there on a relay with tokens. The meeting place logs no
+code, nameplate, ticket, SPAKE2 message or sealed value at any level.
 
-```
-docker run -d --name relay -p 443:443 -p 80:80 -p 7842:7842/udp \
-  -v "$PWD/certs:/etc/relay/certs:ro" sluice-relay --open --config-path /etc/relay/open.toml
-```
+## Certificates and ACME
 
-Without `--open` the guard refuses `open.toml`, and with `--open` it refuses `relay.toml`, so the
-flag and the config always agree. An open config of the operator's own must set
-`[limits.client.rx] bytes_per_second`, or the guard refuses it.
+The shipped recipes use `cert_mode = "Manual"` and read `default.crt` and `default.key` from
+`cert_dir`. The server reads them once at start, so restart the container after a renewal. The
+meeting place is served from the same certificate.
 
-What it costs: anyone who finds the URL, in a ticket, a log or a screenshot, can use the operator's
-bandwidth up to that rate, as many clients at once as care to. `iroh-relay` 1.4.1 has no working
-limit on connections (`accept_conn_limit` and `accept_conn_burst` are documented upstream as not
-implemented, ADR 0013), so the per-client byte limit is the only limit there is. The limit on
-connections and on total bandwidth has to come from the host, such as a firewall or the provider's
-traffic cap.
+`cert_mode = "LetsEncrypt"` is not carried by `sluice-relay` yet; with `[meet]` enabled the guard
+refuses it with a line that names the limit. A config with no `[tls]` is served as plain HTTP and is
+refused unless `--behind-proxy` says a proxy in front ends TLS.
 
-## Certificates
+## Smoke test
 
-The image takes `Manual` certificates. With the relay half on, `iroh-relay`
-1.4.1 can also fetch a LetsEncrypt certificate itself: set `cert_mode = "LetsEncrypt"`, `hostname`
-and `contact` in `[tls]`, and keep `cert_dir` on a mounted volume, where it caches the certificate.
-Its challenge is TLS-ALPN-01, answered on the HTTPS listener (`src/server/http_server.rs:1095`), so
-TCP 443 must be reachable from the internet. TCP 80 is not used for the challenge. This mode was
-read from the source and not run, because there was no public host name.
-
-With a certificate from outside, `certbot --standalone` would work with one change: it needs TCP 80,
-which the relay holds, so add `--pre-hook 'docker stop relay'` and end the deploy hook with `docker
-start relay`. This recipe was not run either.
-
-## A config with no `[tls]`
-
-A config with no `[tls]` table makes iroh-relay serve plain HTTP, so it is refused unless the
-operator says a proxy in front ends TLS. Add `--behind-proxy` to the `docker run` command for that.
-The flag and the file have to agree: `--behind-proxy` with a `[tls]` table is refused, because then
-iroh-relay ends TLS itself.
-
-**The proxy in front must end TLS.** A client reaches the proxy over HTTPS, and the proxy reaches
-the relay over HTTP. Whatever the clients present crosses that second hop in clear text, shared
-tokens and bearer tokens included. Keep it on one host or one private network, and never on a path
-another party can read.
-
-`dangerous_http_only = true` stays refused in a config that has `[tls]`: it turns HTTPS off, which
-is what `--dev` does, and the flag is not a second way to ask for that.
+`docker/smoke-test.sh relay <image>` checks that the image starts with a read-only root as the
+config it was given, that PID 1 is `sluice-relay` with the sealed copy on descriptor 0, that
+`/generate_204` answers 204, that `/meet` claims and joins a nameplate on the relay's own port and
+certificate, that metrics are off, and that `docker stop` returns quickly. It also checks each
+refusal the guard makes, `[meet]`'s limits and the ACME refusal included.

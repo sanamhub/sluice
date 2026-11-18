@@ -4,6 +4,7 @@ mod examples;
 mod files;
 mod handover;
 mod keys;
+mod meet;
 mod rules;
 mod secrets;
 mod settings;

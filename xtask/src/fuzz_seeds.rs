@@ -244,6 +244,7 @@ fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
     let mut paths = vec![
         docker.join("relay").join("relay.toml"),
         docker.join("relay").join("open.toml"),
+        docker.join("relay").join("meeting-point.toml"),
     ];
     let mut found = Vec::new();
     for entry in
@@ -285,7 +286,7 @@ fn relay_configs(root: &Path) -> anyhow::Result<Vec<Seed>> {
 /// examples are not: none of them turns HTTPS off, leaves a limit out of an open config, or puts a
 /// secret in a URL. Without a seed on each side of a rule, a run of seconds cannot tell a guard
 /// that has the rule from one that lost it.
-const NEAR_MISSES: [&str; 6] = [
+const NEAR_MISSES: [&str; 8] = [
     // `dangerous_http_only`, for a relay and for one with the relay half off.
     "enable_metrics = false\n[access]\nallowlist = []\n[tls]\ncert_mode = \"Manual\"\n\
      dangerous_http_only = true\n",
@@ -299,6 +300,10 @@ const NEAR_MISSES: [&str; 6] = [
     "enable_metrics = false\n[access.http]\nurl = \"https://u@a.example/?k=v#f\"\n",
     // An empty shared token list.
     "enable_metrics = false\n[access]\nshared_token = []\n",
+    // A meeting place enabled without its limits, and one with ACME.
+    "enable_metrics = false\n[access]\nallowlist = []\n[meet]\nenable = true\n",
+    "enable_metrics = false\n[access]\nallowlist = []\n[meet]\nenable = true\nrate_per_ip = 10\n\
+     max_plates = 10\nttl_seconds = 600\n[tls]\ncert_mode = \"LetsEncrypt\"\n",
 ];
 
 /// The UTF-8 name of a vector file, or the error that says it is not. Split from [`vector_files`]

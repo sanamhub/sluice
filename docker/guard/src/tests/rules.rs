@@ -252,3 +252,80 @@ fn deep_nesting_is_an_error_and_not_a_stack_overflow() {
     let deep = format!("a = {}{}\n", "[".repeat(100_000), "]".repeat(100_000));
     refused(&deep, Mode::Closed, "is not valid TOML");
 }
+
+/// A closed config with a meeting place, and the limits it needs.
+fn met(limits: &str) -> String {
+    m(&format!(
+        "[access]\nallowlist = []\n[meet]\nenable = true\n{limits}"
+    ))
+}
+
+#[test]
+fn a_meeting_place_needs_its_three_limits_inside_the_adr_bounds() {
+    let good = met("rate_per_ip = 10\nmax_plates = 100\nttl_seconds = 600\n");
+    assert_eq!(check_config(&good, Mode::Closed, None, false), Ok(()));
+    for (limits, says) in [
+        (
+            "max_plates = 100\nttl_seconds = 600\n",
+            "needs `rate_per_ip`, `max_plates` and `ttl_seconds`",
+        ),
+        (
+            "rate_per_ip = 0\nmax_plates = 100\nttl_seconds = 600\n",
+            "`meet.rate_per_ip` must be from 1 to 600",
+        ),
+        (
+            "rate_per_ip = 601\nmax_plates = 100\nttl_seconds = 600\n",
+            "`meet.rate_per_ip` must be from 1 to 600",
+        ),
+        (
+            "rate_per_ip = 10\nmax_plates = 0\nttl_seconds = 600\n",
+            "`meet.max_plates` must be from 1 to 9999",
+        ),
+        (
+            "rate_per_ip = 10\nmax_plates = 10000\nttl_seconds = 600\n",
+            "`meet.max_plates` must be from 1 to 9999",
+        ),
+        (
+            "rate_per_ip = 10\nmax_plates = 100\nttl_seconds = 59\n",
+            "`meet.ttl_seconds` must be from 60 to 600",
+        ),
+        (
+            "rate_per_ip = 10\nmax_plates = 100\nttl_seconds = 601\n",
+            "`meet.ttl_seconds` must be from 60 to 600",
+        ),
+    ] {
+        refused(&met(limits), Mode::Closed, says);
+    }
+}
+
+#[test]
+fn a_meeting_place_that_is_off_needs_no_limits() {
+    let off = m("[access]\nallowlist = []\n[meet]\nenable = false\n");
+    assert_eq!(check_config(&off, Mode::Closed, None, false), Ok(()));
+}
+
+#[test]
+fn lets_encrypt_is_refused_with_a_meeting_place_and_names_the_limit() {
+    let text = "enable_metrics = false\n[access]\nallowlist = []\n[meet]\nenable = true\n\
+                rate_per_ip = 10\nmax_plates = 100\nttl_seconds = 600\n\
+                [tls]\ncert_mode = \"LetsEncrypt\"\n";
+    let message = refused(
+        text,
+        Mode::Closed,
+        "ACME is not supported with the meeting place yet",
+    );
+    assert!(message.contains("cert_mode = \"LetsEncrypt\""), "{message}");
+    assert!(message.contains("cert_mode = \"Manual\""), "{message}");
+}
+
+#[test]
+fn a_misspelled_meet_key_is_refused() {
+    let text = met("rate_per_ip = 10\nmax_plates = 100\nttl_seconds = 600\nmax_plate = 1\n");
+    refused(&text, Mode::Closed, "unknown key `max_plate`");
+    let missing = m("[access]\nallowlist = []\n[meet]\nenable = true\n");
+    refused(
+        &missing,
+        Mode::Closed,
+        "needs `rate_per_ip`, `max_plates` and `ttl_seconds`",
+    );
+}

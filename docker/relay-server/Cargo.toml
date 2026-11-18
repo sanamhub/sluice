@@ -1,0 +1,51 @@
+[package]
+name = "sluice-relay"
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.91"
+license = "Apache-2.0 OR MIT"
+publish = false
+description = "The Sluice relay: iroh-relay's server and the short-code meeting place on one listener"
+
+# Its own workspace, so iroh-relay's `server` feature cannot unify into the CLI's build. The root
+# workspace's default members deliberately do not see this crate.
+[workspace]
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+bytes = "1"
+futures-util = "0.3"
+http = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+# The relay's server half. `tls-ring` is the provider the image already used; the root workspace
+# pins iroh-relay to the same 1.4.1 release.
+iroh-base = "=1.4.1"
+iroh-relay = { version = "=1.4.1", default-features = false, features = ["server", "tls-ring"] }
+rcgen = "0.14"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde = { version = "1", features = ["derive"] }
+sha1 = "0.10"
+sluice-meet = { path = "../../crates/sluice-meet" }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-rustls = "0.26"
+tokio-websockets = { version = "=0.13.3", features = ["client", "server"] }
+toml = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+
+[dev-dependencies]
+serde_json = "1"
+sluice-relay-guard = { path = "../guard" }
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"

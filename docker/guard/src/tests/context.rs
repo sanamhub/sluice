@@ -4,7 +4,7 @@
 //! must hold the image's rules in the same order. The Dockerfile must copy only what the image
 //! needs, and only from the guard's folder.
 
-use super::{docker_dir, read, relay_dir};
+use super::{read, relay_dir};
 
 /// The lines of an ignore file that are rules: no comment, no blank line.
 fn rules(text: &str) -> Vec<String> {
@@ -16,19 +16,22 @@ fn rules(text: &str) -> Vec<String> {
 }
 
 #[test]
-fn the_legacy_builders_ignore_file_is_the_images_in_order() {
+fn the_relay_build_lets_in_the_meeting_place_and_both_workspaces() {
     let image = rules(&read(&relay_dir().join("Dockerfile.dockerignore")));
-    let shared = rules(&read(&docker_dir().join(".dockerignore")));
-    assert_eq!(
-        shared.first().map(String::as_str),
-        Some("*"),
-        "an allowlist"
-    );
-    assert_eq!(image.first().map(String::as_str), Some("*"));
-    // The same rules in the same order, or a re-included path could be excluded again.
-    assert_eq!(
-        image, shared,
-        "docker/.dockerignore is not the image's rules"
+    assert_eq!(image.first().map(String::as_str), Some("*"), "an allowlist");
+    for needed in [
+        "!crates/sluice-meet/Cargo.toml",
+        "!crates/sluice-meet/src",
+        "!docker/guard/Cargo.toml",
+        "!docker/guard/src",
+        "!docker/relay-server/Cargo.toml",
+        "!docker/relay-server/src",
+    ] {
+        assert!(image.iter().any(|rule| rule == needed), "{needed}");
+    }
+    assert!(
+        !image.iter().any(|rule| rule.contains("target")),
+        "{image:?}"
     );
 }
 
@@ -92,17 +95,20 @@ fn context_readers(dockerfile: &str) -> Vec<String> {
 
 #[test]
 fn each_dockerfile_copies_only_what_the_image_needs() {
-    let common = [
-        "COPY --from=build /out/bin/iroh-relay /usr/local/bin/iroh-relay",
+    let expected: Vec<String> = [
+        "COPY docker/guard/Cargo.toml docker/guard/Cargo.lock /src/docker/guard/",
+        "COPY docker/guard/src /src/docker/guard/src",
+        "COPY crates/sluice-meet/Cargo.toml /src/crates/sluice-meet/",
+        "COPY crates/sluice-meet/words.txt /src/crates/sluice-meet/",
+        "COPY crates/sluice-meet/src /src/crates/sluice-meet/src",
+        "COPY docker/relay-server/Cargo.toml docker/relay-server/Cargo.lock /src/docker/relay-server/",
+        "COPY docker/relay-server/src /src/docker/relay-server/src",
+        "COPY --from=build /out/release/sluice-relay /usr/local/bin/sluice-relay",
         "COPY --from=build /out/bin/sluice-relay-guard /usr/local/bin/sluice-relay-guard",
-    ];
-    let guard = [
-        "COPY guard/Cargo.toml guard/Cargo.lock /src/guard/",
-        "COPY guard/src /src/guard/src",
-    ];
-    let mut expected = guard.to_vec();
-    expected.extend(common);
-    expected.push("COPY relay/relay.toml relay/open.toml /etc/relay/");
+        "COPY docker/relay/relay.toml docker/relay/open.toml docker/relay/meeting-point.toml /etc/relay/",
+    ]
+    .map(String::from)
+    .to_vec();
     assert_eq!(
         context_readers(&read(&relay_dir().join("Dockerfile"))),
         expected,
