@@ -300,8 +300,9 @@ message or sealed value to a log at any level, and it does not parse the ticket 
 #### 4.1.3 SPAKE2, confirmation and the sealed ticket
 
 The password is the two words joined by one `-`, exactly as the code spells them. The sender plays
-SPAKE2 role A and the receiver role B (in the `spake2` crate, `start_a` and `start_b`); the two
-identities are the UTF-8 bytes of
+SPAKE2 role A and the receiver role B (in the `spake2` crate, `start_a` and `start_b`); the reference
+implementation uses `spake2` 0.4.0, the newest stable release, and that version is not part of the
+wire format. The two identities are the UTF-8 bytes of
 
 ```
 sluice short code v1/nameplate/<nameplate>/sender
@@ -348,12 +349,21 @@ Other failures:
 
 | Event | Sender | Receiver |
 |---|---|---|
-| no configured relay, or the relay has no `/meet` | `send --code` exits non-zero before serving | the join fails with no such code |
+| no configured relay, or the relay has no `/meet` | `send --code` exits 6 before serving, with the message in the paragraph below | the join fails: no relay is configured, or its meeting place is missing |
 | `NoCode` | not applicable | report that the code was not found at this relay, and that the sender may be using another relay |
 | `Busy` | report that someone is already meeting the code | report that another receiver joined first |
 | `Expired`, `Full`, `RateLimited` | report the relay's answer and exit non-zero before serving | report the relay's answer |
 | `PeerClosed` | not applicable | report that the sender closed |
 | confirmation or AEAD failure | send `Fail`, report `Burned`, make a new code | send `Fail`, report the words do not match |
+
+A `send --code` with no meeting place exits **6** before it serves anything or prints a ticket. The
+message is exactly one of:
+
+- `--code needs a relay with a meeting place, and no relay is configured; set --relay or send without --code`
+- `--code needs a relay with a meeting place, and the configured relay does not serve /meet; add [meet] to it or send without --code`
+
+The message names no URL, code or ticket. Exit 6 is the policy code of the table under Errors in
+`docs/design.md`; a script can tell this refusal from a network failure (3).
 
 Limits at the meeting place:
 
