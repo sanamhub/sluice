@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "hex": "01",
+      "frame": "claim"
+    },
+    {
+      "hex": "0200000007",
+      "frame": "join"
+    },
+    {
+      "hex": "03111111111111111111111111111111111111111111111111111111111111111111",
+      "frame": "spake"
+    },
+    {
+      "hex": "042222222222222222222222222222222222222222222222222222222222222222",
+      "frame": "confirm"
+    },
+    {
+      "hex": "05000102030405060708090a0b0c0d0e0f101112131415161718191a1b",
+      "frame": "sealed"
+    },
+    {
+      "hex": "0601",
+      "frame": "fail_confirm"
+    },
+    {
+      "hex": "0602",
+      "frame": "fail_seal"
+    },
+    {
+      "hex": "07",
+      "frame": "done"
+    }
+  ],
+  "description": "Every client frame of SPEC 4.1.2, encoded. A decoder reads the bytes and an encoder writes them again."
+}

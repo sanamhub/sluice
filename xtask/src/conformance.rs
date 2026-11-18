@@ -18,6 +18,7 @@ mod receipts;
 #[cfg(test)]
 mod rules_tests;
 mod sequences;
+mod short_code;
 #[cfg(test)]
 mod tests;
 mod tickets;
@@ -108,6 +109,7 @@ pub fn check(root: &Path) -> Result<Report> {
             "receipt-requests" => receipt_requests::run(&dir, &mut report)?,
             "receipts" => receipts::run(&dir, &mut report)?,
             "sequences" => sequences::run(&dir, &mut report)?,
+            "short-code" => short_code::run(&dir, &mut report)?,
             "tickets" => tickets::run(&dir, &mut report)?,
             "writer" => writer::run(&dir, &mut report)?,
             _ => {

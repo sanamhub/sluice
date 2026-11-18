@@ -1,0 +1,100 @@
+{
+  "description": "The meeting-place state machine driven by scripts. Each step names a connection label and the millisecond the transport passes in; `out` is every frame the state machine returns, in order, and `expect_error` is the refusal code.",
+  "cases": [
+    {
+      "name": "claim, join, and a third connection is Busy",
+      "config": { "rate_per_ip": 100, "max_plates": 10, "ttl_seconds": 600 },
+      "steps": [
+        { "connect": "s", "ip": "192.0.2.1", "now_ms": 0 },
+        { "connect": "r", "ip": "192.0.2.1", "now_ms": 0 },
+        { "connect": "t", "ip": "192.0.2.1", "now_ms": 0 },
+        { "receive": "s", "frame": "claim", "now_ms": 0, "out": [{ "to": "s", "frame": "claimed", "nameplate": 1 }] },
+        { "receive": "r", "frame": "join", "nameplate": 1, "now_ms": 0, "out": [{ "to": "s", "frame": "joined", "role": "sender" }, { "to": "r", "frame": "joined", "role": "receiver" }] },
+        { "receive": "t", "frame": "join", "nameplate": 1, "now_ms": 0, "expect_error": "busy" }
+      ],
+      "plates": 1
+    },
+    {
+      "name": "a failed confirmation burns both sides",
+      "config": { "rate_per_ip": 100, "max_plates": 10, "ttl_seconds": 600 },
+      "steps": [
+        { "connect": "s", "ip": "192.0.2.1", "now_ms": 0 },
+        { "connect": "r", "ip": "192.0.2.1", "now_ms": 0 },
+        { "receive": "s", "frame": "claim", "now_ms": 0 },
+        { "receive": "r", "frame": "join", "nameplate": 1, "now_ms": 0 },
+        { "receive": "s", "frame": "fail", "reason": "confirm", "now_ms": 1, "out": [{ "to": "s", "frame": "burned" }, { "to": "r", "frame": "burned" }] }
+      ],
+      "plates": 0
+    },
+    {
+      "name": "the sender's close tells the receiver PeerClosed",
+      "config": { "rate_per_ip": 100, "max_plates": 10, "ttl_seconds": 600 },
+      "steps": [
+        { "connect": "s", "ip": "192.0.2.1", "now_ms": 0 },
+        { "connect": "r", "ip": "192.0.2.1", "now_ms": 0 },
+        { "receive": "s", "frame": "claim", "now_ms": 0 },
+        { "receive": "r", "frame": "join", "nameplate": 1, "now_ms": 0 },
+        { "disconnect": "s", "now_ms": 2, "out": [{ "to": "r", "frame": "peer_closed" }] }
+      ],
+      "plates": 0
+    },
+    {
+      "name": "a receiver's close before Done burns the plate",
+      "config": { "rate_per_ip": 100, "max_plates": 10, "ttl_seconds": 600 },
+      "steps": [
+        { "connect": "s", "ip": "192.0.2.1", "now_ms": 0 },
+        { "connect": "r", "ip": "192.0.2.1", "now_ms": 0 },
+        { "receive": "s", "frame": "claim", "now_ms": 0 },
+        { "receive": "r", "frame": "join", "nameplate": 1, "now_ms": 0 },
+        { "disconnect": "r", "now_ms": 2, "out": [{ "to": "s", "frame": "burned" }, { "to": "r", "frame": "burned" }] }
+      ],
+      "plates": 0
+    },
+    {
+      "name": "the TTL expires both sides",
+      "config": { "rate_per_ip": 100, "max_plates": 10, "ttl_seconds": 60 },
+      "steps": [
+        { "connect": "s", "ip": "192.0.2.1", "now_ms": 0 },
+        { "connect": "r", "ip": "192.0.2.1", "now_ms": 0 },
+        { "receive": "s", "frame": "claim", "now_ms": 0 },
+        { "receive": "r", "frame": "join", "nameplate": 1, "now_ms": 0 },
+        { "expire": 60000, "out": [{ "to": "s", "frame": "error", "code": "expired" }, { "to": "r", "frame": "error", "code": "expired" }] }
+      ],
+      "plates": 0
+    },
+    {
+      "name": "a second claim from one IP is rate limited",
+      "config": { "rate_per_ip": 1, "max_plates": 10, "ttl_seconds": 600 },
+      "steps": [
+        { "connect": "s", "ip": "192.0.2.1", "now_ms": 0 },
+        { "connect": "r", "ip": "192.0.2.1", "now_ms": 0 },
+        { "receive": "s", "frame": "claim", "now_ms": 0 },
+        { "receive": "r", "frame": "claim", "now_ms": 1, "expect_error": "rate_limited" }
+      ],
+      "plates": 1
+    },
+    {
+      "name": "the table is full",
+      "config": { "rate_per_ip": 100, "max_plates": 1, "ttl_seconds": 600 },
+      "steps": [
+        { "connect": "s", "ip": "192.0.2.1", "now_ms": 0 },
+        { "connect": "t", "ip": "192.0.2.2", "now_ms": 0 },
+        { "receive": "s", "frame": "claim", "now_ms": 0 },
+        { "receive": "t", "frame": "claim", "now_ms": 1, "expect_error": "full" }
+      ],
+      "plates": 1
+    },
+    {
+      "name": "Done releases the plate and tells the sender",
+      "config": { "rate_per_ip": 100, "max_plates": 10, "ttl_seconds": 600 },
+      "steps": [
+        { "connect": "s", "ip": "192.0.2.1", "now_ms": 0 },
+        { "connect": "r", "ip": "192.0.2.1", "now_ms": 0 },
+        { "receive": "s", "frame": "claim", "now_ms": 0 },
+        { "receive": "r", "frame": "join", "nameplate": 1, "now_ms": 0 },
+        { "receive": "r", "frame": "done", "now_ms": 2, "out": [{ "to": "s", "frame": "done" }] }
+      ],
+      "plates": 0
+    }
+  ]
+}

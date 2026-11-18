@@ -382,7 +382,7 @@ T89 adds `tests/vectors/short-code/`:
 
 | Vector | Contents |
 |---|---|
-| `codes/` | accepted code texts with their parsed nameplate and word indices, and rejected ones for each rule: leading zero, `0`, `10000`, unknown word, missing and extra parts, upper case and wrong separators |
+| `codes/` | accepted code texts with their parsed nameplate and word indices, including upper-case input, which is accepted and printed in lower case; and rejected ones for each rule: leading zero, `0`, `10000`, unknown word, missing and extra parts, and wrong separators |
 | `words.txt` | the 2048-word list, checked against its SHA-256 |
 | `transcript/` | fixed nameplate and SPAKE2 messages with the expected transcript bytes |
 | `keys/` | a fixed SPAKE2 shared key and transcript with the expected confirmation tags and `ticket` key, for both roles |

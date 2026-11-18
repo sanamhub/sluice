@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "crates/sluice-core",
   "crates/sluice-live",
+  "crates/sluice-meet",
   "crates/sluice-api",
   "crates/sluice-cli",
   "crates/sluice-delta",
@@ -21,6 +22,7 @@ members = [
 default-members = [
   "crates/sluice-core",
   "crates/sluice-live",
+  "crates/sluice-meet",
   "crates/sluice-api",
   "crates/sluice-cli",
   "crates/sluice-delta",
@@ -85,6 +87,9 @@ iroh-mdns-address-lookup = "0.6.1"
 # Constant-time comparison of a pairing ticket's 32-byte secret. Already in the tree through
 # ed25519-dalek, so no new version.
 subtle = "2.6"
+# The AEAD and HKDF of a short code's exchange. Already in the tree through iroh-relay's server
+# feature and the browser build's TLS, so the code adds no cipher implementation.
+ring = "0.17"
 # iroh re-exports neither the congestion controllers nor the rustls handshake data.
 noq = { version = "1.4", default-features = false, features = ["rustls"] }
 # Only for StreamExt on iroh-blobs' GetProgress stream. The version Cargo.lock already resolves
@@ -173,7 +178,7 @@ unicode-normalization = "=0.1.26"
 # resolves it. The default `std` feature is all it has.
 url = "2.5.8"
 # Wipes the buffers that held a secret key. ed25519-dalek already brings it into the tree.
-zeroize = { version = "1", default-features = false }
+zeroize = { version = "1", default-features = false, features = ["alloc"] }
 # Pinned exactly: the version has to equal the wasm-bindgen CLI that the wasm-hash workflow installs
 # and `cargo xtask wasm-hash` runs, and a lockfile update must not move it on its own.
 wasm-bindgen = "=0.2.129"

@@ -1,0 +1,24 @@
+{
+  "description": "Codes a decoder MUST reject, each for the rule named in `rule`: `nameplate` is rule 1, `word` is rule 2, and `shape` is the three-parts rule.",
+  "cases": [
+    { "text": "07-orbit-velvet", "rule": "nameplate" },
+    { "text": "0-orbit-velvet", "rule": "nameplate" },
+    { "text": "00-orbit-velvet", "rule": "nameplate" },
+    { "text": "10000-orbit-velvet", "rule": "nameplate" },
+    { "text": "12345-orbit-velvet", "rule": "nameplate" },
+    { "text": "+7-orbit-velvet", "rule": "nameplate" },
+    { "text": "-orbit-velvet", "rule": "nameplate" },
+    { "text": " 7-orbit-velvet", "rule": "nameplate" },
+    { "text": "7-orbit-notaword", "rule": "word" },
+    { "text": "7-orbit-vel vet", "rule": "word" },
+    { "text": "7-orbit-velvet!", "rule": "word" },
+    { "text": "7--velvet", "rule": "word" },
+    { "text": "7-orbit-velvet ", "rule": "word" },
+    { "text": "7-orbit", "rule": "shape" },
+    { "text": "7-orbit-velvet-extra", "rule": "shape" },
+    { "text": "7_orbit_velvet", "rule": "shape" },
+    { "text": "7-orbit-velvet-", "rule": "shape" },
+    { "text": "", "rule": "shape" },
+    { "text": "7", "rule": "shape" }
+  ]
+}
