@@ -13,11 +13,13 @@ use iroh_blobs::{Hash, store::fs::FsStore};
 use super::{endpoint, live::LiveLog, now_ms, policy, storage};
 mod hold;
 mod keep;
+mod lock;
 mod report;
 mod start;
 mod stop;
 mod waiting;
 
+use lock::{lock_lines, lock_places};
 use stop::{GRACE, elapsed, wait_grace};
 pub use stop::{ServeEnd, Stop};
 use waiting::Waiting;
@@ -167,6 +169,23 @@ impl Provider {
         stop: Stop,
         events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
     ) -> Result<ServeEnd, Error> {
+        let end = self.wait(stop, events).await;
+        // Shutting the endpoint down is part of serving and can take longer than the wait itself:
+        // a test that wants to time the wait calls it directly.
+        let closed = self.close().await;
+        let end = end?;
+        closed?;
+        Ok(end)
+    }
+
+    /// Runs the requested stop and reports what ended it, without closing the endpoint. [`serve`]
+    /// calls this and then closes; a test that asks how quickly a wait notices a closed report
+    /// channel must time this half, because a loaded machine can spend seconds in `close`.
+    pub(crate) async fn wait(
+        &mut self,
+        stop: Stop,
+        events: &tokio::sync::mpsc::UnboundedSender<crate::engine::Event>,
+    ) -> Result<ServeEnd, Error> {
         // The endpoint has been accepting since the send was prepared. The mode is set before the
         // first request can be answered: `reserve` does it earlier still, for a ticket that can be
         // dialled before this call, and a caller that skipped that is covered here.
@@ -174,7 +193,7 @@ impl Provider {
             Stop::Keep { limit, .. } => self.set_limit(*limit),
             _ => self.arm(),
         }
-        let end = match stop {
+        match stop {
             Stop::OneDownload(roots) => {
                 self.one_download(roots.into_iter().map(Hash::from).collect(), events)
                     .await
@@ -184,11 +203,7 @@ impl Provider {
                 self.keep(limit, roots.into_iter().map(Hash::from).collect(), events)
                     .await
             }
-        };
-        let closed = self.close().await;
-        let end = end?;
-        closed?;
-        Ok(end)
+        }
     }
 
     /// Serves a live stream until its close is signed, then waits for the segments the way a
@@ -372,20 +387,4 @@ impl Provider {
 /// A wait that selected on a closed channel would poll it at once for ever, so it ends here.
 fn reports_stopped() -> Error {
     Error::Bug("the endpoint stopped reporting its receivers".to_string())
-}
-
-/// The places lock, poisoned only by a panic that changed nothing it guards: a holder edits a set
-/// and reads a clock.
-fn lock_places(places: &Mutex<policy::Places>) -> std::sync::MutexGuard<'_, policy::Places> {
-    places
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-/// The refused-group lock, poisoned only by a panic that changed nothing it guards: it edits a set
-/// of endpoint ids.
-fn lock_lines(lines: &Mutex<policy::Lines>) -> std::sync::MutexGuard<'_, policy::Lines> {
-    lines
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
