@@ -33,14 +33,14 @@ wasm-bindgen = { workspace = true }
 # module so the added size can be measured. Never enabled by the product. Pinned to the newest
 # stable release: 0.5 is a pre-release with no audit, which a security crate should not ride on.
 spake2 = { version = "=0.4.0", features = ["getrandom"], optional = true }
+# The version the lock resolves beside that `wasm-bindgen`, which is what an async export needs.
+wasm-bindgen-futures = "=0.4.79"
 
 # spake2 0.4's `getrandom` feature asks rand_core 0.6 for entropy, and that reaches getrandom 0.2,
 # whose wasm32-unknown-unknown backend needs the `js` feature. Optional and probe-only, so the
 # product build is byte-for-byte the module it was before this spike.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"], optional = true }
-# The version the lock resolves beside that `wasm-bindgen`, which is what an async export needs.
-wasm-bindgen-futures = "=0.4.79"
 
 # Runs the loopback test on the host, where the browser transport is not compiled in. The crate
 # itself has no async runtime of its own: a page's promise is the whole of its concurrency. It is
