@@ -53,8 +53,9 @@ jobs:
         working-directory: bench/wasm-hash/page
       - run: npm run check
         working-directory: bench/wasm-hash/page
-      # A high or critical advisory fails the job. Lower ones are listed and do not.
-      - run: npm audit --audit-level=high
+      # High and critical advisories fail unless audit-allow.json lists them with an owner and a
+      # recheck date. Lower ones are listed and do not fail.
+      - run: node scripts/audit.mjs
         working-directory: bench/wasm-hash/page
       - run: npx playwright install --with-deps chromium firefox webkit
         working-directory: bench/wasm-hash/page
