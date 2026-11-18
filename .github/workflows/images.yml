@@ -52,7 +52,9 @@ jobs:
           - image: relay
             package: sluice-relay
             dockerfile: docker/relay/Dockerfile
-            context: docker
+            # The relay workspace depends on crates/sluice-meet by path, so the context is the
+            # repository root; Dockerfile.dockerignore keeps it small.
+            context: .
           - image: cli
             package: sluice
             dockerfile: docker/cli/Dockerfile
@@ -77,7 +79,7 @@ jobs:
             --file "$DOCKERFILE" "$CONTEXT"
       # The distroless image has no shell, so the binary is run directly.
       - if: matrix.image == 'relay'
-        run: docker run --rm --entrypoint /usr/local/bin/iroh-relay "$PACKAGE:ci" --version
+        run: docker run --rm --entrypoint /usr/local/bin/sluice-relay "$PACKAGE:ci" --version
       - if: matrix.image == 'cli'
         run: docker run --rm "$PACKAGE:ci" --version
       # The relay starts with a read-only root, and its guard refuses each config that would open

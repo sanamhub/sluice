@@ -31,6 +31,16 @@ struct Loose {
     access: LooseAccess,
     limits: Option<LooseLimits>,
     tls: Option<LooseTls>,
+    meet: Option<LooseMeet>,
+}
+
+/// The guard's own `[meet]`, which iroh-relay ignores. The relay binary reads it.
+#[derive(Deserialize)]
+struct LooseMeet {
+    enable: bool,
+    rate_per_ip: Option<u32>,
+    max_plates: Option<u32>,
+    ttl_seconds: Option<u32>,
 }
 
 /// `struct Limits`, main.rs:510-518, down to the one number open mode needs.
@@ -54,6 +64,7 @@ struct LooseRate {
 struct LooseTls {
     #[serde(default)]
     dangerous_http_only: bool,
+    cert_mode: Option<String>,
 }
 
 /// `struct HttpAccessConfig`, main.rs:203-214. The URL is a string here, and parsed by the
@@ -151,7 +162,7 @@ fuzz_target!(|data: &[u8]| {
                  so iroh-relay serves metrics"
             );
             assert!(
-                !loose.tls.is_some_and(|tls| tls.dangerous_http_only),
+                !loose.tls.as_ref().is_some_and(|tls| tls.dangerous_http_only),
                 "the guard passed {mode:?} with HTTPS turned off"
             );
             if let LooseAccess::SharedToken(tokens) = &loose.access {
@@ -162,6 +173,21 @@ fuzz_target!(|data: &[u8]| {
             }
             if let LooseAccess::Http(http) = &loose.access {
                 plain_url(&http.url);
+            }
+            if let Some(meet) = &loose.meet
+                && meet.enable
+            {
+                assert!(
+                    meet.rate_per_ip.is_some()
+                        && meet.max_plates.is_some()
+                        && meet.ttl_seconds.is_some(),
+                    "the guard passed an enabled meeting place without its limits"
+                );
+                assert_ne!(
+                    loose.tls.as_ref().and_then(|tls| tls.cert_mode.as_deref()),
+                    Some("LetsEncrypt"),
+                    "the guard passed ACME with an enabled meeting place"
+                );
             }
         }
     }

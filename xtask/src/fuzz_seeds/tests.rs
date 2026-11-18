@@ -226,13 +226,17 @@ fn the_range_seeds_are_written_here_and_every_one_parses() {
 fn the_relay_config_seeds_are_the_shipped_configs_and_every_iroh_example() {
     let seeds = seeds(Target::RelayConfig, &vectors_dir()).unwrap();
     let files: Vec<String> = seeds.iter().filter_map(|seed| seed.file.clone()).collect();
-    assert_eq!(files.len(), 22, "{files:?}");
+    assert_eq!(files.len(), 23, "{files:?}");
     assert_eq!(
-        files[..2],
-        ["docker/relay/relay.toml", "docker/relay/open.toml"]
+        files[..3],
+        [
+            "docker/relay/relay.toml",
+            "docker/relay/open.toml",
+            "docker/relay/meeting-point.toml"
+        ]
     );
     assert!(
-        files[2..]
+        files[3..]
             .iter()
             .all(|f| f.starts_with("docker/guard/testdata/iroh-relay-1.4.1/")),
         "{files:?}"
@@ -242,7 +246,7 @@ fn the_relay_config_seeds_are_the_shipped_configs_and_every_iroh_example() {
     // The configs one line from a rule come after them, and are all TOML, so each reaches the
     // check.
     let near: Vec<_> = seeds.iter().filter(|seed| seed.file.is_none()).collect();
-    assert_eq!(near.len(), 6);
+    assert_eq!(near.len(), 8);
     for seed in near {
         let text = std::str::from_utf8(&seed.bytes).unwrap();
         assert!(text.parse::<toml::Table>().is_ok(), "{text}");

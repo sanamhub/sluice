@@ -44,15 +44,15 @@ fn start(config: File, text: String) -> ExitCode {
     use std::os::unix::process::CommandExt;
     use std::process::Command;
 
-    use sluice_relay_guard::{IROH_RELAY, relay_args};
+    use sluice_relay_guard::{SLUICE_RELAY, relay_args};
 
     if let Err(refusal) = hand_over(config, &text) {
         eprintln!("sluice-relay-guard: {refusal}");
         return ExitCode::from(EXIT_NO_RELAY);
     }
     // Standard input is inherited, and is the sealed copy.
-    let err = Command::new(IROH_RELAY).args(relay_args()).exec();
-    eprintln!("sluice-relay-guard: cannot start {IROH_RELAY}: {err}");
+    let err = Command::new(SLUICE_RELAY).args(relay_args()).exec();
+    eprintln!("sluice-relay-guard: cannot start {SLUICE_RELAY}: {err}");
     ExitCode::from(EXIT_NO_RELAY)
 }
 

@@ -34,12 +34,13 @@ pub use handover::{CONFIG_FD_PATH, MEMFD_NAME, hand_over, relay_args};
 /// ```
 pub const IROH_RELAY_VERSION: &str = "1.4.1";
 
-/// Where both images keep the relay the guard starts.
+/// Where the image keeps the relay the guard starts. Since ADR 0041 it is ours, so the binary can
+/// serve `GET /meet` on the same TLS listener as `/relay`.
 ///
 /// ```
-/// assert!(sluice_relay_guard::IROH_RELAY.ends_with("/iroh-relay"));
+/// assert!(sluice_relay_guard::SLUICE_RELAY.ends_with("/sluice-relay"));
 /// ```
-pub const IROH_RELAY: &str = "/usr/local/bin/iroh-relay";
+pub const SLUICE_RELAY: &str = "/usr/local/bin/sluice-relay";
 
 /// The environment variable iroh-relay 1.4.1 replaces the whole `access.shared_token` list with,
 /// if it is set and is UTF-8 (main.rs:43 and 236-241). The guard reads it the same way, and passes

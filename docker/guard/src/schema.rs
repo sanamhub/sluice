@@ -42,6 +42,23 @@ pub(crate) struct Config {
     /// `#[serde(default)]` there, with `Everyone` as the default. Here a missing `access` stays
     /// `None`, so the guard can say that it was left out.
     pub access: Option<AccessConfig>,
+    /// The meeting place of ADR 0041. It is the guard's own table, not iroh-relay's: the relay
+    /// binary reads it and starts `GET /meet`, and iroh-relay itself has no such setting.
+    pub meet: Option<MeetConfig>,
+}
+
+/// `[meet]` in `relay.toml`: the meeting place beside `/relay`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MeetConfig {
+    /// Whether `/meet` is served. Required, so a typo cannot leave it off by accident.
+    pub enable: bool,
+    /// Claims and joins one IP may make per minute, 1..=600.
+    pub rate_per_ip: Option<u32>,
+    /// Plates held at once, 1..=9999.
+    pub max_plates: Option<u32>,
+    /// How long a plate lives, 60..=600 seconds.
+    pub ttl_seconds: Option<u32>,
 }
 
 /// `enum AccessConfig`, main.rs:161-201: lower case names, and `shared_token` renamed.

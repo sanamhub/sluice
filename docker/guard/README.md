@@ -3,7 +3,7 @@
 The entry point of the [`relay`](../relay/README.md) image (ADR 0019, ADR 0020, ADR 0021). It
 checks the config that `iroh-relay` 1.4.1 is about to start with, refuses one that would open
 more than the operator wrote, and then replaces itself with
-`/usr/local/bin/iroh-relay --config-path=/proc/self/fd/0`, with a sealed copy of the bytes it
+`/usr/local/bin/sluice-relay --config-path=/proc/self/fd/0`, with a sealed copy of the bytes it
 checked on descriptor 0, so the server runs as PID 1 and gets the container's signals.
 
 ```
@@ -66,6 +66,9 @@ path or an argument, is escaped, so a refusal is one line.
 | no `enable_metrics` line (ADR 0020) | iroh-relay then serves metrics on port 9090 with no login; `true` and `false` both start |
 | an `access.http.url` that is not an absolute http or https URL, or holds a user name, password, query or fragment (ADR 0020) | iroh-relay logs the URL when a check fails; a secret goes in `bearer_token`, a header |
 | `enable_relay = false` (ADR 0020) | the relay half is off, so no traffic passes; the image exists to carry it |
+| `[meet] enable = true` without `rate_per_ip`, `max_plates` or `ttl_seconds` | ADR 0041: an enabled meeting place must state all three limits |
+| a `[meet]` limit outside 1..=600, 1..=9999 or 60..=600 | the bounds ADR 0041 sets |
+| `cert_mode = "LetsEncrypt"` with `[meet] enable = true` | T89 does not carry ACME into `sluice-relay`; the line names the limit and says so |
 
 An empty allowlist starts: it is what the relay image ships, and it lets nobody in. If iroh-relay
 itself cannot be started, the guard exits with 69, `EX_UNAVAILABLE`.
@@ -95,7 +98,12 @@ and exits with 69, and starts nothing. `/proc/self/fd/0` is a path of the kernel
 The guard starts the relay only on Linux, where `memfd_create` and its seals exist (Linux 3.17).
 Elsewhere it stops after the check with exit 69.
 
-iroh-relay 1.4.1 reads nothing from standard input: no line of its `src/` reads `stdin`.
+`sluice-relay` reads the config from `/proc/self/fd/0` and nothing from standard input beyond that.
+It is our binary, built from `docker/relay-server`; it serves `/relay` and `/meet` on one listener.
+
+`[meet]` is the guard's own table, not iroh-relay's. The guard refuses an unknown key inside it, and
+checks the three limits and the ACME refusal above; the relay binary reads the same table and starts
+`/meet` only when `enable = true`. A config without `[meet]` answers `/meet` with `404`.
 
 ## What it must never do
 
@@ -114,17 +122,18 @@ so before moving `IROH_RELAY_VERSION`:
    it against 1.4.1's.
 2. Bring `schema.rs` in line, field by field, with the new line numbers, and copy the release's own
    example configs into `testdata/iroh-relay-<version>/`.
-3. Move `IROH_RELAY_VERSION` in `src/lib.rs`, the `ARG` in the Dockerfile, and `iroh-relay` in the
-   root `Cargo.lock` together. Two tests fail until all three agree, and a third until every crate
-   in this project's `Cargo.lock` is one the root lock has at the same version.
+3. Move `IROH_RELAY_VERSION` in `src/lib.rs`, `iroh-relay` in `docker/relay-server/Cargo.toml` and
+   its lock, and `iroh-relay` in the root `Cargo.lock` together. A test fails until the root lock
+   and this project's lock agree, and another until the schema is the release the root resolves.
 
 ## Building and testing
 
-It is its own project with its own `Cargo.lock`, outside the root workspace, so the image builds
-from `docker/` with only the files it needs: `Dockerfile.dockerignore` beside the Dockerfile lists
-them, which BuildKit reads. The legacy builder (`DOCKER_BUILDKIT=0`) reads only
-`docker/.dockerignore`, so that holds the same list, and the Dockerfile copies only
-`guard/Cargo.toml`, `guard/Cargo.lock` and `guard/src`. Tests check both.
+It is its own project with its own `Cargo.lock`, outside the root workspace. The relay image builds
+from the repository root, because its workspace depends on `crates/sluice-meet` by path;
+`docker/relay/Dockerfile.dockerignore` lists the files both workspaces need, and BuildKit reads it.
+The Dockerfile copies only `docker/guard/Cargo.toml`, `docker/guard/Cargo.lock` and
+`docker/guard/src` for this project. The legacy builder (`DOCKER_BUILDKIT=0`) does not read that
+file, so the relay image needs BuildKit.
 
 ci.yml runs its gates; to run them by hand from the repository root:
 

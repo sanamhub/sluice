@@ -1,12 +1,20 @@
-# The build context is docker/, which both images share for the guard, and only what this image
-# needs goes in. Anything not named below stays out, so a target/ folder, a local config, a
-# certificate or a key never reaches the build. The guard's tests are left out too: the image
-# builds the guard without them.
+# The build context is the repository root, because the relay workspace depends on
+# crates/sluice-meet by path. Only what the two workspaces and the image need goes in: a target/
+# folder, a local config, a certificate or a key never reaches the build. The guard's tests are left
+# out too, and the relay's own tests, because the image builds the two binaries.
 *
-!relay/relay.toml
-!relay/open.toml
-!guard/Cargo.toml
-!guard/Cargo.lock
-!guard/src
-guard/src/tests.rs
-guard/src/tests
+!crates/sluice-meet/Cargo.toml
+!crates/sluice-meet/words.txt
+!crates/sluice-meet/src
+!docker/guard/Cargo.toml
+!docker/guard/Cargo.lock
+!docker/guard/src
+!docker/relay-server/Cargo.toml
+!docker/relay-server/Cargo.lock
+!docker/relay-server/src
+!docker/relay/relay.toml
+!docker/relay/open.toml
+!docker/relay/meeting-point.toml
+docker/guard/src/tests.rs
+docker/guard/src/tests
+docker/relay-server/tests

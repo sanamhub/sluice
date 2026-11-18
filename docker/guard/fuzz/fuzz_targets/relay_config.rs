@@ -76,6 +76,14 @@ const FIXED_SPANS: &[&str] = &[
     "[access] allowlist",
     // The command that prints an id.
     "sluice id",
+    // The meeting place's table, its limits and its two certificate modes.
+    "[meet] enable = true",
+    "rate_per_ip",
+    "max_plates",
+    "ttl_seconds",
+    "enable = false",
+    "cert_mode = \"LetsEncrypt\"",
+    "cert_mode = \"Manual\"",
 ];
 
 /// Every backticked span of a config refusal is [`FIXED_SPANS`] or dotted parts that each match
