@@ -117,6 +117,10 @@ async fn start_page(
     daemon: &Daemon,
 ) -> Result<Option<(crate::ui::Page, sluice_api::Service)>, Error> {
     if !args.ui {
+        // A port file can be left by a daemon that died before it removed the file. This daemon
+        // does not serve a page, so the file is not its own and must not outlive its start: `stop`
+        // takes the file's presence as the sign that the daemon it asked had a page.
+        daemon.service().remove_private(crate::ui::PORT_FILE);
         return Ok(None);
     }
     let service = daemon.service();

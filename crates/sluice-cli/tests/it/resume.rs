@@ -26,7 +26,6 @@ fn a_killed_receive_resumes_from_its_partial_store() {
         .spawn()
         .expect("start recv");
     wait_for_partial(&out);
-    std::thread::sleep(Duration::from_millis(100));
     let _ = child.kill();
     let _ = child.wait();
 
@@ -121,19 +120,40 @@ fn two_identical_files_arrive_and_a_run_after_a_kill_finishes() {
     wait_for_sender(&mut sender);
 }
 
+/// Waits until the receive has a partial store that is worth resuming: the store's folder exists
+/// before its marker and database do, and killing between the two leaves a folder no record names,
+/// which the next run refuses rather than resumes. A megabyte of data is proof that the store was
+/// opened and has taken part of the transfer.
 fn wait_for_partial(out: &std::path::Path) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        let found = std::fs::read_dir(out).unwrap().flatten().any(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".sluice-partial-")
-        });
-        if found {
-            return;
+        if let Ok(entries) = std::fs::read_dir(out) {
+            for entry in entries.flatten() {
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".sluice-partial-")
+                    && partial_bytes(&entry.path()) >= 1 << 20
+                {
+                    return;
+                }
+            }
         }
-        assert!(Instant::now() < deadline, "no partial store appeared");
-        std::thread::sleep(Duration::from_millis(20));
+        assert!(
+            Instant::now() < deadline,
+            "the receive never filled a partial store"
+        );
+        std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// How many bytes the data files of the store at `store` hold.
+fn partial_bytes(store: &std::path::Path) -> u64 {
+    std::fs::read_dir(store.join("data"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| entry.metadata().ok())
+        .map(|meta| meta.len())
+        .sum()
 }

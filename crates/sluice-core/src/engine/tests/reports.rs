@@ -18,33 +18,39 @@ async fn closed_reports() -> (TempDir, Provider, Vec<[u8; 32]>) {
 
 /// A send that waits for Ctrl+C or the expiry is one of the waits that reads the reports; with the
 /// channel closed it ends with the error at once.
+///
+/// This times the wait, not `serve`: `serve` closes the endpoint after the wait, and a busy machine
+/// can spend longer in that shutdown than the wait itself. The wait is what must not poll a closed
+/// channel.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_keep_wait_ends_when_the_reports_stop() {
-    let (dir, provider, roots) = closed_reports().await;
+    let (dir, mut provider, roots) = closed_reports().await;
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let served = tokio::time::timeout(
         Duration::from_secs(2),
-        provider.serve(Stop::Keep { limit: None, roots }, &tx),
+        provider.wait(Stop::Keep { limit: None, roots }, &tx),
     )
     .await
     .expect("the wait polled a closed channel instead of ending");
     let err = served.unwrap_err();
     assert!(err.to_string().contains("stopped reporting"), "{err}");
+    provider.shutdown().await.unwrap();
     drop(dir);
 }
 
 /// A one-download send reads the same reports to know when its receiver finished.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_one_download_wait_ends_when_the_reports_stop() {
-    let (dir, provider, roots) = closed_reports().await;
+    let (dir, mut provider, roots) = closed_reports().await;
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     let served = tokio::time::timeout(
         Duration::from_secs(2),
-        provider.serve(Stop::OneDownload(roots), &tx),
+        provider.wait(Stop::OneDownload(roots), &tx),
     )
     .await
     .expect("the wait polled a closed channel instead of ending");
     let err = served.unwrap_err();
     assert!(err.to_string().contains("stopped reporting"), "{err}");
+    provider.shutdown().await.unwrap();
     drop(dir);
 }

@@ -42,6 +42,11 @@ pub(super) async fn status(output: &Output) -> Result<u8, Error> {
 
 pub(super) async fn stop(output: &Output) -> Result<u8, Error> {
     let home = Home::locate()?;
+    // A daemon with `--ui` writes this before it listens and removes it after it stops accepting.
+    // `stop` must not answer before both are true: the file is part of what the daemon leaves, and
+    // a caller that runs straight on would otherwise find it still there.
+    let page = home.join(crate::ui::PORT_FILE);
+    let page_was_here = page.exists();
     let mut client = sluice_api::connect(&home).await.map_err(refused)?;
     let stopped = client
         .shutdown(ShutdownRequest {})
@@ -52,11 +57,13 @@ pub(super) async fn stop(output: &Output) -> Result<u8, Error> {
     let started = Instant::now();
     // The daemon answers before it stops listening, so the end is the moment a connection is
     // refused. A connection that is accepted by the system and never answered, because the daemon
-    // is closing, is not the end either.
-    while !gone(&home).await {
+    // is closing, is not the end either. The page listener goes with the daemon, and its file is
+    // removed after the listener: wait for that too when this daemon had one.
+    while !gone(&home).await || (page_was_here && page.exists()) {
         if started.elapsed() > GONE_WITHIN {
             return Err(Error::Network(
-                "the daemon was asked to stop and is still answering".to_string(),
+                "the daemon was asked to stop and is still answering or clearing its port file"
+                    .to_string(),
             ));
         }
         tokio::time::sleep(LOOK_EVERY).await;
