@@ -33,7 +33,7 @@ be merged):
 | Question | Answer, with the evidence |
 |---|---|
 | Can the meeting place share the relay's host and port? | Yes. `iroh-relay` 1.4.1's library exports `RelayService`, `Handlers` and `TlsConfig`, and `RelayService::handle_connection` accepts a TLS stream. A binary of ours registers `GET /meet` in `Handlers`, builds the relay service, and serves both paths on one listener. The spike's test connects two `iroh-relay` clients through `/relay` (a Ping/Pong and a Datagram from one to the other) and claims a nameplate over `wss://…/meet` on the same port and certificate, in one run. The upstream `Server` itself cannot add a route: its `ServerBuilder` is `pub(super)`. |
-| Does `spake2` build for the browser? | Yes, for the sources it needs. `spake2` 0.5.0-pre.0 with `curve25519-dalek` 5 and `sha2` 0.11, which the tree already holds, builds for `wasm32-unknown-unknown` when `getrandom` 0.4 has `wasm_js` (which `iroh` already enables for the target). The `.wasm` module grows by 36 320 bytes raw and 8 440 bytes with brotli, 0.5% and 0.6% of the module. `spake2` 0.4.0, the newest stable, needs `getrandom` 0.2's `js` feature and a second `curve25519-dalek`; that is why the spike uses the pre-release. |
+| Does `spake2` build for the browser? | Yes, on the newest stable release. `spake2` 0.4.0 with `curve25519-dalek` 4.1.3, `sha2` 0.10.9 and `getrandom` 0.2.17 builds for `wasm32-unknown-unknown` when `getrandom` 0.2 has its `js` feature, which the probe enables and the product build does not. The `.wasm` module grows by 56 650 bytes raw and 9 432 bytes with brotli, 0.8% and 0.7% of the module. The price of the stable release is a second `curve25519-dalek` (4.1.3 beside 5.0.0) and a second SHA-2 (0.10.9 beside 0.11.1); the pre-release variant measured 36 320 and 8 440 bytes, so stability costs 20 330 bytes raw and 992 with brotli. |
 | Does the exchange work, including the burn? | Yes. Four in-process tests: right words deliver a ticket; wrong words burn the nameplate and the sender sees `Burned`; a third connection to a held nameplate is refused with `Busy`; and the relay keeps relaying on the same port. |
 
 The spike also fixed the wire shape and the failure rules below; the numbers in it are the ones this
@@ -70,11 +70,11 @@ and its exec target becomes `sluice-relay`. The guard refuses a `[meet]` that en
 place without the three limits, and the binary refuses to serve `/meet` at all when `[meet]` is
 absent. The binary also keeps the relay's small endpoints, which upstream registers before
 `/relay`: `/`, `/index.html`, `/ping`, `/robots.txt`, `/healthz`, and the plain-HTTP
-`/generate_204`. The relay config surface is the other half of the work: the two shipped recipes
-use `cert_mode = "Manual"`, and T89 must either carry the ACME path into `sluice-relay` or refuse
-`cert_mode = "LetsEncrypt"` when `[meet]` is enabled, with a line that names the limit. That
-config surface, and not the meeting place, is the largest implementation risk; it is one reason
-this ADR is Proposed.
+`/generate_204`. The relay config surface is the other half of the work. The two shipped recipes
+use `cert_mode = "Manual"`, and T89 refuses `cert_mode = "LetsEncrypt"` when `[meet]` is enabled,
+with a line that names the limit. That refusal is the decision; carrying ACME into `sluice-relay`
+is later work, not an open choice. The config surface, and not the meeting place, is the largest
+implementation risk, and T89 carries it in the same binary.
 
 ### 2. The code is `<nameplate>-<word>-<word>`
 
@@ -129,9 +129,14 @@ message, or a crash report, and an error names only the part that failed.
   value: a guess costs a live connection, and that connection burns the code.
 
 The AEAD and the KDF come from `ring`, which the browser build already uses for TLS, so the browser
-adds no new cipher implementation. The new code is `spake2`, which reuses the tree's
-`curve25519-dalek` 5 and `sha2` 0.11. `spake2` has no independent audit, by its own README; the docs and the threat model say
-so.
+adds no new cipher implementation. The new code is `spake2` 0.4.0, the newest stable release. It
+brings `curve25519-dalek` 4.1.3 and `sha2` 0.10.9 beside the tree's 5.0.0 and 0.11.1, and it reads
+entropy through `getrandom` 0.2.17, whose `js` backend the browser build enables only for the probe.
+The 0.4.0 `start_a`, `start_b` and `finish` calls, the 33-byte messages and the identities are the
+same as the pre-release's, so the transcript, the HKDF schedule and the AEAD above do not change.
+`spake2` has no independent audit, by its own README; the docs and the threat model say so. The
+choice of the stable release over the pre-release is deliberate: a security path that protects a
+ticket should not ride on an unaudited pre-release for 20 KB of `.wasm`.
 
 ### 4. The meeting place lives with the relay and speaks WebSocket over HTTPS
 
@@ -179,9 +184,15 @@ so.
   different relay.
 - `sluice doctor` prints the configured relay and the `/meet` URL it would use, and says that a
   code only works when both sides name that relay. If the relay has no meeting place, it says so.
-- If `--code` cannot claim a nameplate (no configured relay, the relay has no `[meet]`, or the
-  claim is refused), the command stops before serving and exits non-zero. A user who asked for a
-  code gets a code or an error, not a transfer with the flag silently ignored.
+- If `--code` cannot claim a nameplate because no relay is configured or the relay serves no
+  `/meet`, the command stops before serving and exits **6** (policy). The message is one of these,
+  and it names no URL, code or ticket:
+  `--code needs a relay with a meeting place, and no relay is configured; set --relay or send without --code`
+  or
+  `--code needs a relay with a meeting place, and the configured relay does not serve /meet; add [meet] to it or send without --code`.
+  If the claim itself is refused (`Busy`, `Full`, `RateLimited`, `Expired`), the command reports the
+  relay's answer and exits non-zero before serving. A user who asked for a code gets a code or an
+  error, not a transfer with the flag silently ignored.
 - The project's own relay (ADR 0040) is the default once it exists. Until then a code needs a
   relay the user configured; there is no built-in meeting place.
 
@@ -219,21 +230,26 @@ rewritten for this design: one online guess, a burn, no stored ciphertext, and n
   document license on a table in an MIT/Apache implementation, and every copy would carry its
   notice. The 22-bit BIP-0039 list is permissive and shorter to license, though its codes are
   longer.
-- **Use `spake2` 0.4.0, the newest stable.** Refused for now: it pulls a second
-  `curve25519-dalek` and needs `getrandom` 0.2's `js` feature in the browser build. 0.5.0-pre.0
-  shares the tree's `curve25519-dalek` 5 and `sha2` 0.11.
-  The pre-release status is a cost, recorded under Consequences.
+- **Use `spake2` 0.5.0-pre.0.** It shares the tree's `curve25519-dalek` 5 and `sha2` 0.11, so its
+  module is 20 330 bytes raw and 992 bytes brotli smaller. Refused: it is a pre-release of a
+  security crate with no audit, and the path that protects a ticket should use a stable release.
+  Revisit when a stable 0.5 ships; then the second curve library and its SHA-2 leave the graph.
 
 ## Consequences
 
 - The relay image gains a binary of ours, and the guard's exec target becomes `sluice-relay`. The
   guard's schema and the binary's reader must move together; a test compares the keys they accept.
   The image grows by about 172 KB, the meeting place's own code plus its handler and state machine.
-- The browser module grows by 36 320 bytes raw and 8 440 bytes with brotli. The AEAD and KDF
-  are `ring`, already present; the new code is `spake2` and the `hkdf` it brings.
-- T89 takes `spake2 = 0.5.0-pre.0`, a pre-release, and its `hkdf` 0.13. A pre-release in a
-  security path is a supply-chain cost. Revisit when 0.5.0 is released, or pin the exact
-  pre-release and review it.
+- The browser module grows by 56 650 bytes raw and 9 432 bytes with brotli, 0.8% and 0.7%. The AEAD
+  and KDF are `ring`, already present; the new code is `spake2` 0.4.0 and the second
+  `curve25519-dalek` 4.1.3 and `sha2` 0.10.9 it brings. The pre-release variant measured 36 320 and
+  8 440; the difference is what a stable release costs.
+- T89 takes `spake2 = "=0.4.0"`, an exact pin on the newest stable. The tree then carries
+  `curve25519-dalek` 4.1.3 beside 5.0.0, `sha2` 0.10.9 beside 0.11.1 and `rand_core` 0.6.4.
+  `cargo deny check` reports `bans ok`; this repository's `deny.toml` sets no multiple-version
+  denial, so no skip entry is needed. If that policy ever changes, the skip names exactly
+  `curve25519-dalek` 4.1.3 and `sha2` 0.10.9, with a comment naming this ADR and saying that it goes
+  away when a stable `spake2` shares the tree's `curve25519-dalek` 5.
 - A code is one guess, but a nameplate is public: anyone who learns or scans a live nameplate can
   join it first, fail the confirmation, and burn the code. That is denial of service, not
   disclosure; it is rate-limited per IP, the sender is told, and a new code is cheap. The threat
@@ -243,5 +259,5 @@ rewritten for this design: one online guess, a burn, no stored ciphertext, and n
 - A sender that closes before the receiver joins releases the nameplate and the code is dead; the
   receiver gets `PeerClosed`. A receiver that closes early burns the code; the sender gets `Burned`.
 - Revisit if `iroh-relay` exposes a public route hook on its own `Server` (the `Handlers` route is
-  enough today), if BIP-0039's license changes, or if a stable `spake2` release shares the tree's
-  curve arithmetic.
+  enough today), if BIP-0039's license changes, or when a stable `spake2` 0.5 shares the tree's
+  curve arithmetic, which lets the second `curve25519-dalek` and `sha2` go.
