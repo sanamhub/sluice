@@ -1,5 +1,5 @@
 ---
-source: crates/sluice-cli/tests/help.rs
+source: crates/sluice-cli/tests/it/help.rs
 expression: "help(&[\"doctor\", \"--help\"])"
 ---
 Check the home, who can reach it, its lock and identity key, and say how to fix a problem
@@ -26,7 +26,7 @@ Options:
           [default: auto]
 
       --relay <URL>
-          The relay the network checks use and ask for a net report
+          The relay the network checks use, and the one a short code would meet at
 
       --n0-relays
           Use n0's public relays for the network checks (not run by this project)

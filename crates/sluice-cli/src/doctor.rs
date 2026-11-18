@@ -22,8 +22,8 @@ pub struct Args {
     /// port-mapping request to the router. The plain report stays local and quick
     #[arg(long)]
     pub network: bool,
-    /// The relay the network checks use and ask for a net report
-    #[arg(long, value_name = "URL", requires = "network")]
+    /// The relay the network checks use, and the one a short code would meet at
+    #[arg(long, value_name = "URL")]
     pub relay: Option<String>,
     /// Use n0's public relays for the network checks (not run by this project)
     #[arg(long, requires = "network")]
@@ -54,6 +54,7 @@ pub fn run(args: &Args) -> Result<Outcome, Error> {
         fix: None,
     }];
     lines.extend(checks.iter().map(line));
+    lines.push(meet(args)?);
     if args.network {
         let relay = RelayModeChoice::from_flags(args.relay.as_deref(), args.n0_relays)?;
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -75,6 +76,49 @@ pub fn run(args: &Args) -> Result<Outcome, Error> {
         lines,
         code: exit_code(&checks),
     })
+}
+
+/// The meeting place a code would use: the configured relay's `/meet`, and whether that relay
+/// answers there. It never makes a code; one upgrade and a close are enough.
+fn meet(args: &Args) -> Result<Line, Error> {
+    let Some(relay) = args.relay.as_deref() else {
+        return Ok(Line {
+            name: "meet",
+            status: Status::Skipped,
+            detail: "no relay is configured; a short code needs a relay with a meeting place"
+                .to_string(),
+            fix: Some("pass --relay URL on both sides, or send without --code".to_string()),
+        });
+    };
+    let url = crate::short_code::meet_url(relay)?;
+    let detail =
+        format!("{url} on the relay; a code only works when both sides name the same relay");
+    if !args.network {
+        return Ok(Line {
+            name: "meet",
+            status: Status::Skipped,
+            detail,
+            fix: Some("pass --network to check whether the relay serves it".to_string()),
+        });
+    }
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| Error::Storage(format!("cannot start the check runtime: {e}")))?;
+    match runtime.block_on(crate::short_code::serves(relay)) {
+        Ok(()) => Ok(Line {
+            name: "meet",
+            status: Status::Ok,
+            detail,
+            fix: None,
+        }),
+        Err(error) => Ok(Line {
+            name: "meet",
+            status: Status::Warning,
+            detail: format!("{detail}; {error}"),
+            fix: Some("add [meet] to the relay, or send without --code".to_string()),
+        }),
+    }
 }
 
 /// 0 when no check failed, since a warning does not fail. Otherwise the code of the most serious

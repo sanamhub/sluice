@@ -74,11 +74,18 @@ pub struct SendArgs {
     /// Do not offer the receiver a signed receipt for this send
     #[arg(long)]
     pub no_receipt: bool,
+    /// Also meet a receiver at the relay's `/meet` on a short code. It needs `--relay`, and the code
+    /// is printed beside the ticket
+    #[arg(long)]
+    pub code: bool,
 }
 
 pub fn run(args: &SendArgs, output: &Output) -> Result<u8, Error> {
     if args.qr.is_some() {
         crate::qr::check_terminal(std::io::stderr().is_terminal())?;
+    }
+    if args.code && args.relay.is_none() {
+        return Err(Error::Policy(crate::short_code::NO_RELAY.to_string()));
     }
     let relay = RelayModeChoice::from_flags(args.relay.as_deref(), args.n0_relays)?;
     if args.n0_relays {
@@ -175,15 +182,31 @@ fn serve(
             outgoing.no_receipt();
         }
         let ticket = outgoing.ticket.encode();
-        // The code goes first and to standard error: the line below is what a script reads, and a
-        // ticket that no code holds stops the command before either is written.
+        // A code is claimed before anything is printed: a refusal here must not leave a ticket or a
+        // QR code on the screen, because neither is a code.
+        let claim = if args.code {
+            let Some(relay) = args.relay.as_deref() else {
+                return Err(Error::Policy(crate::short_code::NO_RELAY.to_string()));
+            };
+            Some(crate::short_code::claim(relay, &ticket).await?)
+        } else {
+            None
+        };
         if let Some(asked) = args.qr {
             crate::qr::write(output, &ticket, asked)?;
         }
-        events::ticket(*output, &ticket)?;
+        match &claim {
+            Some((_, _, code)) => events::ticket_with_code(*output, &ticket, code)?,
+            None => events::ticket(*output, &ticket)?,
+        }
         let (tx, rx) = unbounded_channel();
         let printer = events::printer(*output, rx, "sending");
+        let meeting_task =
+            claim.map(|(ws, sender, _)| tokio::spawn(crate::short_code::drive_sender(ws, sender)));
         let end = outgoing.serve(keep, &tx).await;
+        if let Some(task) = meeting_task {
+            task.abort();
+        }
         drop(tx);
         let printed = printer
             .await

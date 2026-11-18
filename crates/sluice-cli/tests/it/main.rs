@@ -25,6 +25,7 @@ mod receipt;
 mod receipt_delivery;
 mod receivers;
 mod resume;
+mod short_code;
 mod transfer;
 mod ui;
 mod ui_guards;

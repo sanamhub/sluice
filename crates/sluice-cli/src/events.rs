@@ -53,6 +53,18 @@ pub fn ticket(output: Output, ticket: &str) -> Result<(), Error> {
     }
 }
 
+/// The ticket and the short code beside it. The code is printed only because the sender asked for
+/// one with `--code`; it is secret material like the ticket, and this is the one place it goes.
+pub fn ticket_with_code(output: Output, ticket: &str, code: &str) -> Result<(), Error> {
+    match output.format() {
+        Format::Human => output.write_stdout(&format!("{ticket}\ncode {code}\n")),
+        Format::Json => {
+            let line = serde_json::json!({ "event": "ticket", "ticket": ticket, "code": code });
+            output.write_stdout(&format!("{line}\n"))
+        }
+    }
+}
+
 fn human(event: &Event, verb: &str) -> String {
     match event {
         Event::Planned {

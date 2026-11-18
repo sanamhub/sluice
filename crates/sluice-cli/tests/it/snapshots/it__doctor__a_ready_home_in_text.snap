@@ -1,5 +1,5 @@
 ---
-source: crates/sluice-cli/tests/doctor.rs
+source: crates/sluice-cli/tests/it/doctor.rs
 expression: "redact(&stdout_text(&assert), &home)"
 ---
 ok       version    sluice <version> for <target>, running on <os>
@@ -9,4 +9,6 @@ ok       layout     version 1
 ok       lock       free
 ok       key        32 bytes, readable only by this user
 <status> space      <free>
+skipped  meet       no relay is configured; a short code needs a relay with a meeting place
+                    fix: pass --relay URL on both sides, or send without --code
 skipped  transport  pass --network to check UDP, the relay, the public address, NAT and port mapping

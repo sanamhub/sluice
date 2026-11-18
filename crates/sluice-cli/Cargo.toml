@@ -25,7 +25,15 @@ anstream.workspace = true
 blake3.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
+futures-util = "0.3"
 iroh = { workspace = true, features = ["unstable-net-report"] }
+# The short-code meeting place: the same crate the relay uses, and a WebSocket client.
+sluice-meet = { path = "../sluice-meet" }
+tokio-websockets = { version = "=0.13.3", features = ["client", "server"] }
+tokio-rustls = "0.26"
+rustls.workspace = true
+url.workspace = true
+webpki-roots = "1"
 portmapper = "0.19.3"
 # The QR code `send --qr` prints. It draws nothing itself: the half blocks are written here.
 qrcodegen.workspace = true
