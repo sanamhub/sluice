@@ -240,6 +240,9 @@ rewritten for this design: one online guess, a burn, no stored ciphertext, and n
 - The relay image gains a binary of ours, and the guard's exec target becomes `sluice-relay`. The
   guard's schema and the binary's reader must move together; a test compares the keys they accept.
   The image grows by about 172 KB, the meeting place's own code plus its handler and state machine.
+- An operator who uses `cert_mode = "LetsEncrypt"` cannot enable the meeting place yet: T89 refuses
+  that combination with a line that names the limit, and ACME parity is later work. The two shipped
+  recipes use `cert_mode = "Manual"`.
 - The browser module grows by 56 650 bytes raw and 9 432 bytes with brotli, 0.8% and 0.7%. The AEAD
   and KDF are `ring`, already present; the new code is `spake2` 0.4.0 and the second
   `curve25519-dalek` 4.1.3 and `sha2` 0.10.9 it brings. The pre-release variant measured 36 320 and
