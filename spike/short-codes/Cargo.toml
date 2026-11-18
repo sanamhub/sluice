@@ -26,7 +26,7 @@ ring = "0.17"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 sha1 = "0.10"
 rustls-pemfile = "2"
-spake2 = { version = "=0.5.0-pre.0", features = ["getrandom"] }
+spake2 = { version = "=0.4.0", features = ["getrandom"] }
 subtle = "2"
 tokio = { version = "1", features = ["full"] }
 tokio-rustls = "0.26"
