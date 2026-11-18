@@ -23,10 +23,10 @@ non-exhaustive configs are built with `Default` and field assignment, not a stru
 
 ## 2. SPAKE2 in the browser build
 
-`spake2` 0.5.0-pre.0 with `getrandom` builds for `wasm32-unknown-unknown` with the tree's
-`curve25519-dalek` 5 and `sha2` 0.11. `crates/sluice-wasm` gets an optional
-`short-code-probe` feature that pulls SPAKE2 into the module; the feature is off by default and is
-not part of the product.
+`spake2` 0.4.0, the newest stable release, builds for `wasm32-unknown-unknown` with
+`curve25519-dalek` 4.1.3, `sha2` 0.10.9 and `getrandom` 0.2's `js` feature. `crates/sluice-wasm`
+gets an optional `short-code-probe` feature that pulls SPAKE2 into the module and turns on that
+`js` backend; the feature is off by default and is not part of the product.
 
 Measured with `cargo build -p sluice-wasm --release --target wasm32-unknown-unknown`, built once
 without the feature and once with it:
@@ -34,16 +34,14 @@ without the feature and once with it:
 | Module | Raw | Brotli |
 |---|---|---|
 | `sluice_wasm.wasm` without the probe | 7 084 725 | 1 354 693 |
-| with the SPAKE2 probe | 7 121 045 | 1 363 133 |
-| **added** | **36 320** | **8 440** |
+| with the SPAKE2 probe | 7 141 375 | 1 364 125 |
+| **added** | **56 650** | **9 432** |
 
-A standalone SPAKE2-only module is 84 342 raw and 23 746 brotli; the difference is code the browser
-module already had (curve arithmetic, SHA-2, `getrandom`).
-
-`spake2` 0.4.0, the newest stable, does **not** build for the target with this graph without adding
-`getrandom` 0.2's `js` feature, and it brings a second `curve25519-dalek`. That is why the spike and
-the ADR use the pre-release. Building `ring` for wasm needs `clang` on PATH; on this machine it is
-the Swift toolchain's clang.
+The stable release brings a second `curve25519-dalek` (4.1.3 beside the tree's 5.0.0) and a second
+SHA-2 (0.10.9 beside 0.11.1). The pre-release `spake2` 0.5.0-pre.0, which shares the tree's curve
+and SHA-2, measured 36 320 raw and 8 440 brotli, so the stable release costs 20 330 bytes raw and
+992 bytes brotli more. Building `ring` for wasm needs `clang` on PATH; on this machine it is the
+Swift toolchain's clang.
 
 ## 3. The exchange
 
