@@ -31,7 +31,7 @@ pub(super) async fn fetch(
 /// The download itself, through an endpoint that can already reach the sender. The store is this
 /// call's and is dropped with it, so the bytes exist in the page only as the value returned here,
 /// and only the bytes the ticket names are ever asked for.
-pub(super) async fn fetch_direct(
+pub(crate) async fn fetch_direct(
     endpoint: &Endpoint,
     sender: EndpointId,
     hash: Hash,

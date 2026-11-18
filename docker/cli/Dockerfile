@@ -26,6 +26,9 @@ COPY crates/sluice-live/Cargo.toml crates/sluice-live/
 COPY crates/sluice-api/Cargo.toml crates/sluice-api/
 COPY crates/sluice-delta/Cargo.toml crates/sluice-delta/
 COPY crates/sluice-wasm/Cargo.toml crates/sluice-wasm/
+# The spike's native peer: a member of the workspace, and nothing this image builds. Cargo resolves
+# every member before it reads the lock file, so the manifest has to be here.
+COPY crates/sluice-wasm-spike/Cargo.toml crates/sluice-wasm-spike/
 COPY bench/probe/Cargo.toml bench/probe/
 COPY bench/harness/Cargo.toml bench/harness/
 COPY bench/wasm-hash/Cargo.toml bench/wasm-hash/
@@ -39,6 +42,7 @@ COPY crates/sluice-live/src crates/sluice-live/src
 COPY crates/sluice-api/src crates/sluice-api/src
 COPY crates/sluice-delta/src crates/sluice-delta/src
 COPY crates/sluice-wasm/src crates/sluice-wasm/src
+COPY crates/sluice-wasm-spike/src crates/sluice-wasm-spike/src
 COPY bench/probe/build.rs bench/probe/
 COPY bench/probe/src bench/probe/src
 COPY bench/harness/src bench/harness/src

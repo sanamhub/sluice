@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>wasm post-quantum spike</title>
+    <style>
+      body { font: 14px/1.4 ui-monospace, monospace; margin: 2rem; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>wasm post-quantum spike</h1>
+    <pre id="log">starting</pre>
+    <script type="module">
+      import init, { fetch_blob_pq, pq_handshake, pq_last_fetch_ms } from './out/web/sluice_wasm.js';
+
+      const log = (line) => {
+        const element = document.getElementById('log');
+        element.textContent += `\n${line}`;
+        console.log(line);
+      };
+
+      const ROUNDS = 50;
+      const FETCHES = 5;
+      const MODES = ['classical', 'hybrid'];
+
+      const median = (values) => {
+        const sorted = [...values].sort((a, b) => a - b);
+        const middle = Math.floor(sorted.length / 2);
+        return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+      };
+
+      const stats = (values) => ({
+        median: Number(median(values).toFixed(3)),
+        min: Number(Math.min(...values).toFixed(3)),
+        max: Number(Math.max(...values).toFixed(3)),
+      });
+
+      async function post(result) {
+        await fetch('./result', { method: 'POST', body: JSON.stringify(result) });
+      }
+
+      async function run() {
+        await init();
+        const config = await (await fetch('./config.json')).json();
+        const report = {
+          runtime: navigator.userAgent,
+          rounds: ROUNDS,
+          fetches: FETCHES,
+          size: config.size,
+          handshake: {},
+          fetch: {},
+        };
+        log(`relay ${config.relay}, ${config.size} bytes`);
+
+        for (const mode of MODES) {
+          // Two that are not counted: the first handshake pays for a verifier and a relay
+          // registration that later ones do not.
+          await pq_handshake(config.relay, config.endpoint, mode);
+          await pq_handshake(config.relay, config.endpoint, mode);
+          const times = [];
+          let group = 'none';
+          for (let round = 0; round < ROUNDS; round += 1) {
+            const result = JSON.parse(await pq_handshake(config.relay, config.endpoint, mode));
+            times.push(result.handshake_ms);
+            group = result.group;
+          }
+          report.handshake[mode] = { group, ...stats(times) };
+          log(`handshake ${mode}: ${JSON.stringify(report.handshake[mode])}`);
+        }
+
+        for (const mode of MODES) {
+          const warm = await fetch_blob_pq(
+            config.relay,
+            config.endpoint,
+            config.root,
+            config.size,
+            mode,
+          );
+          if (warm.length !== config.size) {
+            throw new Error(`the warmup fetched ${warm.length} bytes, not ${config.size}`);
+          }
+          const transfers = [];
+          const walls = [];
+          for (let round = 0; round < FETCHES; round += 1) {
+            const started = performance.now();
+            const bytes = await fetch_blob_pq(
+              config.relay,
+              config.endpoint,
+              config.root,
+              config.size,
+              mode,
+            );
+            const wall = performance.now() - started;
+            if (bytes.length !== config.size) {
+              throw new Error(`the fetch got ${bytes.length} bytes, not ${config.size}`);
+            }
+            transfers.push(pq_last_fetch_ms());
+            walls.push(wall);
+          }
+          const seconds = median(transfers) / 1000;
+          report.fetch[mode] = {
+            ...stats(transfers),
+            wall_ms: Number(median(walls).toFixed(3)),
+            mib_per_second: Number((config.size / 1048576 / seconds).toFixed(1)),
+          };
+          log(`fetch ${mode}: ${JSON.stringify(report.fetch[mode])}`);
+        }
+
+        // A tab exposes no counter for a wasm module's linear memory. The JS heap is what
+        // `performance.memory` reports in Chromium, and it says nothing about the 256 MiB a fetch
+        // held, so this is reported as what it is.
+        if (performance.memory) {
+          report.heap_mib = Number((performance.memory.usedJSHeapSize / 1048576).toFixed(1));
+        }
+        log('done');
+        await post(report);
+      }
+
+      run().catch(async (error) => {
+        log(`failed: ${error}`);
+        await post({ error: String(error) });
+      });
+    </script>
+  </body>
+</html>
