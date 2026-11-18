@@ -1,0 +1,38 @@
+[package]
+name = "sluice-meet"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Short codes: the words, the SPAKE2 exchange, the frames, and the meeting-place state"
+homepage.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["p2p", "file-transfer", "spake2", "short-code", "websocket"]
+categories = ["network-programming", "cryptography"]
+
+# No network, filesystem, clock or runtime: the CLI, the relay and later the browser drive this crate
+# with bytes and with the time their transport gives them.
+[dependencies]
+# The AEAD and the KDF, which the browser already carries for TLS. The 0.17 release is the one in the
+# tree through iroh-relay.
+ring = { workspace = true }
+# The newest stable release, pinned exactly by ADR 0041 decision 3. It has no independent audit, and
+# the crate README and `SPEC.md` say so. The `getrandom` feature gives its start functions entropy;
+# the browser build enables that backend for this dependency.
+spake2 = { version = "=0.4.0", features = ["getrandom"] }
+subtle.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+# Reads the vectors' JSON in the crate tests, so a vector can be checked here as well as by xtask.
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+# Not released: dist builds only the `sluice` binary of sluice-cli.
+[package.metadata.dist]
+dist = false

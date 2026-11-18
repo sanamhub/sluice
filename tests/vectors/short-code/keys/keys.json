@@ -1,0 +1,12 @@
+{
+  "description": "The key schedule of SPEC 4.1.3 from a fixed shared key and transcript: HKDF-SHA256 gives the two confirmation tags and the ticket key. The shared key is an input, so no SPAKE2 random draw has to be reproduced.",
+  "cases": [
+    {
+      "shared": "4242424242424242424242424242424242424242424242424242424242424242",
+      "transcript": "736c756963652073686f727420636f6465207631000000070000002111111111111111111111111111111111111111111111111111111111111111111100000021222222222222222222222222222222222222222222222222222222222222222222",
+      "confirm_sender": "3b2f881d574e6794673a606e5dddb4d9dd1bc653afc228edfb13b05b9e4fb5fa",
+      "confirm_receiver": "fd1ef6c50a6bb535f50031cca23a27355f5a92b12b5a68f22fd9684a7f45851e",
+      "ticket": "0be17789c43cb7491a3d5c8633e0d4c8c51bfb4d2dbb34ea43cbdc8bf6f95ea6"
+    }
+  ]
+}

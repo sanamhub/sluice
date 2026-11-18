@@ -22,6 +22,7 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates/sluice-cli/Cargo.toml crates/sluice-cli/
 COPY crates/sluice-core/Cargo.toml crates/sluice-core/
+COPY crates/sluice-meet/Cargo.toml crates/sluice-meet/
 COPY crates/sluice-live/Cargo.toml crates/sluice-live/
 COPY crates/sluice-api/Cargo.toml crates/sluice-api/
 COPY crates/sluice-delta/Cargo.toml crates/sluice-delta/
@@ -35,6 +36,8 @@ COPY crates/sluice-cli/build.rs crates/sluice-cli/
 COPY crates/sluice-cli/src crates/sluice-cli/src
 COPY crates/sluice-cli/ui crates/sluice-cli/ui
 COPY crates/sluice-core/src crates/sluice-core/src
+COPY crates/sluice-meet/words.txt crates/sluice-meet/
+COPY crates/sluice-meet/src crates/sluice-meet/src
 COPY crates/sluice-live/src crates/sluice-live/src
 COPY crates/sluice-api/src crates/sluice-api/src
 COPY crates/sluice-delta/src crates/sluice-delta/src

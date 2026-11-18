@@ -1,0 +1,49 @@
+{
+  "cases": [
+    {
+      "hex": "8100000007",
+      "frame": "claimed"
+    },
+    {
+      "hex": "8200",
+      "frame": "joined_sender"
+    },
+    {
+      "hex": "8201",
+      "frame": "joined_receiver"
+    },
+    {
+      "hex": "83111111111111111111111111111111111111111111111111111111111111111111",
+      "frame": "spake"
+    },
+    {
+      "hex": "842222222222222222222222222222222222222222222222222222222222222222",
+      "frame": "confirm"
+    },
+    {
+      "hex": "85000102030405060708090a0b0c0d0e0f101112131415161718191a1b",
+      "frame": "sealed"
+    },
+    {
+      "hex": "86",
+      "frame": "burned"
+    },
+    {
+      "hex": "87",
+      "frame": "peer_closed"
+    },
+    {
+      "hex": "88",
+      "frame": "done"
+    },
+    {
+      "hex": "8f01",
+      "frame": "error_no_code"
+    },
+    {
+      "hex": "8f07",
+      "frame": "error_rate_limited"
+    }
+  ],
+  "description": "Every server frame of SPEC 4.1.2, encoded. A decoder reads the bytes and an encoder writes them again."
+}

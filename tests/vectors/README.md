@@ -29,6 +29,7 @@ tests/vectors/
   receipt-requests/  the stream that asks a sender for a receipt, SPEC.md section 10
   need-ranges/  the message that asks for the bytes a delta needs, SPEC.md section 7
   gear/         the chunker's gear table, SPEC.md section 7
+  short-code/   the code, exchange, frames and meeting place, SPEC.md section 4.1
 ```
 
 One directory per row of the table in section 12. A directory holds one or more `.json` files. The
@@ -560,3 +561,32 @@ To check an implementation: compute `BLAKE3("sluice/delta/gear/1" || [index])`, 
 bytes little-endian, and compare. The table is derived rather than transcribed, so a reader that
 follows the sentence computes the same 256 values; the cases pin the derivation, including that
 `[index]` is one byte and not its decimal text.
+
+## `short-code/`
+
+One directory per part of `SPEC.md` section 4.1. The code vectors name the rule that refuses a
+case, and the exchange vectors take fixed inputs so no SPAKE2 random draw has to be reproduced.
+
+| Directory | Cases |
+|---|---|
+| `codes/` | Accepted texts with their nameplate and two word indices, including upper case, which is accepted and printed in lower case; rejected texts with the rule `nameplate`, `word` or `shape` |
+| `transcript/` | A nameplate and two 33-byte SPAKE2 messages, with the transcript bytes of section 4.1.3 |
+| `keys/` | A fixed 32-byte shared key and transcript, with the two confirmation tags and the `ticket` key |
+| `sealed/` | A fixed key, nonce, transcript and ticket, with the sealed bytes; the second case flips a tag byte and MUST fail to open |
+| `frames/` | Every client and server frame as lower-case hex, and the frames a decoder MUST refuse with the rule it breaks |
+| `meeting/` | Scripted steps with milliseconds passed in, every returned frame, and the refusal code |
+
+`words.txt` is the reference BIP-0039 English list. Its bytes with one LF after each word have
+SHA-256 `2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda`; an implementation
+MUST ship the list and check the digest.
+
+The transcript is `"sluice short code v1" || nameplate:u32be || len(A):u32be || A || len(B):u32be
+|| B`. The keys are HKDF-SHA256 over the shared key with the transcript as salt and info `confirm
+sender`, `confirm receiver` and `ticket`. The sealed value is ChaCha20-Poly1305 under `ticket` with
+the transcript as associated data, written as `nonce || ciphertext || tag`.
+
+The meeting script is one case per row of the state machine: a claim and join, a third connection
+refused with `Busy`, a wrong confirmation that burns both sides, a sender close that gives
+`PeerClosed`, a receiver close that burns, `Done`, the TTL, the per-IP rate and the table cap. Each
+step names a connection label and the time; `out` is every frame returned, in order, and
+`expect_error` is the refusal code. A setup step without `out` checks only that it was accepted.

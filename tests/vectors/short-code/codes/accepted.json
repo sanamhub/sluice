@@ -1,0 +1,10 @@
+{
+  "description": "Codes a decoder MUST accept. Upper case is accepted on input and the encoder writes the lower-case words; the nameplate is always the shortest decimal spelling.",
+  "cases": [
+    { "text": "7-orbit-velvet", "nameplate": 7, "words": [1247, 1936] },
+    { "text": "7-ORBIT-Velvet", "nameplate": 7, "words": [1247, 1936] },
+    { "text": "1-abandon-zoo", "nameplate": 1, "words": [0, 2047] },
+    { "text": "9999-ZOO-Abandon", "nameplate": 9999, "words": [2047, 0] },
+    { "text": "42-ability-zone", "nameplate": 42, "words": [1, 2046] }
+  ]
+}

@@ -11,6 +11,8 @@ crates/**
 !crates/sluice-cli/**
 !crates/sluice-core
 !crates/sluice-core/**
+!crates/sluice-meet
+!crates/sluice-meet/**
 !crates/sluice-live
 !crates/sluice-live/**
 !crates/sluice-api
