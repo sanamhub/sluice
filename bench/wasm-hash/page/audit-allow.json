@@ -1,0 +1,9 @@
+[
+  {
+    "id": "GHSA-fc5q-39xc-vjpf",
+    "package": "picomatch",
+    "reason": "picomatch is a build-time dependency of the benchmark page's dev tools (vite and friends). It never ships in the product or the browser module, and it only matches glob patterns written in this repo, never input from a user or the network.",
+    "approved_by": "@sanamhub",
+    "recheck_by": "2027-02-18"
+  }
+]
